@@ -1,31 +1,42 @@
 //! What a Claude Code tool call acts on and what it changes, read from the
 //! call's `name` and `input` (PROTO-CLAUDE-CODE-STREAM, Tool targets and
-//! edits), so `tool.requested` carries a `target` and `edits` and the
+//! edits), so `tool.requested` carries a `target`, its `target_kind` and
+//! `edits`, and the
 //! Interface never reads Claude Code's tool input to draw a card.
 
-use ersa_protocol::events::FileEdit;
+use ersa_protocol::events::{FileEdit, TargetKind};
 use serde_json::{Map, Value};
 
-/// The `target` and `edits` a `tool.requested` carries for a call to `name`
-/// with `input` (PROTO-CLAUDE-CODE-STREAM-R48). A tool the table does not name,
-/// an MCP server's included, gets neither. A field missing from the input, or
-/// not a string, leaves the target or that one edit out; a call left with no
-/// edit carries none rather than an empty list.
-pub(crate) fn target_and_edits(
-    name: &str,
-    input: &Map<String, Value>,
-) -> (Option<String>, Option<Vec<FileEdit>>) {
-    // The input field that holds the call's target, by tool. Matched exactly:
-    // Claude Code's tool names are case-sensitive identifiers.
-    let target_field = match name {
-        "Read" | "Write" | "Edit" | "MultiEdit" => "file_path",
-        "NotebookEdit" => "notebook_path",
-        "Bash" | "PowerShell" => "command",
-        "Grep" | "Glob" => "pattern",
-        "WebFetch" => "url",
-        "WebSearch" | "ToolSearch" => "query",
-        "Task" | "Agent" => "description",
-        _ => return (None, None),
+/// What a `tool.requested` says about its call beyond the backend's own
+/// input: the one thing it acts on, what kind of thing that is, and the
+/// changes it makes to files.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct CallTarget {
+    pub target: Option<String>,
+    /// Set exactly when `target` is (PROTO-CLAUDE-CODE-STREAM-R61).
+    pub target_kind: Option<TargetKind>,
+    pub edits: Option<Vec<FileEdit>>,
+}
+
+/// The `target`, `target_kind` and `edits` a `tool.requested` carries for a
+/// call to `name` with `input` (PROTO-CLAUDE-CODE-STREAM-R48, R61). A tool the
+/// table does not name, an MCP server's included, gets none of them. A field
+/// missing from the input, or not a string, leaves the target (and so its
+/// kind) or that one edit out; a call left with no edit carries none rather
+/// than an empty list.
+pub(crate) fn call_target(name: &str, input: &Map<String, Value>) -> CallTarget {
+    // The input field that holds the call's target, by tool, and what kind of
+    // thing it is. Matched exactly: Claude Code's tool names are
+    // case-sensitive identifiers.
+    let (target_field, kind) = match name {
+        "Read" | "Write" | "Edit" | "MultiEdit" => ("file_path", TargetKind::Path),
+        "NotebookEdit" => ("notebook_path", TargetKind::Path),
+        "Bash" | "PowerShell" => ("command", TargetKind::Command),
+        "Grep" | "Glob" => ("pattern", TargetKind::Search),
+        "WebFetch" => ("url", TargetKind::Address),
+        "WebSearch" | "ToolSearch" => ("query", TargetKind::Search),
+        "Task" | "Agent" => ("description", TargetKind::Task),
+        _ => return CallTarget::default(),
     };
     let target = string(input, target_field);
 
@@ -48,7 +59,12 @@ pub(crate) fn target_and_edits(
         // other tool in the table changes no file.
         _ => Vec::new(),
     };
-    (target, (!edits.is_empty()).then_some(edits))
+    CallTarget {
+        // A kind only goes with a target: no target, no kind.
+        target_kind: target.as_ref().map(|_| kind),
+        target,
+        edits: (!edits.is_empty()).then_some(edits),
+    }
 }
 
 /// The input's `field`, when it is a string.
@@ -88,7 +104,10 @@ mod tests {
 
     fn project(name: &str, input: Value) -> (Option<String>, Option<Vec<FileEdit>>) {
         match input {
-            Value::Object(input) => target_and_edits(name, &input),
+            Value::Object(input) => {
+                let call = call_target(name, &input);
+                (call.target, call.edits)
+            }
             other => panic!("not an object: {other}"),
         }
     }
@@ -173,6 +192,42 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R61
+    // verifies: PROTO-AGENT-EVENTS-R26
+    #[test]
+    fn each_tool_in_the_table_says_what_kind_its_target_is() {
+        let kind = |name: &str, input: Value| match input {
+            Value::Object(input) => call_target(name, &input).target_kind,
+            other => panic!("not an object: {other}"),
+        };
+        let every_field = json!({
+            "file_path": "/w/a", "notebook_path": "/w/n.ipynb", "command": "/w/run.sh --all",
+            "pattern": "/w/src", "url": "https://example.com", "query": "q", "description": "d",
+        });
+        for (name, expected) in [
+            ("Read", TargetKind::Path),
+            ("Write", TargetKind::Path),
+            ("Edit", TargetKind::Path),
+            ("MultiEdit", TargetKind::Path),
+            ("NotebookEdit", TargetKind::Path),
+            ("Bash", TargetKind::Command),
+            ("PowerShell", TargetKind::Command),
+            ("Grep", TargetKind::Search),
+            ("Glob", TargetKind::Search),
+            ("WebSearch", TargetKind::Search),
+            ("ToolSearch", TargetKind::Search),
+            ("WebFetch", TargetKind::Address),
+            ("Task", TargetKind::Task),
+            ("Agent", TargetKind::Task),
+        ] {
+            assert_eq!(kind(name, every_field.clone()), Some(expected), "{name}");
+        }
+        // No target, no kind: a missing field, and a tool the table does not name.
+        assert_eq!(kind("Read", json!({})), None);
+        assert_eq!(kind("Bash", json!({ "command": ["ls"] })), None);
+        assert_eq!(kind("mcp__docs__search", every_field), None);
     }
 
     // verifies: PROTO-CLAUDE-CODE-STREAM-R48

@@ -1530,6 +1530,55 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
     }
 }
 
+// Recorded on 2.1.316: every call to a tool in Tool targets and edits says
+// the kind its tool gives its target, including a subagent's own call.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R61
+// verifies: PROTO-AGENT-EVENTS-R26
+#[test]
+fn recorded_tool_calls_say_what_kind_their_target_is() {
+    let kind_of = |tool: &str| match tool {
+        "Read" | "Write" | "Edit" | "NotebookEdit" => TargetKind::Path,
+        "Bash" | "PowerShell" => TargetKind::Command,
+        "Grep" | "Glob" | "WebSearch" | "ToolSearch" => TargetKind::Search,
+        "Agent" => TargetKind::Task,
+        other => panic!("{other} is not a recorded tool of the table"),
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    for fixture_name in [
+        "2.1.316/00-session-tools",
+        "2.1.316/28-tool-edit",
+        "2.1.316/29-tool-write",
+        "2.1.316/30-tool-notebook-edit",
+        "2.1.316/31-tool-grep",
+        "2.1.316/32-tool-glob",
+        "2.1.316/33-tool-web-search",
+        "2.1.316/34-tool-agent",
+        "2.1.316/35-tool-powershell",
+        "2.1.316/36-tool-edit-replace-all",
+    ] {
+        for call in tool_requests(fixture_name) {
+            assert!(call.target.is_some(), "{fixture_name}: {} has no target", call.name);
+            assert_eq!(
+                call.target_kind,
+                Some(kind_of(&call.name)),
+                "{fixture_name}: {}",
+                call.name
+            );
+            seen.insert(call.name.clone());
+        }
+    }
+    // Every tool the CLI was recorded with appears, so a fixture that stops
+    // carrying one is noticed.
+    let expected: std::collections::BTreeSet<String> = [
+        "Read", "Write", "Edit", "NotebookEdit", "Bash", "PowerShell", "Grep", "Glob",
+        "WebSearch", "ToolSearch", "Agent",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    assert_eq!(seen, expected);
+}
+
 // ---------------------------------------------------------------------------
 // Messages written during a turn (PROTO-CLAUDE-CODE-STREAM, Sequencing)
 
