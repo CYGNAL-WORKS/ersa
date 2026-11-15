@@ -174,7 +174,7 @@ describe("the session controls under a running session", () => {
     expect(chip("Effort").getAttribute("aria-label")).toBe("Effort: Low");
     expect(document.activeElement).toBe(chip("Effort"));
     const line = screen.getByRole("alert");
-    expect(line.textContent).toBe("Ersa can't change the effort. the model takes no effort high");
+    expect(line.textContent).toBe("Ersa can't change the effort. The model takes no effort high.");
     expect(line.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
     // Opening any chip clears it.
     fireEvent.click(chip("Model"));
@@ -193,7 +193,7 @@ describe("the session controls under a running session", () => {
     fireEvent.click(chip("Permission mode"));
     fireEvent.click(screen.getByRole("option", { name: /Plan only/ }));
     await settle();
-    expect(statusLine()?.textContent).toBe("Ersa can't change the permission mode. the session is not live");
+    expect(statusLine()?.textContent).toBe("Ersa can't change the permission mode. The session is not live.");
     const words = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(words, { target: { value: "Run the tests" } });
     await act(async () => {

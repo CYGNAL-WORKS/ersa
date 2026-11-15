@@ -1114,6 +1114,14 @@ Ersa can't change the permission mode.
 
 Detection failed
 
+### `sessionControls.noBackendStatus`
+
+No backend
+
+### `sessionControls.detectingBackendsProgress`
+
+Detecting backends…
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet

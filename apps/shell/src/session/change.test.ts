@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CoreClient, Method } from "../core/client";
 import type { Session } from "../protocol/core-api.gen";
-import { changeSession, runs } from "./change";
+import { NO_CHANGES, changeAnswered, changeSent, changeSession, refusalSeen, runs } from "./change";
 
 const tile = (state: Session["tile"]["state"]) => ({ tile: { state, pending: [] } });
 
@@ -36,6 +36,28 @@ describe("changing a running session", () => {
     const refused = client(() => {
       throw { kind: "rpc", error: { code: -32000, message: "session.set_model: the session is not live", data: { kind: "invalid_state" } } };
     });
-    await expect(changeSession(refused, "s1", "model", "sonnet")).rejects.toThrow("Ersa can't change the model. the session is not live");
+    await expect(changeSession(refused, "s1", "model", "sonnet")).rejects.toThrow("Ersa can't change the model. The session is not live.");
+  });
+});
+
+describe("a session's changes on their way", () => {
+  // verifies: FLOW-NEW-SESSION-R30
+  it("keep a refusal's line when another change is accepted later, until the user sends or opens a chip", () => {
+    let c = changeSent(NO_CHANGES, "effort");
+    c = changeSent(c, "model");
+    c = changeAnswered(c, "model", "Ersa can't change the model. No.");
+    expect(c).toEqual({ sending: ["effort"], refused: "Ersa can't change the model. No." });
+    c = changeAnswered(c, "effort");
+    expect(c).toEqual({ sending: [], refused: "Ersa can't change the model. No." });
+    expect(refusalSeen(c)).toEqual({ sending: [] });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R30
+  it("hold each chip on its own while its change is on its way", () => {
+    let c = changeSent(changeSent(NO_CHANGES, "model"), "effort");
+    c = changeAnswered(c, "effort");
+    // The model's change is still on its way, so its chip still waits.
+    expect(c.sending).toEqual(["model"]);
+    expect(refusalSeen(c).sending).toEqual(["model"]);
   });
 });
