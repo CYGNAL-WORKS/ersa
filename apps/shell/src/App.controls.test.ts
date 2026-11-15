@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "./App";
-import type { Attachment, CoreClient, Method } from "./core/client";
+import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
 import type { BackendInfo, CoreHelloResult, Session, Workspace } from "./protocol/core-api.gen";
 
 afterEach(cleanup);
@@ -64,8 +64,9 @@ const session = (more: Partial<Session> = {}): Session => ({
 
 type Answers = Partial<Record<Method, (params: never) => unknown>>;
 
-function fakeCore(listed: Session, more: Answers = {}) {
-  let list = [listed];
+function fakeCore(listed: Session | Session[], more: Answers = {}) {
+  let list = Array.isArray(listed) ? listed : [listed];
+  let onEvent: (event: CoreEvent) => void = () => {};
   const calls: { method: Method; params: unknown }[] = [];
   const answers: Answers = {
     "core.status": () => ({ sessions_running: 1, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
@@ -79,7 +80,10 @@ function fakeCore(listed: Session, more: Answers = {}) {
     ...more,
   };
   const client: CoreClient = {
-    attach: () => Promise.resolve<Attachment>({ how: "attached", hello }),
+    attach: (listener) => {
+      onEvent = listener;
+      return Promise.resolve<Attachment>({ how: "attached", hello });
+    },
     call: (method, params) => {
       calls.push({ method, params });
       const answer = answers[method];
@@ -92,7 +96,9 @@ function fakeCore(listed: Session, more: Answers = {}) {
     list = list.map((s) => ({ ...s, ...changed }));
     return list[0] as Session;
   };
-  return { client, calls, becomes };
+  // Ersa loses Core; attaching again waits, so Core stays away.
+  const drop = () => act(() => onEvent({ kind: "lost", reason: "gone" }));
+  return { client, calls, becomes, drop };
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -249,6 +255,44 @@ describe("the session controls under a running session", () => {
       expect(chip(name).querySelector(".chip-chevron:not([data-hidden])")).not.toBeNull();
     }
     expect((chip("Workspace") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("a running session's controls across sessions and connections", () => {
+  const tile = (title: string) => [...document.querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title)) as HTMLElement;
+
+  // verifies: FLOW-NEW-SESSION-R34
+  it("keep a refused change's line for its session through a switch to another session and back", async () => {
+    const other = session({ id: "s2", title: "Write the notes", created_at: "2026-10-01T09:00:00Z" });
+    const core = fakeCore([session(), other], {
+      "session.set_model": () => {
+        throw refusal("session.set_model: the backend refused the model");
+      },
+    });
+    await start(core);
+    fireEvent.click(chip("Model"));
+    fireEvent.click(screen.getByRole("option", { name: /Sonnet/ }));
+    await settle();
+    const said = "Ersa can't change the model. The backend refused the model.";
+    expect(statusLine()?.textContent).toBe(said);
+    // Another session has no refusal of its own.
+    fireEvent.click(tile("Write the notes"));
+    await settle();
+    expect(statusLine()).toBeNull();
+    // Back in the first, the line is said again, since the user neither sent nor opened a chip there.
+    fireEvent.click(tile("Fix the build"));
+    await settle();
+    expect(statusLine()?.textContent).toBe(said);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R35
+  it("are unavailable while Ersa can't reach the sessions", async () => {
+    const core = fakeCore(session());
+    await start(core);
+    for (const name of ["Model", "Effort", "Permission mode"]) expect((chip(name) as HTMLButtonElement).disabled).toBe(false);
+    await core.drop();
+    await settle();
+    for (const name of ["Model", "Effort", "Permission mode"]) expect((chip(name) as HTMLButtonElement).disabled).toBe(true);
   });
 });
 
