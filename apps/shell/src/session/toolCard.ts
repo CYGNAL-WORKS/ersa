@@ -2,7 +2,7 @@
 // its detail (progress, a running clock, or its duration), and its target. Kept free of React so tests call it.
 
 import { t } from "../catalog";
-import type { Item } from "./transcript";
+import type { Item, TargetKind } from "./transcript";
 
 type Tool = Extract<Item, { kind: "tool" }>;
 
@@ -59,30 +59,34 @@ export interface ShownTarget {
   path: boolean;
 }
 
-/** An absolute path by its own spelling: from a drive letter (`D:\`, `d:/`), a share (`\\server`), or the root (`/`). */
-const WINDOWS_PATH = /^([a-z]:[\\/]|\\\\)/i;
-const isPath = (text: string) => WINDOWS_PATH.test(text) || (text.startsWith("/") && !/\s/.test(text));
+/** A Windows folder by its spelling, from a drive letter (`D:\`, `d:/`) or a share (`\\server`): compared without case. */
+const WINDOWS_FOLDER = /^([a-z]:[\\/]|\\\\)/i;
 
 /**
- * The target as the row shows it. The event says only what the call acts on, not what kind of thing that is, and the
- * Interface never reads a tool's input to draw a card (PROTO-AGENT-EVENTS). A target inside the session's workspace
- * folder is a path, shown relative to it (FLOW-READ-TRANSCRIPT-R08), compared with `\` and `/` alike, as the backend
- * and Core may each write them, and, for a Windows folder, without case, as Windows compares them; the rest keeps the
- * target's own spelling, spaces included ("docs/Meeting notes.md"). A command that runs a program from the workspace
- * is shown so too, as the event can't tell it from a path (docs/briefs/INBOX.md). Any other target is taken for a path
- * when it is spelled as an absolute one, so a command or a search that names a path stays as it is.
+ * A path as the user reads it: relative to the session's workspace folder when it lies inside it (FLOW-READ-TRANSCRIPT-R08),
+ * compared with `\` and `/` alike, as the backend and Core may each write them, and, for a Windows folder, without case,
+ * as Windows compares them; the rest keeps the path's own spelling, spaces included ("docs/Meeting notes.md"). Any
+ * other path stays as it is.
  */
-export function shownTarget(target: string, workspace: string | undefined): ShownTarget {
-  if (workspace) {
-    const windows = WINDOWS_PATH.test(workspace);
-    const norm = (p: string) => {
-      const slashed = p.replace(/\\/g, "/");
-      return windows ? slashed.toLowerCase() : slashed;
-    };
-    const root = norm(workspace).replace(/\/+$/, "");
-    // Inside means past the folder and a separator: a sibling sharing its prefix ("ersa-old") is outside.
-    const rest = target.slice(root.length + 1);
-    if (root !== "" && norm(target).startsWith(`${root}/`) && rest !== "") return { text: rest, path: true };
-  }
-  return { text: target, path: isPath(target) };
+export function relativePath(path: string, workspace: string | undefined): string {
+  if (!workspace) return path;
+  const windows = WINDOWS_FOLDER.test(workspace);
+  const norm = (p: string) => {
+    const slashed = p.replace(/\\/g, "/");
+    return windows ? slashed.toLowerCase() : slashed;
+  };
+  const root = norm(workspace).replace(/\/+$/, "");
+  // Inside means past the folder and a separator: a sibling sharing its prefix ("ersa-old") is outside.
+  const rest = path.slice(root.length + 1);
+  return root !== "" && norm(path).startsWith(`${root}/`) && rest !== "" ? rest : path;
+}
+
+/**
+ * The target as the row shows it. The event says what kind of thing the target is (PROTO-AGENT-EVENTS-R26), so a
+ * command that begins with a path, or a search spelled like one, is never taken for a path: only a `path` is made
+ * relative to the workspace and cut at its start. Every other kind, and a target whose event names none, keeps its
+ * spelling and is cut at its end.
+ */
+export function shownTarget(target: string, kind: TargetKind | undefined, workspace: string | undefined): ShownTarget {
+  return kind === "path" ? { text: relativePath(target, workspace), path: true } : { text: target, path: false };
 }
