@@ -1,0 +1,157 @@
+{
+  "recorded_at": "2026-11-15T03:33:17.628Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "39885328-1e47-4d9e-804e-5ec43fc6efb1",
+    "--settings",
+    "{\"model\":\"haiku\"}"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "39885328-1e47-4d9e-804e-5ec43fc6efb1",
+  "session_record": "record/43-session-title.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 6637,
+  "stderr": "",
+  "stdout_lines": 54,
+  "stdout_timing_ms": [
+    1828,
+    2521,
+    2534,
+    2843,
+    2849,
+    4035,
+    4036,
+    4036,
+    4036,
+    4233,
+    4233,
+    4233,
+    4233,
+    4233,
+    4233,
+    4233,
+    4233,
+    4233,
+    4235,
+    4256,
+    4277,
+    4472,
+    4472,
+    4480,
+    4480,
+    4489,
+    4490,
+    4516,
+    4545,
+    4547,
+    5624,
+    5624,
+    5624,
+    5624,
+    5796,
+    5796,
+    5796,
+    5796,
+    5796,
+    5796,
+    5796,
+    5796,
+    5796,
+    5841,
+    5861,
+    5865,
+    6065,
+    6065,
+    6065,
+    6077,
+    6078,
+    6079,
+    6080,
+    6094
+  ],
+  "sent": [
+    {
+      "t": 26,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1829,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Why is the sky blue? Answer in one sentence.\"}]}}"
+    },
+    {
+      "t": 1829,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-generate_session_title-1\",\"request\":{\"subtype\":\"generate_session_title\",\"description\":\"Why is the sky blue? Answer in one sentence.\",\"persist\":true}}"
+    },
+    {
+      "t": 4516,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"And why are sunsets red? One sentence.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Why is the sky blue? Answer in one sentence.",
+      "waited": false
+    },
+    {
+      "turn": 2,
+      "control": "generate_session_title",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 3,
+      "text": "And why are sunsets red? One sentence.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}
