@@ -1632,3 +1632,29 @@ fn a_message_taken_in_mid_turn_on_an_abandoned_branch_is_not_read_back() {
         ]
     );
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
+#[test]
+fn a_message_taken_in_just_before_the_record_ends_is_read_back() {
+    // The CLI took a message in and stopped before the next reply: the
+    // attachment ends the record, after the conversation's last message.
+    let entries = [
+        prompt("u1", None, "Hello"),
+        reply("a1", "u1", "m1", "Working"),
+        json!({"type": "attachment", "uuid": "q1", "parentUuid": "a1", "isSidechain": false,
+            "attachment": {"type": "queued_command", "source_uuid": "c1",
+                "prompt": [{"type": "text", "text": "Taken in"},
+                    {"type": "text", "text": "<ersa-attachments>\nfile: a.txt\n</ersa-attachments>"}]}}),
+        json!({"type": "queue-operation", "operation": "remove", "reason": "absorbed_mid_turn",
+            "content": "Taken in\n<ersa-attachments>\nfile: a.txt\n</ersa-attachments>",
+            "commandUuid": "c1"}),
+    ];
+    let events = events_of(&entries);
+    assert_eq!(
+        texts(&events),
+        ["user: Hello", "assistant: Working", "user: Taken in"]
+    );
+    // Its blocks come from the attachment, so the file is an attachment.
+    assert!(events.iter().any(|e| matches!(e, Event::UserMessage(m)
+        if m.attachments == [MessageAttachment::File { path: "a.txt".into() }])));
+}
