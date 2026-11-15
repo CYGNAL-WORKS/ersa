@@ -367,33 +367,39 @@ async fn two_adds_of_one_folder_at_once_add_it_once() {
 }
 
 /// Inspections that ran past their limit keep their places until their
-/// calls return, so folders that never answer hold a bounded number of
-/// threads: past that, the answer is `permission` without inspecting.
-// verifies: PROTO-CORE-API-R93
+/// calls return, so folders that never answer hold at most 8 threads: past
+/// that, `project.add` and `project.find` answer `permission` without
+/// inspecting.
+// verifies: PROTO-CORE-API-R100
 #[tokio::test(flavor = "multi_thread")]
 async fn folders_that_never_answer_hold_a_bounded_number_of_threads() {
+    assert_eq!(FOLDER_INSPECTIONS, 8);
     let (stall, gate, _let_go) = stops();
     let (core, mut client) = start(&stall, &gate, |c| c.folder_inspection_limit = SHORT).await;
-    let params = folder_params("project.find", core.dir.path());
+    let folder = core.dir.path();
 
     for _ in 0..FOLDER_INSPECTIONS {
-        let slow = client.request("project.find", params.clone()).await;
+        let params = folder_params("project.find", folder);
+        let slow = client.request("project.find", params).await;
         reached(&gate).await;
         let answer = client.response(slow).await;
         let message = answer["error"]["message"].as_str().unwrap_or_default();
         assert!(message.contains("did not answer in time"), "{answer}");
     }
-    // Every place is held by a call still stuck: this one is not started.
-    let answer = client.call("project.find", params).await;
-    let error = &answer["error"];
-    assert_eq!(kind(error), "permission", "{answer}");
-    assert!(
-        error["message"]
-            .as_str()
-            .unwrap()
-            .contains("too many folders asked about are not answering"),
-        "{answer}"
-    );
+    // Every place is held by a call still stuck: these are not started.
+    for method in ["project.find", "project.add"] {
+        let answer = client.call(method, folder_params(method, folder)).await;
+        let error = &answer["error"];
+        assert_eq!(kind(error), "permission", "{method}: {answer}");
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("too many folders asked about are not answering"),
+            "{method}: {answer}"
+        );
+    }
+    assert_eq!(client.result("project.list", json!({})).await, json!([]));
 }
 
 /// Core gives the inspection 10 seconds unless a test says otherwise; the
