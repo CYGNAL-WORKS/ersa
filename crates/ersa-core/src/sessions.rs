@@ -1296,7 +1296,7 @@ impl SessionManager {
                 lock(&handle.presented).title = Some(title.to_string());
             }
             drop(hub);
-            return Ok(handle.describe());
+            return Ok(self.retitled(&handle));
         } else {
             let row = lock(&handle.row).clone();
             let backend_id = row.backend_session_id.ok_or_else(unnamed)?;
@@ -1345,7 +1345,22 @@ impl SessionManager {
             }
         }
         lock(&handle.presented).title = Some(title.to_string());
-        Ok(handle.describe())
+        Ok(self.retitled(&handle))
+    }
+
+    /// Tells every client of the session's title after `session.set_title`
+    /// (PROTO-CORE-API-R83), whichever client renamed it, and returns the
+    /// session as it now is.
+    fn retitled(&self, handle: &Handle) -> Session {
+        let session = handle.describe();
+        send_tile(
+            &self.tiles,
+            &handle.id,
+            &session.tile,
+            session.last_activity_at.clone(),
+            session.title.clone(),
+        );
+        session
     }
 
     /// Archives the session, or unarchives it (ADR 0026,
@@ -1751,6 +1766,7 @@ impl SessionManager {
                 &handle.id,
                 &session.tile,
                 session.last_activity_at,
+                session.title,
             );
         }
         let first_seq = subscribed.first_seq.unwrap_or(0).max(from_seq);
@@ -2699,6 +2715,7 @@ async fn run_pipeline(pipeline: Pipeline) {
 
         // A title the backend announced is the session's from now on, until
         // a newer one or its record says otherwise (PROTO-CLAUDE-CODE-STREAM-R36).
+        let title_changed = retitled.is_some();
         if let Some(title) = retitled {
             lock(&handle.presented).title = Some(title);
         }
@@ -2751,9 +2768,12 @@ async fn run_pipeline(pipeline: Pipeline) {
         // A tile carries the last activity, so a turn's end sends one even
         // when the tile itself ends as it began, as a turn that starts and
         // ends in one batch does.
-        if tile != last_tile || activity_changed {
+        // A new title, the backend's announced or generated name, sends one
+        // too (PROTO-CORE-API-R83).
+        if tile != last_tile || activity_changed || title_changed {
             let last_activity_at = lock(&handle.row).last_activity_at.clone();
-            send_tile(&tiles, &handle.id, &tile, last_activity_at);
+            let title = lock(&handle.presented).title.clone();
+            send_tile(&tiles, &handle.id, &tile, last_activity_at, title);
             last_tile = tile;
         }
         progress.send_replace(Progress {
@@ -2806,15 +2826,22 @@ fn published(session_id: &str, event: &Envelope) -> Published {
     }
 }
 
-/// Sends a session's tile with its last activity, which every tile carries
-/// as `session.list` has it.
-fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile, last_activity_at: Option<String>) {
+/// Sends a session's tile with its last activity and title, which every
+/// tile carries as `session.list` has them.
+fn send_tile(
+    tiles: &TileHub,
+    session_id: &str,
+    tile: &Tile,
+    last_activity_at: Option<String>,
+    title: Option<String>,
+) {
+    // Every tile carries the title, so a coalesced tile never loses a
+    // change to it (PROTO-CORE-API-R83).
     let params = SessionTileParams {
         session_id: session_id.to_string(),
         tile: tile.clone(),
         last_activity_at,
-        // Every tile carries the title once PROTO-CORE-API-R83 is built.
-        title: None,
+        title,
     };
     tiles.publish(
         session_id,
