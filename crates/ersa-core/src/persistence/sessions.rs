@@ -25,7 +25,8 @@ pub struct SessionRow {
     pub mode: Option<String>,
     /// Core's latest request for the session's model, effort and permission
     /// mode, ids from `backend.list`: what it last gave the backend at
-    /// `session.create` or `session.fork`. `None` for a model or effort left
+    /// `session.create`, `session.fork` or through `session.set_model`,
+    /// `session.set_effort` or `session.set_permission_mode`. `None` for a model or effort left
     /// to its backend, and for every session created before Core recorded
     /// them (PROTO-CORE-API-R71).
     pub model: Option<String>,
@@ -164,6 +165,33 @@ impl Store {
                 "UPDATE sessions SET forked_from = NULL, forked_through = NULL WHERE id = ?1",
                 params![id],
             )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Keeps Core's new request for one of the session's controls, with the
+    /// time it gave it to the backend (PROTO-CORE-API-R71). `control` is the
+    /// column's name: `model`, `effort` or `permission_mode`.
+    pub async fn set_session_control(
+        &self,
+        id: String,
+        control: &'static str,
+        value: String,
+        at: String,
+    ) -> Result<()> {
+        // A column name can't be a bound parameter; only these three are
+        // ever written here.
+        let sql = match control {
+            "model" => "UPDATE sessions SET model = ?2, model_at = ?3 WHERE id = ?1",
+            "effort" => "UPDATE sessions SET effort = ?2, effort_at = ?3 WHERE id = ?1",
+            "permission_mode" => {
+                "UPDATE sessions SET permission_mode = ?2, permission_mode_at = ?3 WHERE id = ?1"
+            }
+            other => unreachable!("no session control {other}"),
+        };
+        self.call(move |conn| {
+            conn.execute(sql, params![id, value, at])?;
             Ok(())
         })
         .await

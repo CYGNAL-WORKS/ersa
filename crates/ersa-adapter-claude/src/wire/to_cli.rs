@@ -4,7 +4,7 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use super::permissions::{PermissionDecision, PermissionMode};
+use super::permissions::PermissionDecision;
 
 /// One stdin line. Only serialised, never parsed: the host writes these.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -108,8 +108,9 @@ pub struct HostControlRequest {
     pub request: HostRequest,
 }
 
-/// The control requests the adapter sends (ADR 0014). `initialize` and
-/// `rename_session` are recorded; the others follow the SDK types until
+/// The control requests the adapter sends (ADR 0014). `initialize`,
+/// `rename_session`, `set_model`, `set_permission_mode` and
+/// `apply_flag_settings` are recorded; the others follow the SDK types until
 /// fixtures exist.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
@@ -137,13 +138,25 @@ pub enum HostRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
     },
+    /// Changes the permission mode at once; the CLI answers
+    /// `{"mode": ...}` and follows with a `system/status` line carrying it
+    /// (2.1.316 fixtures 25, 26).
     SetPermissionMode {
-        mode: PermissionMode,
+        /// The CLI's own name for the mode, as `backend.list` offers it.
+        mode: String,
     },
+    /// Changes the model at once; the CLI answers `{"model": <resolved id>}`
+    /// (fixtures 25, 26).
     SetModel {
-        /// `None` resets to the session's default model.
+        /// A model's `value` from the `initialize` response. `None` resets
+        /// to the session's default model.
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+    },
+    /// Changes settings the CLI otherwise takes as flags; the adapter sends
+    /// only the effort. The CLI answers a bare success (fixtures 25, 26).
+    ApplyFlagSettings {
+        settings: FlagSettings,
     },
     GetContextUsage {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -156,6 +169,14 @@ pub enum HostRequest {
         server_name: String,
         message: Value,
     },
+}
+
+/// The settings an `apply_flag_settings` request changes.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlagSettings {
+    /// The effort level, one of the CLI's own names (`low`, `max`).
+    pub effort_level: String,
 }
 
 /// Who chose a `rename_session` title: `remote` (the CLI's default) for a
