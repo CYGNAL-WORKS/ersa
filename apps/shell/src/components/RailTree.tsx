@@ -15,6 +15,7 @@ import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
 import { useLeavingFocus } from "./useLeavingFocus";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
+import "./Tip.css";
 
 interface RailTreeProps extends TileHandlers {
   projects: ProjectsView;
@@ -616,7 +617,7 @@ function GroupToggle({
             </span>
           </span>
           {notTrusted && folded && (
-            <span className="rail-heading-tip" aria-hidden="true" style={{ positionAnchor: shieldAnchor } as CSSProperties}>
+            <span className="tip rail-heading-tip" aria-hidden="true" style={{ positionAnchor: shieldAnchor } as CSSProperties}>
               {t("trust.notTrustedStatus")}
             </span>
           )}

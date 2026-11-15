@@ -10,6 +10,10 @@
 //!   request with one model, the CLI's own `default` entry, so detection
 //!   lists it and the session starts and takes messages; it then accepts
 //!   each change of model, permission mode or effort as the CLI does.
+//!   Sent the message `limits`, it reports the plan's usage windows as the
+//!   CLI's `rate_limit_event` does, with made-up shares: a 5-hour limit at
+//!   84 percent resetting in 1 hr 15 min, and a weekly limit at 62 percent
+//!   resetting in three days.
 //! - Otherwise it starts that grandchild, writes `<own pid> <grandchild pid>`
 //!   to the file named by `ERSA_STAND_IN_PIDS`, and reads its input until
 //!   the input closes, which is how Core tells the CLI to stop. Its
@@ -60,6 +64,42 @@ fn main() {
     let _ = std::io::stdin().lock().read_to_end(&mut input);
 }
 
+/// Whether a `user` line from the host says exactly `text`, given as a
+/// string or as one text block.
+fn said(message: &serde_json::Value, text: &str) -> bool {
+    let content = &message["message"]["content"];
+    content.as_str() == Some(text)
+        || content
+            .as_array()
+            .is_some_and(|blocks| blocks.iter().any(|b| b["text"].as_str() == Some(text)))
+}
+
+/// Writes a `rate_limit_event` line with two usage windows, made up, whose
+/// reset times are counted from now so the window shows each way of saying
+/// when a limit resets (docs/design/COMPOSER.md, The context ring).
+fn report_limits() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("a clock after 1970")
+        .as_secs();
+    let line = serde_json::json!({
+        "type": "rate_limit_event",
+        "session_id": "stand-in",
+        "uuid": "stand-in-limits",
+        "rate_limit_info": {
+            "status": "allowed_warning",
+            "unifiedWindows": {
+                // Just under 1 hr 15 min, which the list rounds up to it for the next half minute.
+                "five_hour": { "utilization": 0.84, "resetsAt": now + 75 * 60 - 30 },
+                "seven_day": { "utilization": 0.62, "resetsAt": now + 3 * 24 * 3600 },
+            },
+        },
+    });
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{line}");
+    let _ = out.flush();
+}
+
 /// Reads the host's lines, answering `initialize` with success and the
 /// CLI's `default` model entry (PROTO-CLAUDE-CODE-STREAM, the handshake),
 /// and each change of model, permission mode or effort with success, the
@@ -71,6 +111,12 @@ fn answer_initialize() {
         let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        if message["type"] == "user" {
+            if said(&message, "limits") {
+                report_limits();
+            }
+            continue;
+        }
         if message["type"] != "control_request" {
             continue;
         }
