@@ -171,12 +171,12 @@ export const enUS = {
       // Beneath Delete… while Ersa is already deleting the session.
       deletingReason: "Ersa is deleting this session",
       title: "Delete {title}?",
-      // Always said: the conversation goes from the backend's own tools too ("Claude Code").
-      conversationDetail: "Its conversation is deleted for good, in {backend} too.",
-      folderAndBranchDetail: "Its folder and its branch {branch} are deleted with it.",
-      folderDetail: "Its folder is deleted with it.",
+      // Always said: the conversation goes for good.
+      conversationDetail: "The conversation is permanently deleted.",
+      folderAndBranchDetail: "The session's folder and branch {branch} are deleted too.",
+      folderDetail: "The session's folder is deleted too.",
       // A branch that holds commits no other branch or remote holds is kept; the next line says why.
-      folderBranchKeptDetail: "Its folder is deleted with it. Its branch {branch} is kept.",
+      folderBranchKeptDetail: "The session's folder is deleted too, but its branch {branch} is kept.",
       branchKeptDetail: "The branch holds commits that exist nowhere else.",
       // The project's own folder, or a folder another session also uses.
       filesStayDetail: "Its files stay in {path}.",
