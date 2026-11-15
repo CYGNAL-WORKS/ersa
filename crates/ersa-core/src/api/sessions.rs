@@ -202,35 +202,50 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .await?)
 }
 
-/// The model a fork asks its backend for, by the rule the session controls
-/// name a model by (FLOW-NEW-SESSION-R33): `request`, Core's request for the
-/// original's model, while `report`, what its backend reports, is absent or is
-/// what the requested choice resolves to (the backend's default choice with no
-/// request, which a fork leaves to its backend in turn, R98); otherwise the
-/// choice the report names, by its id, else the choice not marked default that
-/// resolves to it, else the report itself. An alias such as `opus` so stays one
-/// rather than becoming the id it resolved to.
-fn fork_model(
+/// A session's model choice, the one rule for which `backend.list` model a
+/// session's model is (PROTO-CORE-API, the set methods; FLOW-NEW-SESSION-R33):
+/// Core's request stands while the backend reports no model, or reports what
+/// the requested choice resolves to (the default choice when Core made no
+/// request), since an alias and the default can resolve to the same id;
+/// otherwise the backend's report names the model.
+struct SessionModel<'a> {
+    /// Whether Core's request stands over the backend's report.
+    request_stands: bool,
+    /// The `backend.list` model the session's model is; `None` when it
+    /// matches none, as one chosen in the backend's own tools.
+    choice: Option<&'a ModelChoice>,
+}
+
+fn session_model<'a>(
     request: Option<&str>,
     report: Option<&str>,
-    models: &[ModelChoice],
-) -> Option<String> {
-    let Some(report) = report else {
-        return request.map(String::from);
-    };
+    models: &'a [ModelChoice],
+) -> SessionModel<'a> {
     let requested = match request {
         Some(request) => models.iter().find(|m| m.id == request),
         None => models.iter().find(|m| m.default),
     };
-    if requested.is_some_and(|choice| choice.resolved.as_deref() == Some(report)) {
-        return request.map(String::from);
+    match report {
+        Some(report)
+            if !requested.is_some_and(|choice| choice.resolved.as_deref() == Some(report)) =>
+        {
+            // The report by its id, else by the choice not marked default
+            // that resolves to it: a live session reports the resolved id.
+            let choice = models.iter().find(|m| m.id == report).or_else(|| {
+                models
+                    .iter()
+                    .find(|m| !m.default && m.resolved.as_deref() == Some(report))
+            });
+            SessionModel {
+                request_stands: false,
+                choice,
+            }
+        }
+        _ => SessionModel {
+            request_stands: true,
+            choice: requested,
+        },
     }
-    let named = models.iter().find(|m| m.id == report).or_else(|| {
-        models
-            .iter()
-            .find(|m| !m.default && m.resolved.as_deref() == Some(report))
-    });
-    Some(named.map_or_else(|| report.to_string(), |m| m.id.clone()))
 }
 
 /// `session.fork` (FLOW-FORK-SESSION): a new session from a copy of the
@@ -271,14 +286,19 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     // The original's values as `session.list` reports them now: the
     // backend's newest, not only what Core last asked for (PROTO-CORE-API-R71).
     let listed = core.sessions.get(&params.id)?;
-    // The model to ask the fork's backend for: the original's own request
-    // while its backend reports only what that request resolves to, else
-    // the model the backend reports (PROTO-CORE-API-R102).
-    let model = fork_model(
+    // The original's model choice: its request while that stands, which
+    // is nothing for a model left to the backend, else the model its
+    // backend reports, so an alias or the default stays one (PROTO-CORE-API-R104).
+    let original_model = session_model(
         listed.model_request.as_deref(),
         listed.model.as_deref(),
         &models,
     );
+    let model = if original_model.request_stands {
+        listed.model_request.clone()
+    } else {
+        listed.model.clone()
+    };
     let permission_mode = Some(listed.permission_mode)
         .filter(|mode| !mode.is_empty())
         .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
@@ -818,22 +838,21 @@ pub(super) async fn set_model(core: &Core, params: SetModelParams) -> Result<Ses
 }
 
 /// `session.set_effort` (PROTO-CORE-API-R82): an effort `backend.list`
-/// lists for the session's model, as `session.list` reports it. That model
-/// is found among the backend's by id, else by the id it resolves to (a
-/// live session reports the resolved one), else, for a session whose model
-/// is the backend's to choose, the one marked default. A model the backend
-/// does not list is checked against every effort the backend offers.
+/// lists for the session's model choice ([`session_model`]): the choice
+/// Core requested while the backend reports what it resolves to, else the
+/// one the backend's report names. A model the backend does not list is
+/// checked against every effort the backend offers (PROTO-CORE-API-R101).
 pub(super) async fn set_effort(core: &Core, params: SetEffortParams) -> Result<Session, ApiError> {
     core.sessions.check_live(&params.id)?;
     let session = core.sessions.get(&params.id)?;
     let models = offered_models(core, &params.id).await?;
-    let model = match &session.model {
-        Some(model) => models
-            .iter()
-            .find(|m| &m.id == model)
-            .or_else(|| models.iter().find(|m| m.resolved.as_ref() == Some(model))),
-        None => models.iter().find(|m| m.default),
-    };
+    // The session's model choice, as the session controls name it.
+    let model = session_model(
+        session.model_request.as_deref(),
+        session.model.as_deref(),
+        &models,
+    )
+    .choice;
     let effort = Some(params.effort.clone());
     match model {
         Some(ModelChoice {
