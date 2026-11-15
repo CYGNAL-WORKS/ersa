@@ -20,7 +20,7 @@ const MINE: &str = "Mine";
 
 /// Fixture 43's stdout up to the end of the first turn, with the answer to
 /// the title request given the id the driver gives that request
-/// (`ersa-title-2`, its first after `initialize`), and its `response`
+/// (`ersa-title-3`, its first after `initialize` and `get_context_usage`), and its `response`
 /// replaced by `response` when one is given.
 fn first_turn(response: Option<Value>) -> Vec<String> {
     let stdout = Recording::load(&fixtures_of("2.1.316").join("43-session-title.jsonl"))
@@ -35,7 +35,7 @@ fn first_turn(response: Option<Value>) -> Vec<String> {
         .map(|line| {
             let mut v = parse(line);
             if v["response"]["request_id"] == "ersa-generate_session_title-1" {
-                v["response"]["request_id"] = json!("ersa-title-2");
+                v["response"]["request_id"] = json!("ersa-title-3");
                 if let Some(response) = &response {
                     v["response"] = response.clone();
                 }
@@ -50,7 +50,7 @@ fn first_turn(response: Option<Value>) -> Vec<String> {
 fn around_answer(stdout: &[String]) -> (Vec<String>, String, Vec<String>) {
     let at = stdout
         .iter()
-        .position(|l| parse(l)["response"]["request_id"] == "ersa-title-2")
+        .position(|l| parse(l)["response"]["request_id"] == "ersa-title-3")
         .expect("the answer");
     (
         stdout[..at].to_vec(),
@@ -67,7 +67,7 @@ fn renamed(uuid: &str) -> [String; 2] {
             "session_id": "39885328-1e47-4d9e-804e-5ec43fc6efb1", "uuid": uuid})
         .to_string(),
         json!({"type": "control_response",
-            "response": {"subtype": "success", "request_id": "ersa-rename-3"}})
+            "response": {"subtype": "success", "request_id": "ersa-rename-4"}})
         .to_string(),
     ]
 }
@@ -78,6 +78,7 @@ fn naming_cli(stdout: &[String]) -> FakeTransport {
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("get_context_usage"))
         .wait_for_stdin(is("user"))
         .wait_for_stdin(is("generate_session_title"))
         .then_stdout(&stdout[1..])
@@ -212,10 +213,10 @@ async fn a_rename_after_the_generated_name_replaces_it_on_every_window() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_error_a_decline_or_no_title_names_nothing_and_tells_the_user_nothing() {
     let answers = [
-        json!({"subtype": "error", "request_id": "ersa-title-2",
+        json!({"subtype": "error", "request_id": "ersa-title-3",
             "error": "Unsupported control request subtype: generate_session_title"}),
-        json!({"subtype": "declined", "request_id": "ersa-title-2"}),
-        json!({"subtype": "success", "request_id": "ersa-title-2", "response": {}}),
+        json!({"subtype": "declined", "request_id": "ersa-title-3"}),
+        json!({"subtype": "success", "request_id": "ersa-title-3", "response": {}}),
     ];
     for answer in answers {
         let transport = naming_cli(&first_turn(Some(answer.clone()))).hold_open();
