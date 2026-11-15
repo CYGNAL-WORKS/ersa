@@ -168,21 +168,17 @@ export function connect(
         if (event.method === "session.tile") {
           const session_id = event.params.session_id;
           const tile = checkTile(event.params.tile);
-          const last_activity_at = event.params.last_activity_at;
-          const listed =
-            current.phase === "connected" && current.sessions.state === "ready"
-              ? current.sessions.sessions.find((s) => s.id === session_id)
-              : undefined;
-          const known = listed !== undefined;
-          // A turn's end: no notification carries a title the backend announced or a creation time Core corrected
-          // from the session's record, and the rail sorts by both, so the list is read for them now.
-          const turnEnded = last_activity_at !== undefined && last_activity_at !== listed?.last_activity_at;
+          const { last_activity_at, title } = event.params;
+          const known =
+            current.phase === "connected" &&
+            current.sessions.state === "ready" &&
+            current.sessions.sessions.some((s) => s.id === session_id);
           // A tile for a session the list lacks means a session was created
           // since it was read: read it again.
           if (known) {
             // A read in flight may answer with a list older than this
             // tile; read once more after it so the newer tile is not lost.
-            if (sessionRead !== "idle" || turnEnded) listSessions();
+            if (sessionRead !== "idle") listSessions();
             patch((view) =>
               view.sessions.state === "ready"
                 ? {
@@ -191,10 +187,14 @@ export function connect(
                       state: "ready",
                       // Every tile carries the last activity once a turn has ended, and that is how the rail
                       // hears of a new one (FLOW-ORGANIZE-SESSIONS-R10). Core never clears it, so one that
-                      // comes without keeps what was listed.
-                      sessions: view.sessions.sessions.map((s) =>
-                        s.id === session_id ? { ...s, tile, last_activity_at: last_activity_at ?? s.last_activity_at } : s,
-                      ),
+                      // comes without keeps what was listed. Every tile carries the session's current title, absent
+                      // while it has none (PROTO-CORE-API-R83), so the rail, the header and the sessions page show a
+                      // rename or a generated name from it, with no list read (PROTO-CORE-API-R84).
+                      sessions: view.sessions.sessions.map((s) => {
+                        if (s.id !== session_id) return s;
+                        const { title: _listed, ...rest } = s;
+                        return { ...rest, tile, last_activity_at: last_activity_at ?? s.last_activity_at, ...(title === undefined ? {} : { title }) };
+                      }),
                     },
                   }
                 : view,
