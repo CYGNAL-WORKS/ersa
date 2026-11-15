@@ -55,11 +55,12 @@ pub(super) fn listed(row: &SessionRow, recorded: &RecordedSettings, reported: &R
 /// another value than the first such turn did, so a request for an alias or
 /// the backend's default stays one even though the record names what it
 /// resolved to; the record's latest once a later turn ran with another, as
-/// when the user changed it in the backend's own tools. A value without a
-/// time (left to the backend, or stored before Core kept times) has no first
-/// turn to weigh the latest against, so Core passes what it stored: nothing
-/// for one left out, so the backend's own default stays one, as at
-/// `session.create`.
+/// when the user changed it in the backend's own tools. A value left to the
+/// backend is a request for its default with a time like any other, so it
+/// passes nothing until the record shows a change (PROTO-CORE-API-R98). A
+/// value Core holds no time for has no first turn to weigh the latest
+/// against: the record's latest from any turn, else what Core stored
+/// (PROTO-CORE-API-R99).
 pub(super) fn relaunched(row: &SessionRow, record: &RelaunchSettings) -> Listed {
     let requested = requested(row);
     let newer = record.latest.clone().since(requested);
@@ -68,8 +69,12 @@ pub(super) fn relaunched(row: &SessionRow, record: &RelaunchSettings) -> Listed 
                 newer: Option<Recorded>,
                 first: Option<Recorded>| {
         let latest = newer.map(|r| r.value);
-        let changed = at.is_some() && latest.is_some() && latest != first.map(|r| r.value);
-        if changed { latest } else { request.clone() }
+        match at {
+            // Unchanged since the first turn after the request, or no turn
+            // since: the request.
+            Some(_) if latest.is_none() || latest == first.map(|r| r.value) => request.clone(),
+            _ => latest.or_else(|| request.clone()),
+        }
     };
     let first = record.first.clone();
     Listed {

@@ -151,7 +151,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
     // (PROTO-CLAUDE-CODE-STREAM-R35). Any other backend names it as it
     // starts.
     let backend_session_id = adapter.new_session_id();
-    let requested = Stamped::now(&params.model, &params.effort, &permission_mode);
+    let requested = Stamped::now(&permission_mode);
     let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
@@ -243,7 +243,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let permission_mode = Some(listed.permission_mode)
         .filter(|mode| !mode.is_empty())
         .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
-    let requested = Stamped::now(&listed.model, &listed.effort, &permission_mode);
+    let requested = Stamped::now(&permission_mode);
     // Chosen and stored before the backend starts, as for a new session, so
     // a fork can be renamed before its first message (R38).
     let backend_session_id = adapter.new_session_id();
@@ -847,9 +847,11 @@ pub(super) async fn raw_log(
 }
 
 /// When Core gives a new session's backend its model, effort and permission
-/// mode: now, on the host's clock, for each value given, and nothing for one
-/// left to the backend (PROTO-CORE-API-R71). Core runs on the only host it
-/// reaches, so its clock is the host's, which the backend's record uses.
+/// mode: now, on the host's clock (PROTO-CORE-API-R71). A model or effort
+/// left out is a request for the backend's default, made now too, so a turn
+/// before it never counts against it (PROTO-CORE-API-R98). Core runs on the
+/// only host it reaches, so its clock is the host's, which the backend's
+/// record uses.
 struct Stamped {
     model: Option<String>,
     effort: Option<String>,
@@ -857,11 +859,11 @@ struct Stamped {
 }
 
 impl Stamped {
-    fn now(model: &Option<String>, effort: &Option<String>, permission_mode: &str) -> Self {
+    fn now(permission_mode: &str) -> Self {
         let now = persistence::now_rfc3339();
         Stamped {
-            model: model.as_ref().map(|_| now.clone()),
-            effort: effort.as_ref().map(|_| now.clone()),
+            model: Some(now.clone()),
+            effort: Some(now.clone()),
             permission_mode: (!permission_mode.is_empty()).then(|| now.clone()),
         }
     }
