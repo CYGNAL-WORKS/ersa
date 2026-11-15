@@ -109,6 +109,7 @@ const ERSA_ARGS = [
   "--setting-sources", "user,project,local",
   "--permission-prompt-tool", "stdio",
   "--await-initialize",
+  "--replay-user-messages",
 ];
 // Ersa's environment changes: its own entrypoint, and nothing inherited from
 // whatever started it.

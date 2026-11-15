@@ -10,4 +10,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 
 
+
 ## Resolved recently (optional, trimmed in planning passes)
