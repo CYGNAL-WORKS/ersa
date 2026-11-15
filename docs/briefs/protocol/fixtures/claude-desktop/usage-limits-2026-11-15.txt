@@ -1,0 +1,15 @@
+Claude Desktop's plan usage limits, observed 2026-11-15 in the Code tab.
+
+The ring at the end of the row beneath the composer opens a small panel:
+
+  Plan usage limits · <plan's name>                       See all ->
+  Weekly · all models            Resets Wed 2:00 PM        <n>%
+  [bar filled to the share]
+  Weekly · <model's name>        Resets Wed 2:00 PM        <n>%
+  [bar filled to the share]
+
+Each row is a limit's name at the leading edge, then "Resets" with a weekday and a time, then the share used as a whole percent, over a thin bar filled to that share. The heading names the plan after a middle dot. The second row is a limit for one model, named by the model.
+
+The plan's name, the model's name and the shares are left out here: they are the account's.
+
+Not observed on this date, since the account showed no such rows: a five-hour limit and an overage limit. The owner's notes from earlier use of Claude Desktop give them as "5-hour limit", with a reset inside a day read as time left ("Resets in 1 hr 15 min"), and "Weekly · overage". To be captured when an account shows them.
