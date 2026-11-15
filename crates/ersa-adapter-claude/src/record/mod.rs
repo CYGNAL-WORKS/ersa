@@ -46,13 +46,14 @@ pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// What session `session_id`'s record says of its model, effort and
 /// permission mode, read back from its end as far as Core's request for
-/// each (PROTO-CLAUDE-CODE-STREAM-R57). A session with no record has none.
+/// each, and what the first turn after each request ran with
+/// (PROTO-CLAUDE-CODE-STREAM-R57, R60). A session with no record has none.
 pub fn record_settings(
     claude_home: &Path,
     cwd: &str,
     session_id: &str,
     requested: ersa_adapter::Requested,
-) -> io::Result<ersa_adapter::RecordedSettings> {
+) -> io::Result<ersa_adapter::RelaunchSettings> {
     let Some(path) = find_record(claude_home, cwd, session_id)? else {
         return Ok(Default::default());
     };
