@@ -1044,9 +1044,13 @@ export interface Session {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1278,9 +1282,13 @@ export interface Session1 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1331,9 +1339,13 @@ export interface Session2 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1384,9 +1396,13 @@ export interface Session3 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1437,9 +1453,13 @@ export interface Session4 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1490,9 +1510,13 @@ export interface Session5 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1543,9 +1567,13 @@ export interface Session6 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1596,9 +1624,13 @@ export interface Session7 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1649,9 +1681,13 @@ export interface Session8 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1719,9 +1755,13 @@ export interface Session9 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1797,9 +1837,13 @@ export interface Session10 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1850,9 +1894,13 @@ export interface Session11 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1903,9 +1951,13 @@ export interface Session12 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1956,9 +2008,13 @@ export interface Session13 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -2009,9 +2065,13 @@ export interface Session14 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -2062,9 +2122,13 @@ export interface Session15 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -2115,9 +2179,13 @@ export interface Session16 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
