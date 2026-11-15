@@ -107,9 +107,11 @@ async fn messages_sent_during_a_turn_are_handed_over_and_counted_until_taken_in(
         events.iter().all(|e| e["event"]["type"] != "turn.started"),
         "joined the running turn: {events:#?}"
     );
-    let tile = tile_where(&mut client, &id, |t| t.get("waiting").is_none()).await;
+    // Listed, not awaited as a `session.tile`: that may have come before
+    // the event, and `events_until` passes over it. The tile is updated
+    // with the event, so the list already has it.
+    let tile = listed_tile(&mut client, &id).await;
     assert!(tile.get("waiting").is_none(), "{tile:#}");
-    assert!(listed_tile(&mut client, &id).await.get("waiting").is_none());
 }
 
 /// A session that is not live holds nothing: its tile drops the count when
