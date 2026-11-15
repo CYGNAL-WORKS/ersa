@@ -130,11 +130,10 @@ export function SessionTile({
           </span>
         )}
         <span className="session-mark">{!handle && <Mark view={view} breath={breath} onAnimationEnd={breathed} />}</span>
-        {view.ring !== undefined && (
-          <span className="session-ring">
-            <ContextRing used={view.ring} size="ring-sm" />
-          </span>
-        )}
+        {/* Always there: empty, and saying so, until the backend reports (LAY-SHELL, Tiles). */}
+        <span className="session-ring">
+          <ContextRing used={view.ring} size="ring-sm" />
+        </span>
         <span className="session-detail">
           {/* On the active tile a want is named by its chevron mark, so it isn't read twice. */}
           {view.phrase && (
