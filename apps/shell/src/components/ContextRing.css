@@ -1,4 +1,4 @@
-/* The context ring: a hairline track and the consumed arc in ink, read like a dial. */
+/* The context ring: a hairline track and the consumed arc in ink-muted, read like a dial. */
 
 .context-ring {
   display: inline-flex;
@@ -19,9 +19,13 @@
   height: var(--size-ring-sm);
 }
 
-/* Near full, the arc turns caution (LAY-SHELL, Context). */
-.context-ring[data-near-full] .context-ring-used {
+/* Past half the arc turns caution, past four fifths danger (LAY-SHELL, Context). */
+.context-ring[data-band="caution"] .context-ring-used {
   stroke: var(--color-caution);
+}
+
+.context-ring[data-band="danger"] .context-ring-used {
+  stroke: var(--color-danger);
 }
 
 .context-ring-track,
@@ -36,7 +40,9 @@
 
 .context-ring-used {
   stroke: var(--color-ink-muted);
-  transition: stroke-dasharray var(--motion-settle) var(--motion-ease-out);
+  transition:
+    stroke-dasharray var(--motion-settle) var(--motion-ease-out),
+    stroke var(--motion-settle) var(--motion-ease-out);
 }
 
 /* Turning: the gauge spins once per motion-loop-ring at constant speed while the work lasts. */

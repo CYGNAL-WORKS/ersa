@@ -63,7 +63,7 @@ interface SessionControlsProps {
   waiting?: readonly ControlKey[];
   /** A chip's list opened. */
   onOpen?: () => void;
-  /** The context ring's share used; absent before the session has used any. */
+  /** The context ring's share used; absent while none is reported. */
   used?: number;
   /** For the gallery: one chip shown open, or in a pointer or keyboard state. */
   open?: ControlKey;
@@ -283,7 +283,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
             )}
           </>
         )}
-        <ContextRing used={used} />
+        <ContextRing used={used} beforeSession={!readOnly} />
       </div>
     </div>
   );

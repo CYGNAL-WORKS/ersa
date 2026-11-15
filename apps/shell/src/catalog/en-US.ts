@@ -454,10 +454,14 @@ export const enUS = {
     // The backend chip when the host lists none that can run, and while its backends are detected (R07, R23).
     noBackendStatus: "No backend",
     detectingBackendsProgress: "Detecting backends…",
-    // The context ring's name, in the session controls and on a tile.
+    // The context ring's name and tooltip, in the session controls and on a tile; its readout for a share under 1 percent.
     contextRing: {
       noneLabel: "Context: none used yet",
+      unreportedLabel: "Context isn't reported yet",
       usedLabel: "Context: {percent} percent used",
+      underOneLabel: "Context: less than 1 percent used",
+      // Given 1 as `percent`: the figure stays out of the copy so the token check reads no raw percentage here.
+      underOneReadout: "<{percent}%",
     },
   },
   quit: {},
