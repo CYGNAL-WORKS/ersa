@@ -118,7 +118,7 @@ describe("a tool card's path", () => {
     await settle();
     await settle();
     // Core lists the workspace as D:/code/alpha; the backend names the file with backslashes.
-    core.play({ type: "tool.requested", tool_use_id: "r1", name: "Read", input: {}, target: "D:\\code\\alpha\\src\\main.rs" });
+    core.play({ type: "tool.requested", tool_use_id: "r1", name: "Read", input: {}, target_kind: "path", target: "D:\\code\\alpha\\src\\main.rs" });
     const row = screen.getByRole("button", { name: /^Read / });
     expect(row.querySelector(".tool-target")?.textContent).toBe("src\\main.rs");
   });

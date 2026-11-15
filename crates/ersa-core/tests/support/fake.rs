@@ -11,7 +11,16 @@
 //! - `question`: a question for the user.
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
 //! - `work`: a turn that keeps working, the backend saying it is running,
-//!   until it is interrupted, then ends with outcome `interrupted`.
+//!   until it is interrupted, then ends with outcome `interrupted`. A
+//!   message sent while it works waits in the backend, as Claude Code holds
+//!   one (PROTO-CLAUDE-CODE-STREAM, Sequencing): its host line projects to a
+//!   passthrough, and the projector counts it in [`Projector::waiting`].
+//! - `take in`, sent while a turn works: the backend takes in every message
+//!   waiting, this one included, echoing them as one message that joins the
+//!   running turn, as Claude Code's echo does.
+//! - `refused once answered`: the backend waits until a permission request
+//!   has been answered, then refuses the message without recording it, as
+//!   an adapter that found the session stopped before writing does.
 //! - `exit`: the backend exits by itself, with code 0.
 //! - `idle`: the backend says it is idle, as Claude Code does once a turn
 //!   ends; the fake otherwise reports itself running from its start.
@@ -87,6 +96,8 @@ pub struct Stats {
     pub messages: Mutex<Vec<OutgoingMessage>>,
     /// Records deleted.
     pub record_deletes: AtomicUsize,
+    /// Permission requests answered.
+    pub decisions: AtomicUsize,
 }
 
 /// The kind of the record entry a rename adds.
@@ -495,6 +506,8 @@ impl Adapter for FakeAdapter {
             turn: 0,
             model: None,
             permission_mode: None,
+            working: false,
+            held: Vec::new(),
         })
     }
 
@@ -707,6 +720,16 @@ impl AdapterSession for FakeSession {
         if message.text == "stopped before the write" {
             return Err(AdapterError::NotRunning);
         }
+        if message.text == "refused once answered" {
+            // Waits on state, bounded so a test that never answers still ends.
+            for _ in 0..500 {
+                if self.stats.decisions.load(Ordering::SeqCst) > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            return Err(AdapterError::NotRunning);
+        }
         if message.text == "stopped mid-write" {
             self.sink.record(
                 Direction::Host,
@@ -724,6 +747,14 @@ impl AdapterSession for FakeSession {
             Direction::Host,
             json!({ "t": "user", "text": text }).to_string(),
         );
+        // A turn is working: the backend holds the message until it takes
+        // the waiting ones in.
+        if self.inner.lock().unwrap().working {
+            if text == "take in" {
+                self.backend(json!({ "t": "echo" }));
+            }
+            return Ok(());
+        }
         if let Some(count) = text.strip_prefix("burst ") {
             let count: usize = count.parse().expect("burst <n>");
             for i in 0..count {
@@ -787,6 +818,7 @@ impl AdapterSession for FakeSession {
             Direction::Host,
             json!({ "t": "decide", "id": request_id, "behavior": behavior }).to_string(),
         );
+        self.stats.decisions.fetch_add(1, Ordering::SeqCst);
         self.backend(json!({ "t": "done", "id": request_id }));
         Ok(())
     }
@@ -837,6 +869,10 @@ struct FakeProjector {
     /// The model and permission mode the stream last reported.
     model: Option<String>,
     permission_mode: Option<String>,
+    /// A turn is working: a message sent now waits in the backend.
+    working: bool,
+    /// The texts of the messages waiting in the backend, in the order sent.
+    held: Vec<String>,
 }
 
 impl Projector for FakeProjector {
@@ -852,6 +888,10 @@ impl Projector for FakeProjector {
         self.permission_mode.as_deref()
     }
 
+    fn waiting(&self) -> u32 {
+        u32::try_from(self.held.len()).unwrap()
+    }
+
     fn project(&mut self, line: &RawLine) -> Vec<Projected> {
         let value: Value = serde_json::from_str(&line.line).unwrap_or(Value::Null);
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
@@ -859,6 +899,40 @@ impl Projector for FakeProjector {
             self.model = Some(text("model"));
             self.permission_mode = Some(text("permission_mode"));
             return Vec::new();
+        }
+        match (line.dir, value["t"].as_str()) {
+            (Direction::Backend, Some("working")) => self.working = true,
+            (Direction::Backend, Some("interrupted" | "completed" | "idle")) => {
+                self.working = false;
+            }
+            (Direction::Host, Some("user")) if self.working => {
+                self.held.push(text("text"));
+                return vec![Projected::from_line(
+                    line,
+                    Event::BackendPassthrough(BackendPassthrough {
+                        backend: BACKEND.into(),
+                        kind: "fake/user".into(),
+                        payload: value.clone(),
+                    }),
+                )];
+            }
+            // Every waiting message, joined, in the running turn.
+            (Direction::Backend, Some("echo")) if !self.held.is_empty() => {
+                let text = std::mem::take(&mut self.held).join(
+                    "
+",
+                );
+                return vec![Projected::from_line(
+                    line,
+                    Event::UserMessage(UserMessage {
+                        text,
+                        origin: MessageOrigin::Human,
+                        peer: None,
+                        attachments: Vec::new(),
+                    }),
+                )];
+            }
+            _ => {}
         }
         let events = match (line.dir, value["t"].as_str()) {
             (Direction::Host, Some("user")) => {
