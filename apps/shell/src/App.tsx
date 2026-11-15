@@ -745,7 +745,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const away = view.phase === "connected" ? undefined : view.phase === "failed" ? "unreachable" : "reconnecting";
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
-  const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
+  // While Ersa can't reach Core its lists are gone: the controls keep the session's values and project as last listed,
+  // unavailable, rather than leaving the composer (FLOW-NEW-SESSION-R35).
+  const keptControls = useRef<{ session: Session; project: Project }>(undefined);
+  if (listed && listedProject) keptControls.current = { session: listed, project: listedProject };
+  const controlsFor =
+    listed && listedProject ? { session: listed, project: listedProject } : away && keptControls.current?.session.id === shown?.id ? keptControls.current : undefined;
+  const controlsWorkspace = controlsFor && workspaces[controlsFor.session.workspace_id];
+  const sessionControls = controlsFor && controlsWorkspace && sessionShown(controlsFor.session, controlsWorkspace, backends[controlsFor.session.host_id] ?? []);
   const used = listed && contextUsed(listed.tile);
   const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
 
@@ -942,12 +949,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               waiting={waitingOf(listed?.tile.waiting, shown.waitingHere)}
               controls={
                 sessionControls &&
-                listedProject &&
+                controlsFor &&
                 hello && (
                   <SessionControls
                   hosts={[hello.host]}
                   localHostId={hello.host.id}
-                  projects={[listedProject]}
+                  projects={[controlsFor.project]}
                   backends={[sessionControls.backend]}
                   values={sessionControls.values}
                   workspaceLabel={sessionControls.workspaceLabel}
@@ -956,7 +963,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   }}
                   onOpen={() => resetChange(shown.id)}
                   readOnly
-                  changeable={listed !== undefined && runs(listed)}
+                  changeable={runs(controlsFor.session)}
                   waiting={changeHere.sending}
                   // Nothing reaches Core while Ersa can't reach it.
                   disabled={away !== undefined}
