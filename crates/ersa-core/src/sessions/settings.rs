@@ -7,11 +7,71 @@
 //! request. Core keeps only the request, with when it made it; the other two
 //! are the backend's, read and held in memory.
 
-use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings, Requested};
+use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings, Requested, SessionControl};
+use ersa_protocol::core_api::Session;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::persistence::SessionRow;
+use super::{SEND_SETTLE, SessionError, SessionManager, bounded, lock};
+use crate::persistence::{SessionRow, now_rfc3339};
+
+impl SessionManager {
+    /// Refuses a session that is not live as [`SessionManager::change`] would,
+    /// so a stopped session is answered before its value is checked, which
+    /// may wait on detecting the backend.
+    pub fn check_live(&self, id: &str) -> Result<(), SessionError> {
+        self.live(id).map(drop)
+    }
+
+    /// Changes a live session's model, effort or permission mode through its
+    /// backend, at once (PROTO-CORE-API-R73, R74, R82), and keeps the new
+    /// value with the time Core gave it, as any request is kept
+    /// (PROTO-CORE-API-R71): a relaunch before a turn has run with it still
+    /// passes it. A session that is not live is refused; one still starting
+    /// takes the change once its backend is ready. Core has checked the
+    /// value against `backend.list`.
+    pub async fn change(&self, id: &str, control: SessionControl) -> Result<Session, SessionError> {
+        let handle = self.handle(id)?;
+        let live = self.live(id)?;
+        let session = live.wait_ready().await?;
+        // The time Core gives the backend the value, taken before it does:
+        // a turn that began after it is one the backend may have run with
+        // it, and none before it is.
+        let at = now_rfc3339();
+        let sent = control.clone();
+        bounded(async move { session.change(sent).await }).await?;
+        // The backend has it: keep it, so a relaunch passes it. Stored only
+        // now, so a value the backend refused is never kept.
+        let (name, value) = (control.name(), control.value().to_string());
+        self.store
+            .set_session_control(id.to_string(), name, value.clone(), at.clone())
+            .await?;
+        {
+            let mut guard = lock(&handle.row);
+            // A plain reference, so two of its fields can be borrowed at once.
+            let row = &mut *guard;
+            let (stored, stored_at) = match control {
+                SessionControl::Model(_) => (&mut row.model, &mut row.model_at),
+                SessionControl::Effort(_) => (&mut row.effort, &mut row.effort_at),
+                SessionControl::PermissionMode(_) => {
+                    (&mut row.permission_mode, &mut row.permission_mode_at)
+                }
+            };
+            *stored = Some(value);
+            *stored_at = Some(at);
+        }
+        // The adapter recorded the backend's answer before it returned, and
+        // the stream's report of the new model or mode comes with it: wait
+        // until the pipeline has projected it, so the session is listed
+        // with the backend's own word on the new value. A pipeline that
+        // falls behind only delays the report, which `session.list` gives
+        // once projected.
+        let target = live.sink.next_index();
+        let mut progress = live.progress.clone();
+        let _ = tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await;
+        Ok(handle.describe())
+    }
+}
 
 /// What a live session's stream last reported, kept after the run ends until
 /// the record is read again, since the record then holds the same.
