@@ -338,7 +338,6 @@ async fn answer(
         Method::WorkspaceList => to_json(handlers::workspace_list(core, parse(params)?).await),
         Method::WorkspaceCreate => to_json(handlers::workspace_create(core, parse(params)?).await),
         Method::WorkspaceRemove => to_json(handlers::workspace_remove(core, parse(params)?).await),
-        Method::BranchList => to_json(handlers::branch_list(core, parse(params)?).await),
         Method::WorkspaceChanges => {
             to_json(handlers::workspace_changes(core, parse(params)?).await)
         }
@@ -445,7 +444,6 @@ fn runs_apart(method: Method) -> bool {
         | Method::ProjectAdd
         | Method::ProjectFind
         // Run git.
-        | Method::BranchList
         | Method::WorkspaceCreate
         | Method::WorkspaceRemove
         | Method::WorkspaceChanges
@@ -556,7 +554,7 @@ fn to_json<T: Serialize>(result: Result<T, ApiError>) -> Result<Value, ApiError>
 mod tests {
     use super::*;
 
-    /// The seven methods PROTO-CORE-API-R92 names run apart, and no method
+    /// The methods PROTO-CORE-API-R92 names run apart, and no method
     /// that runs apart is one only the connection itself can answer.
     // verifies: PROTO-CORE-API-R92
     #[test]
@@ -564,7 +562,6 @@ mod tests {
         for method in [
             Method::ProjectAdd,
             Method::ProjectFind,
-            Method::BranchList,
             Method::WorkspaceCreate,
             Method::WorkspaceRemove,
             Method::BackendList,
