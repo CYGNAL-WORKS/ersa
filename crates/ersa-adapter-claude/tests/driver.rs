@@ -177,7 +177,8 @@ fn model_and_effort_are_passed_only_when_named() {
 
 /// The efforts and permission modes `backend.list` offers for Claude Code:
 /// the brief's effort levels with none marked, as the CLI marks none, and
-/// its permission modes, never `bypassPermissions`.
+/// its permission modes, never `bypassPermissions`, each by its name.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R75
 #[test]
 fn the_choices_are_the_briefs_efforts_and_permission_modes() {
     let choices = adapter().choices();
@@ -196,6 +197,22 @@ fn the_choices_are_the_briefs_efforts_and_permission_modes() {
     for list in [&choices.efforts, &choices.permission_modes] {
         assert!(list.iter().all(|c| !c.label.is_empty()), "{list:?}");
     }
+    // Each permission mode reads by its name, as Claude Desktop's chip does:
+    // "Ask" for the mode that asks before acting.
+    let labels: Vec<(&str, &str)> = choices
+        .permission_modes
+        .iter()
+        .map(|c| (c.id.as_str(), c.label.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("default", "Ask"),
+            ("acceptEdits", "Accept edits"),
+            ("plan", "Plan"),
+            ("auto", "Auto"),
+        ]
+    );
     // The session's permission mode when none is named is the one that asks
     // before every action outside the allow rules (FLOW-NEW-SESSION-R02).
     assert_eq!(
