@@ -112,16 +112,20 @@ describe("a session's tile", () => {
     expect(draw({ state: "error" })).toContain('<span class="session-detail"><span class="session-phrase">Error</span></span>');
   });
 
-  it("keeps line two when it has nothing to show, and shows no ring until one is reported", () => {
+  it("keeps line two when it has nothing to show, and always shows the ring, saying so until context is reported", () => {
     const html = draw({ state: "idle" });
     expect(html).toContain('<span class="session-detail"></span>');
-    expect(html).not.toContain("context-ring");
+    expect(html).toContain('<span class="session-ring"><span class="context-ring" data-size="ring-sm" role="img" aria-label="Context isn&#x27;t reported yet"');
+    // A window of nothing is no reading either.
+    expect(draw({ context_tokens: 10, context_window: 0 })).toContain('aria-label="Context isn&#x27;t reported yet"');
     expect(draw({ context_tokens: 10, context_window: 100 })).toContain('aria-label="Context: 10 percent used"');
   });
 
-  it("turns the ring caution from 85 percent used", () => {
-    expect(draw({ context_tokens: 85, context_window: 100 })).toContain('data-size="ring-sm" data-near-full="true"');
-    expect(draw({ context_tokens: 84, context_window: 100 })).not.toContain("data-near-full");
+  it("turns the ring caution past half and danger past four fifths", () => {
+    expect(draw({ context_tokens: 50, context_window: 100 })).not.toContain("data-band");
+    expect(draw({ context_tokens: 51, context_window: 100 })).toContain('data-size="ring-sm" data-band="caution"');
+    expect(draw({ context_tokens: 80, context_window: 100 })).toContain('data-size="ring-sm" data-band="caution"');
+    expect(draw({ context_tokens: 81, context_window: 100 })).toContain('data-size="ring-sm" data-band="danger"');
   });
 
   it("draws each mark in the tone the mapping gives", () => {
