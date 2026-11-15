@@ -13,6 +13,7 @@ import { isChangeable } from "../session/change";
 import { Chip, type ChipOption } from "./Chip";
 import { Icon } from "./Icon";
 import { ContextRing } from "./ContextRing";
+import type { UsageWindow } from "../session/limits";
 import "./SessionControls.css";
 
 export type Host = CoreHelloResult["host"];
@@ -60,6 +61,11 @@ interface SessionControlsProps {
   onOpen?: () => void;
   /** The context ring's share used; absent while none is reported. */
   used?: number;
+  /**
+   * The usage windows the session's backend last reported, which the ring reads with the context (LAY-SHELL,
+   * Context); none on the new-session screen and before a session's first report.
+   */
+  windows?: readonly UsageWindow[];
   /** For the gallery: one chip shown open, or in a pointer or keyboard state. */
   open?: ControlKey;
   force?: { key: ControlKey; state: "hover" | "focus" | "pressed" };
@@ -157,7 +163,7 @@ function WorktreeCheckbox({ checked, onChange, disabled, force }: { checked: boo
  * the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, windows, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey): ChipHandlers => ({
@@ -249,7 +255,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
             )}
           </>
         )}
-        <ContextRing used={used} beforeSession={!readOnly} />
+        <ContextRing used={used} windows={windows ?? []} beforeSession={!readOnly} />
       </div>
     </div>
   );
