@@ -7,7 +7,7 @@ import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { t } from "../catalog";
 import type { ToolInput } from "../protocol/agent-events.gen";
 import { type DiffLine, type FileDiff, diffCounts, fileDiffs } from "../session/diff";
-import { type ShownTarget, type ToolState, shownTarget, toolDetail, toolState } from "../session/toolCard";
+import { type ShownTarget, type ToolState, relativePath, shownTarget, toolDetail, toolState } from "../session/toolCard";
 import type { Item } from "../session/transcript";
 import { Icon } from "./Icon";
 import { Revealed } from "./Revealed";
@@ -145,7 +145,7 @@ export function ToolCard({
   const unfinished = !diffs && !item.result && item.live && !item.stopped && item.progress === undefined;
   const now = useNow(unfinished, context.now);
   const counts = diffs ? diffCounts(diffs) : undefined;
-  const target = diffs ? diffTarget(diffs, context.workspace) : item.target === undefined ? undefined : shownTarget(item.target, context.workspace);
+  const target = diffs ? diffTarget(diffs, context.workspace) : item.target === undefined ? undefined : shownTarget(item.target, item.targetKind, context.workspace);
   const calls = context.calls.get(item.key) ?? [];
   // Heard: the tool, its target, its state, and a diff card's counts; whether it is open is the button's own (R12).
   const row = String(
@@ -251,7 +251,7 @@ function Detail({ item, state, counts, now }: { item: Tool; state: ToolState; co
 function diffTarget(diffs: readonly FileDiff[], workspace: string | undefined): ShownTarget | undefined {
   const first = diffs[0];
   if (!first) return undefined;
-  const path = shownTarget(first.path, workspace).text;
+  const path = relativePath(first.path, workspace);
   const more = diffs.length - 1;
   return { text: more > 0 ? String(t("transcript.diff.filesLabel", { path, count: more })) : path, path: true };
 }
@@ -272,7 +272,7 @@ function DiffChange({ diffs, item, workspace }: { diffs: readonly FileDiff[]; it
         <section key={file.path} className="diff-file">
           {diffs.length > 1 && (
             <span className="diff-path mono">
-              <Revealed text={shownTarget(file.path, workspace).text} />
+              <Revealed text={relativePath(file.path, workspace)} />
             </span>
           )}
           <div className="diff-change">
