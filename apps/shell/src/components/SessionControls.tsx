@@ -11,6 +11,7 @@ import {
   showsBackend,
   workspaceKinds,
 } from "../session/controls";
+import { isChangeable } from "../session/change";
 import { Chip, type ChipOption, type ChipSection } from "./Chip";
 import { ContextRing } from "./ContextRing";
 import "./SessionControls.css";
@@ -23,11 +24,16 @@ export type ControlKey = "host" | "project" | "workspace" | "base" | "backend" |
 /** What every chip takes from the session controls. */
 interface ChipHandlers {
   onChoose: (id: string) => void;
+  onOpen?: () => void;
   disabled?: boolean;
   readOnly?: boolean;
+  keepsChevron?: boolean;
+  waiting?: boolean;
   initialOpen: boolean;
   force?: "hover" | "focus" | "pressed";
 }
+
+
 
 interface SessionControlsProps {
   hosts: readonly Host[];
@@ -37,6 +43,8 @@ interface SessionControlsProps {
   projects: readonly Project[];
   /** The backends on the values' host, from `backend.list`; absent while Core is still detecting them. */
   backends?: readonly BackendInfo[];
+  /** Why the host could not list its backends: the backend chip says detection failed (FLOW-NEW-SESSION-R11). */
+  detectionFailed?: boolean;
   values: SessionValues;
   /** The project's branches, for a new workspace's base branch (FLOW-NEW-SESSION-R21); absent for a project without git. */
   branches?: Branches;
@@ -47,8 +55,14 @@ interface SessionControlsProps {
   onAddProject?: () => void;
   /** While the first message is on its way, nothing changes. */
   disabled?: boolean;
-  /** Under a running session: its values, as pills that do not open (docs/design/COMPOSER.md, The session controls). */
+  /** Under a session: its values, as pills that do not open (docs/design/COMPOSER.md, The session controls). */
   readOnly?: boolean;
+  /** Under a session that is running: its model, effort and permission mode chips open (FLOW-NEW-SESSION-R30). */
+  changeable?: boolean;
+  /** The chips whose change is on its way to Core: each reads its old value and does not open. */
+  waiting?: readonly ControlKey[];
+  /** A chip's list opened. */
+  onOpen?: () => void;
   /** The context ring's share used; absent before the session has used any. */
   used?: number;
   /** For the gallery: one chip shown open, or in a pointer or keyboard state. */
@@ -87,7 +101,10 @@ function baseSection(branches: Branches, base: string | undefined, onChoose: (id
         ? t("sessionControls.workspace.readingBranchesProgress")
         : branches.state === "failed"
           ? t("sessionControls.workspace.branchesFailedError")
-          : t("sessionControls.workspace.noBranchMatchesEmpty"),
+          : // A repository with no commits lists no branch at all: nothing was searched.
+            listed.length === 0
+            ? t("sessionControls.workspace.noBranchesEmpty")
+            : t("sessionControls.workspace.noBranchMatchesEmpty"),
   };
 }
 
@@ -144,13 +161,17 @@ function EffortChip({ backend, values, readOnly, chip }: { backend: BackendInfo;
  * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, values, branches, workspaceLabel, onChoose, onAddProject, disabled, readOnly, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, branches, workspaceLabel, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey): ChipHandlers => ({
     onChoose: (id: string) => onChoose(key, id),
+    onOpen,
     disabled,
-    readOnly,
+    // Under a session, only a running one's model, effort and permission mode open; those keep the chevron's place.
+    readOnly: readOnly && !(changeable && isChangeable(key)),
+    keepsChevron: readOnly && isChangeable(key),
+    waiting: waiting?.includes(key),
     initialOpen: open === key,
     force: force?.key === key ? force.state : undefined,
   });
@@ -216,14 +237,15 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
       </div>
       <div className="session-controls-how">
         {backends === undefined ? (
-          <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />
+          <Chip name="Backend" placeholder={t("sessionControls.detectingBackendsProgress")} pending options={[]} onChoose={() => {}} disabled />
         ) : (
           <>
             {showsBackend(backends) && (
               <Chip
                 name="Backend"
                 value={values.backend}
-                placeholder="No backend"
+                // A listing that failed is not a host without backends (FLOW-NEW-SESSION-R11).
+                placeholder={t(detectionFailed ? "sessionControls.detectionFailedStatus" : "sessionControls.noBackendStatus")}
                 problem={available(backends).length === 0}
                 options={backends.map(backendOption)}
                 {...chip("backend")}

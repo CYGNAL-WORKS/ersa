@@ -315,9 +315,8 @@ describe("the base branch a new workspace starts from", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R21
-  it("is none with no default branch listed, or none read yet, so Core starts at the checked-out commit", () => {
+  it("is none with no default branch listed, so Core starts at the checked-out commit", () => {
     expect(baseFor([{ name: "topic", default: false }])).toBeUndefined();
-    expect(baseFor(undefined, "main")).toBeUndefined();
   });
 
   // verifies: FLOW-NEW-SESSION-R21

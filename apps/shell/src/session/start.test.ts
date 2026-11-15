@@ -320,9 +320,12 @@ describe("opening the new-session screen", () => {
     expect(choices).toEqual({ backends: [], lastUsed: { p1: values("root") } });
   });
 
-  it("offers no backend when they could not be read, and starts at the defaults without remembered values", async () => {
-    const { client } = fakeClient({});
-    expect(await readChoices(client, "local", client.call("settings.get"))).toEqual({ backends: [], lastUsed: {} });
+  // verifies: FLOW-NEW-SESSION-R11
+  it("keeps why the backends could not be read, and starts at the defaults without remembered values", async () => {
+    const { client } = fakeClient({ "backend.list": () => {
+      throw refusal("backend.list: the host did not answer", "unavailable");
+    } });
+    expect(await readChoices(client, "local", client.call("settings.get"))).toEqual({ backends: [], failed: "the host did not answer", lastUsed: {} });
   });
 });
 
