@@ -33,6 +33,8 @@ interface NewSessionScreenProps {
   projects: readonly Project[];
   /** Each host's backends from `backend.list`, by host id; a host absent here is still being detected. */
   backends: Readonly<Record<string, readonly BackendInfo[]>>;
+  /** Why a host's backends could not be listed, by host id: the screen says detection failed (FLOW-NEW-SESSION-R11). */
+  backendFailures?: Readonly<Record<string, string>>;
   /** The values the user last started a session with, by project id. */
   lastUsed?: Readonly<Record<string, SessionValues>>;
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
@@ -86,7 +88,7 @@ interface NewSessionScreenProps {
  * (FLOW-NEW-SESSION-R17 to R20, R27); with no project, the chip and sending both open the dialog.
  */
 export function NewSessionScreen(props: NewSessionScreenProps) {
-  const { hosts, localHostId, backends, lastUsed = {}, onStart, starting, onChooseFolder, onAddProject, adding } = props;
+  const { hosts, localHostId, backends, backendFailures = {}, lastUsed = {}, onStart, starting, onChooseFolder, onAddProject, adding } = props;
   // A project just added or found is chosen at once, before Core's list is read again with it (FLOW-NEW-SESSION-R27).
   const [added, setAdded] = useState<Project>();
   const projects = added && !props.projects.some((p) => p.id === added.id) ? [added, ...props.projects] : props.projects;
@@ -282,17 +284,21 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   // The box is unavailable while Ersa can't reach the sessions, while the host's backends are being detected
   // (FLOW-NEW-SESSION-R23), and while the host has no backend to run.
-  // With none to run, the line names a backend that failed detection, else says none is installed (R07).
+  // With none to run, the line says why the host could not list them (R11), else names a backend that failed
+  // detection, else says none is installed (R07).
   const failed = hostBackends?.find((b) => b.status === "error");
+  const listingFailed = backendFailures[hostId];
   const unavailable: Unavailable | undefined =
     props.away ??
     (hostBackends === undefined
       ? "detecting"
       : available(hostBackends).length > 0
         ? undefined
-        : failed
-          ? { failedBackend: failed.label }
-          : "no-backend");
+        : listingFailed !== undefined
+          ? { detectionFailed: listingFailed }
+          : failed
+            ? { failedBackend: failed.label }
+            : "no-backend");
 
   return (
     <section ref={screen} className="new-session" aria-label="New session">
@@ -351,6 +357,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           localHostId={localHostId}
           projects={projects}
           backends={hostBackends}
+          detectionFailed={listingFailed !== undefined}
           values={values}
           branches={branches}
           onChoose={onChoose}
