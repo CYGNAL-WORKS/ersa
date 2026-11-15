@@ -10,8 +10,6 @@ import "./DeleteQuestion.css";
 interface DeleteQuestionProps {
   /** The session's title as its tile shows it. */
   title: string;
-  /** The backend's own name, such as Claude Code: the conversation goes from its tools too. */
-  backend: string;
   phase: Exclude<DeletePhase, { kind: "deleted" }>;
   /** The user confirmed the question. */
   onConfirm: () => void;
@@ -28,7 +26,7 @@ interface DeleteQuestionProps {
  * session, says its conversation goes for good, and says what goes with it or that its files stay. Focus starts on
  * Cancel and stays within it; while the deletion runs, both buttons and Escape wait for it to end.
  */
-export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, onCancel, inline = false }: DeleteQuestionProps) {
+export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, inline = false }: DeleteQuestionProps) {
   const id = useId();
   const root = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -119,7 +117,7 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
       <div className="delete-question-body">
         <div className="delete-question-detail" id={`${id}-detail`}>
           {phase.kind === "asking" && phase.changed && <p>{t("rail.delete.changedDetail")}</p>}
-          <p>{t("rail.delete.conversationDetail", { backend })}</p>
+          <p>{t("rail.delete.conversationDetail")}</p>
           {goes && <Goes goes={goes} />}
           {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
         </div>
