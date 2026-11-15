@@ -372,14 +372,98 @@ fn rate_limit_event_projects_to_a_rate_limit_update() {
             _ => None,
         })
         .collect();
+    assert_eq!(rate_limits.len(), 1);
+    assert_eq!(rate_limits[0].status, "allowed");
     assert_eq!(
-        rate_limits,
-        [&RateLimit {
-            status: "allowed".into(),
-            resets_at: Some("2026-11-04T20:00:00Z".into()),
-            detail: Some("seven_day".into()),
-        }]
+        rate_limits[0].resets_at.as_deref(),
+        Some("2026-11-04T20:00:00Z")
     );
+    assert_eq!(rate_limits[0].detail.as_deref(), Some("seven_day"));
+}
+
+/// The usage windows of every `usage.updated` a log projects to.
+fn windows_reported(log: &[ersa_adapter::RawLine]) -> Vec<Option<Vec<UsageWindow>>> {
+    events(log)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::UsageUpdated(u) => u.rate_limit.map(|r| r.windows),
+            _ => None,
+        })
+        .collect()
+}
+
+fn window(id: &str, label: &str, used: f64, resets_at: Option<&str>) -> UsageWindow {
+    UsageWindow {
+        id: id.into(),
+        label: label.into(),
+        used,
+        resets_at: resets_at.map(Into::into),
+    }
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R76
+#[test]
+fn a_recorded_rate_limit_event_reports_both_its_windows_in_order() {
+    let reported = windows_reported(&fixture("11-stream-permission-prompt-tool-stdio").raw_log());
+    // The share is `utilization` as the line gives it, from 0 to 1, never a
+    // percent; Claude Desktop's names label the keys the adapter knows.
+    assert_eq!(
+        reported,
+        [Some(vec![
+            window(
+                "seven_day",
+                "Weekly · all models",
+                0.04,
+                Some("2026-11-04T20:00:00Z")
+            ),
+            window(
+                "seven_day_overage_included",
+                "Weekly · overage",
+                0.06,
+                Some("2026-11-04T20:00:00Z")
+            ),
+        ])]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R76
+#[test]
+fn windows_keep_the_lines_order_and_an_unknown_key_is_its_own_label() {
+    // Out of alphabetical order on purpose, so a projection that sorts the
+    // keys fails; `opus_week` is a key the adapter has no name for. A window
+    // may carry a `status` and may lack `resetsAt`.
+    let line = r#"{"type":"rate_limit_event","session_id":"s","uuid":"u","rate_limit_info":{"status":"allowed_warning","resetsAt":1793822400,"rateLimitType":"five_hour","unifiedWindows":{"seven_day":{"utilization":0.5,"resetsAt":1793822400,"status":"allowed"},"five_hour":{"utilization":1.2,"resetsAt":1793804400},"opus_week":{"utilization":0.25}}}}"#;
+    assert_eq!(
+        windows_reported(&log(&[(Backend, line)])),
+        [Some(vec![
+            window(
+                "seven_day",
+                "Weekly · all models",
+                0.5,
+                Some("2026-11-04T20:00:00Z")
+            ),
+            window(
+                "five_hour",
+                "5-hour limit",
+                1.2,
+                Some("2026-11-04T15:00:00Z")
+            ),
+            window("opus_week", "opus_week", 0.25, None),
+        ])]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R76
+#[test]
+fn a_line_without_unified_windows_reports_no_windows() {
+    let line = r#"{"type":"rate_limit_event","session_id":"s","uuid":"u","rate_limit_info":{"status":"allowed","resetsAt":1793822400,"rateLimitType":"seven_day"}}"#;
+    assert_eq!(windows_reported(&log(&[(Backend, line)])), [None]);
+    // An empty object is a report of no windows, which replaces the last list.
+    let empty = line.replace(
+        r#""rateLimitType":"seven_day""#,
+        r#""rateLimitType":"seven_day","unifiedWindows":{}"#,
+    );
+    assert_eq!(windows_reported(&log(&[(Backend, &empty)])), [Some(vec![])]);
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R05

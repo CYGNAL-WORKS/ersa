@@ -197,6 +197,20 @@ fn examples() -> Vec<Event> {
                 status: "allowed_warning".into(),
                 resets_at: Some("2026-10-31T18:00:00Z".into()),
                 detail: Some("80% of the five-hour limit used".into()),
+                windows: Some(vec![
+                    UsageWindow {
+                        id: "five_hour".into(),
+                        label: "5-hour limit".into(),
+                        used: 0.8,
+                        resets_at: Some("2026-10-31T18:00:00Z".into()),
+                    },
+                    UsageWindow {
+                        id: "seven_day".into(),
+                        label: "Weekly · all models".into(),
+                        used: 0.31,
+                        resets_at: None,
+                    },
+                ]),
             }),
         }),
         Event::Error(ErrorEvent {
@@ -462,6 +476,7 @@ fn an_extra_field_in_a_nested_protocol_object_fails() {
         ("question.answered", "/event/answers/0"),
         ("question.asked", "/event/questions/0/options/0"),
         ("usage.updated", "/event/rate_limit"),
+        ("usage.updated", "/event/rate_limit/windows/0"),
         ("session.started", ""),
     ];
     for (type_name, pointer) in cases {
@@ -561,6 +576,43 @@ fn a_target_says_what_kind_it_is_and_only_a_target_has_a_kind() {
     assert!(
         validate_event(&unknown).is_err(),
         "accepted an unknown kind"
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R76
+#[test]
+fn a_usage_window_needs_its_id_label_and_share() {
+    let wire = serde_json::to_value(example("usage.updated")).expect("serialize");
+    let windows = &wire["rate_limit"]["windows"];
+    assert_eq!(windows[0]["id"], "five_hour");
+    assert_eq!(windows[0]["label"], "5-hour limit");
+    assert_eq!(windows[0]["used"], 0.8);
+    assert_eq!(windows[0]["resets_at"], "2026-10-31T18:00:00Z");
+    // A window without a reset time is still a window.
+    assert!(windows[1].get("resets_at").is_none());
+    validate_event(&wire).unwrap_or_else(|e| panic!("{e}"));
+
+    for field in ["id", "label", "used"] {
+        let mut missing = wire.clone();
+        missing["rate_limit"]["windows"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(
+            validate_event(&missing).is_err(),
+            "accepted a window without {field}"
+        );
+    }
+
+    // A share is a number of at least 0; above 1 is a backend's to report.
+    let mut over = wire.clone();
+    over["rate_limit"]["windows"][0]["used"] = json!(1.2);
+    validate_event(&over).unwrap_or_else(|e| panic!("{e}"));
+    let mut negative = wire;
+    negative["rate_limit"]["windows"][0]["used"] = json!(-0.1);
+    assert!(
+        validate_event(&negative).is_err(),
+        "accepted a negative share"
     );
 }
 

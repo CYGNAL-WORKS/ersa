@@ -33,7 +33,7 @@ export interface Envelope {
   /**
    * Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.
    */
-  v: 7;
+  v: 8;
   session_id: string;
   /**
    * Gap-free and increasing within a session; assigned by Core.
@@ -306,6 +306,21 @@ export interface UsageUpdated {
     status: string;
     resets_at?: string;
     detail?: string;
+    /**
+     * The usage windows the backend counts the login against, in the backend's order. A report's list replaces the last one.
+     */
+    windows?: {
+      id: string;
+      /**
+       * A name to show for the window, which the adapter gives where the backend gives none.
+       */
+      label: string;
+      /**
+       * The share of the window used, from 0 to 1; a backend may report above 1.
+       */
+      used: number;
+      resets_at?: string;
+    }[];
   };
 }
 export interface Error {
