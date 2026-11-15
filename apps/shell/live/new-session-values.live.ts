@@ -63,14 +63,42 @@ test("a session runs with, and shows, the model, effort and permission mode chos
   expect(cli).toMatch(/--model opus\b/);
   expect(cli).toMatch(/--effort low\b/);
 
-  // After the first turn: the CLI has reported the model it resolved `opus` to, which Core lists as `opus`, and the
-  // chips still read as chosen.
+  // After the first turn: the CLI has reported the model it resolved `opus` to, which `session.list` gives as reported
+  // beside Core's request (PROTO-CORE-API-R102), and the chips still read as chosen (FLOW-NEW-SESSION-R33).
   await expect(page.getByRole("form", { name: "Composer" }).getByRole("button", { name: "Send", exact: true })).toBeVisible({ timeout: 120_000 });
   const listed = await page.evaluate(async () => {
-    const all = (await (window as any).__TAURI_INTERNALS__.invoke("core_request", { method: "session.list", params: null })) as { model?: string; effort?: string; permission_mode: string }[];
-    return all.map(({ model, effort, permission_mode }) => ({ model, effort, permission_mode }));
+    const all = (await (window as any).__TAURI_INTERNALS__.invoke("core_request", { method: "session.list", params: null })) as { model?: string; model_request?: string; effort?: string; permission_mode: string }[];
+    return all.map(({ model, model_request, effort, permission_mode }) => ({ model, model_request, effort, permission_mode }));
   });
-  expect(listed).toEqual([{ model: "opus", effort: "low", permission_mode: "plan" }]);
+  expect(listed).toEqual([{ model: expect.stringMatching(/^claude-opus-/), model_request: "opus", effort: "low", permission_mode: "plan" }]);
   expect(await reads(page, chips)).toEqual(chosen);
   await ersa.shot("after-first-turn");
+});
+
+test("a session left at Default keeps reading Default once Claude Code reports the model it chose", async ({ ersa }) => {
+  test.setTimeout(300_000);
+  const { page } = ersa;
+  const folder = path.join(ersa.dir, "default-check");
+  mkdirSync(folder);
+  await page.getByRole("button", { name: "Project: Choose a folder" }).click();
+  const answered = ersa.answerDialog(folder);
+  await page.getByRole("option", { name: /Add project…/ }).click();
+  await answered;
+  await page.getByRole("button", { name: "Trust", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Project: default-check" })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", "Model: Default (recommended)");
+
+  const words = page.getByRole("textbox", { name: "Message" });
+  await words.fill("Reply with the single word: ready. Do not use any tools.");
+  await words.press("Enter");
+  await expect(page.getByRole("form", { name: "Composer" }).getByRole("button", { name: "Send", exact: true })).toBeVisible({ timeout: 120_000 });
+  // The CLI reports the id Default resolved to, which may be listed under a choice of its own; the request is Default.
+  const [listed] = await page.evaluate(async () =>
+    ((await (window as any).__TAURI_INTERNALS__.invoke("core_request", { method: "session.list", params: null })) as { model?: string; model_request?: string }[]).map(
+      ({ model, model_request }) => ({ model, model_request }),
+    ),
+  );
+  expect(listed?.model).toMatch(/^claude-/);
+  expect(listed?.model_request).toBe("default");
+  await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", "Model: Default (recommended)");
 });

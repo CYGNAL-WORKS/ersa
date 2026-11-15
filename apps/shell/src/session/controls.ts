@@ -240,30 +240,32 @@ function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
 }
 
 /**
- * The choice that names a model a session reports: the one listed under that id, else one whose alias resolves to it
- * (PROTO-CORE-API, `backend.list`'s `resolved`). Core lists a model reported by what the session's own request
- * resolves to as that request, so this names only a model the session changed to since, as in the backend's own
- * tools, or one Core could not match. Where several resolve to it, one the backend does not mark as its default comes
- * first: a session that changed its model chose a model, not whatever the backend picks.
+ * The choice that names a session's model (FLOW-NEW-SESSION-R33). While the backend has reported no model, or reports
+ * the id the requested choice resolves to, the requested choice names it (the backend's default with no request): an
+ * alias and Default can resolve to the same id, and the request says which the user chose. Otherwise the report names
+ * it: the choice with that id, else one not marked default that resolves to it, else the id itself.
  */
-function modelChoiceFor(models: readonly ModelChoice[], id: string): string {
-  const resolving = models.filter((m) => m.resolved === id);
-  return (models.find((m) => m.id === id) ?? resolving.find((m) => !m.default) ?? resolving[0])?.id ?? id;
+function modelChoiceFor(models: readonly ModelChoice[], session: Pick<Session, "model" | "model_request">): string | undefined {
+  const requested = models.find((m) => m.id === (session.model_request ?? defaultOf(models)));
+  if (session.model === undefined) return session.model_request ?? requested?.id;
+  if (requested !== undefined && requested.resolved === session.model) return requested.id;
+  const reported = session.model;
+  return (models.find((m) => m.id === reported) ?? models.find((m) => !m.default && m.resolved === reported))?.id ?? reported;
 }
 
 /**
  * The values a running session shows (FLOW-NEW-SESSION-R12): what `session.list` reports, never what the host offers
  * now, each under the choice that names it. A model or effort the session was not given is the backend's own, shown
  * as the choice the backend marks as its default when the host lists it. A value the host no longer lists shows under
- * its id, and a model it no longer lists takes every effort, as `effortsFor` says of a model it does not list.
+ * its id, and a model it no longer lists takes every effort, as Core accepts any for it (PROTO-CORE-API-R101).
  */
 export function sessionShown(
-  session: Pick<Session, "host_id" | "backend" | "model" | "effort" | "permission_mode">,
+  session: Pick<Session, "host_id" | "backend" | "model" | "model_request" | "effort" | "permission_mode">,
   workspace: Pick<Workspace, "project_id" | "kind" | "vcs_ref">,
   hostBackends: readonly BackendInfo[],
 ): SessionShown {
   const listed = hostBackends.find((b) => b.name === session.backend);
-  const model = session.model === undefined ? listed && defaultOf(listed.models) : modelChoiceFor(listed?.models ?? [], session.model);
+  const model = modelChoiceFor(listed?.models ?? [], session);
   const effort = session.effort ?? listed?.efforts.find((c) => c.default)?.id;
   const backend: BackendInfo = {
     ...(listed ?? { name: session.backend, label: session.backend, status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] }),

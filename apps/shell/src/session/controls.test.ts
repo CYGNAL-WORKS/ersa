@@ -160,23 +160,39 @@ describe("the session controls under a running session", () => {
     ],
   };
 
-  // verifies: FLOW-NEW-SESSION-R12
-  it("name a model the session reports by the id its alias resolves to under the alias's own choice", () => {
-    // Claude Code reports `claude-opus-5-5` once a turn has run with `--model opus` (#397).
-    const shown = sessionShown({ ...running, model: "claude-opus-5-5" }, branch, [claude]);
-    expect(shown.values.model).toBe("opus");
-    expect(shown.backend.models.map((m) => m.id)).toEqual(["default", "opus", "claude-fable-5-2", "haiku"]);
-    expect(effortsFor(shown.backend, shown.values.model).map((e) => e.id)).toEqual(["low", "high"]);
-    // A model listed by its own id is that choice, never another that resolves to it too, Default included.
-    expect(sessionShown({ ...running, model: "claude-fable-5-2" }, branch, [claude]).values.model).toBe("claude-fable-5-2");
-    // Only Default resolves to it: Default names it.
+  // verifies: FLOW-NEW-SESSION-R33
+  it("name the model by the choice requested while the backend reports what it resolves to, Default and an alias alike", () => {
+    // Default and `opus` both resolve to `claude-opus-5-5`, as Claude Code's own list can have them.
+    const both: BackendInfo = { ...claude, models: claude.models.map((m) => (m.id === "default" ? { ...m, resolved: "claude-opus-5-5" } : m)) };
+    const named = (model: string | undefined, model_request: string | undefined, host = both) =>
+      sessionShown({ ...running, model, model_request }, branch, [host]).values.model;
+    // Claude Code reports `claude-opus-5-5` once a turn has run with `--model opus`, or with Default.
+    expect(named("claude-opus-5-5", "opus")).toBe("opus");
+    expect(named("claude-opus-5-5", "default")).toBe("default");
+    // Before the backend reports one: the request, else the backend's default.
+    expect(named(undefined, "opus")).toBe("opus");
+    expect(named(undefined, undefined)).toBe("default");
+    // A request the host no longer lists still names it, under its id.
+    expect(named(undefined, "retired")).toBe("retired");
+    // No request: the backend's default names what it resolves to.
+    expect(named("claude-opus-5-5", undefined)).toBe("default");
+    // The session's request with `opus` reported as itself, before the stream resolves it.
+    expect(named("opus", "opus")).toBe("opus");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R33
+  it("name a model the session changed to since its request by the report", () => {
+    const named = (model: string, model_request: string) => sessionShown({ ...running, model, model_request }, branch, [claude]).values.model;
+    // Listed under its own id: that choice, though Default resolves to it too.
+    expect(named("claude-fable-5-2", "opus")).toBe("claude-fable-5-2");
+    // Not listed by id: the choice not marked default that resolves to it.
+    expect(named("claude-haiku-5-5", "opus")).toBe("haiku");
+    // Only Default resolves to it: the id itself, since the session left the request and Default for a model.
     const onlyDefault = { ...claude, models: claude.models.filter((m) => m.id !== "claude-fable-5-2") };
-    expect(sessionShown({ ...running, model: "claude-fable-5-2" }, branch, [onlyDefault]).values.model).toBe("default");
-    // Default and an alias resolving to an id listed under neither: the alias names it, since the session chose a model.
-    const both = { ...claude, models: claude.models.map((m) => (m.id === "default" ? { ...m, resolved: "claude-opus-5-5" } : m)) };
-    expect(sessionShown({ ...running, model: "claude-opus-5-5" }, branch, [both]).values.model).toBe("opus");
-    // A model that takes no effort keeps taking none under its alias.
-    expect(effortsFor(claude, sessionShown({ ...running, model: "claude-haiku-5-5" }, branch, [claude]).values.model)).toEqual([]);
+    expect(sessionShown({ ...running, model: "claude-fable-5-2", model_request: "opus" }, branch, [onlyDefault]).values.model).toBe("claude-fable-5-2");
+    // A model that takes no effort keeps taking none under its alias; one under an alias takes the alias's.
+    expect(effortsFor(claude, named("claude-haiku-5-5", "opus"))).toEqual([]);
+    expect(effortsFor(claude, sessionShown({ ...running, model: "claude-opus-5-5", model_request: "opus" }, branch, [claude]).values.model).map((e) => e.id)).toEqual(["low", "high"]);
   });
 
   // verifies: FLOW-NEW-SESSION-R12
