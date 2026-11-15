@@ -31,8 +31,7 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
-/* A prefix, such as Effort, before the value; a where chip's icon leading it; the chevron of one that opens a list. */
-.chip-prefix,
+/* A where chip's icon leading it; the chevron of one that opens a list. */
 .chip-icon,
 .chip-chevron {
   display: inline-flex;
@@ -80,10 +79,6 @@
 .chip:disabled {
   color: var(--color-ink-faint);
   cursor: default;
-}
-
-.chip:disabled .chip-prefix {
-  color: var(--color-ink-faint);
 }
 
 /* Under a running session the chips show its values: the same pills, as at rest, that do not open. */

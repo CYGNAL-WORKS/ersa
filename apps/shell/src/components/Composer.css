@@ -159,7 +159,7 @@
   color: var(--color-ink-faint);
 }
 
-/* One line, or three on the new-session screen, growing with the words. */
+/* One line, on the new-session screen as in a session, growing with the words. */
 .composer-words {
   field-sizing: content;
   min-height: 1lh;
@@ -176,10 +176,6 @@
   background: none;
   border: none;
   outline: none;
-}
-
-.composer-words[data-tall] {
-  min-height: 3lh;
 }
 
 .composer-words::placeholder {
