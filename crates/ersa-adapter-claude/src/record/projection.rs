@@ -594,7 +594,7 @@ impl RecordProjector {
             // A message a turn took in part way has no prompt entry of its
             // own: this `remove` is the message, read as the live stream read
             // its echo and under the echo's id, so the transcript shows it
-            // where the turn took it in (PROTO-CLAUDE-CODE-STREAM-R69).
+            // where the turn took it in (PROTO-CLAUDE-CODE-STREAM-R77).
             // Every other queue operation carries no message.
             RecordEntry::QueueOperation(queued) => {
                 let Some((echo_id, content)) = queued.absorbed_mid_turn() else {

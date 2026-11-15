@@ -155,7 +155,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
         }
         // The kind each record entry has, by uuid; a message a turn took in
         // part way is a `queue-operation` under its echo's id, `commandUuid`
-        // (PROTO-CLAUDE-CODE-STREAM-R69).
+        // (PROTO-CLAUDE-CODE-STREAM-R77).
         let record_kinds: HashMap<String, String> = record
             .text
             .lines()
@@ -1497,7 +1497,7 @@ fn only_place_of(events: &[RecordEvent], id: &str) -> usize {
     at[0]
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R69
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
 #[test]
 fn a_message_taken_in_mid_turn_is_read_back_where_the_turn_took_it_in() {
     // Fixture 52: a message written while the first tool call ran. The record
@@ -1538,7 +1538,7 @@ fn a_message_taken_in_mid_turn_is_read_back_where_the_turn_took_it_in() {
     );
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R69
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
 #[test]
 fn other_queue_operations_are_not_messages() {
     let queued = |operation: &str, reason: Option<&str>| {
@@ -1566,7 +1566,7 @@ fn other_queue_operations_are_not_messages() {
     assert_eq!(texts(&events_of(&entries[..4])), ["user: Hello"]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R69
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
 #[test]
 fn a_message_taken_in_mid_turn_keeps_its_attachments_when_read_back() {
     // Fixture 54: the message has words, an image and a file. The `remove`
