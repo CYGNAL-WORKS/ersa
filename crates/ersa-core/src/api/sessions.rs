@@ -258,7 +258,9 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     // its `busy` is the answer that says why.
     core.sessions.refuse_fork_if_busy(&params.id)?;
     let original = core.sessions.row(&params.id)?;
-    let (original_workspace, project) = ready_workspace(core, &original.workspace_id).await?;
+    // Whether the workspace is ready is one of `prepare_fork`'s checks, which
+    // a resume of a fork with no record of its own shares (FLOW-RESUME-SESSION-R10).
+    let (original_workspace, project) = workspace_and_project(core, &original.workspace_id).await?;
     let Starting {
         transport,
         backend_version,
