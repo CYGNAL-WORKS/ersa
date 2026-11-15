@@ -149,6 +149,40 @@ describe("the session controls under a running session", () => {
     expect(changed.backend.models.map((c) => c.id)).toContain("retired");
   });
 
+  // The CLI's own list, as `backend.list` gives it: two aliases and a full id, Default resolving to the full id.
+  const claude: BackendInfo = {
+    ...backend("claude"),
+    models: [
+      { id: "default", label: "Default (recommended)", default: true, resolved: "claude-fable-5-2", efforts: ["low", "high"] },
+      { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5", efforts: ["low", "high"] },
+      { id: "claude-fable-5-2", label: "Fable 5.2", default: false, resolved: "claude-fable-5-2", efforts: ["low", "high"] },
+      { id: "haiku", label: "Haiku", default: false, resolved: "claude-haiku-5-5" },
+    ],
+  };
+
+  // verifies: FLOW-NEW-SESSION-R12
+  it("name a model the session reports by the id its alias resolves to under the alias's own choice", () => {
+    // Claude Code reports `claude-opus-5-5` once a turn has run with `--model opus` (#397).
+    const shown = sessionShown({ ...running, model: "claude-opus-5-5" }, branch, [claude]);
+    expect(shown.values.model).toBe("opus");
+    expect(shown.backend.models.map((m) => m.id)).toEqual(["default", "opus", "claude-fable-5-2", "haiku"]);
+    expect(effortsFor(shown.backend, shown.values.model).map((e) => e.id)).toEqual(["low", "high"]);
+    // A model listed by its own id is that choice, never another that resolves to it too, Default included.
+    expect(sessionShown({ ...running, model: "claude-fable-5-2" }, branch, [claude]).values.model).toBe("claude-fable-5-2");
+    // Only Default resolves to it: Default names it.
+    const onlyDefault = { ...claude, models: claude.models.filter((m) => m.id !== "claude-fable-5-2") };
+    expect(sessionShown({ ...running, model: "claude-fable-5-2" }, branch, [onlyDefault]).values.model).toBe("default");
+    // A model that takes no effort keeps taking none under its alias.
+    expect(effortsFor(claude, sessionShown({ ...running, model: "claude-haiku-5-5" }, branch, [claude]).values.model)).toEqual([]);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R12
+  it("offer every effort for a model the host no longer lists, so the session's effort still shows", () => {
+    const shown = sessionShown({ ...running, model: "retired", effort: "low" }, branch, [backend("claude")]);
+    expect(shown.values.effort).toBe("low");
+    expect(effortsFor(shown.backend, "retired").map((e) => e.id)).toEqual(["low", "high"]);
+  });
+
   it("show a value left to the backend as the backend's default, and the root workspace as the project folder", () => {
     const shown = sessionShown({ ...running, model: undefined }, { ...branch, kind: "root", vcs_ref: "" }, [backend("claude")]);
     expect(shown.values.model).toBe("claude-large");
@@ -240,7 +274,7 @@ describe("where the new-session screen starts", () => {
   it("starts afresh when New session is chosen for another project, even after the user chose", () => {
     const touched = { ...seedScreen(undefined, named("a"), undefined, {}), touched: true };
     const next = seedScreen(touched, named("c"), "c", { c: used("c") });
-    expect(next).toEqual({ shownFor: "c", seededWith: used("c"), touched: false, wanted: { ...used("c"), project_id: "c" } });
+    expect(next).toEqual({ shownFor: "c", seededWith: used("c"), touched: false, wanted: { ...used("c"), project_id: "c" }, picked: {} });
   });
 });
 

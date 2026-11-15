@@ -120,6 +120,65 @@ describe("adding a project from the project chip", () => {
   });
 });
 
+describe("what the user chose on the new-session screen when the project changes", () => {
+  const offering: BackendInfo = {
+    ...claude,
+    models: [
+      { id: "default", label: "Default (recommended)", default: true, efforts: ["low", "high"] },
+      { id: "opus", label: "Opus 5.5", default: false, efforts: ["low", "high"] },
+    ],
+    efforts: ["low", "high"].map((id) => ({ id, label: id, default: false })),
+    permission_modes: [
+      { id: "default", label: "Ask before acting", default: true },
+      { id: "plan", label: "Plan", default: false },
+    ],
+  };
+  const pick = (chip: string, option: RegExp) => {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${chip}:`) }));
+    fireEvent.click(screen.getByRole("option", { name: option }));
+  };
+  const label = (chip: string) => screen.getByRole("button", { name: new RegExp(`^${chip}:`) }).getAttribute("aria-label");
+
+  // verifies: FLOW-NEW-SESSION-R02
+  // verifies: FLOW-NEW-SESSION-R19
+  it("keeps the model, effort and permission mode chosen before the project was added, and starts with them", async () => {
+    const beyond = project("beyond");
+    const onStart = vi.fn(async () => true);
+    // The project last started at the defaults, as the first session of a new install leaves it.
+    const lastUsed = { beyond: { host_id: "local", project_id: "beyond", workspace: "isolated" as const, backend: "claude-code", model: "default", permission_mode: "default" } };
+    render(createElement(NewSessionScreen, props([], { backends: { local: [offering] }, lastUsed, onStart, onChooseFolder: async () => ({ kind: "found", project: beyond }) as const })));
+    pick("Model", /Opus 5.5/);
+    pick("Effort", /low/);
+    pick("Permission mode", /Plan/);
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Add project…/ }));
+    });
+    expect(chosen()).toBe("Project: beyond");
+    expect([label("Model"), label("Effort"), label("Permission mode")]).toEqual(["Model: Opus 5.5", "Effort: low", "Permission mode: Plan"]);
+
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Fix the build" } });
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    });
+    expect(onStart).toHaveBeenCalledWith("Fix the build", expect.objectContaining({ project_id: "beyond", model: "opus", effort: "low", permission_mode: "plan" }), []);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R02
+  it("keeps them when another project is chosen, and takes the rest from what that project last used", () => {
+    const lastUsed = { beta: { host_id: "local", project_id: "beta", workspace: "root" as const, backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" } };
+    render(createElement(NewSessionScreen, props([alpha, beta], { backends: { local: [offering] }, lastUsed })));
+    pick("Permission mode", /Plan/);
+    pick("Project", /beta/);
+    expect([label("Workspace"), label("Model"), label("Effort"), label("Permission mode")]).toEqual(["Workspace: Project folder", "Model: Opus 5.5", "Effort: high", "Permission mode: Plan"]);
+    // Default effort chosen on the screen is a choice too: it stays none over the project's last level.
+    pick("Effort", /Default/);
+    pick("Project", /alpha/);
+    pick("Project", /beta/);
+    expect([label("Effort"), label("Permission mode")]).toEqual(["Effort: Default", "Permission mode: Plan"]);
+  });
+});
+
 describe("the effort chip on the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R02
   it("goes back to no level when Default is chosen, and keeps a level only while the model takes it", () => {
