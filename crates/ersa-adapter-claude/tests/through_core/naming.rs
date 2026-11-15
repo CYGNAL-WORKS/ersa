@@ -46,7 +46,9 @@ fn announced(stdout: &[String], title: &str) -> String {
 }
 
 /// A stub check that the stdin line is a `kind` control request or message.
-fn is(kind: &'static str) -> impl Fn(&str) -> Result<(), String> + Send + Sync + 'static {
+pub(crate) fn is(
+    kind: &'static str,
+) -> impl Fn(&str) -> Result<(), String> + Send + Sync + 'static {
     move |line: &str| {
         let v = parse(line);
         let found = v["request"]["subtype"]
@@ -64,7 +66,7 @@ fn is(kind: &'static str) -> impl Fn(&str) -> Result<(), String> + Send + Sync +
 
 /// A Core whose only adapter is Claude Code's, starting its CLI on
 /// `transport`, with session records under `home`.
-async fn claude_core(transport: &FakeTransport, home: &Path) -> TestCore {
+pub(crate) async fn claude_core(transport: &FakeTransport, home: &Path) -> TestCore {
     let adapter = OnTransport {
         adapter: ClaudeAdapter::new()
             .with_claude_home(home.to_path_buf())
@@ -76,7 +78,7 @@ async fn claude_core(transport: &FakeTransport, home: &Path) -> TestCore {
 }
 
 /// Creates a Claude Code session; returns it as `session.create` did.
-async fn create(core: &TestCore, client: &mut Client) -> Value {
+pub(crate) async fn create(core: &TestCore, client: &mut Client) -> Value {
     let workspace_id = workspace(client, core.dir.path()).await;
     client
         .result(
@@ -96,7 +98,7 @@ fn chosen_id(transport: &FakeTransport) -> String {
     args[at + 1].clone()
 }
 
-async fn listed_title(client: &mut Client, id: &str) -> Value {
+pub(crate) async fn listed_title(client: &mut Client, id: &str) -> Value {
     let list = client.result("session.list", json!({})).await;
     list.as_array()
         .unwrap()
