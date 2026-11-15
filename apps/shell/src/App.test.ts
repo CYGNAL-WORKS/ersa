@@ -425,7 +425,7 @@ describe("the tree App draws in the rail", () => {
     expect(tile).not.toBeNull();
     holding = true;
     listed = [stranded, fresh];
-    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "fresh", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "fresh", tile: { state: "idle", pending: [] }, created_at: "2026-11-08T09:00:00Z" } } as CoreEvent);
     for (let turn = 0; turn < 20 && later.length < projects.length; turn++) await settle();
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
     expect(later).toHaveLength(projects.length);
@@ -457,7 +457,7 @@ describe("the tree App draws in the rail", () => {
     fireEvent.keyDown(words(), { key: "Enter" });
     await settle();
     await settle();
-    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s-new", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s-new", tile: { state: "idle", pending: [] }, created_at: "2026-11-03T09:00:00Z" } } as CoreEvent);
     await settle();
     await settle();
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
@@ -753,7 +753,7 @@ describe("arranging the rail", () => {
     const quiet = { ...session("s1", "alpha", "2026-11-01T09:00:00Z"), last_activity_at: "2026-11-01T12:00:00.000Z" };
     const core = await open({ "session.list": () => [quiet, session("s2", "alpha", "2026-11-01T10:00:00Z")], "settings.get": () => ({ rail: { sort_by: "last_activity" } }) });
     expect(tiles()).toEqual(["s1", "s2"]);
-    const tile = (more: object) => act(async () => core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s2", tile: { state: "running", pending: [] }, ...more } } as CoreEvent));
+    const tile = (more: object) => act(async () => core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s2", tile: { state: "running", pending: [] }, created_at: "2026-11-01T10:00:00Z", ...more } } as CoreEvent));
     await tile({});
     expect(tiles()).toEqual(["s1", "s2"]);
     await tile({ last_activity_at: "2026-11-01T13:00:00.000Z" });
@@ -777,7 +777,7 @@ describe("arranging the rail", () => {
       core.emit({
         kind: "notification",
         method: "session.tile",
-        params: { session_id: "s2", tile: { state: "idle", pending: [] }, last_activity_at: "2026-11-01T13:00:00.000Z", title: "Alpha" },
+        params: { session_id: "s2", tile: { state: "idle", pending: [] }, last_activity_at: "2026-11-01T13:00:00.000Z", title: "Alpha", created_at: "2026-11-01T10:00:00Z" },
       } as CoreEvent),
     );
     await settle();
@@ -1158,7 +1158,7 @@ describe("archiving a session from its tile, and an archived session read-only",
     const list = { current: titled() };
     const core = await open(list, more);
     list.current = titled({ s2: true });
-    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s9", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s9", tile: { state: "idle", pending: [] }, created_at: "2026-11-03T09:00:00Z" } } as CoreEvent);
     await settle();
     return { core, list };
   }

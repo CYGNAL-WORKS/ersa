@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
 import type { AnyNotification, Attachment, BridgeError, CoreClient, CoreEvent, Method } from "./client";
 import { type CoreView, connect } from "./connection";
+import { treeOf } from "../session/tree";
 
 const hello: CoreHelloResult = {
   core_version: "0.1.0",
@@ -109,10 +110,47 @@ describe("connect", () => {
       const view = seen.at(-1);
       return view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0]?.last_activity_at : "unread";
     };
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
     expect(activity()).toBe("2026-11-01T14:00:00.000Z");
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile } });
     expect(activity()).toBe("2026-11-01T14:00:00.000Z");
+  });
+
+  // verifies: PROTO-CORE-API-R105
+  // verifies: PROTO-CORE-API-R106
+  it("takes a session's date created from its tile, so it moves date group and place with no list read", async () => {
+    let reads = 0;
+    // Local times, so the date groups are the same in every time zone.
+    const at = (day: number, hour: number) => new Date(2026, 10, day, hour).toISOString();
+    const older: Session = { ...session, id: "s0", created_at: at(10, 12) };
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => (reads++, Promise.resolve([older, session])) });
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v));
+    await settle();
+    const now = new Date(2026, 10, 15, 12);
+    const rail = (groupBy: "date" | "none") => {
+      const view = seen.at(-1);
+      if (view?.phase !== "connected" || view.sessions.state !== "ready") return undefined;
+      const tree = treeOf([], {}, view.sessions.sessions, { groupBy, sortBy: "created", show: "all", now });
+      return groupBy === "date"
+        ? tree.groups.map((g) => [g.key, g.sessions.map((s) => s.id)])
+        : tree.loose.map((s) => s.id);
+    };
+    // Listed as made today, s1 is newest; corrected to a date before s0, it is older than s0 and in another group.
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, created_at: at(15, 9) } });
+    expect(rail("none")).toEqual(["s1", "s0"]);
+    expect(rail("date")).toEqual([
+      ["today", ["s1"]],
+      ["previous_7_days", ["s0"]],
+    ]);
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, created_at: at(1, 12) } });
+    expect(rail("none")).toEqual(["s0", "s1"]);
+    expect(rail("date")).toEqual([
+      ["previous_7_days", ["s0"]],
+      ["older", ["s1"]],
+    ]);
+    await settle();
+    expect(reads).toBe(1);
   });
 
   // verifies: PROTO-CORE-API-R84
@@ -127,11 +165,11 @@ describe("connect", () => {
       const view = seen.at(-1);
       return view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0]?.title : "unread";
     };
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z", title: "From the backend" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z", title: "From the backend" } });
     expect(title()).toBe("From the backend");
-    notify({ method: "session.tile", params: { session_id: "s1", tile: { state: "running", pending: [] }, title: "Renamed elsewhere" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: { state: "running", pending: [] }, title: "Renamed elsewhere" } });
     expect(title()).toBe("Renamed elsewhere");
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
     expect(title()).toBeUndefined();
     await settle();
     expect(reads).toBe(1);
@@ -154,8 +192,8 @@ describe("connect", () => {
     };
     // A read starts (a session made elsewhere, say), then the turn ends before it answers.
     connection.reload("sessions");
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
     await settle();
     expect(reads).toBe(2);
     answer([{ ...session, last_activity_at: "2026-11-01T14:00:00.000Z" }]);
@@ -171,7 +209,7 @@ describe("connect", () => {
     const seen: CoreView[] = [];
     const connection = connect(client, (v) => seen.push(v));
     await settle();
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
     connection.reload("sessions");
     await settle();
     const view = seen.at(-1);
@@ -191,14 +229,14 @@ describe("connect", () => {
     await settle();
 
     const waiting = { state: "waiting_user" as const, pending: [{ kind: "permission" as const, request_id: "r1" }] };
-    notify({ method: "session.tile", params: { session_id: "s1", tile: waiting } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: waiting } });
     const last = seen.at(-1);
     expect(last?.phase === "connected" && last.sessions).toEqual({
       state: "ready",
       sessions: [{ ...session, tile: waiting }],
     });
 
-    notify({ method: "session.tile", params: { session_id: "s2", tile: created.tile } });
+    notify({ method: "session.tile", params: { created_at: created.created_at, session_id: "s2", tile: created.tile } });
     await settle();
     const after = seen.at(-1);
     expect(after?.phase === "connected" && after.sessions.state === "ready" && after.sessions.sessions.map((s) => s.id)).toEqual([
@@ -228,7 +266,7 @@ describe("connect", () => {
     const { client, notify } = fakeClient({ ...answering, "session.list": () => new Promise((r) => answers.push(r)) });
     connect(client, () => {});
     await settle();
-    for (const id of ["s2", "s3", "s4"]) notify({ method: "session.tile", params: { session_id: id, tile: session.tile } });
+    for (const id of ["s2", "s3", "s4"]) notify({ method: "session.tile", params: { created_at: session.created_at, session_id: id, tile: session.tile } });
     expect(answers).toHaveLength(1);
     answers[0]?.([session]);
     await settle();
@@ -245,7 +283,7 @@ describe("connect", () => {
     await settle();
     connection.reload("sessions");
     const waiting = { state: "waiting_user" as const, pending: [{ kind: "permission" as const, request_id: "r1" }] };
-    notify({ method: "session.tile", params: { session_id: "s1", tile: waiting } });
+    notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: waiting } });
     // The read in flight was taken before the tile: it answers with the old one.
     answers[1]?.([session]);
     await settle();
