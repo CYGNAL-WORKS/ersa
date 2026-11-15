@@ -21,7 +21,7 @@ use ersa_protocol::events::{
     PermissionReason, PermissionRequested, PermissionSuggestion, Question, QuestionAnswered,
     QuestionAsked, RateLimit, SessionNotice, SessionStarted, SessionState, ToolRequested,
     ToolResult, ToolResultContent, TurnCompleted, TurnOutcome, TurnStarted, TurnTrigger,
-    UsageUpdated, UserMessage,
+    UsageUpdated, UsageWindow, UserMessage,
 };
 use serde_json::Value;
 
@@ -30,13 +30,14 @@ use crate::suggestions;
 use crate::tools;
 use crate::wire::{
     ApiMessage, AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
-    MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage, Usage,
+    MessageContent, RateLimitEvent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage,
+    Usage,
 };
 use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 11;
+pub const PROJECTOR_VERSION: u32 = 12;
 
 /// How long the CLI has to answer `generate_session_title`: a model writes
 /// the name, so longer than other control requests (PROTO-CLAUDE-CODE-STREAM-R49).
@@ -297,13 +298,20 @@ impl ClaudeProjector {
                 self.tool_results(line, user.message.content, user.is_replay, user.uuid, value)
             }
             CliMessage::StreamEvent(stream) => self.stream_event(line, stream, value),
-            CliMessage::RateLimitEvent(event) => vec![at(
-                line,
-                Event::UsageUpdated(UsageUpdated {
-                    rate_limit: Some(rate_limit(&event.rate_limit_info)),
-                    ..UsageUpdated::default()
-                }),
-            )],
+            CliMessage::RateLimitEvent(event) => {
+                // Read again from the line's text: `value` has sorted the
+                // keys of `unifiedWindows`, whose order the windows keep
+                // (PROTO-CLAUDE-CODE-STREAM-R76). The typed read above
+                // succeeded, so this one does too; the fallback is belt and braces.
+                let event = serde_json::from_str::<RateLimitEvent>(&line.line).unwrap_or(event);
+                vec![at(
+                    line,
+                    Event::UsageUpdated(UsageUpdated {
+                        rate_limit: Some(rate_limit(&event.rate_limit_info)),
+                        ..UsageUpdated::default()
+                    }),
+                )]
+            }
             CliMessage::ControlResponse(answer) => {
                 self.control_response(line, answer.response, value)
             }
@@ -1675,6 +1683,31 @@ fn rate_limit(info: &RateLimitInfo) -> RateLimit {
         resets_at: info.resets_at.map(rfc3339_from_unix),
         // Which limit this is, such as `seven_day`.
         detail: info.rate_limit_type.clone(),
+        // Every window, in the line's order (PROTO-CLAUDE-CODE-STREAM-R76).
+        windows: info.unified_windows.as_ref().map(|windows| {
+            windows
+                .0
+                .iter()
+                .map(|(key, window)| UsageWindow {
+                    id: key.clone(),
+                    label: window_label(key).to_string(),
+                    used: window.utilization,
+                    resets_at: window.resets_at.map(rfc3339_from_unix),
+                })
+                .collect()
+        }),
+    }
+}
+
+/// The name to show for a usage window. The CLI gives none, so the windows the
+/// adapter knows take the names Claude Desktop gives them in its plan usage
+/// limits; any other keeps its key, so a limit not met before still counts.
+fn window_label(key: &str) -> &str {
+    match key {
+        "seven_day" => "Weekly · all models",
+        "five_hour" => "5-hour limit",
+        "seven_day_overage_included" => "Weekly · overage",
+        other => other,
     }
 }
 

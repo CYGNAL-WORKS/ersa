@@ -397,20 +397,69 @@ pub struct RateLimitInfo {
     pub overage_status: Option<String>,
     #[serde(default)]
     pub is_using_overage: Option<bool>,
-    /// Utilisation per window, keyed by window name such as `seven_day`.
+    /// The usage windows the login is counted against, keyed by window name
+    /// such as `seven_day`, in the line's order.
     #[serde(default)]
-    pub unified_windows: Option<BTreeMap<String, RateLimitWindow>>,
+    pub unified_windows: Option<UnifiedWindows>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// `unifiedWindows`: a JSON object whose keys keep the order the line gives
+/// them (PROTO-CLAUDE-CODE-STREAM-R76). A `BTreeMap` would sort them, so this
+/// is a list of `(key, window)` pairs read and written as an object.
+///
+/// The order survives only when the line is read straight from its text:
+/// `serde_json::Value` (without the `preserve_order` feature) sorts its keys.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct UnifiedWindows(pub Vec<(String, RateLimitWindow)>);
+
+impl<'de> Deserialize<'de> for UnifiedWindows {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = UnifiedWindows;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("an object of usage windows")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<UnifiedWindows, A::Error> {
+                // Pushed one by one as the parser meets them: the line's order.
+                let mut windows = Vec::new();
+                while let Some(entry) = map.next_entry::<String, RateLimitWindow>()? {
+                    windows.push(entry);
+                }
+                Ok(UnifiedWindows(windows))
+            }
+        }
+        deserializer.deserialize_map(Visitor)
+    }
+}
+
+impl Serialize for UnifiedWindows {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (key, window) in &self.0 {
+            map.serialize_entry(key, window)?;
+        }
+        map.end()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitWindow {
-    /// Fraction of the window used, 0 to 1.
+    /// Fraction of the window used, 0 to 1; may exceed 1.
     pub utilization: f64,
+    /// Unix seconds.
     #[serde(default)]
     pub resets_at: Option<i64>,
+    /// `allowed` and the like; the recordings show it on some windows only.
+    #[serde(default)]
+    pub status: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
