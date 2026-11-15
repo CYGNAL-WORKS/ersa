@@ -5,8 +5,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Sending } from "../session/follow";
-import { Composer, type Unavailable, type Waiting } from "./Composer";
+import type { Sending, Waiting } from "../session/follow";
+import { Composer, type Unavailable } from "./Composer";
 
 afterEach(cleanup);
 

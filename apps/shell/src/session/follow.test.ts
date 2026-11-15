@@ -528,40 +528,71 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
+  const ev = (seq: number, event: object) =>
+    ({ v: EVENT_VERSION, session_id: "s1", seq, ts: "2026-11-14T09:00:00Z", source: { backend: "claude-code", backend_version: "2.1.302", input: "live" }, event }) as never;
+
   // verifies: FLOW-SEND-MESSAGE-R20
   it("takes no second stop for a turn still winding down, after a message sent meanwhile", async () => {
-    const ev = (seq: number, event: object) => ({ ...replay[0], seq, event }) as never;
     const { client, calls } = fakeClient({
       "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
       "session.interrupt": () => Promise.resolve({}),
       "session.send": () => Promise.resolve({}),
     });
-    const seen: SessionView[] = [];
-    const f = follow(client, "s1", (v) => seen.push(v));
+    const f = follow(client, "s1", () => {});
     const interrupts = () => calls.filter((c) => c.method === "session.interrupt").length;
-    f.receive({ ...(ev(0, { type: "turn.started", turn: 1, trigger: "user" }) as object), session_id: "s1" } as never);
+    f.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
     await f.interrupt();
     // A message sent while the stopped turn winds down waits; stop still holds.
     await f.send("Do this instead", undefined, "Do this instead");
     await f.interrupt();
     expect(interrupts()).toBe(1);
     // The stopped turn ends: the next turn, the waiting message's, can be stopped.
-    f.receive({ ...(ev(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }) as object), session_id: "s1" } as never);
+    f.receive(ev(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
     await f.interrupt();
     expect(interrupts()).toBe(2);
   });
 
   // verifies: FLOW-SEND-MESSAGE-R20
-  it("holds a stop chosen before its turn showed when that turn's turn.started arrives", async () => {
-    const { follower, calls, last } = following({ "session.interrupt": () => Promise.resolve({}), "session.send": () => Promise.resolve({ turn: 9 }) });
+  it("holds a stop chosen before its turn showed, through a message sent then and that turn's turn.started", async () => {
+    const answers = [{ turn: 9 }, {}];
+    const { follower, calls, last } = following({ "session.interrupt": () => Promise.resolve({}), "session.send": () => Promise.resolve(answers.shift()) });
     await follower.send("hello");
     expect(last().turnPending).toBe(true);
     await follower.interrupt();
+    // Sent while the stopped turn has not shown yet: the stop still holds.
+    await follower.send("Do this instead");
+    expect(last().stopChosen).toBe(true);
+    await follower.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
     const at = last().transcript.lastSeq + 1;
     follower.receive({ ...replay[0], seq: at, event: { type: "turn.started", turn: 9, trigger: "user" } } as never);
     expect(last().stopChosen).toBe(true);
     await follower.interrupt();
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("cancels a message on its way once, even with a stop chosen for a turn still winding down", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { client, calls } = fakeClient({
+      "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
+      "session.interrupt": () => Promise.resolve({}),
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+    });
+    const seen: SessionView[] = [];
+    const f = follow(client, "s1", (v) => seen.push(v));
+    f.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    await f.interrupt();
+    const sent = f.send("With a large attachment");
+    await settle();
+    await f.interrupt();
+    expect(seen.at(-1)?.canceling).toBe(true);
+    await f.interrupt();
+    refuse({ kind: "rpc", error: { code: -32000, message: "stopped", data: { kind: "invalid_state", reason: "send_stopped" } } } as never);
+    expect(await sent).toBe(false);
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
+    expect(seen.at(-1)?.message).toBeUndefined();
+    expect(seen.at(-1)?.canceling).toBeUndefined();
   });
 
   // verifies: FLOW-SEND-MESSAGE-R20
