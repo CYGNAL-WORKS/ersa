@@ -64,7 +64,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Unseen session**: a session that went idle after working while it was not the active session, or that the user marked as unread, until the user makes it active or marks it as read.
 - **Foot**: the bottom of the rail. Empty unless Ersa can't reach Core.
 - **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session. The chevron on the tile is its handle. *Not: drawer, flyout.*
-- **Context ring**: the circular gauge showing the share of its context window a session has used, on its tile and in the session controls.
+- **Context ring**: the circular gauge showing the share of its context window a session has used, on its tile and in the session controls, where it reads a usage window instead when one is nearer its limit.
+- **Usage window**: a span of time over which a backend counts an account's use against a limit, such as a plan's five-hour and weekly limits. The backend reports each window's share used and when it resets.
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
 - **Composer**: the input area beneath the transcript where the user writes to the agent. *Not: chat box, input box, prompt box.*
 - **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session, where the model, effort and permission mode can still change.
