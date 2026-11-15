@@ -23,13 +23,20 @@ pub struct SessionRow {
     pub backend_session_id: Option<String>,
     /// Ersa's mode for the session (milestone M3).
     pub mode: Option<String>,
-    /// The model and effort the session named and the permission mode it
-    /// started with, ids from `backend.list`. `None` for a model or effort
-    /// left to its backend, and for every session created before Core
-    /// recorded them (PROTO-CORE-API-R16).
+    /// Core's latest request for the session's model, effort and permission
+    /// mode, ids from `backend.list`: what it last gave the backend at
+    /// `session.create` or `session.fork`. `None` for a model or effort left
+    /// to its backend, and for every session created before Core recorded
+    /// them (PROTO-CORE-API-R71).
     pub model: Option<String>,
     pub effort: Option<String>,
     pub permission_mode: Option<String>,
+    /// When Core gave the backend each of those, RFC 3339 on the host's
+    /// clock (PROTO-CORE-API-R71); `None` for a value it never gave, and for
+    /// a session from before Core kept the time.
+    pub model_at: Option<String>,
+    pub effort_at: Option<String>,
+    pub permission_mode_at: Option<String>,
     /// The workspace's path on the session's host, where the backend runs:
     /// the directory its record is filed under. Read from the workspace.
     pub cwd: String,
@@ -57,7 +64,7 @@ pub struct SessionRow {
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
      s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
-     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through";
+     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -70,8 +77,9 @@ impl Store {
                 .execute(
                     "INSERT INTO sessions
                      (id, workspace_id, host_id, backend, backend_session_id, mode,
-                      model, effort, permission_mode, section_id, forked_from, forked_through)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+                      model, effort, permission_mode, section_id, forked_from, forked_through,
+                      model_at, effort_at, permission_mode_at)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
                  WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
                     params![
                         session.id,
@@ -86,6 +94,9 @@ impl Store {
                         session.section_id,
                         session.forked_from,
                         session.forked_through,
+                        session.model_at,
+                        session.effort_at,
+                        session.permission_mode_at,
                     ],
                 )
                 .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
@@ -378,5 +389,8 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         last_activity_at: row.get(14)?,
         forked_from: row.get(15)?,
         forked_through: row.get(16)?,
+        model_at: row.get(17)?,
+        effort_at: row.get(18)?,
+        permission_mode_at: row.get(19)?,
     })
 }

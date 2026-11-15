@@ -426,6 +426,17 @@ impl View {
     pub fn announced_title(&self) -> Option<(u64, &str)> {
         self.projector.as_ref()?.announced_title()
     }
+
+    /// The model and permission mode the live stream last reported
+    /// ([`Projector::reported_model`]); `None` before any, and once the live
+    /// stream is over.
+    pub fn reported_model(&self) -> Option<&str> {
+        self.projector.as_ref()?.reported_model()
+    }
+
+    pub fn reported_permission_mode(&self) -> Option<&str> {
+        self.projector.as_ref()?.reported_permission_mode()
+    }
 }
 
 fn state(state: LifecycleState, reason: Option<String>) -> Event {
