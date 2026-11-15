@@ -88,6 +88,11 @@ export interface SessionView {
   stopChosen?: true;
   /** Stop was chosen while the latest message was on its way, to cancel it (FLOW-SEND-MESSAGE-R03). */
   canceling?: true;
+  /**
+   * Stop takes no choice now, as it shows: the message on its way is being canceled, or, with none on its way, the
+   * running turn is being stopped. Worked out from the two above on every change, so the window and `interrupt` agree.
+   */
+  stopTaken?: true;
 }
 
 export interface Follower {
@@ -123,14 +128,16 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   // The last event before a gap this follower already resubscribed for, so
   // one gap costs one resubscribe, not one per event behind it.
   let resumedAt: number | undefined;
-  // Stop was chosen while a message was on its way: its failure is the stop's doing, not a refusal.
-  let stopping = false;
   // A turn showed on the subscription since the latest send began, so its answer needs no pending turn.
   let turnSeen = false;
+  // Each send gets a number, so a stop's late failure clears only its own send's cancel.
+  let sends = 0;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
-    view = change(view);
+    const next = change(view);
+    const taken = next.message?.state === "sending" ? next.canceling : next.stopChosen;
+    view = taken === next.stopTaken ? next : { ...next, stopTaken: taken };
     update(view);
   };
 
@@ -262,8 +269,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     },
 
     async send(text, attachments, name) {
-      stopping = false;
       turnSeen = false;
+      sends += 1;
       const after = view.transcript.lastSeq;
       // A stop chosen for a turn still winding down holds until that turn ends, else a second one could stop the
       // turn this message runs (R20). With no turn running, nothing is being stopped, and this send can be (R03).
@@ -280,18 +287,17 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
           ...v,
           message: undefined,
           turnPending: pending || undefined,
+          // A stop chosen to cancel it came too late: Core handed the message over, and the stop met the running turn.
+          ...(v.canceling ? { stopChosen: true as const, canceling: undefined } : {}),
           ...(waits ? { waitingHere: [...(v.waitingHere ?? []), { name, after }] } : {}),
         }));
         return true;
       } catch (error) {
-        // Only Core's cancel is the stop's doing; any other failure, even after a stop, is still shown.
-        const stopped = stopping && stoppedBeforeSent(error);
-        // A stop that canceled this send stopped no turn: a turn still running can be stopped.
-        set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error), stopChosen: stopped ? undefined : v.stopChosen }));
+        // Only Core's cancel is the stop's doing; any other failure, even after a stop, is still shown. A cancel
+        // leaves any stop held for a turn as it was.
+        const stopped = view.canceling === true && stoppedBeforeSent(error);
+        set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error), canceling: undefined }));
         return false;
-      } finally {
-        stopping = false;
-        set((v) => (v.canceling ? { ...v, canceling: undefined } : v));
       }
     },
 
@@ -305,16 +311,16 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       // While a message is on its way, stop cancels it (R03), once, even with a stop already chosen for a turn still
       // winding down: Core cancels a message not yet handed to the backend rather than stopping a turn, and one handed
       // over meanwhile meets the turn already being stopped. Otherwise stop is once per turn (R20).
+      if (view.stopTaken) return;
       const onItsWay = view.message?.state === "sending";
-      if (onItsWay ? stopping : view.stopChosen) return;
-      if (onItsWay) stopping = true;
-      set((v) => ({ ...v, stopChosen: true, ...(onItsWay ? { canceling: true as const } : {}) }));
+      const send = sends;
+      set((v) => (onItsWay ? { ...v, canceling: true } : { ...v, stopChosen: true }));
       // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop. A stop that never
       // reached Core stopped nothing, so a failure of the send after it is still a refusal to show, and stop is
-      // offered again.
+      // offered again; only what this stop chose is undone.
       await client.call("session.interrupt", { id }).catch(() => {
-        stopping = false;
-        set((v) => ({ ...v, stopChosen: undefined, canceling: undefined }));
+        if (onItsWay) set((v) => (send === sends && v.canceling ? { ...v, canceling: undefined } : v));
+        else set((v) => ({ ...v, stopChosen: undefined }));
       });
     },
 
