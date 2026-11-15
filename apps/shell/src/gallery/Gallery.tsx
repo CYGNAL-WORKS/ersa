@@ -364,6 +364,14 @@ const asked: Event[] = [
   },
   { type: "session.state", state: "waiting_user" },
 ];
+// Suggestions worded as the Claude Code adapter words them from recorded requests, and a directory too long for any
+// line of the shelf, which must break within its name (FLOW-APPROVE-PERMISSION-R30).
+const suggestions: Extract<Event, { type: "permission.requested" }>["suggestions"] = [
+  { kind: "allow_rule", label: "Always allow Bash(echo probe *) in this project's local settings", payload: {} },
+  { kind: "allow_directory", label: "Allow access to C:\Users\me\src\reconnect-integration-fixtures-generated for this session", payload: {} },
+  { kind: "set_mode", label: "Switch to acceptEdits mode for this session", payload: {} },
+];
+const withSuggestions: Event[] = asked.map((e) => (e.type === "permission.requested" ? { ...e, suggestions } : e));
 // An agent hiding what a command does: a right-to-left override and a zero-width space, shown as code points.
 const hiding: Event[] = [
   {
@@ -517,6 +525,7 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Empty", sessionView([])],
   ["Streaming", sessionView(streaming)],
   ["Permission open", sessionView(asked)],
+  ["Permission with suggestions", sessionView(withSuggestions)],
   ["Permission sending", sessionView(asked), { r1: { state: "sending", decision: "allow" } }],
   ["Permission refused", sessionView(asked), { r1: { state: "failed", message: refusal } }],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
@@ -867,12 +876,12 @@ const longCommand = Array.from({ length: 14 }, (_, i) => `cargo test -p ersa-cor
 const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A permission request", { state: "permission", request: shelfRequest }],
   [
-    "With a suggestion, one of three",
+    "With suggestions, one of three",
     {
       state: "permission",
       request: {
         ...shelfRequest,
-        suggestions: [{ kind: "allow_rule", label: "Allow echo commands in this project for the rest of the session", payload: {} }],
+        suggestions,
         reason: { kind: "rule", text: "Writing outside the workspace needs approval." },
       },
       place: { n: 1, m: 3 },
