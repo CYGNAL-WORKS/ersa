@@ -136,7 +136,20 @@ impl View {
             };
             out.push(self.wrap(line.ts.clone(), source, event));
         }
+        self.count_waiting();
         out
+    }
+
+    /// Takes the tile's `waiting` from the projector, as the projector's
+    /// other reports are read: how many messages the backend holds behind
+    /// its running turn, absent when none or once the session has ended
+    /// (PROTO-CORE-API-R81).
+    fn count_waiting(&mut self) {
+        let waiting = match &self.projector {
+            Some(projector) if !self.ended => projector.waiting(),
+            _ => 0,
+        };
+        self.tile.waiting = (waiting > 0).then_some(u64::from(waiting));
     }
 
     /// The events one of Core's lifecycle facts yields, learnt at `ts`.
@@ -252,7 +265,11 @@ impl View {
             }
             Event::QuestionAnswered(answered) => remove(&answered.request_id),
             // A backend that has gone is waiting on nobody.
-            Event::SessionEnded(_) => self.tile.pending.clear(),
+            Event::SessionEnded(_) => {
+                self.tile.pending.clear();
+                // Nor does it hold any message (PROTO-CORE-API-R81).
+                self.tile.waiting = None;
+            }
             _ => {}
         }
     }
