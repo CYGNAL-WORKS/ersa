@@ -99,23 +99,14 @@ pub async fn git_worktree_add(
     check(output, "git worktree add failed")
 }
 
-/// A repository's local branches, and which one is its default.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LocalBranches {
-    /// Short names (`main`, `feature/rail`), sorted.
-    pub names: Vec<String>,
-    /// The default branch, one of `names`: the one `origin/HEAD` points
-    /// at, else `main`, else `master`, else the checked-out branch. None
-    /// on a detached checkout with none of those.
-    pub default: Option<String>,
-}
-
-/// The local branches of the repository at `repo`, and its default branch.
+/// The default branch of the repository at `repo`: the local branch
+/// `origin/HEAD` points at, else `main`, else `master`, else the
+/// checked-out branch. None on a detached checkout with none of those.
 /// One git call, given [`GIT_QUERY_TIMEOUT`].
-pub async fn git_local_branches(
+pub async fn git_default_branch(
     transport: &dyn Transport,
     repo: &str,
-) -> Result<LocalBranches, VcsError> {
+) -> Result<Option<String>, VcsError> {
     // Each line is `<ref>:<* if checked out>:<target if a symbolic ref>`.
     // A ref name can never contain `:`, so the split is unambiguous. The
     // second pattern names `origin/HEAD` exactly, to read where it points.
@@ -128,11 +119,12 @@ pub async fn git_local_branches(
     ];
     let output = query(transport, repo, &args, deadline()).await?;
     let output = checked(output, "git could not list the branches")?;
-    Ok(parse_branches(&output.stdout))
+    Ok(pick_default_branch(&output.stdout))
 }
 
-/// Parses `git_local_branches`' `for-each-ref` output and picks the default.
-fn parse_branches(lines: &[String]) -> LocalBranches {
+/// Picks the default branch from `git_default_branch`'s `for-each-ref`
+/// output.
+fn pick_default_branch(lines: &[String]) -> Option<String> {
     let mut names = Vec::new();
     let mut checked_out = None;
     let mut origin_head = None;
@@ -154,11 +146,10 @@ fn parse_branches(lines: &[String]) -> LocalBranches {
             names.push(name.to_string());
         }
     }
-    names.sort();
     // `origin/HEAD` counts only when the branch it names exists locally:
-    // a base is a local branch.
+    // a workspace starts from a local branch.
     let local = |name: &str| names.iter().any(|n| n == name);
-    let default = origin_head
+    origin_head
         .filter(|name| local(name))
         .or_else(|| {
             ["main", "master"]
@@ -166,8 +157,7 @@ fn parse_branches(lines: &[String]) -> LocalBranches {
                 .find(|n| local(n))
                 .map(str::to_string)
         })
-        .or(checked_out);
-    LocalBranches { names, default }
+        .or(checked_out)
 }
 
 /// The commit `revision` names in the repository at `repo`, or `None`
@@ -1429,9 +1419,7 @@ mod tests {
         // don't: both exist, with another branch checked out.
         let text = "refs/heads/main: :\nrefs/heads/master: :\nrefs/heads/x:*:";
         let lines: Vec<String> = text.lines().map(str::to_string).collect();
-        let parsed = parse_branches(&lines);
-        assert_eq!(parsed.names, ["main", "master", "x"]);
-        assert_eq!(parsed.default.as_deref(), Some("main"));
+        assert_eq!(pick_default_branch(&lines).as_deref(), Some("main"));
     }
 
     /// A transport whose git never answers: its output never ends.
@@ -1458,9 +1446,9 @@ mod tests {
 
     // verifies: PROTO-CORE-API-R18
     #[tokio::test(start_paused = true)]
-    async fn listing_branches_gives_git_ten_seconds() {
+    async fn finding_the_default_branch_gives_git_ten_seconds() {
         let started = tokio::time::Instant::now();
-        let result = git_local_branches(&hanging_git(), "repo").await;
+        let result = git_default_branch(&hanging_git(), "repo").await;
         timed_out_at_ten_seconds(result, started);
     }
 

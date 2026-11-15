@@ -494,7 +494,6 @@ describe("the workspace App starts a new session in", () => {
     await send("Fix the build");
     expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
     expect(paramsOf(core, "session.create")).toMatchObject({ workspace_id: "w-new" });
-    expect(methods(core)).not.toContain("branch.list");
   });
 
   // verifies: FLOW-NEW-SESSION-R37

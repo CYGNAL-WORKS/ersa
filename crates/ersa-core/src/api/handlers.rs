@@ -5,11 +5,11 @@ use std::path::{Component, Path};
 use std::sync::Arc;
 
 use ersa_protocol::core_api::{
-    BackendInfo, BackendListParams, Branch, BranchListParams, Empty, HelloParams, HelloResult,
-    Host, HostKind, HostStatus, IdParams, Project, ProjectAddParams, ProjectFindParams,
-    ProjectSetTrustParams, SUPPORTED_API_VERSIONS, SettingsSetParams, StatusResult, Vcs, Workspace,
-    WorkspaceChanges, WorkspaceCreateParams, WorkspaceKind, WorkspaceListParams,
-    WorkspaceRemoveParams, WorkspaceState,
+    BackendInfo, BackendListParams, Empty, HelloParams, HelloResult, Host, HostKind, HostStatus,
+    IdParams, Project, ProjectAddParams, ProjectFindParams, ProjectSetTrustParams,
+    SUPPORTED_API_VERSIONS, SettingsSetParams, StatusResult, Vcs, Workspace, WorkspaceChanges,
+    WorkspaceCreateParams, WorkspaceKind, WorkspaceListParams, WorkspaceRemoveParams,
+    WorkspaceState,
 };
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
@@ -404,28 +404,6 @@ pub(super) async fn workspace_list(
     Ok(core.store.workspaces(project.id).await?)
 }
 
-/// The project's local branches, sorted by name, with its default marked
-/// (PROTO-CORE-API-R18).
-pub(super) async fn branch_list(
-    core: &Core,
-    params: BranchListParams,
-) -> Result<Vec<Branch>, ApiError> {
-    let project = find_project(core, &params.project_id).await?;
-    require_workspace_adapter(&project)?;
-    let transport = core
-        .transport_for(&project.host_id)
-        .ok_or_else(|| unreachable_host(&project.host_id))?;
-    let branches = workspace::git_local_branches(transport.as_ref(), &project.path).await?;
-    Ok(branches
-        .names
-        .into_iter()
-        .map(|name| Branch {
-            default: branches.default.as_ref() == Some(&name),
-            name,
-        })
-        .collect())
-}
-
 /// What deleting an isolated workspace would lose, for the delete question
 /// (PROTO-CORE-API-R48, R46). Answers for a workspace in any state, a half-removed
 /// one included, counting what is left of it.
@@ -592,8 +570,7 @@ pub(super) async fn workspace_create(
 
 /// The commit a new workspace starts from (PROTO-CORE-API-R19): `base` when
 /// given, refused with `invalid_params` when git cannot resolve it; without
-/// one, the default branch `branch.list` marks, else the checked-out
-/// commit. Resolved to a commit id once, here, so the worktree starts from
+/// one, the repository's default branch, else the checked-out commit. Resolved to a commit id once, here, so the worktree starts from
 /// exactly what was checked, and git never reads `base` as anything else.
 async fn resolve_base(
     transport: &dyn ersa_adapter::Transport,
@@ -607,9 +584,7 @@ async fn resolve_base(
                 ApiError::invalid_params(format!("git cannot resolve base {base} to a commit"))
             });
     }
-    let default = workspace::git_local_branches(transport, repo)
-        .await?
-        .default;
+    let default = workspace::git_default_branch(transport, repo).await?;
     let revision = match &default {
         Some(name) => format!("refs/heads/{name}"),
         None => "HEAD".to_string(),
