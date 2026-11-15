@@ -15,26 +15,24 @@ use std::time::Duration;
 
 use ersa_adapter::{Process, ProcessSpec, Transport};
 use ersa_core::transport::LocalTreeTransport;
-use ersa_core::{Adapter, CoreConfig, Gate};
+use ersa_core::{Adapter, CommandTransport, CoreConfig, Gate};
 use serde_json::{Value, json};
 use support::fake::FakeAdapter;
 use support::{Client, TestCore, git_repo, kind, start_with_adapters, tempdir};
-use tokio::sync::Semaphore;
 
-/// Holds the next process Core starts, once armed, until the test lets it
-/// go: a git call or a backend's version command that does not answer.
+/// Holds the next process Core starts, once armed, at its [`Gate`] until
+/// the test lets it go: a git call or a backend's version command that does
+/// not answer.
 struct Stall {
     armed: AtomicBool,
-    reached: Semaphore,
-    go: Semaphore,
+    gate: Gate,
 }
 
 impl Stall {
     fn new() -> Arc<Stall> {
         Arc::new(Stall {
             armed: AtomicBool::new(false),
-            reached: Semaphore::new(0),
-            go: Semaphore::new(0),
+            gate: Gate::default(),
         })
     }
 
@@ -45,11 +43,11 @@ impl Stall {
 
     /// Waits until a process is held.
     async fn reached(&self) {
-        within(self.reached.acquire()).await.expect("open").forget();
+        reached(&self.gate).await;
     }
 
     fn go(&self) {
-        self.go.add_permits(1);
+        self.gate.go();
     }
 }
 
@@ -100,8 +98,7 @@ struct StallingTransport {
 impl Transport for StallingTransport {
     async fn spawn(&self, spec: ProcessSpec) -> io::Result<Box<dyn Process>> {
         if self.stall.armed.swap(false, Ordering::SeqCst) {
-            self.stall.reached.add_permits(1);
-            self.stall.go.acquire().await.expect("open").forget();
+            self.stall.gate.stop().await;
         }
         self.inner.spawn(spec).await
     }
@@ -124,7 +121,7 @@ async fn start(
     let core = start_with_adapters(
         tempdir(),
         move |config| {
-            config.command_transport = Some(transport);
+            config.command_transport = Some(CommandTransport(transport));
             config.inspect_gate = Some(gate);
             configure(config);
         },

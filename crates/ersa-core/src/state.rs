@@ -19,7 +19,7 @@ use crate::transport::LocalTreeTransport;
 /// How a Core process is set up. Built by the `ersa-core` binary from its
 /// command line, and by tests with a temporary data directory and a unique
 /// endpoint.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct CoreConfig {
     /// Where the database, the app log and (by default) worktrees live.
     pub data_dir: PathBuf,
@@ -62,31 +62,21 @@ pub struct CoreConfig {
     /// The transport git and backends' version commands run through on the
     /// local host. `None` is the local machine's; tests put one in front
     /// of it that holds a command, as a slow repository or backend would.
-    pub command_transport: Option<Arc<dyn Transport>>,
+    pub command_transport: Option<CommandTransport>,
     /// How long a backend detection that found anything other than
     /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
     /// that need every detection after a failed one to run again.
     pub failed_detection_ttl: Duration,
 }
 
-impl std::fmt::Debug for CoreConfig {
-    /// Every field but the transport, which has no `Debug` of its own.
+/// A transport for [`CoreConfig::command_transport`]. Its own type only so
+/// that `CoreConfig` can derive `Debug`, which a transport has none of.
+#[derive(Clone)]
+pub struct CommandTransport(pub Arc<dyn Transport>);
+
+impl std::fmt::Debug for CommandTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CoreConfig")
-            .field("data_dir", &self.data_dir)
-            .field("endpoint", &self.endpoint)
-            .field("backend_program_override", &self.backend_program_override)
-            .field("handshake_timeout", &self.handshake_timeout)
-            .field("max_line_bytes", &self.max_line_bytes)
-            .field("replay", &self.replay)
-            .field("copy_pause", &self.copy_pause)
-            .field("wind_down_pause", &self.wind_down_pause)
-            .field("remove_gate", &self.remove_gate)
-            .field("inspect_gate", &self.inspect_gate)
-            .field("folder_inspection_limit", &self.folder_inspection_limit)
-            .field("command_transport", &self.command_transport.is_some())
-            .field("failed_detection_ttl", &self.failed_detection_ttl)
-            .finish()
+        f.write_str("CommandTransport")
     }
 }
 
@@ -112,7 +102,7 @@ impl Default for Gate {
 
 impl Gate {
     /// Called by the request: says it got here, then waits to be let go.
-    pub(crate) async fn stop(&self) {
+    pub async fn stop(&self) {
         self.reached.add_permits(1);
         // The semaphore is never closed, so acquiring cannot fail.
         if let Ok(permit) = self.go.acquire().await {
@@ -218,7 +208,8 @@ impl Core {
     ) -> Core {
         let local_transport = config
             .command_transport
-            .clone()
+            .as_ref()
+            .map(|CommandTransport(transport)| Arc::clone(transport))
             .unwrap_or_else(|| Arc::new(LocalTreeTransport::for_commands()));
         let sessions = SessionManager::new(store.clone(), adapters, app_log)
             .with_copy_pause(config.copy_pause)
