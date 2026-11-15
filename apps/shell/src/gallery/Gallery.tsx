@@ -368,7 +368,7 @@ const asked: Event[] = [
 // line of the shelf, which must break within its name (FLOW-APPROVE-PERMISSION-R30).
 const suggestions: Extract<Event, { type: "permission.requested" }>["suggestions"] = [
   { kind: "allow_rule", label: "Always allow Bash(echo probe *) in this project's local settings", payload: {} },
-  { kind: "allow_directory", label: "Allow access to C:\Users\me\src\reconnect-integration-fixtures-generated for this session", payload: {} },
+  { kind: "allow_directory", label: "Allow access to C:\\Users\\me\\src\\reconnect-integration-fixtures-generated for this session", payload: {} },
   { kind: "set_mode", label: "Switch to acceptEdits mode for this session", payload: {} },
 ];
 const withSuggestions: Event[] = asked.map((e) => (e.type === "permission.requested" ? { ...e, suggestions } : e));
