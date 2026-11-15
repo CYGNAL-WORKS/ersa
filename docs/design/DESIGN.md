@@ -192,7 +192,7 @@ The colors in the front matter are Midnight, the default palette; the faces, typ
 
 Principles that resolve trade-offs:
 
-- **Quiet surfaces, one accent.** Almost everything is neutral. Color means something: the accent for what you can act on, an agent at work and a question waiting for you; caution for a permission request; danger for a failure.
+- **Quiet surfaces, one accent.** Almost everything is neutral. Color means something: the accent for what you can act on, an agent at work and a question waiting for you; caution for a permission request and a gauge filling up; danger for a failure and a gauge near its limit.
 - **Familiar conversation, readable output.** The user's messages sit in chat bubbles. The agent's output has no bubble and reads as a document in `prose` at the `measure` column. No avatars.
 - **Status lives in tiles.** Cost, context, permissions and progress are compact tiles with the same anatomy everywhere, so the eye learns one shape.
 - **Calm and luminous.** One thing draws the eye at a time. Light and depth carry the design: soft tonal gradients give surfaces and primary controls a sense of material, a faint wash keeps the canvas from being flat, and a gentle accent glow marks the one thing that is focused or waiting for you. A screen has one focal glow; everything else rests.
@@ -203,7 +203,7 @@ Principles that resolve trade-offs:
 
 ## Colors
 
-Two token sets, `light` and `dark`, with identical names, so components name a role and never a value. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border color. `accent` marks what can be acted on, an agent at work, and a question waiting for the user. `caution` is yellow and marks a permission request and a gauge near full; `danger` marks a failure; `positive` marks success. Semantic colors appear on glyphs, icons and inline status, never as large fills; the one tint is a diff line's (`material-diff-added`, `material-diff-removed`), faint enough that its text keeps `ink`.
+Two token sets, `light` and `dark`, with identical names, so components name a role and never a value. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border color. `accent` marks what can be acted on, an agent at work, and a question waiting for the user. `caution` is yellow and marks a permission request and a gauge past half; `danger` marks a failure and a gauge near its limit; `positive` marks success. Semantic colors appear on glyphs, icons and inline status, never as large fills; the one tint is a diff line's (`material-diff-added`, `material-diff-removed`), faint enough that its text keeps `ink`.
 
 Text meets 4.5:1 against its background; a control's edge and a state glyph meet 3:1. Every `ink` level, `ink-faint` included, meets 4.5:1 against `canvas`, `surface`, and `surface-raised`, so `ink-faint` is safe for placeholders and disabled text, and `ink-muted` stays a clear step above it. Generate the palette from these targets (the Leonardo method: name each role's contrast against the canvas and derive both themes from it) rather than picking hex values by eye. `caution` is the one role set by eye: the owner chose yellow, and its light value is as light as keeps 4.5:1 on every fill a tile can take (`docs/design/RAIL.md`).
 
