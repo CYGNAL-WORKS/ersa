@@ -1091,6 +1091,10 @@ pub struct SessionTileParams {
     /// The session's current title; absent while it has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// The session's `created_at` as `session.list` has it, so the rail
+    /// groups and sorts by a date the record corrected without reading the
+    /// list again.
+    pub created_at: String,
 }
 
 /// `host.status` params.
