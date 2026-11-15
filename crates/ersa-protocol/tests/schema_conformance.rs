@@ -533,23 +533,35 @@ fn a_target_says_what_kind_it_is_and_only_a_target_has_a_kind() {
         payload["target_kind"] = json!(kind);
         validate_event(&payload).unwrap_or_else(|e| panic!("{kind}: {e}"));
         let parsed: Event = serde_json::from_value(payload).expect("deserialize");
-        assert_eq!(serde_json::to_value(parsed).expect("serialize")["target_kind"], kind);
+        assert_eq!(
+            serde_json::to_value(parsed).expect("serialize")["target_kind"],
+            kind
+        );
     }
 
     // A target without its kind is refused.
     let mut no_kind = wire.clone();
     no_kind.as_object_mut().unwrap().remove("target_kind");
-    assert!(validate_event(&no_kind).is_err(), "accepted a target with no kind");
+    assert!(
+        validate_event(&no_kind).is_err(),
+        "accepted a target with no kind"
+    );
 
     // A kind without a target is refused.
     let mut no_target = wire.clone();
     no_target.as_object_mut().unwrap().remove("target");
-    assert!(validate_event(&no_target).is_err(), "accepted a kind with no target");
+    assert!(
+        validate_event(&no_target).is_err(),
+        "accepted a kind with no target"
+    );
 
     // A kind the brief does not name is refused.
     let mut unknown = wire;
     unknown["target_kind"] = json!("file");
-    assert!(validate_event(&unknown).is_err(), "accepted an unknown kind");
+    assert!(
+        validate_event(&unknown).is_err(),
+        "accepted an unknown kind"
+    );
 }
 
 #[test]
