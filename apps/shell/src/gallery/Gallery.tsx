@@ -731,6 +731,22 @@ const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
 const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
 /** Room above a composer for its attach menu, which opens upward from attach. */
 const menuRoom = (node: ReactNode) => <div className="gallery-room-before gallery-list-above">{node}</div>;
+
+/** The session controls under a session with its values, ended unless `changeable` says it runs. */
+const sessionControls = (more: Partial<Parameters<typeof SessionControls>[0]> = {}) => (
+  <SessionControls
+    hosts={[hello.host]}
+    localHostId={hello.host.id}
+    projects={projects}
+    backends={[claudeCode]}
+    values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
+    workspaceLabel="ersa/fix-reconnect"
+    onChoose={() => {}}
+    readOnly
+    used={0.42}
+    {...more}
+  />
+);
 /** A message's attachments (FLOW-SEND-MESSAGE-R09, R17): a file in the workspace, an image, and a folder Core copies. */
 const galleryWorkspace = "w-gallery";
 const inWorkspace = { workspace: galleryWorkspace, copied: false };
@@ -1288,6 +1304,8 @@ const entries: Entry[] = [
       ["Backend missing, beside one available", room(<NewSessionScreen {...newSession} open="backend" />)],
       ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
       ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
+      // FLOW-NEW-SESSION-R11: the listing failed, which is not a host without backends.
+      ["Backend detection failed", <NewSessionScreen {...newSession} backends={{ local: [] }} backendFailures={{ local: "The host didn't answer in time." }} />],
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
       // docs/design/COMPOSER.md: with no level chosen the effort reads Default, the first row of its list.
       ["The effort chip open, at Default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="effort" />)],
@@ -1339,6 +1357,8 @@ const entries: Entry[] = [
       ["A problem", <Chip name="Backend" placeholder="No backend" problem options={[]} onChoose={() => {}} />],
       // Under a running session: the session's value, without the chevron, unchanged under the pointer.
       ["In a session", <Chip {...chip} readOnly />],
+      // A session's model, effort or permission mode while it is not running: the chevron's place kept, faded out.
+      ["In a session, keeping the chevron's place", <Chip {...chip} readOnly keepsChevron />],
       ["Detecting backends", <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />],
       // Where the window has no room beneath, the list opens above its chip.
       ["Open above", <div className="gallery-room-before gallery-list-above">{<Chip {...chip} initialOpen />}</div>],
@@ -1448,25 +1468,21 @@ const entries: Entry[] = [
     wide: true,
     states: [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
+      // Ended: its values, as pills that do not open; model, effort and permission mode keep the chevron's place.
+      ["Under a session, with its values", <Composer autoFocus={false} onSend={async () => false} controls={sessionControls()} />],
+      // Running: model, effort and permission mode open (FLOW-NEW-SESSION-R30).
+      ["Under a running session", <Composer autoFocus={false} onSend={async () => false} controls={sessionControls({ changeable: true })} />],
+      ["Under a running session, a chip open", menuRoom(<Composer autoFocus={false} onSend={async () => false} controls={sessionControls({ changeable: true, open: "model" })} />)],
       [
-        "Under a session, with its values",
-        <Composer
-          autoFocus={false}
-          onSend={async () => false}
-          controls={
-            <SessionControls
-              hosts={[hello.host]}
-              localHostId={hello.host.id}
-              projects={projects}
-              backends={[claudeCode]}
-              values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
-              workspaceLabel="ersa/fix-reconnect"
-              onChoose={() => {}}
-              readOnly
-              used={0.42}
-            />
-          }
-        />,
+        "Under a running session, a change refused",
+        statusRoom(
+          <Composer
+            autoFocus={false}
+            onSend={async () => false}
+            refusedChange="Ersa can't change the effort. The model takes no effort high."
+            controls={sessionControls({ changeable: true })}
+          />,
+        ),
       ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
       ["Send under the pointer", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="hover" />],
@@ -1497,6 +1513,10 @@ const entries: Entry[] = [
       ["Detecting backends", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="detecting" />)],
       ["No backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="no-backend" />)],
       ["A backend not working", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ failedBackend: "Claude Code" }} />)],
+      [
+        "Backends can't be listed",
+        statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ detectionFailed: "The host didn't answer in time." }} />),
+      ],
       ["The attach menu open", menuRoom(<Composer {...attachProps} attachMenuOpen />)],
       ["An attach choice under the pointer", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "hover" }} />)],
       ["An attach choice pressed", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "pressed" }} />)],
