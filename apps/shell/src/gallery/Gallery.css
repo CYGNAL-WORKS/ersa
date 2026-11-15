@@ -155,3 +155,14 @@
   position-area: block-start span-inline-end;
   position-try-fallbacks: none;
 }
+
+/* Room above the session controls' ring for its list, which opens above it. A specimen is narrower than the list, so
+   here the list extends toward the trailing edge from the ring at the leading one, rather than off the specimen. */
+.gallery-ring-room {
+  padding-top: var(--size-card-max);
+}
+
+.gallery-ring-room .context-ring-tip {
+  position-area: block-start span-inline-end;
+  position-try-fallbacks: none;
+}

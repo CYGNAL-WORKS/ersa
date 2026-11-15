@@ -101,7 +101,7 @@ describe("the rail's tree", () => {
     const ersa = untrusted.slice(untrusted.indexOf('<li class="rail-project"'));
     expect(ersa.indexOf("rail-heading-shield")).toBeLessThan(ersa.indexOf("rail-heading-count"));
     // Its words as a tooltip, which assistive technology does not read twice.
-    expect(untrusted).toMatch(/<span class="rail-heading-tip" aria-hidden="true" style="[^"]*">Not trusted<\/span>/);
+    expect(untrusted).toMatch(/<span class="tip rail-heading-tip" aria-hidden="true" style="[^"]*">Not trusted<\/span>/);
 
     // Expanded, the shield is a plain icon beside its words, and there is no tooltip.
     const open = render({ projects: { state: "ready", projects: [project("ersa", { trusted: false })] }, sessions, workspaces });

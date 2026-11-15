@@ -1102,6 +1102,26 @@ Context: {percent} percent used
 
 Context: less than 1 percent used
 
+### `sessionControls.contextRing.windowUsedLabel`
+
+{label}: {percent} percent used
+
+### `sessionControls.contextRing.resetsAtLabel`
+
+Resets {when}
+
+### `sessionControls.contextRing.resetsInHoursMinutesLabel`
+
+Resets in {hours} hr {minutes} min
+
+### `sessionControls.contextRing.resetsInHoursLabel`
+
+Resets in {hours} hr
+
+### `sessionControls.contextRing.resetsInMinutesLabel`
+
+Resets in {minutes} min
+
 ### `sessionControls.contextRing.underOneReadout`
 
 <{percent}%
