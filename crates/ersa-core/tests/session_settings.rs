@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings, SessionControl};
 use ersa_core::Adapter;
+use ersa_protocol::core_api::ModelChoice;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, RecordedSettingsMap, Records};
 use support::{Client, TestCore, start_with_adapters, tempdir, workspace};
@@ -352,6 +353,115 @@ async fn session_list_carries_cores_model_request_beside_the_backends_report() {
         .unwrap()
         .to_string();
     assert_eq!(model_and_request(&mut client, &other).await.1, Value::Null);
+}
+
+/// A model list shaped like Claude Code's: the default `model-a` resolves
+/// to `model-x`, which is also listed under its own id, as Default resolves
+/// to `claude-fable-5-2`; `model-b` is an alias resolving to `model-b-1`.
+/// Default takes only `low`, `model-x` only `high`.
+fn default_resolving_to_a_listed_model(fake: &FakeAdapter) {
+    let choice = |id: &str, default: bool, resolved: &str, effort: &str| ModelChoice {
+        id: id.into(),
+        label: id.to_uppercase(),
+        default,
+        resolved: Some(resolved.into()),
+        efforts: Some(vec![effort.into()]),
+    };
+    *fake.models.lock().unwrap() = fake::ModelsAnswer::Listed(vec![
+        choice("model-a", true, "model-x", "low"),
+        choice("model-x", false, "model-x", "high"),
+        choice("model-b", false, "model-b-1", "low"),
+    ]);
+}
+
+/// The model the fork's backend was started with: the second start's.
+async fn fork_started_with(fake: &FakeAdapter) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
+            return config.model.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "never started");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A live session's turn reported `model` and `mode`; waits until it is idle.
+async fn reported(client: &mut Client, id: &str, model: &str, mode: &str) {
+    client
+        .result(
+            "session.send",
+            json!({ "id": id, "text": format!("report {model} {mode}") }),
+        )
+        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(client, id).await["model"] != model || row(client, id).await["state"] != "idle" {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never idle with {model}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+// verifies: PROTO-CORE-API-R104
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_of_a_default_session_leaves_the_model_to_its_backend() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    default_resolving_to_a_listed_model(&fake);
+    let mut client = core.client().await;
+    // No request: the backend's default, which it reports as `model-x`.
+    let id = started(&core, &mut client, json!({})).await;
+    reported(&mut client, &id, "model-x", "ask").await;
+
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+
+    assert_eq!(fork["model_request"], Value::Null);
+    assert_eq!(fork_started_with(&fake).await, None);
+}
+
+// verifies: PROTO-CORE-API-R104
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_of_a_session_whose_model_changed_asks_for_the_model_reported() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    default_resolving_to_a_listed_model(&fake);
+    let mut client = core.client().await;
+    // Asked for the default by name, then the backend reported another
+    // model, as one chosen in its own tools: the report as given.
+    let id = started(&core, &mut client, json!({ "model": "model-a" })).await;
+    reported(&mut client, &id, "model-b-1", "ask").await;
+
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+
+    assert_eq!(fork["model_request"], json!("model-b-1"));
+    assert_eq!(fork_started_with(&fake).await.as_deref(), Some("model-b-1"));
+}
+
+/// The effort is checked against the session's model choice, the one the
+/// session controls name: a session left at the default that reports
+/// `model-x` is the default, which takes `low`, not the `model-x` choice.
+// verifies: PROTO-CORE-API-R82
+#[tokio::test(flavor = "multi_thread")]
+async fn set_effort_checks_the_model_choice_not_a_choice_listed_under_the_report() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    default_resolving_to_a_listed_model(&fake);
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({})).await;
+    reported(&mut client, &id, "model-x", "ask").await;
+    let set = |effort: &str| json!({ "id": id, "effort": effort });
+
+    refused(
+        &mut client,
+        "session.set_effort",
+        set("high"),
+        "invalid_params",
+        None,
+    )
+    .await;
+    client.result("session.set_effort", set("low")).await;
 }
 
 // verifies: PROTO-CORE-API-R104
