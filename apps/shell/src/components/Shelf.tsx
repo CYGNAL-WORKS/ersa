@@ -300,13 +300,12 @@ function Heading({ kind, place }: { kind?: string; place?: { n: number; m: numbe
   );
 }
 
-/** The context ring with its percentage, a middle dot, and the cost: each only when the tile shows it. */
+/** The context ring, always there as on the tile, with its percentage once reported, then a middle dot and the cost once reported. */
 function Readouts({ ring, cost }: { ring?: number; cost?: string }) {
-  if (ring === undefined && cost === undefined) return null;
   return (
     <p className="shelf-readouts">
-      {ring !== undefined && <ContextRing used={ring} />}
-      {ring !== undefined && cost !== undefined && <span aria-hidden="true">·</span>}
+      <ContextRing used={ring} />
+      {cost !== undefined && <span aria-hidden="true">·</span>}
       {cost !== undefined && <span>{cost}</span>}
     </p>
   );
