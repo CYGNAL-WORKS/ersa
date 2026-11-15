@@ -13,6 +13,9 @@ export default defineConfig({
   clearScreen: false,
   build: {
     rollupOptions: { input: resolve(import.meta.dirname, "index.html") },
+    // The window loads the bundle from local disk, not over a network, so the
+    // web-oriented 500 kB default warns about a cost the app does not pay.
+    chunkSizeWarningLimit: 1000,
   },
   test: {
     include: ["src/**/*.test.ts"],
