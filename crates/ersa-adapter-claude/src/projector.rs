@@ -1643,21 +1643,14 @@ fn outcome(result: &Value) -> TurnOutcome {
 /// lists the calls, so its last entry is used when present. Zero means the
 /// turn made no call (a failed login, say) and says nothing about the context.
 fn context_tokens(usage: &Value) -> Option<u64> {
-    const COUNTS: [&str; 4] = [
-        "input_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_input_tokens",
-        "output_tokens",
-    ];
     let counted = usage["iterations"]
         .as_array()
         .and_then(|calls| calls.last())
         .unwrap_or(usage);
-    let total: u64 = COUNTS
-        .iter()
-        .filter_map(|count| counted[*count].as_u64())
-        .sum();
-    (total > 0).then_some(total)
+    // The same sum as a reply's (R71), so the ring reads one way throughout.
+    serde_json::from_value::<Usage>(counted.clone())
+        .ok()
+        .and_then(|counts| call_context(&counts))
 }
 
 /// What the model holds after the API call an `assistant` line came from: the
