@@ -61,13 +61,19 @@ fn stub() -> FakeTransport {
     let stdout = fixture(FIXTURE).stdout;
     let mut answer = parse(&stdout[2]);
     assert_eq!(answer["response"]["request_id"], "ersa-rename_session-1");
-    answer["response"]["request_id"] = json!("ersa-rename-2");
+    answer["response"]["request_id"] = json!("ersa-rename-3");
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(|line| match parse(line)["request"]["subtype"].as_str() {
             Some("initialize") => Ok(()),
             _ => Err(format!("expected initialize, got {line}")),
         })
         .then_stdout([&stdout[0]])
+        // The question about the session's context (PROTO-CLAUDE-CODE-STREAM-R72),
+        // which the recording predates; this CLI leaves it unanswered.
+        .wait_for_stdin(|line| match parse(line)["request"]["subtype"].as_str() {
+            Some("get_context_usage") => Ok(()),
+            _ => Err(format!("expected get_context_usage, got {line}")),
+        })
         .wait_for_stdin(|line| match parse(line)["request"]["subtype"].as_str() {
             Some("rename_session") => Ok(()),
             _ => Err(format!("expected rename_session, got {line}")),
@@ -216,12 +222,13 @@ async fn a_session_is_renamed_before_its_first_message() {
 
     let sent: Vec<Value> = transport.stdin_lines().iter().map(|l| parse(l)).collect();
     assert_eq!(sent[0]["request"]["subtype"], "initialize");
+    assert_eq!(sent[1]["request"]["subtype"], "get_context_usage");
     assert_eq!(
-        sent[1],
-        json!({"type": "control_request", "request_id": "ersa-rename-2", "request": {
+        sent[2],
+        json!({"type": "control_request", "request_id": "ersa-rename-3", "request": {
             "subtype": "rename_session", "title": TITLE, "source": "host", "session_id": id}})
     );
-    assert_eq!(sent[2]["type"], "user");
+    assert_eq!(sent[3]["type"], "user");
     assert!(
         transport.stub_failures().is_empty(),
         "{:?}",

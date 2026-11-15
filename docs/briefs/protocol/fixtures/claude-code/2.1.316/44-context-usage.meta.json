@@ -1,0 +1,170 @@
+{
+  "recorded_at": "2026-11-15T15:29:51.424Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "f414b87b-2d16-4f86-af69-e58c201d9c11"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "f414b87b-2d16-4f86-af69-e58c201d9c11",
+  "session_record": "record/44-context-usage.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 8088,
+  "stderr": "",
+  "stdout_lines": 27,
+  "stdout_timing_ms": [
+    753,
+    1245,
+    1328,
+    1332,
+    2378,
+    2378,
+    2378,
+    2378,
+    2382,
+    2382,
+    2383,
+    2384,
+    2385,
+    2399,
+    2701,
+    2704,
+    2705,
+    3032,
+    3042,
+    7506,
+    7518,
+    7518,
+    7518,
+    7518,
+    7518,
+    7519,
+    7696
+  ],
+  "sent": [
+    {
+      "t": 10,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 753,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_context_usage-1\",\"request\":{\"subtype\":\"get_context_usage\"}}"
+    },
+    {
+      "t": 1245,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: first\"}]}}"
+    },
+    {
+      "t": 2400,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_context_usage-2\",\"request\":{\"subtype\":\"get_context_usage\"}}"
+    },
+    {
+      "t": 2702,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-set_model-3\",\"request\":{\"subtype\":\"set_model\",\"model\":\"haiku\"}}"
+    },
+    {
+      "t": 2705,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_context_usage-4\",\"request\":{\"subtype\":\"get_context_usage\"}}"
+    },
+    {
+      "t": 3032,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"/compact\"}]}}"
+    },
+    {
+      "t": 7520,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_context_usage-5\",\"request\":{\"subtype\":\"get_context_usage\"}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "control": "get_context_usage",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 2,
+      "text": "Reply with the single word: first",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 3,
+      "control": "get_context_usage",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 4,
+      "control": "set_model",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 5,
+      "control": "get_context_usage",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 6,
+      "text": "/compact",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 7,
+      "control": "get_context_usage",
+      "got_response": true,
+      "subtype": "success"
+    }
+  ]
+}
