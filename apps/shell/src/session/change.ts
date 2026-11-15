@@ -28,7 +28,7 @@ const REFUSED = {
 } satisfies Record<Changeable, () => string>;
 
 /** The fields of the session a change can move, as Core answers them: the backend's word on the new value. */
-export type Changed = Pick<Session, "model" | "effort" | "permission_mode">;
+export type Changed = Pick<Session, "model" | "model_request" | "effort" | "permission_mode">;
 
 /**
  * Asks Core to change `key` to `value` on session `id`. Resolves with the session's changed fields as Core lists them
@@ -43,7 +43,7 @@ export async function changeSession(client: Pick<CoreClient, "call">, id: string
           ? await client.call("session.set_effort", { id, effort: value })
           : await client.call("session.set_permission_mode", { id, permission_mode: value });
     // Only what the change moves: the rest of the session, its tile above all, comes from `session.list` as ever.
-    return { model: answer.model, effort: answer.effort, permission_mode: answer.permission_mode };
+    return { model: answer.model, model_request: answer.model_request, effort: answer.effort, permission_mode: answer.permission_mode };
   } catch (error) {
     throw new Error(`${REFUSED[key]()} ${describeError(error)}`);
   }
