@@ -1126,9 +1126,21 @@ Detecting backends…
 
 Context: none used yet
 
+### `sessionControls.contextRing.unreportedLabel`
+
+Context isn't reported yet
+
 ### `sessionControls.contextRing.usedLabel`
 
 Context: {percent} percent used
+
+### `sessionControls.contextRing.underOneLabel`
+
+Context: less than 1 percent used
+
+### `sessionControls.contextRing.underOneReadout`
+
+<{percent}%
 
 ## `quit`
 

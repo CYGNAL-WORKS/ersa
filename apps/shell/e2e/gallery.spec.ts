@@ -205,6 +205,29 @@ test("send keeps its primary fill under the pointer and pressed, in both themes"
   }
 });
 
+// The context ring's arc is a hairline, so a band's colour sits inside the screenshots' per-pixel threshold; it is
+// checked here, on its own and on the shelf's open tile (LAY-SHELL, Context): caution past half, danger past four fifths.
+test("the context ring's arc takes its band's colour, in both themes", async ({ page }) => {
+  await page.goto("/gallery.html");
+  for (const theme of ["light", "dark"]) {
+    const root = page.locator(`[data-theme="${theme}"]`).first();
+    const token = (name: string) => root.evaluate((el, n) => {
+      const probe = document.createElement("span");
+      probe.style.color = `var(${n})`;
+      el.appendChild(probe);
+      const value = getComputedStyle(probe).color;
+      probe.remove();
+      return value;
+    }, name);
+    const stroke = (selector: string) => root.locator(`${selector} .context-ring-used`).first().evaluate((el) => getComputedStyle(el).stroke);
+    const [muted, caution, danger] = [await token("--color-ink-muted"), await token("--color-caution"), await token("--color-danger")];
+    expect(await stroke('[data-component="ContextRing"] .context-ring:not([data-band])'), `quiet in ${theme}`).toBe(muted);
+    expect(await stroke('[data-component="ContextRing"] .context-ring[data-band="caution"]'), `caution in ${theme}`).toBe(caution);
+    expect(await stroke('[data-component="ContextRing"] .context-ring[data-band="danger"]'), `danger in ${theme}`).toBe(danger);
+    expect(await stroke('[data-component="Shelf"] .shelf-readouts .context-ring[data-band="caution"]'), `the shelf's in ${theme}`).toBe(caution);
+  }
+});
+
 // The open list's shadow is soft enough to sit inside the screenshots' per-pixel threshold, so it is checked here.
 // Its options take radius-md, so their corners nest within the list's (DESIGN.md, Shapes).
 test("an open chip list floats: a shadow and the floating radius, its options nested, in both themes", async ({ page }) => {
