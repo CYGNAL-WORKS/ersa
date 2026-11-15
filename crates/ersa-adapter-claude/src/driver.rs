@@ -853,19 +853,17 @@ impl ClaudeAdapter {
             tokio::time::timeout(self.handshake_timeout, handshake)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(AdapterError::Protocol(
-                        if answered.load(Ordering::SeqCst) {
-                            format!(
-                                "the CLI answered initialize but stopped reading its input                                  within {:?}",
-                                self.handshake_timeout
-                            )
-                        } else {
-                            format!(
-                                "the CLI did not answer initialize within {:?}",
-                                self.handshake_timeout
-                            )
-                        },
-                    ))
+                    Err(AdapterError::Protocol(if answered.load(Ordering::SeqCst) {
+                        format!(
+                            "the CLI answered initialize but stopped reading its input within {:?}",
+                            self.handshake_timeout
+                        )
+                    } else {
+                        format!(
+                            "the CLI did not answer initialize within {:?}",
+                            self.handshake_timeout
+                        )
+                    }))
                 })
         };
         match handshake.await {

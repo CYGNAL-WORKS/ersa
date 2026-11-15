@@ -563,5 +563,8 @@ async fn a_cli_that_stops_reading_after_initialize_fails_the_start_saying_so() {
     let Err(ersa_adapter::AdapterError::Protocol(message)) = result else {
         panic!("expected the start to fail");
     };
-    assert!(message.contains("stopped reading its input"), "{message}");
+    assert_eq!(
+        message,
+        "the CLI answered initialize but stopped reading its input within 300ms"
+    );
 }
