@@ -848,6 +848,81 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "session.set_model"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_model.params"
+            }
+          },
+          "description": "Changes a live session's model through its backend at once; sent during a turn, the turn's next model call uses it."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.set_effort"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_effort.params"
+            }
+          },
+          "description": "Changes a live session's effort through its backend at once; sent during a turn, the turn's next model call uses it."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.set_permission_mode"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_permission_mode.params"
+            }
+          },
+          "description": "Changes a live session's permission mode through its backend at once; sent during a turn, the turn's later tool calls follow it."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.set_mode"
             },
             "params": {
@@ -2962,6 +3037,63 @@
       }
     },
     "session.set_title.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.set_model.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "model"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "model": {
+          "type": "string"
+        }
+      }
+    },
+    "session.set_model.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.set_effort.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "effort"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "effort": {
+          "type": "string"
+        }
+      }
+    },
+    "session.set_effort.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.set_permission_mode.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "permission_mode"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "permission_mode": {
+          "type": "string"
+        }
+      }
+    },
+    "session.set_permission_mode.result": {
       "$ref": "#/$defs/session"
     },
     "session.set_mode.params": {
