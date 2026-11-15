@@ -3,7 +3,7 @@
 // and `backend.list`; the starting values from what the user last chose for the project, else the brief's defaults.
 
 import { t } from "../catalog";
-import type { BackendInfo, Branch, Choice, Project, Session, Workspace } from "../protocol/core-api.gen";
+import type { BackendInfo, Branch, Choice, ModelChoice, Project, Session, Workspace } from "../protocol/core-api.gen";
 
 /** A new isolated workspace (a git worktree for a git project), or the project's own folder. */
 export type WorkspaceKind = "isolated" | "root";
@@ -107,6 +107,11 @@ export interface ScreenSeed {
   touched: boolean;
   /** What the user has chosen; the controls show it where the project and its host offer it. */
   wanted: Partial<SessionValues>;
+  /**
+   * The how values the user chose on this screen, each with the backend it was chosen for: they stay when the project
+   * changes, over what that project last used, since the user saw and chose them here.
+   */
+  picked?: Partial<HowValues>;
 }
 
 /**
@@ -127,6 +132,7 @@ export function seedScreen(
     seededWith: first && lastUsed[first.id],
     touched: false,
     wanted: first ? { ...lastUsed[first.id], project_id: first.id } : {},
+    picked: {},
   });
   if (prev === undefined || prev.shownFor !== projectId) return fresh();
   if (!prev.touched && first && (lastUsed[first.id] !== prev.seededWith || first.id !== prev.wanted.project_id)) return fresh();
@@ -234,22 +240,38 @@ function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
 }
 
 /**
+ * The choice that names a session's model (FLOW-NEW-SESSION-R33). While the backend has reported no model, or reports
+ * the id the requested choice resolves to, the requested choice names it (the backend's default with no request): an
+ * alias and Default can resolve to the same id, and the request says which the user chose. Otherwise the report names
+ * it: the choice with that id, else one not marked default that resolves to it, else the id itself.
+ */
+function modelChoiceFor(models: readonly ModelChoice[], session: Pick<Session, "model" | "model_request">): string | undefined {
+  const requested = models.find((m) => m.id === (session.model_request ?? defaultOf(models)));
+  if (session.model === undefined) return session.model_request ?? requested?.id;
+  if (requested !== undefined && requested.resolved === session.model) return requested.id;
+  const reported = session.model;
+  return (models.find((m) => m.id === reported) ?? models.find((m) => !m.default && m.resolved === reported))?.id ?? reported;
+}
+
+/**
  * The values a running session shows (FLOW-NEW-SESSION-R12): what `session.list` reports, never what the host offers
- * now. A model or effort the session was not given is the backend's own, shown as the choice the backend marks as
- * its default when the host lists it. A value the host no longer lists shows under its id.
+ * now, each under the choice that names it. A model or effort the session was not given is the backend's own, shown
+ * as the choice the backend marks as its default when the host lists it. A value the host no longer lists shows under
+ * its id, and a model it no longer lists takes every effort, as Core accepts any for it (PROTO-CORE-API-R101).
  */
 export function sessionShown(
-  session: Pick<Session, "host_id" | "backend" | "model" | "effort" | "permission_mode">,
+  session: Pick<Session, "host_id" | "backend" | "model" | "model_request" | "effort" | "permission_mode">,
   workspace: Pick<Workspace, "project_id" | "kind" | "vcs_ref">,
   hostBackends: readonly BackendInfo[],
 ): SessionShown {
   const listed = hostBackends.find((b) => b.name === session.backend);
-  const model = session.model ?? (listed && defaultOf(listed.models));
+  const model = modelChoiceFor(listed?.models ?? [], session);
   const effort = session.effort ?? listed?.efforts.find((c) => c.default)?.id;
   const backend: BackendInfo = {
     ...(listed ?? { name: session.backend, label: session.backend, status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] }),
   };
-  backend.models = holding(backend.models, model);
+  const efforts = backend.efforts.map((e) => e.id);
+  backend.models = holding(backend.models, model).map((m) => (backend.models.includes(m) ? m : { ...m, efforts }));
   backend.efforts = holding(backend.efforts, effort);
   backend.permission_modes = holding(backend.permission_modes, session.permission_mode || undefined);
   return {
