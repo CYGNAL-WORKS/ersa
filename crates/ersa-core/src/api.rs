@@ -280,32 +280,53 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
             After::Continue,
         ));
     };
+    // The two methods that act on the connection itself; `answer` has the
+    // rest.
+    match method {
+        Method::CoreHello => {
+            handlers::core_hello(core, conn, parse(request.params).map_err(keep_open)?)
+        }
+        Method::CoreShutdown => {
+            let _: ersa_protocol::core_api::Empty = parse(request.params).map_err(keep_open)?;
+            // The connection writes this answer, then requests the shutdown.
+            Ok((serde_json::json!({}), After::Shutdown))
+        }
+        _ => answer(core, &conn.peer(), method, request.params)
+            .await
+            .map(|value| (value, After::Continue))
+            .map_err(|e| (e, After::Continue)),
+    }
+}
+
+/// Answers `method` on behalf of connection `peer`, wherever it runs: in
+/// line or apart (see [`runs_apart`]). There is one handler per method, so
+/// a method chosen to run apart cannot lack one.
+async fn answer(
+    core: &Core,
+    peer: &Peer,
+    method: Method,
+    params: Option<Value>,
+) -> Result<Value, ApiError> {
     if let Some(milestone) = method.reserved_for() {
         // A reserved method is part of the API and gets an application
         // error, never "method not found" (PROTO-CORE-API-R10).
-        return Err((
-            ApiError::invalid_state(format!(
-                "{} is reserved for milestone {milestone} and not implemented yet",
-                method.name()
-            )),
-            After::Continue,
-        ));
+        return Err(ApiError::invalid_state(format!(
+            "{} is reserved for milestone {milestone} and not implemented yet",
+            method.name()
+        )));
     }
-
     if let Some(refused) = crate::replay::refusal(core, method) {
-        return Err((refused, After::Continue));
+        return Err(refused);
     }
-
-    let params = request.params;
-    // Each arm parses its params, runs its handler, and serializes the result.
-    // `?` returns early with an error that keeps the connection open.
-    let result = match method {
-        Method::CoreHello => return handlers::core_hello(core, conn, parse(params)?),
-        Method::CoreShutdown => {
-            let _: ersa_protocol::core_api::Empty = parse(params)?;
-            // The connection writes this answer, then requests the shutdown.
-            return Ok((serde_json::json!({}), After::Shutdown));
-        }
+    // Each arm parses its params, runs its handler, and serializes the
+    // result. `?` returns early with an invalid params error.
+    match method {
+        // They act on the connection itself, so `dispatch` answers them in
+        // line, and they never run apart.
+        Method::CoreHello | Method::CoreShutdown => Err(ApiError::invalid_state(format!(
+            "{} is answered only in line on its connection",
+            method.name()
+        ))),
         Method::CoreStatus => to_json(handlers::core_status(core, parse(params)?).await),
         Method::HostList => to_json(handlers::host_list(core, parse(params)?).await),
         Method::BackendList => to_json(handlers::backend_list(core, parse(params)?).await),
@@ -334,7 +355,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionArrange => to_json(sessions::arrange(core, parse(params)?).await),
         Method::SessionDelete => to_json(delete::delete(core, parse(params)?).await),
         Method::SessionFork => to_json(sessions::fork(core, parse(params)?).await),
-        Method::SessionSend => to_json(sessions::send(core, &conn.peer(), parse(params)?).await),
+        Method::SessionSend => to_json(sessions::send(core, peer, parse(params)?).await),
         Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
         Method::SessionDecidePermission => {
             to_json(sessions::decide_permission(core, parse(params)?).await)
@@ -344,10 +365,8 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         }
         Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
         Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
-        Method::SessionSubscribe => {
-            to_json(sessions::subscribe(core, &conn.peer(), parse(params)?).await)
-        }
-        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(&conn.peer(), parse(params)?)),
+        Method::SessionSubscribe => to_json(sessions::subscribe(core, peer, parse(params)?).await),
+        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(peer, parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
         Method::AttachmentInspect => to_json(sessions::inspect(core, parse(params)?).await),
         Method::SectionList => to_json(sections::list(core, parse(params)?).await),
@@ -355,7 +374,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SectionRename => to_json(sections::rename(core, parse(params)?).await),
         Method::SectionRemove => to_json(sections::remove(core, parse(params)?).await),
 
-        // Handled above by `reserved_for`; listed so that adding a method
+        // Refused above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
         Method::HostAdd
         | Method::HostRemove
@@ -367,54 +386,93 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         | Method::TerminalOpen
         | Method::TerminalInput
         | Method::TerminalResize
-        | Method::TerminalClose => unreachable!("reserved methods are answered above"),
-    };
-    result
-        .map(|value| (value, After::Continue))
-        .map_err(|e| (e, After::Continue))
+        | Method::TerminalClose => Err(ApiError::invalid_state(format!(
+            "{} is reserved and not implemented yet",
+            method.name()
+        ))),
+    }
 }
 
-/// Whether `request` runs detached: a session request about one session
-/// (which may wait on its backend, or must keep its place behind one that
-/// does), which the server runs on its own rather than in line with the
-/// connection's other requests. Only after the handshake. Every request
-/// that names a session is one, so requests about one session keep their
-/// order whatever they are; `session.list` and `session.create` name none.
-/// A few slow requests that name no session run detached too, so they
-/// never hold up the connection's other requests.
+/// Whether `request` runs apart from the connection's other requests,
+/// which then never wait for it, rather than in line with them. Only after
+/// the handshake.
 pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
-    conn.api_version.is_some()
-        && matches!(
-            Method::from_name(&request.method),
-            Some(
-                Method::SessionCreate
-                    | Method::SessionStart
-                    | Method::SessionStop
-                    | Method::SessionResume
-                    | Method::SessionRemove
-                    // Stops the session first, which waits on its backend.
-                    | Method::SessionSetArchived
-                    | Method::SessionArrange
-                    // Stops the session, runs git and deletes files.
-                    | Method::SessionDelete
-                    // Reads the session's record, then starts a backend.
-                    | Method::SessionFork
-                    | Method::SessionSend
-                    | Method::SessionInterrupt
-                    | Method::SessionDecidePermission
-                    | Method::SessionAnswerQuestion
-                    | Method::SessionSetTitle
-                    | Method::SessionSetMode
-                    | Method::SessionSubscribe
-                    | Method::SessionUnsubscribe
-                    | Method::SessionRawLog
-                    // Reads a path that may be slow to answer.
-                    | Method::AttachmentInspect
-                    // Runs several git calls and reads every uncommitted
-                    // file, which may take a while in a large workspace.
-                    | Method::WorkspaceChanges
-            )
-        )
+    conn.api_version.is_some() && Method::from_name(&request.method).is_some_and(runs_apart)
+}
+
+/// Whether `method` runs apart. A request that runs git or a backend's
+/// command, inspects a folder or file the user named, or waits on a backend
+/// never holds up the connection (PROTO-CORE-API-R92). Neither does any
+/// request that names a session, so that requests about one session keep
+/// their order whatever they are (`session.list` and `session.create` name
+/// none). Every method is listed, so a new one does not build until it is
+/// placed.
+fn runs_apart(method: Method) -> bool {
+    match method {
+        Method::SessionCreate
+        | Method::SessionStart
+        | Method::SessionStop
+        | Method::SessionResume
+        | Method::SessionRemove
+        // Stops the session first, which waits on its backend.
+        | Method::SessionSetArchived
+        | Method::SessionArrange
+        // Stops the session, runs git and deletes files.
+        | Method::SessionDelete
+        // Reads the session's record, then starts a backend.
+        | Method::SessionFork
+        | Method::SessionSend
+        | Method::SessionInterrupt
+        | Method::SessionDecidePermission
+        | Method::SessionAnswerQuestion
+        | Method::SessionSetTitle
+        | Method::SessionSetMode
+        | Method::SessionSubscribe
+        | Method::SessionUnsubscribe
+        | Method::SessionRawLog
+        // Reads a path that may be slow to answer.
+        | Method::AttachmentInspect
+        // Inspect the folder the user named.
+        | Method::ProjectAdd
+        | Method::ProjectFind
+        // Run git.
+        | Method::BranchList
+        | Method::WorkspaceCreate
+        | Method::WorkspaceRemove
+        | Method::WorkspaceChanges
+        // Run each backend's version command when detecting.
+        | Method::BackendList
+        | Method::HostList => true,
+
+        // Act on the connection itself.
+        Method::CoreHello
+        | Method::CoreShutdown
+        // Read or write only Core's own state and database.
+        | Method::CoreStatus
+        | Method::ProjectList
+        | Method::ProjectSetTrust
+        | Method::ProjectRemove
+        | Method::WorkspaceList
+        | Method::SettingsGet
+        | Method::SettingsSet
+        | Method::SessionList
+        | Method::SectionList
+        | Method::SectionCreate
+        | Method::SectionRename
+        | Method::SectionRemove
+        // Reserved: refused at once.
+        | Method::HostAdd
+        | Method::HostRemove
+        | Method::HostProbe
+        | Method::ModeList
+        | Method::FsList
+        | Method::FsRead
+        | Method::FsDiff
+        | Method::TerminalOpen
+        | Method::TerminalInput
+        | Method::TerminalResize
+        | Method::TerminalClose => false,
+    }
 }
 
 /// When `request` is a `session.stop`, the session it stops. A stop is what
@@ -453,95 +511,13 @@ pub fn session_lane(conn: &ConnectionState, request: &Request) -> Option<String>
 /// `peer`.
 pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Response {
     let id = request.id.clone();
-    // A replay server refuses here too: these requests skip `dispatch`.
-    if let Some(method) = Method::from_name(&request.method)
-        && let Some(ApiError(error)) = crate::replay::refusal(core, method)
-    {
-        return Response::failure(Some(id), error);
-    }
-    let params = request.params;
     let result = match Method::from_name(&request.method) {
-        Some(Method::SessionCreate) => match parse(params) {
-            Ok(params) => to_json(sessions::create(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionStop) => match parse(params) {
-            Ok(params) => to_json(sessions::stop(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionRemove) => match parse(params) {
-            Ok(params) => to_json(sessions::remove(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionSetArchived) => match parse(params) {
-            Ok(params) => to_json(sessions::set_archived(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionArrange) => match parse(params) {
-            Ok(params) => to_json(sessions::arrange(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionDelete) => match parse(params) {
-            Ok(params) => to_json(delete::delete(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionFork) => match parse(params) {
-            Ok(params) => to_json(sessions::fork(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionSend) => match parse(params) {
-            Ok(params) => to_json(sessions::send(core, peer, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionInterrupt) => match parse(params) {
-            Ok(params) => to_json(sessions::interrupt(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionDecidePermission) => match parse(params) {
-            Ok(params) => to_json(sessions::decide_permission(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionStart) => match parse(params) {
-            Ok(params) => to_json(sessions::start(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionResume) => match parse(params) {
-            Ok(params) => to_json(sessions::resume(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionAnswerQuestion) => match parse(params) {
-            Ok(params) => to_json(sessions::answer_question(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionSetTitle) => match parse(params) {
-            Ok(params) => to_json(sessions::set_title(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionSetMode) => match parse(params) {
-            Ok(params) => to_json(sessions::set_mode(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionSubscribe) => match parse(params) {
-            Ok(params) => to_json(sessions::subscribe(core, peer, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionUnsubscribe) => match parse(params) {
-            Ok(params) => to_json(sessions::unsubscribe(peer, params)),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::SessionRawLog) => match parse(params) {
-            Ok(params) => to_json(sessions::raw_log(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::AttachmentInspect) => match parse(params) {
-            Ok(params) => to_json(sessions::inspect(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        Some(Method::WorkspaceChanges) => match parse(params) {
-            Ok(params) => to_json(handlers::workspace_changes(core, params).await),
-            Err((e, _)) => Err(e),
-        },
-        _ => unreachable!("runs_detached chose one of the methods above"),
+        Some(method) => answer(core, peer, method, request.params).await,
+        // `runs_detached` chooses only methods it knows.
+        None => Err(ApiError(ErrorObject::protocol(
+            code::METHOD_NOT_FOUND,
+            format!("no method {}", request.method),
+        ))),
     };
     match result {
         Ok(value) => Response::success(id, value),
@@ -551,17 +527,51 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
 
 /// Parses a method's params. Absent params count as `{}`, so methods without
 /// parameters can be called without them.
-fn parse<T: DeserializeOwned>(params: Option<Value>) -> Result<T, (ApiError, After)> {
+fn parse<T: DeserializeOwned>(params: Option<Value>) -> Result<T, ApiError> {
     let params = params.unwrap_or_else(|| Value::Object(Default::default()));
-    serde_json::from_value(params).map_err(|e| {
-        (
-            ApiError::invalid_params(format!("invalid params: {e}")),
-            After::Continue,
-        )
-    })
+    serde_json::from_value(params)
+        .map_err(|e| ApiError::invalid_params(format!("invalid params: {e}")))
+}
+
+/// An error answered with the connection kept open.
+fn keep_open(error: ApiError) -> (ApiError, After) {
+    (error, After::Continue)
 }
 
 fn to_json<T: Serialize>(result: Result<T, ApiError>) -> Result<Value, ApiError> {
     let value = result?;
     serde_json::to_value(value).map_err(|e| ApiError::internal(format!("serializing: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The seven methods PROTO-CORE-API-R92 names run apart, and no method
+    /// that runs apart is one only the connection itself can answer.
+    // verifies: PROTO-CORE-API-R92
+    #[test]
+    fn slow_methods_run_apart_and_every_one_apart_has_a_handler() {
+        for method in [
+            Method::ProjectAdd,
+            Method::ProjectFind,
+            Method::BranchList,
+            Method::WorkspaceCreate,
+            Method::WorkspaceRemove,
+            Method::BackendList,
+            Method::HostList,
+        ] {
+            assert!(runs_apart(method), "{}", method.name());
+        }
+        for &method in Method::ALL {
+            if runs_apart(method) {
+                assert!(
+                    !matches!(method, Method::CoreHello | Method::CoreShutdown),
+                    "{} needs the connection, so it cannot run apart",
+                    method.name()
+                );
+                assert!(method.reserved_for().is_none(), "{}", method.name());
+            }
+        }
+    }
 }
