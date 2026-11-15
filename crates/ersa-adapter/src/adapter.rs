@@ -184,7 +184,8 @@ pub trait Adapter: Send + Sync {
     /// What session `backend_session_id`'s record says of its model, effort
     /// and permission mode, read for a relaunch: back from the record's end
     /// until each value is found or the record reaches the time Core last
-    /// gave the backend that value. Core picks the values of the turns after
+    /// gave the backend that value, and with it what the first turn after
+    /// each of those times ran with. Core picks the values of the turns after
     /// its requests with [`RecordedSettings::since`]. A session with no
     /// record has none, which is also the default.
     async fn record_settings(
@@ -193,8 +194,8 @@ pub trait Adapter: Send + Sync {
         _cwd: &str,
         _backend_session_id: &str,
         _requested: Requested,
-    ) -> Result<RecordedSettings, AdapterError> {
-        Ok(RecordedSettings::default())
+    ) -> Result<RelaunchSettings, AdapterError> {
+        Ok(RelaunchSettings::default())
     }
 
     /// Renames session `backend_session_id`, which no process of Ersa's has
@@ -364,6 +365,20 @@ pub struct RecordedSettings {
     pub model: Option<Recorded>,
     pub effort: Option<Recorded>,
     pub permission_mode: Option<Recorded>,
+}
+
+/// What a session's record says of its values before a relaunch, which
+/// weighs the latest against the first turn after Core's request for each
+/// (PROTO-CORE-API-R71).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RelaunchSettings {
+    /// Each value from the latest turn that holds it, as far back as the
+    /// record was read.
+    pub latest: RecordedSettings,
+    /// For each value Core gave a time for, what the first turn that began
+    /// after that time ran with (PROTO-CLAUDE-CODE-STREAM-R60); `None` for a
+    /// value without a time, and while no turn after it holds the value.
+    pub first: RecordedSettings,
 }
 
 /// One value from a session's record.
