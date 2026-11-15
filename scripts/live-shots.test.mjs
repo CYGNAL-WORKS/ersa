@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { RESULTS, githubRepo, publishShots, screenshots } from "./live-shots.mjs";
+import { BACKEND_RECORD, RESULTS, githubRepo, publishShots, screenshots } from "./live-shots.mjs";
 
 const roots = [];
 after(() => roots.forEach((r) => rmSync(r, { recursive: true, force: true })));
@@ -67,6 +67,7 @@ test("publishShots pushes the screenshots alone to live-shots/<branch> and links
   mkdirSync(join(work, RESULTS, "smoke"), { recursive: true });
   writeFileSync(join(work, RESULTS, "smoke", "01-new-session.png"), "png");
   writeFileSync(join(work, RESULTS, "smoke", "core.log"), "log");
+  writeFileSync(join(work, RESULTS, "smoke", BACKEND_RECORD), "stand-in\n");
 
   const markdown = publishShots({ root: work });
 
@@ -89,4 +90,54 @@ test("publishShots pushes the screenshots alone to live-shots/<branch> and links
 test("publishShots refuses when there is nothing to publish", () => {
   const { work } = checkout();
   assert.throws(() => publishShots({ root: work }), /No screenshots/);
+});
+
+// Two tests' results, one that ran the stand-in and one whose record says `record` (or none, for `null`).
+function mixedResults(record) {
+  const { bare, work } = checkout();
+  mkdirSync(join(work, RESULTS, "smoke"), { recursive: true });
+  writeFileSync(join(work, RESULTS, "smoke", "01-new-session.png"), "png");
+  writeFileSync(join(work, RESULTS, "smoke", BACKEND_RECORD), "stand-in");
+  mkdirSync(join(work, RESULTS, "tools"), { recursive: true });
+  writeFileSync(join(work, RESULTS, "tools", "01-tool-call.png"), "png");
+  if (record !== null) writeFileSync(join(work, RESULTS, "tools", BACKEND_RECORD), record);
+  return { bare, work };
+}
+
+// Nothing reached the remote: no branch, and no objects at all.
+function assertNothingPushed(bare, work) {
+  assert.equal(git(bare, "for-each-ref", "refs/heads/live-shots"), "");
+  assert.equal(git(bare, "count-objects", "-v").match(/^count: (\d+)/m)?.[1], "0");
+  assert.equal(git(bare, "count-objects", "-v").match(/^in-pack: (\d+)/m)?.[1], "0");
+  // Nor was the screenshot written to the checkout's own object store.
+  const blob = spawnSync("git", ["cat-file", "-e", git(work, "hash-object", join(work, RESULTS, "tools", "01-tool-call.png"))], { cwd: work });
+  assert.notEqual(blob.status, 0, "the refused screenshot is not in the object store");
+}
+
+test("publishShots refuses the whole run when a screenshot came from the real backend", () => {
+  const { bare, work } = mixedResults("claude\n");
+  assert.throws(
+    () => publishShots({ root: work }),
+    (e) => {
+      assert.match(e.message, /tools\/01-tool-call\.png: ran the real backend \(claude\)/);
+      assert.doesNotMatch(e.message, /smoke\/01-new-session/);
+      // Says what to do.
+      assert.match(e.message, /Delete .*tools/);
+      assert.match(e.message, /in words in the pull request's Evidence/);
+      return true;
+    },
+  );
+  assertNothingPushed(bare, work);
+});
+
+test("publishShots refuses a screenshot whose backend is not recorded", () => {
+  const { bare, work } = mixedResults(null);
+  assert.throws(() => publishShots({ root: work }), /tools\/01-tool-call\.png: no record of the backend it ran/);
+  assertNothingPushed(bare, work);
+});
+
+test("publishShots refuses any backend but the stand-in", () => {
+  const { bare, work } = mixedResults("copilot");
+  assert.throws(() => publishShots({ root: work }), /tools\/01-tool-call\.png: ran the real backend \(copilot\)/);
+  assertNothingPushed(bare, work);
 });
