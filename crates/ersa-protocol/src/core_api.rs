@@ -591,6 +591,14 @@ pub struct Session {
     /// Core always states one to the backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Core's latest request for the session's model, a `backend.list` id
+    /// given at `session.create`, `session.fork` or `session.set_model`,
+    /// beside `model`, which stays the backend's report: the session controls
+    /// name the model by the choice the user made, where an alias and the
+    /// backend's default can resolve to the same id (PROTO-CORE-API-R102).
+    /// `None` when the model was left to the backend or Core made no request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_request: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     pub permission_mode: String,
