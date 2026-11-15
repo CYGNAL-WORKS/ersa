@@ -213,11 +213,14 @@ async fn a_request_stands_until_a_turn_after_it_ran_across_a_restart() {
     );
 }
 
+/// A model or effort left out is a request for the backend's default, made
+/// at the call: absent until a turn after the call ran, then the record's.
 // verifies: PROTO-CORE-API-R71
+// verifies: PROTO-CORE-API-R98
 #[tokio::test(flavor = "multi_thread")]
-async fn a_value_core_never_requested_is_the_records_from_any_turn() {
+async fn a_value_left_to_the_backend_is_absent_until_a_turn_after_the_call() {
     let backend = Backend::default();
-    let (core, fake) = start(&backend, tempdir()).await;
+    let (mut core, fake) = start(&backend, tempdir()).await;
     let mut client = core.client().await;
     let id = started(&core, &mut client, json!({})).await;
     // Nothing named: the model and effort are the backend's to choose and
@@ -233,14 +236,27 @@ async fn a_value_core_never_requested_is_the_records_from_any_turn() {
         (None, None, "ask")
     );
 
-    // A turn of unknown start counts for a value Core never requested, and
-    // not for the permission mode it did.
-    backend.record_says("model-b", "low", "auto", None);
+    // A turn of unknown start, or one that began before the call, is not
+    // after it: the default stands.
+    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
+    for began in [None, Some(before)] {
+        backend.record_says("model-b", "low", "auto", began);
+        drop(client);
+        let (again, mut next) = restart(core, &backend).await;
+        assert_eq!(
+            values(&mut next, &id).await,
+            (Value::Null, Value::Null, json!("ask"))
+        );
+        (core, client) = (again, next);
+    }
+
+    // A turn after the call: the record's values.
+    backend.record_says("model-b", "low", "auto", Some(OffsetDateTime::now_utc()));
     drop(client);
     let (_core, mut client) = restart(core, &backend).await;
     assert_eq!(
         values(&mut client, &id).await,
-        three("model-b", "low", "ask")
+        three("model-b", "low", "auto")
     );
 }
 
@@ -515,23 +531,142 @@ async fn a_relaunch_after_a_later_turn_changed_a_value_passes_the_records_latest
     );
 }
 
-/// A value left to the backend has no request or first turn to weigh the
-/// record against: the relaunch passes nothing for it, so the backend's own
-/// default stays one, as at `session.create`.
-// verifies: PROTO-CORE-API-R71
+/// A model and effort left to the backend: the relaunch passes nothing
+/// while the record's latest is what the first turn after the call ran with,
+/// so the default stays one, and the record's latest once a later turn ran
+/// with another, as after `/model` in the backend's own tools.
+// verifies: PROTO-CORE-API-R98
 #[tokio::test(flavor = "multi_thread")]
-async fn a_relaunch_leaves_a_value_core_never_requested_to_the_backend() {
+async fn a_relaunch_keeps_a_default_until_the_record_shows_a_change() {
     let backend = Backend::default();
     let (core, fake) = start(&backend, tempdir()).await;
     let mut client = core.client().await;
     let id = started(&core, &mut client, json!({ "permission_mode": "auto" })).await;
-    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
+    let first = OffsetDateTime::now_utc() + time::Duration::minutes(1);
+    let later = first + time::Duration::minutes(1);
+
     backend.record_relaunch(
-        turn("model-a", "high", "plan", Some(before)),
-        RecordedSettings::default(),
+        turn("model-a", "high", "auto", Some(later)),
+        turn("model-a", "high", "auto", Some(first)),
     );
     assert_eq!(
         relaunched(&mut client, &fake, &id).await,
         (None, None, "auto".to_string())
+    );
+
+    backend.record_relaunch(
+        turn("model-b-1", "low", "auto", Some(later)),
+        turn("model-a", "high", "auto", Some(first)),
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-b-1", "low", "auto")
+    );
+}
+
+/// A fork that left its model and effort to the backend weighs them from
+/// the fork's own call, as a new session does.
+// verifies: PROTO-CORE-API-R98
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_keeps_a_default_from_its_own_call() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "permission_mode": "auto" })).await;
+    // The backend idle, having named no model, so the session can be forked.
+    client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(&mut client, &id).await["state"] != "idle" {
+        assert!(tokio::time::Instant::now() < deadline, "never idle");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let original = backend
+        .records
+        .lock()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (fork["model"].clone(), fork["effort"].clone()),
+        (Value::Null, Value::Null)
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let fork_backend = loop {
+        let found = (backend.records.lock().unwrap().keys())
+            .find(|k| **k != original)
+            .cloned();
+        if let Some(found) = found {
+            break found;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no fork record");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+
+    // The fork's record holds the original's turn from before the fork: it
+    // is not after the fork's call, so the fork lists no model or effort.
+    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
+    backend.record_of_says(&fork_backend, "model-a", "high", "auto", Some(before));
+    assert_eq!(
+        values(&mut client, &fork_id).await,
+        (Value::Null, Value::Null, json!("auto"))
+    );
+
+    // A later turn of the fork changed them: its relaunch passes the change.
+    let first = OffsetDateTime::now_utc() + time::Duration::minutes(1);
+    let later = first + time::Duration::minutes(1);
+    backend.settings.lock().unwrap().insert(
+        fork_backend,
+        RelaunchSettings {
+            latest: turn("model-b-1", "low", "auto", Some(later)),
+            first: turn("model-a", "high", "auto", Some(first)),
+        },
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &fork_id).await,
+        passed("model-b-1", "low", "auto")
+    );
+}
+
+/// A value Core holds no time for, stored before it kept them: the relaunch
+/// passes the record's latest from any turn, and the stored value only while
+/// the record holds none.
+// verifies: PROTO-CORE-API-R99
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relaunch_passes_the_records_latest_for_a_value_without_a_time() {
+    let backend = Backend::default();
+    let (core, _) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low", "permission_mode": "auto" }),
+    )
+    .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    drop(client);
+    let dir = without_request_times(core).await;
+    let (core, fake) = start(&backend, dir).await;
+    let mut client = core.client().await;
+
+    // The record holds none: the stored values.
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-b", "low", "auto")
+    );
+
+    // The record's latest, from a turn of unknown start.
+    backend.record_relaunch(
+        turn("model-a", "high", "plan", None),
+        RecordedSettings::default(),
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-a", "high", "plan")
     );
 }
