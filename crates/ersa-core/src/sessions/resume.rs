@@ -129,16 +129,19 @@ impl SessionManager {
         // The raw log holds the lines since Core last started the backend.
         *lock(&handle.raw) = RawLog::default();
 
-        let permission_mode = row
+        // Weighed against what the record's turns ran with since Core's
+        // requests (PROTO-CORE-API-R71).
+        let values = self
+            .relaunch_values(&adapter, &how.transport, &row, start.resume.as_deref())
+            .await;
+        let permission_mode = values
             .permission_mode
-            .clone()
             .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
         let config = SessionConfig {
             cwd: row.cwd.clone(),
             permission_mode,
-            // Core's request, as it stored it (PROTO-CORE-API-R71).
-            model: row.model.clone(),
-            effort: row.effort.clone(),
+            model: values.model,
+            effort: values.effort,
             project_trusted: how.project_trusted,
             project_path: how.project_path,
             backend_session_id: start.backend_session_id,
@@ -163,6 +166,39 @@ impl SessionManager {
         );
         drop(sessions);
         Ok(())
+    }
+
+    /// The model, effort and permission mode a relaunch passes the backend
+    /// (PROTO-CORE-API-R71). Only a session whose record the backend
+    /// continues (`resumed`, its backend id) has turns to weigh; one that
+    /// starts again as new, or a record that can't be read in time, gets
+    /// Core's requests as it stored them, as a record that can't be looked
+    /// at is resumed all the same.
+    async fn relaunch_values(
+        &self,
+        adapter: &Arc<dyn Adapter>,
+        transport: &Arc<dyn Transport>,
+        row: &SessionRow,
+        resumed: Option<&str>,
+    ) -> settings::Listed {
+        let stored = || settings::Listed {
+            model: row.model.clone(),
+            effort: row.effort.clone(),
+            permission_mode: row.permission_mode.clone(),
+        };
+        let Some(backend_id) = resumed else {
+            return stored();
+        };
+        let reading = adapter.record_settings(
+            Arc::clone(transport),
+            &row.cwd,
+            backend_id,
+            settings::requested(row),
+        );
+        match tokio::time::timeout(RECORD_READ, reading).await {
+            Ok(Ok(record)) => settings::relaunched(row, &record),
+            _ => stored(),
+        }
     }
 
     /// Whether the backend continues the session's record or, with no record
