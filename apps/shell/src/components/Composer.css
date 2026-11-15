@@ -187,9 +187,9 @@
 
 .composer-send {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  /* A grid of one cell, so send's and stop's icons share it and crossfade. */
+  display: inline-grid;
+  place-items: center;
   box-sizing: border-box;
   width: var(--size-control-lg);
   height: var(--size-control-lg);
@@ -295,11 +295,6 @@
 }
 
 /* Send becoming stop and back crossfades: both icons share one place, and the one not shown fades out. */
-.composer-send {
-  display: inline-grid;
-  place-items: center;
-}
-
 .composer-send-icon {
   display: inline-flex;
   grid-area: 1 / 1;
