@@ -179,6 +179,47 @@ describe("what the user chose on the new-session screen when the project changes
   });
 });
 
+describe("a backend chosen on the new-session screen", () => {
+  // verifies: FLOW-NEW-SESSION-R02
+  it("drops the model and permission mode chosen for the backend before it, so they don't follow a project change", () => {
+    const other: BackendInfo = {
+      ...claude,
+      name: "copilot",
+      label: "Copilot",
+      models: [
+        { id: "auto", label: "Auto", default: true },
+        { id: "opus", label: "Opus via Copilot", default: false },
+      ],
+      permission_modes: [
+        { id: "ask", label: "Ask", default: true },
+        { id: "plan", label: "Plan", default: false },
+      ],
+    };
+    const mine: BackendInfo = {
+      ...claude,
+      models: [
+        { id: "default", label: "Default (recommended)", default: true },
+        { id: "opus", label: "Opus 5.5", default: false },
+      ],
+      permission_modes: [
+        { id: "default", label: "Ask before acting", default: true },
+        { id: "plan", label: "Plan", default: false },
+      ],
+    };
+    render(createElement(NewSessionScreen, props([alpha, beta], { backends: { local: [mine, other] } })));
+    const label = (chip: string) => screen.getByRole("button", { name: new RegExp(`^${chip}:`) }).getAttribute("aria-label");
+    const pick = (chip: string, option: RegExp) => {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${chip}:`) }));
+      fireEvent.click(screen.getByRole("option", { name: option }));
+    };
+    pick("Model", /Opus 5.5/);
+    pick("Permission mode", /Plan/);
+    pick("Backend", /Copilot/);
+    pick("Project", /beta/);
+    expect([label("Backend"), label("Model"), label("Permission mode")]).toEqual(["Backend: Copilot", "Model: Auto", "Permission mode: Ask"]);
+  });
+});
+
 describe("the effort chip on the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R02
   it("goes back to no level when Default is chosen, and keeps a level only while the model takes it", () => {
