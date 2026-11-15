@@ -9,7 +9,7 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Recorded, RecordedSettings};
+use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, RecordedSettingsMap, Records};
@@ -48,21 +48,39 @@ impl Backend {
         mode: &str,
         began: Option<OffsetDateTime>,
     ) {
-        let backend_id = backend_id.to_string();
-        let recorded = |value: &str| {
-            Some(Recorded {
-                value: value.into(),
-                turn_began: began,
-            })
-        };
         self.settings.lock().unwrap().insert(
-            backend_id,
-            RecordedSettings {
-                model: recorded(model),
-                effort: recorded(effort),
-                permission_mode: recorded(mode),
+            backend_id.to_string(),
+            RelaunchSettings {
+                latest: turn(model, effort, mode, began),
+                first: RecordedSettings::default(),
             },
         );
+    }
+
+    /// The record of the one session the backend has, as a relaunch reads
+    /// it: the latest values, and those of the first turn after Core's
+    /// requests.
+    fn record_relaunch(&self, latest: RecordedSettings, first: RecordedSettings) {
+        let backend_id = self.records.lock().unwrap().keys().next().unwrap().clone();
+        self.settings
+            .lock()
+            .unwrap()
+            .insert(backend_id, RelaunchSettings { latest, first });
+    }
+}
+
+/// A turn that began at `began` and ran with these values.
+fn turn(model: &str, effort: &str, mode: &str, began: Option<OffsetDateTime>) -> RecordedSettings {
+    let recorded = |value: &str| {
+        Some(Recorded {
+            value: value.into(),
+            turn_began: began,
+        })
+    };
+    RecordedSettings {
+        model: recorded(model),
+        effort: recorded(effort),
+        permission_mode: recorded(mode),
     }
 }
 
@@ -389,5 +407,131 @@ async fn a_value_stored_without_its_time_yields_to_the_records_from_any_turn() {
     assert_eq!(
         values(&mut client, &id).await,
         three("model-a", "high", "ask")
+    );
+}
+
+/// Stops the session, resumes it, and returns the values its backend was
+/// started with again: `(model, effort, permission_mode)`.
+async fn relaunched(
+    client: &mut Client,
+    fake: &FakeAdapter,
+    id: &str,
+) -> (Option<String>, Option<String>, String) {
+    client.result("session.stop", json!({ "id": id })).await;
+    let starts = fake.stats.configs.lock().unwrap().len();
+    client.result("session.resume", json!({ "id": id })).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let config = loop {
+        if let Some(config) = fake.stats.configs.lock().unwrap().get(starts) {
+            break config.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "never resumed");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert!(config.resume.is_some(), "{config:?}");
+    (config.model, config.effort, config.permission_mode)
+}
+
+fn passed(model: &str, effort: &str, mode: &str) -> (Option<String>, Option<String>, String) {
+    (Some(model.into()), Some(effort.into()), mode.into())
+}
+
+/// No turn has begun since Core's requests: the relaunch passes them.
+// verifies: PROTO-CORE-API-R71
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relaunch_with_no_turn_after_the_request_passes_the_request() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low", "permission_mode": "auto" }),
+    )
+    .await;
+    backend.record_relaunch(
+        turn("model-a", "high", "plan", Some(before)),
+        RecordedSettings::default(),
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-b", "low", "auto")
+    );
+}
+
+/// The turns since Core's requests ran with what the first of them did, as
+/// the backend names it: the relaunch passes the request, so an alias the
+/// backend resolved stays an alias.
+// verifies: PROTO-CORE-API-R71
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relaunch_after_turns_that_kept_the_requested_values_passes_the_request() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low", "permission_mode": "auto" }),
+    )
+    .await;
+    let first = OffsetDateTime::now_utc() + time::Duration::minutes(1);
+    let later = first + time::Duration::minutes(1);
+    backend.record_relaunch(
+        turn("model-b-1", "low", "auto", Some(later)),
+        turn("model-b-1", "low", "auto", Some(first)),
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-b", "low", "auto")
+    );
+}
+
+/// A later turn ran with values other than the first after Core's requests,
+/// as when the user changed them in the backend's own tools: the relaunch
+/// passes the record's latest for each value that changed, and the request
+/// for one that did not.
+// verifies: PROTO-CORE-API-R71
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relaunch_after_a_later_turn_changed_a_value_passes_the_records_latest() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low", "permission_mode": "auto" }),
+    )
+    .await;
+    let first = OffsetDateTime::now_utc() + time::Duration::minutes(1);
+    let later = first + time::Duration::minutes(1);
+    backend.record_relaunch(
+        turn("model-a", "low", "plan", Some(later)),
+        turn("model-b-1", "low", "auto", Some(first)),
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-a", "low", "plan")
+    );
+}
+
+/// A value Core never gave the backend has no request to weigh: the
+/// relaunch passes the record's latest from any turn, as `session.list`
+/// reports it.
+// verifies: PROTO-CORE-API-R71
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relaunch_passes_the_records_latest_for_a_value_core_never_requested() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "permission_mode": "auto" })).await;
+    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
+    backend.record_relaunch(
+        turn("model-a", "high", "plan", Some(before)),
+        RecordedSettings::default(),
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-a", "high", "auto")
     );
 }
