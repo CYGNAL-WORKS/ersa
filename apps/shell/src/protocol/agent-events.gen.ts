@@ -33,7 +33,7 @@ export interface Envelope {
   /**
    * Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.
    */
-  v: 6;
+  v: 7;
   session_id: string;
   /**
    * Gap-free and increasing within a session; assigned by Core.
@@ -146,9 +146,13 @@ export interface ToolRequested {
   input: ToolInput;
   parent_tool_use_id?: string;
   /**
-   * The one thing the call acts on, as the user would name it: a path, a command, a search or an address. Filled by the adapter from its backend's own tools; absent for any other call.
+   * The one thing the call acts on, as the user would name it: a path, a command, a search, an address or a subagent's task. Filled by the adapter from its backend's own tools; absent for any other call.
    */
   target?: string;
+  /**
+   * Which kind of thing target is, so the Interface knows a path without guessing from its spelling. Present exactly when target is.
+   */
+  target_kind?: "path" | "command" | "search" | "address" | "task";
   /**
    * For a call that changes files, one entry per change in the order the call makes them; absent for any other call.
    *
