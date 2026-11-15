@@ -395,8 +395,9 @@ test("a tile keeps its chevron beside More, and its mark while its title is edit
   await expect(edited.locator(".session-more")).toHaveCount(0);
 });
 
-// The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
-// opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
+// The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip and the Worktree checkbox on the way
+// from the composer, each chip opening its choices, Escape closing them with focus back on the chip, a choice taking
+// effect, and Space toggling the checkbox with focus kept on it.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {
   await page.goto("/gallery.html");
   const screen = page
@@ -404,18 +405,20 @@ test("every session control is reachable and works from the keyboard", async ({ 
     .filter({ hasText: "Ready, at the defaults" });
   const chips = screen.locator(".chip");
   const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
-  expect(names.length).toBe(6);
+  expect(names.length).toBe(5);
+  const worktree = screen.getByRole("checkbox", { name: "Worktree" });
 
-  // Tab from the composer reaches send, which keeps focus with nothing to send, then each chip in turn.
+  // Tab from the composer reaches send, which keeps focus with nothing to send, then each control in turn: host,
+  // project and Worktree where the session runs, then how it runs.
   await screen.locator("textarea").focus();
   await page.keyboard.press("Tab");
   expect(await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))).toBe("Send");
   const reached: (string | null)[] = [];
-  for (let i = 0; i < names.length; i++) {
+  for (let i = 0; i <= names.length; i++) {
     await page.keyboard.press("Tab");
-    reached.push(await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? null));
+    reached.push(await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.closest("label")?.textContent ?? null));
   }
-  expect(reached).toEqual(names);
+  expect(reached).toEqual([names[0], names[1], "Worktree", ...names.slice(2)]);
 
   for (const name of names) {
     const chip = screen.getByRole("button", { name: name ?? "" });
@@ -423,10 +426,8 @@ test("every session control is reachable and works from the keyboard", async ({ 
     await page.keyboard.press("Enter");
     const list = screen.getByRole("listbox");
     await expect(list).toBeVisible();
-    // Focus starts in the list's search box where it has one, the workspace list's base branch, else on the chosen option.
-    const search = list.getByRole("searchbox");
-    if ((await search.count()) > 0) await expect(search).toBeFocused();
-    else await expect(list.locator('[aria-selected="true"]')).toBeFocused();
+    // Focus starts on the chosen option.
+    await expect(list.locator('[aria-selected="true"]')).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(list).toHaveCount(0);
     await expect(chip).toBeFocused();
@@ -434,14 +435,31 @@ test("every session control is reachable and works from the keyboard", async ({ 
   }
 
   // A choice from the keyboard changes the value and leaves focus on the chip.
-  // The workspace list opens in its search box; the option above it is Project folder.
-  const workspace = screen.getByRole("button", { name: "Workspace: New workspace from main" });
-  await workspace.focus();
+  const mode = screen.getByRole("button", { name: /^Permission mode:/ });
+  await mode.focus();
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  const folder = screen.getByRole("button", { name: "Workspace: Project folder" });
-  await expect(folder).toBeFocused();
+  await expect(screen.getByRole("button", { name: "Permission mode: Accept edits" })).toBeFocused();
+
+  // Space unchecks the Worktree box and checks it again, with keyboard focus on it all the while; the focus edge is
+  // ink (DESIGN.md, Pointer and press).
+  await expect(worktree).toBeChecked();
+  await worktree.focus();
+  await page.keyboard.press("Space");
+  await expect(worktree).not.toBeChecked();
+  await expect(worktree).toBeFocused();
+  const ink = await screen.locator(".worktree").evaluate((el) => {
+    const probe = el.appendChild(document.createElement("span"));
+    probe.style.color = "var(--color-ink)";
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  // Polled, since the edge eases in over motion-quick.
+  await expect.poll(() => screen.locator(".worktree").evaluate((el) => getComputedStyle(el).borderTopColor)).toBe(ink);
+  await page.keyboard.press("Space");
+  await expect(worktree).toBeChecked();
 });
 
 // The rail's foot (LAY-SHELL, The foot; issue #155): Retry attaches again, focus comes back to it when the retry

@@ -3,11 +3,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// The workspace chip's base branch (#184; FLOW-NEW-SESSION-R21, R29) in the running app, against a real Core and a
-// real git repository: the folder dialog is answered from the test, and the backend is the stand-in.
-test("a new workspace starts at the default branch, and is made from the base branch chosen", async ({ ersa }) => {
+// The Worktree checkbox (issue 412; FLOW-NEW-SESSION-R02, R04, R05) in the running app, against a real Core and a real
+// git repository: the folder dialog is answered from the test, and the backend is the stand-in.
+test("a new session runs in a worktree made from the default branch, and unchecked in the project folder", async ({ ersa }) => {
   const { page } = ersa;
-  // A repository whose default branch is main, with a release branch one commit ahead of it.
+  // A repository whose default branch is main, and a feature branch one commit ahead of it, left checked out in the
+  // folder: a new worktree's HEAD is main's tip only if Core made it from the default branch, not what is checked out.
   const repo = path.join(ersa.dir, "repo");
   mkdirSync(repo);
   const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", windowsHide: true }).trim();
@@ -17,14 +18,11 @@ test("a new workspace starts at the default branch, and is made from the base br
   writeFileSync(path.join(repo, "README.md"), "main\n");
   git("add", ".");
   git("commit", "-q", "-m", "On main");
-  git("checkout", "-q", "-b", "release/1.0");
-  writeFileSync(path.join(repo, "RELEASE.md"), "release\n");
+  const mainTip = git("rev-parse", "HEAD");
+  git("checkout", "-q", "-b", "feature/rail");
+  writeFileSync(path.join(repo, "RAIL.md"), "rail\n");
   git("add", ".");
-  git("commit", "-q", "-m", "On release");
-  const releaseTip = git("rev-parse", "HEAD");
-  // The folder is left on a feature branch at main's commit: the chip starts at the default branch, not at what the
-  // folder has checked out, and a new workspace's HEAD can be release's tip only if it was made from release.
-  git("checkout", "-q", "-b", "feature/rail", "main");
+  git("commit", "-q", "-m", "On the feature branch");
 
   const screen = page.getByRole("region", { name: "New session" });
   await screen.getByRole("button", { name: "Project: Choose a folder" }).click();
@@ -34,16 +32,19 @@ test("a new workspace starts at the default branch, and is made from the base br
   await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(screen.getByRole("button", { name: "Project: repo" })).toBeVisible();
 
-  // R21, R29: the chip names a new workspace from the default branch, not the one the folder has checked out.
-  const chip = screen.getByRole("button", { name: /^Workspace:/ });
-  await expect(chip).toHaveAccessibleName("Workspace: New workspace from main");
+  // Checked by default, where the workspace chip stood: after the project, and saying what it means.
+  const worktree = screen.getByRole("checkbox", { name: "Worktree" });
+  await expect(worktree).toBeChecked();
+  await expect(worktree).toHaveAccessibleDescription("The session works in an isolated copy of the repository.");
+  await worktree.hover();
+  await ersa.shot("worktree-checked");
 
-  // In a short window the list has no room beneath its chip, so it opens above it (docs/design/COMPOSER.md, A chip's
-  // list), then beneath again where there is room.
-
-  await page.setViewportSize({ width: 1000, height: 420 });
-  await chip.click();
-  await expect(screen.getByRole("listbox", { name: "Workspace" })).toBeVisible();
+  // In a short window the project chip's list has no room beneath it, so it opens above it (docs/design/COMPOSER.md,
+  // A chip's list).
+  await page.setViewportSize({ width: 1000, height: 320 });
+  const projectChip = screen.getByRole("button", { name: "Project: repo" });
+  await projectChip.click();
+  await expect(screen.getByRole("listbox", { name: "Project" })).toBeVisible();
   const opened = await screen.evaluate(() => {
     const list = document.querySelector(".chip-list")!.getBoundingClientRect();
     const from = document.querySelector(".chip[data-open]")!.getBoundingClientRect();
@@ -53,20 +54,8 @@ test("a new workspace starts at the default branch, and is made from the base br
   expect(opened.listTop).toBeGreaterThanOrEqual(0);
   await page.keyboard.press("Escape");
   await page.setViewportSize({ width: 1400, height: 900 });
-  await chip.click();
-  const list = screen.getByRole("listbox", { name: "Workspace" });
-  const search = list.getByRole("searchbox", { name: "Search branches" });
-  await expect(search).toBeFocused();
-  const base = list.getByRole("group", { name: "Base branch" });
-  await expect(base.getByRole("option")).toHaveText(["feature/rail", /^main\s*Default$/, "release/1.0"]);
-  await ersa.shot("workspace-list");
-  await search.fill("rel");
-  await expect(base.getByRole("option")).toHaveText(["release/1.0"]);
-  await search.press("Enter");
-  await expect(chip).toHaveAccessibleName("Workspace: New workspace from release/1.0");
-  await expect(chip).toBeFocused();
 
-  // Sent, Core makes the workspace from release/1.0: its worktree's HEAD is the release branch's tip.
+  // Sent, Core makes the workspace from main: its worktree's HEAD is main's tip, not the feature branch's.
   await screen.getByRole("textbox", { name: "Message" }).fill("Say hello.");
   await screen.getByRole("textbox", { name: "Message" }).press("Enter");
   await expect(screen).toHaveCount(0, { timeout: 30_000 });
@@ -75,7 +64,7 @@ test("a new workspace starts at the default branch, and is made from the base br
     .split(/\r?\n\r?\n/)
     .filter((entry) => entry.trim() !== "");
   expect(worktrees).toHaveLength(2);
-  expect(/^HEAD (\w+)$/m.exec(worktrees[1]!)?.[1]).toBe(releaseTip);
+  expect(/^HEAD (\w+)$/m.exec(worktrees[1]!)?.[1]).toBe(mainTip);
 
   // Under the session, in a wide window, the session controls sit in the composer's column at the measure,
   // space-xs beneath the box, with room at the window's foot (docs/design/COMPOSER.md, The composer).
@@ -102,8 +91,26 @@ test("a new workspace starts at the default branch, and is made from the base br
   expect(layout.window - layout.controls.bottom).toBeGreaterThanOrEqual(layout.lg - 0.5);
   await ersa.shot("session-wide");
 
-  // A new session starts at the default branch again: the base chosen for the last one is not remembered.
+  // Under the session, the checkbox shows, unavailable, that it runs in a worktree.
+  const controls = page.getByRole("group", { name: "Session controls" });
+  await expect(controls.getByRole("checkbox", { name: "Worktree" })).toBeChecked();
+  await expect(controls.getByRole("checkbox", { name: "Worktree" })).toBeDisabled();
+
+  // A new session for the project starts checked, as the last one was; unchecked, it runs in the project folder and
+  // no worktree is made.
   await page.getByRole("navigation", { name: "Rail" }).getByRole("button", { name: "New session in repo" }).click();
-  await expect(page.getByRole("button", { name: /^Workspace:/ })).toHaveAccessibleName("Workspace: New workspace from main");
+  const again = page.getByRole("region", { name: "New session" }).getByRole("checkbox", { name: "Worktree" });
+  await expect(again).toBeChecked();
+  await again.uncheck();
+  await ersa.shot("worktree-unchecked");
+  await page.getByRole("textbox", { name: "Message" }).fill("Say hello again.");
+  await page.getByRole("textbox", { name: "Message" }).press("Enter");
+  await expect(page.getByRole("region", { name: "New session" })).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByRole("group", { name: "Session controls" }).getByRole("checkbox", { name: "Worktree" })).not.toBeChecked();
+  expect(git("worktree", "list", "--porcelain").split(/\r?\n\r?\n/).filter((entry) => entry.trim() !== "")).toHaveLength(2);
+
+  // And the next new session starts unchecked, as the user last left it (FLOW-NEW-SESSION-R02).
+  await page.getByRole("navigation", { name: "Rail" }).getByRole("button", { name: "New session in repo" }).click();
+  await expect(page.getByRole("region", { name: "New session" }).getByRole("checkbox", { name: "Worktree" })).not.toBeChecked();
   await ersa.shot("new-session-again");
 });

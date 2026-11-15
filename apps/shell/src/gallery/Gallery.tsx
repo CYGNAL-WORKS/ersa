@@ -34,7 +34,6 @@ import type { CoreView, SessionsView } from "../core/connection";
 import type { Envelope, Event, QuestionAsked } from "../protocol/agent-events.gen";
 import type { BackendInfo, Choice, CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
-import { branchesMatching } from "../session/controls";
 import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
 import type { Draft } from "../session/questionForm";
@@ -703,27 +702,6 @@ const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   permission_modes: [],
 });
 
-const galleryBranches = [
-  { name: "feature/rail-tree", default: false },
-  { name: "feature/workspace-chip", default: false },
-  { name: "fix/reconnect", default: false },
-  { name: "main", default: true },
-  { name: "release/0.1", default: false },
-];
-const branchOptions = galleryBranches.map((b) => ({ id: b.name, label: b.name, status: b.default ? "Default" : undefined }));
-/** The workspace chip's base branch section, saying `empty` with nothing to list (docs/design/COMPOSER.md, The workspace list). */
-const baseSection = (listed: typeof branchOptions, empty = "No branch matches.") => ({
-  heading: "Base branch",
-  placeholder: "Search branches",
-  narrow: (query: string) => {
-    const names = new Set(branchesMatching(listed.map((o) => ({ name: o.id, default: false })), query).map((b) => b.name));
-    return listed.filter((o) => names.has(o.id));
-  },
-  value: "main",
-  onChoose: () => {},
-  empty,
-});
-
 const newSession = {
   hosts: [hello.host],
   localHostId: hello.host.id,
@@ -733,8 +711,6 @@ const newSession = {
   // The folder dialog is there, so Add project… can be taken; in the gallery it is always canceled.
   onChooseFolder: async () => ({ kind: "canceled" }) as const,
   onAddProject: async () => undefined,
-  // A git project's branches, for a new workspace's base branch.
-  onListBranches: async () => ({ state: "read", branches: galleryBranches }) as const,
   autoFocus: false,
 } as const;
 const oneBackend = { local: [claudeCode] };
@@ -754,7 +730,6 @@ const sessionControls = (more: Partial<Parameters<typeof SessionControls>[0]> = 
     projects={projects}
     backends={[claudeCode]}
     values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
-    workspaceLabel="ersa/fix-reconnect"
     onChoose={() => {}}
     readOnly
     used={0.42}
@@ -771,14 +746,11 @@ const galleryAttachments: [Attached, Attached, Attached] = [
 ];
 const attachProps = { autoFocus: false, onSend: async () => false, onAttach: async () => [], workspace: galleryWorkspace } as const;
 
-/** More room, for a list with a section beneath its options. */
-const tallRoom = (node: ReactNode) => <div className="gallery-room gallery-room-tall">{node}</div>;
-
 const chipOptions = [
-  { id: "isolated", label: "New workspace", status: "Isolated" },
-  { id: "root", label: "Project folder", status: "Shared" },
+  { id: "default", label: "Ask" },
+  { id: "acceptEdits", label: "Accept edits" },
 ];
-const chip = { name: "Workspace", value: "isolated", options: chipOptions, onChoose: () => {} };
+const chip = { name: "Permission mode", value: "default", options: chipOptions, onChoose: () => {} };
 const projectChip = {
   name: "Project",
   value: "p1",
@@ -1338,7 +1310,20 @@ const entries: Entry[] = [
       ],
       // FLOW-NEW-SESSION-R14: most recently used first, with path, kind and trust, the chosen one marked.
       ["The project chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} projectId="p2" open="project" />)],
-      ["The workspace chip open", tallRoom(<NewSessionScreen {...newSession} backends={oneBackend} open="workspace" />)],
+      // The Worktree checkbox (issue 412): checked by default, unchecked as last left, and under the pointer, pressed and
+      // with keyboard focus. "Starting" shows it unavailable.
+      [
+        "Worktree unchecked",
+        <NewSessionScreen
+          {...newSession}
+          backends={oneBackend}
+          projectId="p1"
+          lastUsed={{ p1: { host_id: "local", project_id: "p1", workspace: "root", backend: "claude-code", permission_mode: "default" } }}
+        />,
+      ],
+      ["Worktree hovered", <NewSessionScreen {...newSession} backends={oneBackend} force={{ key: "workspace", state: "hover" }} />],
+      ["Worktree pressed", <NewSessionScreen {...newSession} backends={oneBackend} force={{ key: "workspace", state: "pressed" }} />],
+      ["Worktree with keyboard focus", <NewSessionScreen {...newSession} backends={oneBackend} force={{ key: "workspace", state: "focus" }} />],
       [
         "Starting",
         <NewSessionScreen
@@ -1378,46 +1363,13 @@ const entries: Entry[] = [
       ["Detecting backends", <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />],
       // Where the window has no room beneath, the list opens above its chip.
       ["Open above", <div className="gallery-room-before gallery-list-above">{<Chip {...chip} initialOpen />}</div>],
-      ["Open, an option with keyboard focus", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "focus" }} />)],
+      ["Open, an option with keyboard focus", room(<Chip {...chip} initialOpen forceOption={{ id: "acceptEdits", state: "focus" }} />)],
       ["Open", room(<Chip {...chip} initialOpen />)],
-      ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
-      ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],
+      ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "acceptEdits", state: "hover" }} />)],
+      ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "acceptEdits", state: "pressed" }} />)],
       ["Open, two lines and an action", room(<Chip {...projectChip} forceOption={{ id: "p2", state: "hover" }} />)],
       // The action as it will be once it can be taken, with its shortcut.
       ["Open, the action available", room(<Chip {...projectChip} action={{ ...projectChip.action, onChoose: () => {} }} />)],
-      ["Reads its choice", <Chip {...chip} reads="New workspace from main" />],
-      ["Open, a section to search", tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialOpen />)],
-      [
-        "Open, more branches than fit",
-        tallRoom(
-          <Chip
-            {...chip}
-            reads="New workspace from main"
-            section={baseSection([...branchOptions, ...["a", "b", "c", "d", "e"].map((n) => ({ id: `topic/${n}`, label: `topic/${n}`, status: undefined }))])}
-            initialOpen
-          />,
-        ),
-      ],
-      [
-        "Open, the section narrowed",
-        tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialQuery="feat" initialOpen />),
-      ],
-      [
-        "Open, nothing in the section matches",
-        tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialQuery="hotfix" initialOpen />),
-      ],
-      [
-        "Open, the section being read",
-        tallRoom(<Chip {...chip} section={{ ...baseSection([], "Reading the branches…"), unavailable: true }} initialOpen />),
-      ],
-      [
-        "Open, the section unreadable",
-        tallRoom(<Chip {...chip} section={{
-              ...baseSection([], "Ersa couldn't read this project's branches. The new workspace will start at the default branch."),
-              unavailable: true,
-              problem: true,
-            }} initialOpen />),
-      ],
       [
         "Open, with statuses",
         room(
@@ -1494,6 +1446,15 @@ const entries: Entry[] = [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
       // Ended: its values, as pills that do not open; model, effort and permission mode keep the chevron's place.
       ["Under a session, with its values", <Composer autoFocus={false} onSend={async () => false} controls={sessionControls()} />],
+      // A session in the project's own folder: the Worktree checkbox unavailable and unchecked (issue 412).
+      [
+        "Under a session in the project folder",
+        <Composer
+          autoFocus={false}
+          onSend={async () => false}
+          controls={sessionControls({ values: { host_id: hello.host.id, project_id: "p1", workspace: "root", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" } })}
+        />,
+      ],
       // Running: model, effort and permission mode open (FLOW-NEW-SESSION-R30).
       ["Under a running session", <Composer autoFocus={false} onSend={async () => false} controls={sessionControls({ changeable: true })} />],
       ["Under a running session, a chip open", menuRoom(<Composer autoFocus={false} onSend={async () => false} controls={sessionControls({ changeable: true, open: "model" })} />)],

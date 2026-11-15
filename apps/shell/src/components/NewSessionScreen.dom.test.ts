@@ -172,7 +172,8 @@ describe("what the user chose on the new-session screen when the project changes
     render(createElement(NewSessionScreen, props([alpha, beta], { backends: { local: [offering] }, lastUsed })));
     pick("Permission mode", /Plan/);
     pick("Project", /beta/);
-    expect([label("Workspace"), label("Model"), label("Effort"), label("Permission mode")]).toEqual(["Workspace: Project folder", "Model: Opus 5.5", "Effort: high", "Permission mode: Plan"]);
+    expect((screen.getByRole("checkbox", { name: "Worktree" }) as HTMLInputElement).checked).toBe(false);
+    expect([label("Model"), label("Effort"), label("Permission mode")]).toEqual(["Model: Opus 5.5", "Effort: high", "Permission mode: Plan"]);
     // Default effort chosen on the screen is a choice too: it stays none over the project's last level.
     pick("Effort", /Default/);
     pick("Project", /alpha/);

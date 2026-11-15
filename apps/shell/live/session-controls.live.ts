@@ -29,7 +29,7 @@ test("a running session's permission mode and effort change from its session con
   await expect(mode).toHaveAccessibleName("Permission mode: Ask");
   await expect(mode).toBeEnabled();
   // The where chips stay read-only under the session.
-  await expect(controls.getByRole("button", { name: /^Workspace:/ })).toBeDisabled();
+  await expect(controls.getByRole("button", { name: /^Project:/ })).toBeDisabled();
 
   await mode.click();
   await ersa.shot("permission-mode-open");
