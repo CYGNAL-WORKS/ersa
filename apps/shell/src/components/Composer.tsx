@@ -19,8 +19,6 @@ import "./Composer.css";
  */
 export type Unavailable = "reconnecting" | "unreachable" | "detecting" | "no-backend" | { failedBackend: string };
 
-export type { Waiting };
-
 interface ComposerProps {
   /** Why the user cannot send now; absent when they can. */
   unavailable?: Unavailable;

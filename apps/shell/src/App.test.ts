@@ -1526,6 +1526,26 @@ describe("sending while the agent works under a session App draws", () => {
     expect(statusText()).toBe("Waiting: notes.md");
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("offers stop again for a message sent while a stopped turn winds down, which cancels that message", async () => {
+    const core = await open({ "session.list": () => running(), "session.interrupt": () => ({}), "session.send": () => new Promise(() => {}) });
+    await core.emit(on(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    const composer = screen.getByRole("form", { name: "Composer" });
+    await act(async () => {
+      fireEvent.click(within(composer).getByRole("button", { name: "Stop" }));
+    });
+    await settle();
+    expect(within(composer).getByRole("button", { name: "Stopping…" })).toBeTruthy();
+    // A message sent now is on its way: stop cancels it.
+    await enter("Do this instead");
+    await act(async () => {
+      fireEvent.click(within(composer).getByRole("button", { name: "Stop" }));
+    });
+    await settle();
+    expect(core.calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
+    expect(within(composer).getByRole("button", { name: "Stopping…" })).toBeTruthy();
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R20
   it("interrupts only the running turn when stop is chosen while a message waits, once until that turn ends", async () => {
     const core = await open({ "session.list": () => running(1), "session.interrupt": () => ({}) });
