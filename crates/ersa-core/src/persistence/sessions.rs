@@ -32,8 +32,9 @@ pub struct SessionRow {
     pub effort: Option<String>,
     pub permission_mode: Option<String>,
     /// When Core gave the backend each of those, RFC 3339 on the host's
-    /// clock (PROTO-CORE-API-R71); `None` for a value it never gave, and for
-    /// a session from before Core kept the time.
+    /// clock (PROTO-CORE-API-R71); for a model or effort left out, when Core
+    /// asked for the backend's default (R98). `None` for a session from
+    /// before Core kept the time, and for one Core made no request for.
     pub model_at: Option<String>,
     pub effort_at: Option<String>,
     pub permission_mode_at: Option<String>,
