@@ -772,6 +772,13 @@ impl ClaudeAdapter {
             exited: exited_rx,
             stop_grace: self.stop_grace,
             answer_timeout: self.answer_timeout,
+            // Only a new session the adapter started under its own id: a
+            // resumed session or a fork asks nothing (R49).
+            may_ask_title: AtomicBool::new(
+                config.backend_session_id.is_some()
+                    && config.fork_of.is_none()
+                    && config.resume.is_none(),
+            ),
         };
 
         // Register for the answer before the request can be written, so the
@@ -1163,9 +1170,34 @@ struct ClaudeSession {
     stop_grace: Duration,
     /// How long a host control request waits for the CLI's answer.
     answer_timeout: Duration,
+    /// True until the session has asked the CLI to name it: set at launch
+    /// for a new session only (PROTO-CLAUDE-CODE-STREAM-R49).
+    may_ask_title: AtomicBool,
 }
 
 impl ClaudeSession {
+    /// Asks the CLI to name a new session once its first message with words
+    /// has gone to the CLI (PROTO-CLAUDE-CODE-STREAM-R49). Nothing waits on
+    /// the answer, so the turn goes on: it arrives on stdout like any line,
+    /// and the projector reads the title from it, within its deadline
+    /// (R50). A message of attachments alone leaves the asking to the next.
+    async fn ask_title(&self, text: &str) {
+        if text.trim().is_empty() || !self.may_ask_title.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        let request_id = self.shared.request_id("title");
+        let request = HostRequest::GenerateSessionTitle {
+            description: text.to_string(),
+            persist: true,
+        };
+        // Naming is a nicety: a write that fails tells the user nothing, and
+        // the session's exit, if that is why, is reported anyway.
+        let _ = self
+            .shared
+            .write(&HostMessage::control_request(request_id, request))
+            .await;
+    }
+
     async fn kill_and_wait(&self) {
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.shared.kill.send_replace(true);
@@ -1262,7 +1294,9 @@ impl Drop for ClaudeSession {
 #[async_trait]
 impl AdapterSession for ClaudeSession {
     async fn send_user(&self, text: &str) -> Result<(), AdapterError> {
-        self.shared.write(&HostMessage::user_text(text)).await
+        self.shared.write(&HostMessage::user_text(text)).await?;
+        self.ask_title(text).await;
+        Ok(())
     }
 
     /// A message with attachments: its text, then its images, then the list
@@ -1276,7 +1310,9 @@ impl AdapterSession for ClaudeSession {
         }
         self.shared
             .write(&HostMessage::user(crate::attachments::blocks(message)))
-            .await
+            .await?;
+        self.ask_title(&message.text).await;
+        Ok(())
     }
 
     async fn decide_permission(

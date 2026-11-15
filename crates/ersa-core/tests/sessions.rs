@@ -1044,6 +1044,36 @@ async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
     assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
 }
 
+/// A rename from one window reaches every other at once, as a tile carrying
+/// the new title, for a stopped session too.
+// verifies: PROTO-CORE-API-R83
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rename_sends_every_client_a_tile_carrying_the_title() {
+    let records = Records::default();
+    let (core, _stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    titled_row(&mut client, &id).await;
+
+    let mut other = core.client().await;
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    let tile = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        other.notification_where(|n| {
+            n["method"] == "session.tile" && n["params"]["session_id"] == id
+        }),
+    )
+    .await
+    .expect("a tile within 10 s");
+    assert_eq!(tile["params"]["title"], "Renamed", "{tile:#}");
+}
+
 /// A stopped session, renamed while the fake's registry answers `answer`:
 /// the events that reached a client reading the session as it was renamed,
 /// after the session's end.
