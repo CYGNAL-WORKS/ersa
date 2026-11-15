@@ -875,8 +875,9 @@ impl SessionManager {
             ) {
                 let handle = Arc::clone(&handle);
                 let store = self.store.clone();
+                let tiles = self.tiles.clone();
                 summaries.spawn(async move {
-                    read_summary(&store, &handle, adapter, transport, row).await;
+                    read_summary(&store, &handle, &tiles, adapter, transport, row).await;
                 });
             }
             lock(&self.sessions).insert(handle.id.clone(), handle);
@@ -1115,6 +1116,7 @@ impl SessionManager {
             finished: finished_tx,
             pipeline,
             wind_down_pause: self.wind_down_pause,
+            tiles: self.tiles.clone(),
         }));
     }
 
@@ -1922,7 +1924,15 @@ impl SessionManager {
         };
         // Turns taken elsewhere may have changed its title too.
         if let (Some(backend_id), Some(transport)) = (source, transport_for(&row.host_id)) {
-            apply_summary(handle, adapter, transport, row.cwd.clone(), backend_id).await;
+            apply_summary(
+                handle,
+                &self.tiles,
+                adapter,
+                transport,
+                row.cwd.clone(),
+                backend_id,
+            )
+            .await;
         }
         let (mut view, mut events) = View::open(&row.id, &row.backend, None, &record);
         if let Some((fact, ts)) = lock(&handle.ending).clone() {
@@ -1970,6 +1980,7 @@ fn register(
 /// a time per session ([`read_once`]).
 async fn apply_summary(
     handle: &Handle,
+    tiles: &TileHub,
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
     cwd: String,
@@ -1996,6 +2007,11 @@ async fn apply_summary(
     match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
         Some(Ok(Some(summary))) => {
             let mut presented = lock(&handle.presented);
+            // A title the record gives that the last tile did not carry is
+            // sent to every window (PROTO-CORE-API-R103): every tile carries
+            // the title Core presents, so the one presented until now is the
+            // one the last tile carried.
+            let retitled = summary.title.is_some() && summary.title != presented.title;
             if summary.title.is_some() {
                 presented.title = summary.title;
             }
@@ -2013,6 +2029,17 @@ async fn apply_summary(
                     tracing::warn!(session = %handle.id, created_at = %at, "the session record's first time is not RFC 3339; not used");
                 }
                 None => {}
+            }
+            drop(presented);
+            if retitled {
+                let session = handle.describe();
+                send_tile(
+                    tiles,
+                    &handle.id,
+                    &session.tile,
+                    session.last_activity_at,
+                    session.title,
+                );
             }
         }
         Some(Ok(None)) => {}
@@ -2068,13 +2095,14 @@ fn is_rfc3339(text: &str) -> bool {
 async fn read_summary(
     store: &Store,
     handle: &Handle,
+    tiles: &TileHub,
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
     row: SessionRow,
 ) {
     let read = Arc::clone(&transport);
     if let Some(id) = record_id(store, handle, Arc::clone(&adapter), read, &row).await {
-        apply_summary(handle, adapter, transport, row.cwd, id).await;
+        apply_summary(handle, tiles, adapter, transport, row.cwd, id).await;
     }
 }
 
@@ -2492,6 +2520,9 @@ struct SessionTask {
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
     wind_down_pause: Duration,
+    /// Where `session.tile` goes when the record read at the end retitles
+    /// the session (PROTO-CORE-API-R103).
+    tiles: Arc<TileHub>,
 }
 
 async fn run_session(task: SessionTask) {
@@ -2508,6 +2539,7 @@ async fn run_session(task: SessionTask) {
         finished,
         pipeline,
         wind_down_pause,
+        tiles,
     } = task;
     // Ready with no turn to report one: a fork, and a session started again,
     // whose backend reports nothing until its next message.
@@ -2618,7 +2650,7 @@ async fn run_session(task: SessionTask) {
     // Read after the stop has its answer, never on its way.
     let row = lock(&handle.row).clone();
     tokio::spawn(async move {
-        read_summary(&store, &handle, adapter, transport, row).await;
+        read_summary(&store, &handle, &tiles, adapter, transport, row).await;
     });
 }
 
