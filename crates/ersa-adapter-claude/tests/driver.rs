@@ -96,6 +96,7 @@ fn allow() -> PermissionDecision {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R01
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12
+// verifies: PROTO-CLAUDE-CODE-STREAM-R62
 #[tokio::test]
 async fn starts_the_cli_with_every_flag_explicit() {
     let transport = ready_stub();
@@ -129,6 +130,7 @@ async fn starts_the_cli_with_every_flag_explicit() {
             "stdio",
             "--await-initialize",
             "--include-partial-messages",
+            "--replay-user-messages",
             "--model",
             "haiku",
         ]

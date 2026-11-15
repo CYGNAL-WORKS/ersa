@@ -1529,3 +1529,428 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
         assert_eq!(call.edits, None, "{fixture_name}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Messages written during a turn (PROTO-CLAUDE-CODE-STREAM, Sequencing)
+
+/// The turn boundaries, states and user messages of a projection, each with
+/// the raw line it was projected at.
+fn turns_and_messages(lines: &[ersa_adapter::RawLine]) -> Vec<(u64, String)> {
+    project(lines)
+        .into_iter()
+        .filter_map(|(at, projected)| {
+            let what = match projected.event {
+                Event::TurnStarted(t) => format!("turn.started {}", t.turn),
+                Event::TurnCompleted(t) => format!("turn.completed {}", t.turn),
+                Event::SessionState(s) => format!("session.state {:?}", s.state),
+                Event::UserMessage(m) => format!("user.message {}", m.text),
+                _ => return None,
+            };
+            Some((at, what))
+        })
+        .collect()
+}
+
+/// The raw line index of each echo of a host message.
+fn echoes(lines: &[ersa_adapter::RawLine]) -> Vec<u64> {
+    lines
+        .iter()
+        .filter(|line| line.line.contains(r#""isReplay":true"#))
+        .map(|line| line.index)
+        .collect()
+}
+
+fn without_lines(sequence: Vec<(u64, String)>) -> Vec<String> {
+    sequence.into_iter().map(|(_, what)| what).collect()
+}
+
+/// The projector's count of waiting messages after each raw line that
+/// changes it, as `(line, count)`.
+fn waiting_counts(lines: &[ersa_adapter::RawLine]) -> Vec<(u64, u32)> {
+    let mut projector = ersa_adapter_claude::ClaudeProjector::new();
+    let mut counts = Vec::new();
+    let mut last = 0;
+    for line in lines {
+        ersa_adapter::Projector::project(&mut projector, line);
+        let now = ersa_adapter::Projector::waiting(&projector);
+        if now != last {
+            counts.push((line.index, now));
+            last = now;
+        }
+    }
+    counts
+}
+
+/// The raw line index of each host user message.
+fn host_messages(lines: &[ersa_adapter::RawLine]) -> Vec<u64> {
+    lines
+        .iter()
+        .filter(|line| line.dir == Host && line.line.contains(r#""type":"user""#))
+        .map(|line| line.index)
+        .collect()
+}
+
+const ESSAY: &str = "user.message Write an essay of about 400 words on the history of lighthouses. Do not use any tools.";
+const READ_THRICE: &str = "user.message Use the Read tool to read README.md. After that, read it \
+     again with the Read tool. After that, read it a third time with the Read tool. Do these one \
+     at a time, one tool call per reply, then say done.";
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R63
+// verifies: PROTO-CLAUDE-CODE-STREAM-R64
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+#[test]
+fn messages_written_during_a_turn_open_the_next_turn_when_the_cli_echoes_them() {
+    // Fixture 53: two messages written while the first turn runs. The CLI
+    // takes them into the next turn together and echoes them as one
+    // message, as its record keeps them.
+    let lines = fixture("53-replay-two-messages-during-turn").raw_log();
+    let sequence = turns_and_messages(&lines);
+    assert_eq!(
+        without_lines(sequence.clone()),
+        [
+            "turn.started 1",
+            "session.state Running",
+            ESSAY,
+            "turn.completed 1",
+            // They wait in the CLI, so the session is still working (R44).
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            // Not joined to the turn that was running when written (R43).
+            "user.message Now reply with the single word: second\n\nNow reply with the single word: third",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+    // Projected at the CLI's echo, which comes after the first message's.
+    let joined = sequence
+        .iter()
+        .find(|(_, what)| what.ends_with("third"))
+        .unwrap();
+    assert_eq!(joined.0, echoes(&lines)[1]);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R63
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+#[test]
+fn a_message_a_turn_that_uses_tools_takes_in_joins_it_where_the_cli_echoes_it() {
+    // Fixture 52: written while the turn's first tool call ran, the message
+    // reaches the model at the turn's next call, and no turn of its own
+    // follows. The CLI echoes it there.
+    let lines = fixture("52-replay-message-during-tool-turn").raw_log();
+    let sequence = turns_and_messages(&lines);
+    assert_eq!(
+        without_lines(sequence.clone()),
+        [
+            "turn.started 1",
+            "session.state Running",
+            READ_THRICE,
+            "user.message Now reply with the single word: second",
+            "turn.completed 1",
+            // Nothing waits once the turn has taken it in.
+            "session.state Idle",
+        ]
+    );
+    let second = sequence
+        .iter()
+        .find(|(_, what)| what.ends_with("second"))
+        .unwrap();
+    assert_eq!(second.0, echoes(&lines)[1]);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+#[test]
+fn an_interrupted_turn_with_a_message_waiting_leaves_the_session_working() {
+    // Fixture 54: interrupting ends only the running turn; the waiting
+    // message then runs as the next.
+    let sequence = without_lines(turns_and_messages(
+        &fixture("24-interrupt-with-waiting").raw_log(),
+    ));
+    let completed = sequence
+        .iter()
+        .position(|what| what == "turn.completed 1")
+        .unwrap();
+    assert_eq!(
+        sequence[completed + 1..],
+        [
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message Now reply with the single word: second",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn the_count_of_waiting_messages_follows_the_handovers_and_the_echoes() {
+    // Fixture 53: each message written during the turn waits until the CLI
+    // takes them all in at once; the message that opened the first turn
+    // never waited.
+    let lines = fixture("53-replay-two-messages-during-turn").raw_log();
+    let (sent, echoed) = (host_messages(&lines), echoes(&lines));
+    assert_eq!(
+        waiting_counts(&lines),
+        [(sent[1], 1), (sent[2], 2), (echoed[1], 0)]
+    );
+    // Fixture 52: taken into the running turn at its echo.
+    let lines = fixture("52-replay-message-during-tool-turn").raw_log();
+    let (sent, echoed) = (host_messages(&lines), echoes(&lines));
+    assert_eq!(waiting_counts(&lines), [(sent[1], 1), (echoed[1], 0)]);
+}
+
+fn user_text(text: &str) -> String {
+    json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}})
+        .to_string()
+}
+
+fn echo_of(text: &str, uuid: &str) -> String {
+    echo_of_blocks(&[text], uuid)
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R65
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn the_echo_of_a_message_that_opened_its_turn_does_not_take_in_one_waiting() {
+    // The first message's echo can come after a second was written: it
+    // repeats the first, which already shows, and the second still waits.
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Backend, init),
+        (Host, &second),
+        (Backend, &echo_of("one", "u-1")),
+        (Backend, result),
+        (Backend, init),
+        (Backend, &echo_of("two", "u-2")),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(2, 1), (6, 0)]);
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message two",
+        ]
+    );
+}
+
+fn echo_of_blocks(texts: &[&str], uuid: &str) -> String {
+    let content: Vec<Value> = texts
+        .iter()
+        .map(|text| json!({"type": "text", "text": text}))
+        .collect();
+    json!({
+        "type": "user",
+        "message": {"role": "user", "content": content},
+        "isReplay": true,
+        "uuid": uuid,
+        "session_id": "s",
+        "parent_tool_use_id": null,
+    })
+    .to_string()
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R65
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
+    // Written a moment after a message to an idle CLI, before the CLI took
+    // that one in: the CLI takes both into the turn and echoes them joined,
+    // the first's blocks first (as fixture 53 joins two).
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Host, &second),
+        (Backend, init),
+        (Backend, &echo_of_blocks(&["one\n", "two"], "u-1")),
+        (Backend, result),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(1, 1), (3, 0)]);
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "user.message two",
+            "turn.completed 1",
+            "session.state Idle",
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R66
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn a_local_commands_output_marked_as_an_echo_takes_in_no_waiting_message() {
+    // The CLI marks a model change's output as an echo too (fixture 26,
+    // mid-turn). It repeats no host message, so the message waiting still
+    // waits, and shows at its own echo.
+    let model_changed = fixture("26-controls-during-turn").stdout[6].clone();
+    assert!(
+        model_changed.contains(r#""isReplay":true"#)
+            && model_changed.contains("local-command-stdout")
+    );
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Backend, init),
+        (Backend, &echo_of("one", "u-1")),
+        (Host, &second),
+        (Backend, &model_changed),
+        (Backend, result),
+        (Backend, init),
+        (Backend, &echo_of("two", "u-2")),
+        (Backend, result),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(3, 1), (7, 0)]);
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message two",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R66
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn a_local_commands_output_before_an_idle_messages_echo_leaves_its_match_alone() {
+    // The model-change output arrives before the echo that takes in "one"
+    // and "two" together: it repeats neither, so "one" is still the
+    // message the joined echo starts with, and "two" shows from its rest.
+    let model_changed = fixture("26-controls-during-turn").stdout[6].clone();
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Host, &second),
+        (Backend, init),
+        (Backend, &model_changed),
+        (Backend, &echo_of_blocks(&["one\n", "two"], "u-1")),
+        (Backend, result),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(1, 1), (4, 0)]);
+    let messages: Vec<String> = without_lines(turns_and_messages(&lines))
+        .into_iter()
+        .filter(|what| what.starts_with("user.message"))
+        .collect();
+    assert_eq!(messages, ["user.message one", "user.message two"]);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R65
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+#[test]
+fn a_command_echoed_only_as_its_output_does_not_hold_up_later_echoes() {
+    // `/compact` written to an idle CLI comes back only as its output
+    // (fixture 27), never as itself. After its turn, a message written to
+    // the idle CLI and one written a moment later are still matched.
+    let compacted = fixture("27-compact-between-turns").stdout[17].clone();
+    assert!(compacted.contains(r#""isReplay":true"#) && compacted.contains("Compacted"));
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (compact, three, four) = (user_text("/compact"), user_text("three"), user_text("four"));
+    let lines = log(&[
+        (Host, &compact),
+        (Backend, init),
+        (Backend, &compacted),
+        (Backend, result),
+        (Host, &three),
+        (Host, &four),
+        (Backend, init),
+        (Backend, &echo_of_blocks(&["three\n", "four"], "u-3")),
+        (Backend, result),
+    ]);
+    let sequence = without_lines(turns_and_messages(&lines));
+    assert!(
+        sequence.contains(&"user.message four".to_string()),
+        "{sequence:?}"
+    );
+    assert_eq!(sequence.last().unwrap(), "session.state Idle");
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R63
+// verifies: PROTO-CLAUDE-CODE-STREAM-R64
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn an_echo_takes_in_only_the_waiting_messages_it_holds() {
+    // Three written while a turn runs; the CLI takes in two, and the third
+    // arrives in the instant before Ersa reads their echo. It still waits,
+    // and shows at its own echo.
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (one, two, three, four) = (
+        user_text("one"),
+        user_text("two"),
+        user_text("three"),
+        user_text("four"),
+    );
+    let lines = log(&[
+        (Host, &one),
+        (Backend, init),
+        (Backend, &echo_of("one", "u-1")),
+        (Host, &two),
+        (Host, &three),
+        (Backend, result),
+        (Backend, init),
+        (Host, &four),
+        (Backend, &echo_of_blocks(&["two\n", "three"], "u-2")),
+        (Backend, result),
+        (Backend, init),
+        (Backend, &echo_of("four", "u-4")),
+        (Backend, result),
+    ]);
+    assert_eq!(
+        waiting_counts(&lines),
+        [(3, 1), (4, 2), (7, 3), (8, 1), (11, 0)]
+    );
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            // The two the echo holds, as one message (R64).
+            "user.message two\n\nthree",
+            "turn.completed 2",
+            // "four" still waits (R67).
+            "session.state Running",
+            "turn.started 3",
+            "session.state Running",
+            "user.message four",
+            "turn.completed 3",
+            "session.state Idle",
+        ]
+    );
+}
