@@ -1090,10 +1090,6 @@ Reading the branches…
 
 Ersa couldn't read this project's branches. The new workspace will start at the default branch.
 
-### `sessionControls.model.defaultLabel`
-
-Default
-
 ### `sessionControls.model.defaultOfLabel`
 
 Default ({model})
