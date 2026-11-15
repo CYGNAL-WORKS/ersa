@@ -84,6 +84,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-15: from #413 inbox: a corrected date created reaches the rail on `session.tile` (PROTO-CORE-API-R105, R106), which is how R07, R09 and R10 hold without a reread of the list; until those are built it shows at the next read of the list. No requirement IDs changed.
 - 2026-11-14: from the triage of #289: a section name holding a control character other than spacing is refused, as Core does (PROTO-CORE-API-R60), and the edge case says so. R27 added. The 2026-11-07 line named PROTO-CORE-API-R61, the rule on case, and now names R60 alone.
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0033).
 - 2026-11-09: from #272 inbox: a fork's creation time is its record's, so a fork moves to its original's date once it has a record. No requirement IDs changed.
