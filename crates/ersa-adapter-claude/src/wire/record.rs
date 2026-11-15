@@ -232,20 +232,49 @@ pub struct QueueOperation {
 }
 
 impl QueueOperation {
-    /// The message a turn took in part way, as its id and content blocks; the
-    /// blocks are what the live echo carries, so both read alike.
+    /// The message a turn took in part way: its id, the echo's, and the
+    /// blocks `content` holds. `content` is the message's text blocks joined
+    /// by newlines, without its images; the `queued_command` attachment keeps
+    /// the blocks as sent (fixture 2.1.316/54).
     pub fn absorbed_mid_turn(&self) -> Option<(&str, Vec<Value>)> {
         if self.operation.as_deref() != Some("remove")
             || self.reason.as_deref() != Some("absorbed_mid_turn")
         {
             return None;
         }
-        let blocks = match self.content.as_ref()? {
-            Value::String(text) => vec![serde_json::json!({ "type": "text", "text": text })],
-            Value::Array(blocks) => blocks.clone(),
-            _ => return None,
-        };
-        Some((self.command_uuid.as_deref()?, blocks))
+        Some((
+            self.command_uuid.as_deref()?,
+            as_blocks(self.content.as_ref()?)?,
+        ))
+    }
+}
+
+/// An `attachment` entry of type `queued_command`: a message a turn takes in
+/// part way, as the model was given it. `prompt` holds the message's content
+/// blocks as the host sent them, images included, and `source_uuid` the id
+/// the live stream's echo gave it. Returns that id and those blocks; any
+/// other entry gives `None`.
+pub fn queued_command(entry: &Value) -> Option<(&str, Vec<Value>)> {
+    if entry.get("type")?.as_str()? != "attachment" {
+        return None;
+    }
+    let attachment = entry.get("attachment")?;
+    if attachment.get("type")?.as_str()? != "queued_command" {
+        return None;
+    }
+    Some((
+        attachment.get("source_uuid")?.as_str()?,
+        as_blocks(attachment.get("prompt")?)?,
+    ))
+}
+
+/// A message's content as blocks, the way the live stream reads it: a string
+/// is one text block.
+fn as_blocks(content: &Value) -> Option<Vec<Value>> {
+    match content {
+        Value::String(text) => Some(vec![serde_json::json!({ "type": "text", "text": text })]),
+        Value::Array(blocks) => Some(blocks.clone()),
+        _ => None,
     }
 }
 
