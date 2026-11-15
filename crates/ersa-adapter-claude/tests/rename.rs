@@ -216,12 +216,14 @@ fn renaming_stub(answer: fn(&str) -> Value) -> FakeTransport {
         .expect("the recording announces the title")
         .clone();
     // The stub's stdout is fixed in advance, so the answer echoes the id the
-    // driver chooses for its first request after `initialize`.
+    // driver chooses for its first request after `initialize` and
+    // `get_context_usage` (PROTO-CLAUDE-CODE-STREAM-R72), which goes unanswered.
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(|_| Ok(()))
         .then_stdout([init_answer])
         .wait_for_stdin(|_| Ok(()))
-        .then_stdout([announced, answer("ersa-rename-2").to_string()])
+        .wait_for_stdin(|_| Ok(()))
+        .then_stdout([announced, answer("ersa-rename-3").to_string()])
         .hold_open()
 }
 
@@ -258,10 +260,10 @@ async fn renaming_a_live_session_sends_rename_session_and_writes_no_record() {
         .expect("answered in time")
         .expect("rename");
 
-    let sent: Value = serde_json::from_str(&transport.stdin_lines()[1]).unwrap();
+    let sent: Value = serde_json::from_str(&transport.stdin_lines()[2]).unwrap();
     assert_eq!(
         sent,
-        json!({"type": "control_request", "request_id": "ersa-rename-2", "request": {
+        json!({"type": "control_request", "request_id": "ersa-rename-3", "request": {
             "subtype": "rename_session", "title": "Renamed live", "source": "host",
             "session_id": SESSION}})
     );
@@ -302,10 +304,11 @@ async fn a_refused_live_rename_is_an_error() {
 async fn a_live_rename_ends_when_the_cli_exits_without_answering() {
     let home = home_with(&recorded_record());
     let init_answer = fixture("11-stream-permission-prompt-tool-stdio").stdout[0].clone();
-    // Answers `initialize`, takes the rename, then exits.
+    // Answers `initialize`, takes `get_context_usage` and the rename, then exits.
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(|_| Ok(()))
         .then_stdout([init_answer])
+        .wait_for_stdin(|_| Ok(()))
         .wait_for_stdin(|_| Ok(()))
         .with_exit_code(1);
     let session = adapter(home.path())

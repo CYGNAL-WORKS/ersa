@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::claude::{
-    OnTransport, fixture, fixtures_of, is_title_request, isolated_claude, parse, sent_but_title,
-    stub, stub_asking_at,
+    OnTransport, fixture, fixtures_of, is_context_request, is_title_request, isolated_claude,
+    parse, sent_but_title, stub, stub_asking_at,
 };
 use crate::support::{Client, start_with_adapters, tempdir, workspace};
 use ersa_adapter::Adapter;
@@ -112,7 +112,7 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
         .collect();
     let host: Vec<&String> = crossed
         .iter()
-        .filter(|(dir, line)| dir == "host" && !is_title_request(line))
+        .filter(|(dir, line)| dir == "host" && !is_title_request(line) && !is_context_request(line))
         .map(|(_, line)| line)
         .collect();
     assert_eq!(backend, stdout.iter().collect::<Vec<_>>());
@@ -121,7 +121,8 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     let position = |line: &String| crossed.iter().position(|(_, l)| l == line).unwrap();
     assert!(position(&sent[0]) < position(&stdout[0]));
     assert!(position(&stdout[4]) < position(&sent[2]));
-    assert_eq!(crossed.len(), stdout.len() + sent.len() + 1);
+    // Plus the requests to name the session and for its context.
+    assert_eq!(crossed.len(), stdout.len() + sent.len() + 2);
 }
 
 /// The `--setting-sources` value of the `n`th CLI the transport started,

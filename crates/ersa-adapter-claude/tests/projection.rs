@@ -1021,8 +1021,9 @@ fn each_line_reporting_output_usage_projects_the_turns_output_tokens_so_far() {
         );
     }
 
-    // Only the count rides on these events, and the `result` line's usage
-    // carries none: it belongs to the running turn.
+    // Only the count and the line's context in use (PROTO-CLAUDE-CODE-STREAM-R71)
+    // ride on these events, and the `result` line's usage carries no count:
+    // it belongs to the running turn.
     for event in &events {
         if let Event::UsageUpdated(usage) = event
             && usage.turn_output_tokens.is_some()
@@ -1031,6 +1032,7 @@ fn each_line_reporting_output_usage_projects_the_turns_output_tokens_so_far() {
                 usage,
                 &UsageUpdated {
                     turn_output_tokens: usage.turn_output_tokens,
+                    context_tokens: usage.context_tokens,
                     ..UsageUpdated::default()
                 }
             );

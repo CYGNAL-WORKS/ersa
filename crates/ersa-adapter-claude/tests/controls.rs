@@ -63,7 +63,7 @@ fn recorded(subtype: &str) -> (Value, Value) {
 
 /// `line` with its request id replaced by `id`: the stub's answers are fixed
 /// in advance, so they carry the id the driver chooses for its first request
-/// after `initialize`.
+/// after `initialize` and `get_context_usage`.
 fn with_id(mut line: Value, id: &str) -> Value {
     if line.get("request_id").is_some() {
         line["request_id"] = json!(id);
@@ -73,13 +73,15 @@ fn with_id(mut line: Value, id: &str) -> Value {
     line
 }
 
-/// A stub CLI that answers `initialize`, then answers the next stdin line
-/// with `answer`.
+/// A stub CLI that answers `initialize`, takes the `get_context_usage`
+/// request that follows it (PROTO-CLAUDE-CODE-STREAM-R72) unanswered, then
+/// answers the next stdin line with `answer`.
 fn answering(answer: Value) -> FakeTransport {
     let init_answer = fixture("11-stream-permission-prompt-tool-stdio").stdout[0].clone();
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(|_| Ok(()))
         .then_stdout([init_answer])
+        .wait_for_stdin(|_| Ok(()))
         .wait_for_stdin(|_| Ok(()))
         .then_stdout([answer.to_string()])
         .hold_open()
@@ -92,17 +94,17 @@ fn controls() -> [(SessionControl, &'static str, &'static str); 3] {
         (
             SessionControl::Model("haiku".into()),
             "set_model",
-            "ersa-set_model-2",
+            "ersa-set_model-3",
         ),
         (
             SessionControl::PermissionMode("acceptEdits".into()),
             "set_permission_mode",
-            "ersa-set_permission_mode-2",
+            "ersa-set_permission_mode-3",
         ),
         (
             SessionControl::Effort("low".into()),
             "apply_flag_settings",
-            "ersa-apply_flag_settings-2",
+            "ersa-apply_flag_settings-3",
         ),
     ]
 }
@@ -130,7 +132,7 @@ async fn each_change_is_the_recorded_control_request_and_its_answer_is_read() {
             .expect("answered in time")
             .unwrap_or_else(|e| panic!("{subtype}: {e}"));
 
-        let written: Value = serde_json::from_str(&transport.stdin_lines()[1]).unwrap();
+        let written: Value = serde_json::from_str(&transport.stdin_lines()[2]).unwrap();
         assert_eq!(written, with_id(sent, id), "{subtype}");
         assert!(transport.stub_failures().is_empty());
         session.stop().await.unwrap();
