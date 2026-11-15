@@ -239,6 +239,14 @@ function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
 }
 
 /**
+ * The listed model a resolved id names (FLOW-NEW-SESSION-R33): the first choice not marked default that resolves to
+ * it. The default is left out, since it resolves to some listed model's id and is not that model.
+ */
+export function listedModelFor(models: readonly ModelChoice[], resolved: string): ModelChoice | undefined {
+  return models.find((m) => !m.default && m.resolved === resolved);
+}
+
+/**
  * The choice that names a session's model (FLOW-NEW-SESSION-R33). While the backend has reported no model, or reports
  * the id the requested choice resolves to, the requested choice names it (the backend's default with no request): an
  * alias and Default can resolve to the same id, and the request says which the user chose. Otherwise the report names
@@ -249,7 +257,7 @@ function modelChoiceFor(models: readonly ModelChoice[], session: Pick<Session, "
   if (session.model === undefined) return session.model_request ?? requested?.id;
   if (requested !== undefined && requested.resolved === session.model) return requested.id;
   const reported = session.model;
-  return (models.find((m) => m.id === reported) ?? models.find((m) => !m.default && m.resolved === reported))?.id ?? reported;
+  return (models.find((m) => m.id === reported) ?? listedModelFor(models, reported))?.id ?? reported;
 }
 
 /**
