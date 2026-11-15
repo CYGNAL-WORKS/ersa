@@ -536,9 +536,52 @@ pub trait AdapterSession: Send + Sync {
         ))
     }
 
+    /// Changes one of the running session's controls through the backend,
+    /// at once: sent during a turn, the turn's next model call uses it
+    /// (`session.set_model`, `session.set_effort`,
+    /// `session.set_permission_mode`). Returns once the backend has taken
+    /// it; the value is an id `backend.list` offers, which Core has checked.
+    /// The default: the backend cannot change a running session's controls.
+    async fn change(&self, control: SessionControl) -> Result<(), AdapterError> {
+        Err(AdapterError::Protocol(format!(
+            "this backend cannot change a running session's {}",
+            control.name()
+        )))
+    }
+
     /// Ends the backend process, gracefully if the backend supports it and by
     /// killing it otherwise, and returns once it has exited.
     async fn stop(&self) -> Result<(), AdapterError>;
+}
+
+/// One of a session's controls with the value it is changed to, as
+/// [`AdapterSession::change`] takes it: each value is an id from
+/// `backend.list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionControl {
+    Model(String),
+    Effort(String),
+    PermissionMode(String),
+}
+
+impl SessionControl {
+    /// The control's name, as `session.list` names its field.
+    pub fn name(&self) -> &'static str {
+        match self {
+            SessionControl::Model(_) => "model",
+            SessionControl::Effort(_) => "effort",
+            SessionControl::PermissionMode(_) => "permission_mode",
+        }
+    }
+
+    /// The value it is changed to.
+    pub fn value(&self) -> &str {
+        match self {
+            SessionControl::Model(value)
+            | SessionControl::Effort(value)
+            | SessionControl::PermissionMode(value) => value,
+        }
+    }
 }
 
 /// Where an adapter delivers what crosses the backend's stdio. Core implements
@@ -591,10 +634,11 @@ pub trait Projector: Send {
     /// taking `ts` from `line`.
     fn project(&mut self, line: &RawLine) -> Vec<Projected>;
 
-    /// The latest title the backend announced on the live stream for the
-    /// session, from the lines projected so far: a name the user gave it,
-    /// which its record may not hold yet, with how many announcements there
-    /// have been, so that one repeating the last title still counts as one.
+    /// The latest title the live stream gave the session, from the lines
+    /// projected so far: a name the user gave it, or one the backend
+    /// generated when asked, which its record may not hold yet, with how
+    /// many such titles there have been, so that one repeating the last
+    /// title still counts as one.
     /// Core shows it as the session's title, in memory only, as it does any
     /// detail only the live stream carries. `None`, the default, before any
     /// announcement, and for a backend that makes none.

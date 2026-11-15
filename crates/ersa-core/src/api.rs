@@ -364,6 +364,11 @@ async fn answer(
             to_json(sessions::answer_question(core, parse(params)?).await)
         }
         Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
+        Method::SessionSetModel => to_json(sessions::set_model(core, parse(params)?).await),
+        Method::SessionSetEffort => to_json(sessions::set_effort(core, parse(params)?).await),
+        Method::SessionSetPermissionMode => {
+            to_json(sessions::set_permission_mode(core, parse(params)?).await)
+        }
         Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
         Method::SessionSubscribe => to_json(sessions::subscribe(core, peer, parse(params)?).await),
         Method::SessionUnsubscribe => to_json(sessions::unsubscribe(peer, parse(params)?)),
@@ -426,6 +431,10 @@ fn runs_apart(method: Method) -> bool {
         | Method::SessionDecidePermission
         | Method::SessionAnswerQuestion
         | Method::SessionSetTitle
+        // Each waits for the backend to take the change.
+        | Method::SessionSetModel
+        | Method::SessionSetEffort
+        | Method::SessionSetPermissionMode
         | Method::SessionSetMode
         | Method::SessionSubscribe
         | Method::SessionUnsubscribe
