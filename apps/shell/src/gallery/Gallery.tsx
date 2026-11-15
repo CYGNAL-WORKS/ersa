@@ -1426,7 +1426,7 @@ const entries: Entry[] = [
       ["On a tile, quiet", <ContextRing used={0.42} size="ring-sm" />],
       ["On a tile, caution", <ContextRing used={0.65} size="ring-sm" />],
       ["On a tile, danger", <ContextRing used={0.93} size="ring-sm" />],
-      // In the session controls the ring reads the nearest limit, a usage window here, and names it (issue #422).
+      // In the session controls the ring reads the nearest limit, a usage window here, and names it (issue 422).
       ["A window in caution", <ContextRing used={0.3} windows={[{ ...weeklyWindow, resets_at: undefined }]} />],
       ["A window in danger", <ContextRing used={0.3} windows={[{ ...fiveHourWindow, resets_at: undefined }]} />],
       [
