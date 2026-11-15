@@ -95,7 +95,7 @@ Progress and summary lines. `task_summary` and `post_turn_summary` are absent fr
 
 ### rate_limit_event
 
-Emitted during turns; carries the login's rate-limit status in `rate_limit_info`: `status`, `resetsAt` (epoch seconds), `rateLimitType`, the overage fields, and `unifiedWindows`, the usage windows the login is counted against, each `{ utilization (from 0 to 1), resetsAt, status }` under its key. The fixtures show `seven_day` and `seven_day_overage_included`; the CLI's schema also has `five_hour`, not yet recorded. The adapter projects them as `usage.updated.rate_limit.windows`, labeled as Claude Desktop names them: 5-hour limit, Weekly · all models and Weekly · overage (R76). A window under a key the adapter doesn't know is left out, and a line with no `unifiedWindows` reports none. A session has no windows until a turn has run.
+Emitted during turns; carries the login's rate-limit status in `rate_limit_info`: `status`, `resetsAt` (epoch seconds), `rateLimitType`, the overage fields, and `unifiedWindows`, the usage windows the login is counted against, each `{ utilization (from 0 to 1), resetsAt }` under its key, some with a `status` too. The fixtures show `seven_day` and `seven_day_overage_included`; the CLI's schema also has `five_hour`, not yet recorded. The adapter projects every one of them, in the line's order, as `usage.updated.rate_limit.windows` (R76). The CLI gives a window no name to show, so the adapter names the ones it knows, as it names the permission modes: 5-hour limit, Weekly limit and Weekly limit with extra usage. A window under any other key keeps its key as its name, so a limit the adapter has not met still counts. A line with no `unifiedWindows` reports none. A session has no windows until a turn has run.
 
 ### result
 
@@ -258,7 +258,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R06**: The adapter shall read capabilities from the `system/init` message and shall not infer behavior from version strings.
 - **PROTO-CLAUDE-CODE-STREAM-R07**: The adapter shall flush stdin after every line written.
 - **PROTO-CLAUDE-CODE-STREAM-R08**: The adapter shall derive cost from `result.total_cost_usd`, context from `result.usage` (its last `iterations` entry when present), and rate-limit budget from `rate_limit_event`.
-- **PROTO-CLAUDE-CODE-STREAM-R76**: The adapter shall project a `rate_limit_event`'s `unifiedWindows` as `usage.updated.rate_limit.windows`, in the order `five_hour`, `seven_day`, `seven_day_overage_included`, each with its key as `id`, its label, `used` from `utilization` and `resets_at` from `resetsAt`, leaving out a window under any other key.
+- **PROTO-CLAUDE-CODE-STREAM-R76**: The adapter shall project every window in a `rate_limit_event`'s `unifiedWindows` as an entry of `usage.updated.rate_limit.windows`, in the line's order, with its key as `id`, `used` from `utilization`, `resets_at` from `resetsAt`, and as `label` the adapter's name for the key, else the key itself.
 - **PROTO-CLAUDE-CODE-STREAM-R09**: The adapter shall map unknown message types to a typed passthrough event and never drop a line.
 - **PROTO-CLAUDE-CODE-STREAM-R10**: When the CLI version exceeds the maximum tested version, the adapter shall emit a `session.notice` with level `warning` and code `backend_version_untested`, and continue.
 - **PROTO-CLAUDE-CODE-STREAM-R11**: The adapter shall parse every line of every stream fixture and every entry of every session-record fixture for its tested version range without error.
@@ -333,7 +333,8 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Open questions
 
-- `rate_limit_event` with a `five_hour` window on the pinned CLI: not recorded, since the recording login had none. R76's order and label for it come from the CLI's schema.
+- `rate_limit_event` with a `five_hour` window on the pinned CLI: not recorded, since the recording login had none. Its key comes from the CLI's schema.
+- Whether the adapter's names for the windows are Claude Desktop's: no recording of Claude Desktop's usage panel is in the fixtures, so the names are the adapter's own until one is.
 - Whether the adapter asks the CLI for the windows with `get_usage`, so a session shows them before its first turn, with the per-model windows and the plan's name that request gives. Not built: the ring reads what `rate_limit_event` reports.
 - Whether a resumed session whose record holds no `custom-title` or `ai-title` is asked to name itself at its next message with words: a new session relaunched before its first message with words, and a session started in the CLI's own tools, are listed under their last prompt, and asking would write a title into a record another tool may also show.
 - What the CLI echoes for a local command, such as `/compact`, written during a turn, and so when it stops counting as waiting: not recorded.
@@ -351,7 +352,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
-- 2026-11-15: owner's decision that the context ring also reads the plan's usage limits: `rate_limit_event`'s shape is written down, and its `unifiedWindows` project as `usage.updated.rate_limit.windows` (R76). Open questions on `five_hour` and on asking the CLI with `get_usage`. PROTO-CLAUDE-CODE-STREAM-R76 added.
+- 2026-11-15: owner's decision that the context ring also reads the plan's usage limits: `rate_limit_event`'s shape is written down, and every window in its `unifiedWindows` projects as an entry of `usage.updated.rate_limit.windows`, named by the adapter (R76). Open questions on `five_hour`, on the names, and on asking the CLI with `get_usage`. PROTO-CLAUDE-CODE-STREAM-R76 added.
 - 2026-11-15: from #398 (the context ring showed nothing), by the owner's direction of 2026-11-15 on the ring's reading: the context in use is reported while a turn runs, from each main-thread `assistant` line (R71); the adapter asks `get_context_usage` at start, after a model change and after a compaction, for the tokens and the window, so a session shows its context before its first turn ends (R72, R73); the window is that answer's, and `result.modelUsage`'s only while it has given none (R74). PROTO-CLAUDE-CODE-STREAM-R71 to R74 added.
 - 2026-11-15: from #403 inbox: Naming a new session cites fixture `43-session-title` in place of the raw capture; only the process that started a new session asks for its name, so one relaunched before its first message with words is listed under its last prompt, recorded as an open question. No requirement IDs changed.
 - 2026-11-15: from #402 inbox: `set_permission_mode`'s answer comes before its `system/status` line (fixtures 25, 26), so the adapter reports the mode from the answer too, as it reports the model from `set_model`'s; otherwise `session.set_permission_mode` would return the old mode. PROTO-CLAUDE-CODE-STREAM-R70 added.
