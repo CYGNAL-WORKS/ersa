@@ -29,8 +29,8 @@ When the build turns up an assumption the plan did not name, add it to the plan,
 
 ## 3. Build
 
-- Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files, and a test for a requirement asserts every value the requirement names (a level, a code, a default), not only that something happened. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
-- Before you push, and again after each fix, prove each citing test: in this checkout, undo the line that carries the requirement's value (never the assertion), see the test fail, and restore the line. Do it at the place the user reaches too, since a test of a module says nothing about whether `App` passes it the value. Vary what the requirement varies (a time zone, a media type, a byte order, letter case), and have a fake's answer change when the requirement says the state changes.
+- Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files, and a test for a requirement asserts every clause and every value the requirement names (a level, a code, a default), not only that something happened. A test waits on the state it needs (an event, a gate the fake offers, a condition polled up to a generous limit), never on a pause sized to pass: a fixed pause fails by chance on a busy machine and puts other pull requests out of the merge queue. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
+- Before you push, and again after each fix, prove each citing test: in this checkout, undo the line that carries the requirement's value (never the assertion), see the test fail, and restore the line. Do it at the place the user reaches too, since a test of a module says nothing about whether `App` passes it the value. Vary what the requirement varies (a time zone, a media type, a byte order, letter case), and have a fake's answer change when the requirement says the state changes. A test that builds its own input by hand, or only reads a fixture, runs none of your change and proves nothing.
 - Plain, idiomatic code with the why commented: the owner is learning Rust.
 - Where a brief, `CONTENT.md` or `DESIGN.md` is wrong, silent, or contradicts what your code relies on, append one line to `docs/briefs/INBOX.md` and carry on. Always write the line: CI stays green with it, and the merge gate holds the pull request until a planning pass closes it (ADR 0025). Briefs, ADRs, the glossary, `CLAUDE.md`, `REVIEW.md`, `.claude/` and `scripts/hooks/` are planning-only; a change to the harness that your code does not depend on is a follow-up in the pull request, not an inbox line.
 - When interface code needs a token `docs/design/DESIGN.md` lacks, define it in `apps/shell/src/theme/tokens.pending.yaml` (the generator merges it) and propose it as an inbox line; a planning pass moves it into DESIGN.md.
@@ -39,7 +39,7 @@ When the build turns up an assumption the plan did not name, add it to the plan,
 
 ## 4. Check, push, open the pull request
 
-1. When the ticket's scope is built and everything is committed: `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`, and when the ticket changes the interface, the live checks (`docs/agents/live-checks.md`) whether or not its **Done when** asks. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; whoever drives the pull request merges `main` in. Everything passes.
+1. When the ticket's scope is built and everything is committed: `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`, then `node scripts/manifest.mjs --verifies <every requirement ID the issue lists, comma-separated>` (a citation outside a test file does not count), and when the ticket changes the interface, the live checks (`docs/agents/live-checks.md`) whether or not its **Done when** asks. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; whoever drives the pull request merges `main` in. Everything passes.
 2. `git push -u origin HEAD` (force-with-lease only for your own rebased branch).
 3. `gh pr create` against `main`, titled with the issue's title. Body: the `pr` skill's **Summary**, **Evidence** and **Merge Danger**, then **Requirements** (each ID and the test that verifies it), **Test seams**, **Assumptions** (each with the checker's verdict and what you did about it), **Inbox entries** added (verbatim), and `Fixes #<n>`. Evidence says what the tests proved, what was driven in the running app or against the real CLI, and what was not exercised.
 
@@ -55,7 +55,9 @@ Docket holds the request until your head reaches a state in the table below, or 
 
 | State | Do |
 | --- | --- |
-| `ci-failed` | Fix the checks it lists and push. CI runs on GitHub-hosted Linux and Windows runners: a test that assumes a platform's path form or locale fails on the other one. |
+| `ci-failed` | Fix the checks it lists and push. CI runs on GitHub-hosted Linux and Windows runners: a test that assumes a platform's path form or locale fails on the other one. When the only failure is a test your change does not reach and it passes here, it failed by chance: add the run's link to that test's issue (`gh issue list --search "<test name>"`; file one labeled `needs-triage` when none exists), rerun the failed jobs once (`gh run list --branch <branch>` gives the run's id; `gh run rerun <id> --failed`, then `gh run watch <id>`), and ask Docket again. |
+| `conflicts` | `git merge origin/main`, resolve, run the checks again and push. |
+| `dequeued` | The merge queue's own run on the merge with `main` failed twice. Read that run on the pull request, fix what is yours and push. When it is a test your change does not reach, add the run's link to that test's issue, report to the owner and stop. |
 | `findings` | Fix every high and medium finding, push, and wait again (below). |
 | `merged` | Done. |
 | `waits-on-owner` | When the `reason` is review rounds spent and the state lists findings, treat it as `findings` (see the last bullet of Fixing findings). Otherwise report the `reason` and stop. |
@@ -64,8 +66,9 @@ Docket holds the request until your head reaches a state in the table below, or 
 
 Fixing findings:
 
-- Fix each with the smallest change that removes the defect, with a test where one is cheap. Fix low ones when trivial and list the rest as follow-ups in the pull request.
+- Fix each with the smallest change that removes the defect and a test that fails without the fix, proven as step 3 says: the review blocks a fix no test reaches, which costs a round. When no test can reach it, say why in the pull request. Fix low ones when trivial and list the rest as follow-ups in the pull request.
 - A fix that needs a new mechanism (a cache, a background task, a protocol field, a state machine or reducer) becomes its own ticket unless the branch is unsafe to merge without it: new mechanisms bring their own defects. So does a reshape the review names that is larger than the ticket. A gap the brief does not cover gets an inbox line when your code depends on it, and is a follow-up otherwise.
+- State you are already patching is the exception. When a round finds a defect in the last round's fix, or a second order of the same two events, another flag opens a third: list every state and every event that can arrive in it as a table in the plan, test each row, and rebuild the fix from the table, removing the flags it replaces. Between two of Core's operations the table exists: add an input and its rows to admission, never a lock, flag or guard (ADR 0037).
 - A finding on a planning-only path, or one that contradicts a harness rule, is the owner's: report it and stop rather than spend a round on it.
 - A finding marked as a follow-up goes in the pull request's follow-ups; it takes no round.
 - After the fifth round (`round` in the state), keep fixing while each round finds new defects you can fix within the ticket. Stop and report to the owner in plain English when a finding needs a decision `CLAUDE.md` leaves to the owner, or a round finds again a defect you already fixed.
@@ -77,4 +80,4 @@ Pushing:
 
 ## 6. End the turn
 
-End your turn only when the pull request merged, or its state says it waits on a planning pass, or step 5 says to stop, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull` and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
+End your turn only when the pull request merged, or its state says it waits on a planning pass, or step 5 says to stop, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull`, read the issue again (the pass may have changed its Requirements list), and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
