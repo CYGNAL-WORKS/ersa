@@ -106,7 +106,7 @@ pub fn project_record_from<R: BufRead + Seek>(
                     // A message taken in part way has a `remove` entry with no
                     // chain fields; its `queued_command` attachment has them.
                     // One on an abandoned branch marks the message as on it
-                    // too (PROTO-CLAUDE-CODE-STREAM-R20).
+                    // too (PROTO-CLAUDE-CODE-STREAM-R78).
                     if fields.get("type").and_then(Value::as_str) == Some("attachment")
                         && let Some(value) = entry_at(reader, offset, len)?
                     {
@@ -305,7 +305,7 @@ fn scan_lines<R: BufRead + Seek>(reader: &mut R, limit: u64) -> io::Result<Scan>
 }
 
 /// Whether an entry is part of the conversation: one on another branch, or
-/// a subagent's, is not (PROTO-CLAUDE-CODE-STREAM-R20). Entries without an
+/// a subagent's, is not (PROTO-CLAUDE-CODE-STREAM-R78). Entries without an
 /// id (titles) are let through; they yield nothing.
 fn on_conversation(chain: &Option<HashSet<String>>, fields: &Value) -> bool {
     match (chain, uuid(fields)) {

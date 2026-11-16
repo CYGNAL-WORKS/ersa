@@ -104,7 +104,7 @@ fn events_read_from_a_session_record_carry_no_turn_output_tokens() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
 // verifies: PROTO-CLAUDE-CODE-STREAM-R23
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn record_messages_project_to_the_same_events_as_the_stream_messages() {
     let records = record_fixtures();
@@ -390,7 +390,7 @@ fn texts(events: &[Event]) -> Vec<String> {
         .collect()
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn only_the_branch_that_ends_the_record_is_projected() {
     // A prompt, a reply, a rewind to the first prompt with an edited second
@@ -426,7 +426,7 @@ fn only_the_branch_that_ends_the_record_is_projected() {
     );
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_damaged_line_mid_record_loses_no_history_silently() {
     // The CLI crashed mid-write once; later entries chain through the entry
@@ -456,7 +456,7 @@ fn a_damaged_line_mid_record_loses_no_history_silently() {
     assert_eq!(errors, 2, "{events:?}");
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn entries_that_form_no_chain_are_shown_in_file_order_with_an_error() {
     // Two entries naming each other: a cycle, no leaf. A subagent's and a
@@ -490,7 +490,7 @@ fn an_entry_written_twice_is_projected_once() {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn parallel_tool_calls_all_stay_in_the_conversation() {
     // Two Read calls in one model message: 2.1.316 chains them one after the
@@ -529,7 +529,7 @@ fn parallel_tool_calls_all_stay_in_the_conversation() {
     assert_eq!(recorded, live);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_compaction_keeps_the_history_before_it() {
     let entries = [
@@ -561,7 +561,7 @@ fn a_compaction_keeps_the_history_before_it() {
     ));
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_compaction_that_keeps_a_segment_shows_its_summary_once() {
     // As fixture 2.1.316/44 records it: the entries after the compaction
@@ -603,7 +603,7 @@ fn a_compaction_that_keeps_a_segment_shows_its_summary_once() {
     ));
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_kept_segment_whose_summary_is_missing_still_keeps_its_history() {
     let entries = [
@@ -1652,7 +1652,7 @@ fn a_message_taken_in_mid_turn_keeps_its_attachments_when_read_back() {
     assert_eq!(events[at].ts.as_deref(), Some("2026-11-15T22:01:40.121Z"));
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_message_taken_in_mid_turn_on_an_abandoned_branch_is_not_read_back() {
     // A message taken in part way through the first reply's turn, then a
