@@ -280,8 +280,9 @@ impl SessionManager {
         // backend then says what is wrong with copying it (FLOW-RESUME-SESSION-R11).
         let forking = match self.session_with_backend_id(&original) {
             Some(original_id) => {
+                let marked = self.begin_fork(&original_id).await?;
                 let forkable = self
-                    .prepare_fork(&original_id, Arc::clone(transport))
+                    .prepare_fork(&original_id, Arc::clone(transport), marked)
                     .await?;
                 forkable.beginning.forking
             }
