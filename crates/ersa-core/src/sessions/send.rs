@@ -55,10 +55,8 @@ fn phase_of(stage: SendStage, work: Option<&Arc<Work>>) -> SendPhase {
 
 impl Handle {
     /// The phase of the message being sent to the session, if one is: its
-    /// stage as admission has it. Read through the send's lock, under
-    /// which a send looks at the fork's flag and takes its slot: a fork
-    /// that raised its flag and then asks sees the send, or the send saw
-    /// the flag.
+    /// stage as admission has it, and `copying` once its copy job, kept
+    /// with what the send reports from, has begun.
     pub(super) fn send_phase(&self) -> Option<SendPhase> {
         let reporting = lock(&self.reporting);
         let stage = self.admission.send_stage(&self.id)?;
@@ -251,26 +249,14 @@ impl SessionManager {
             // is being archived (PROTO-CORE-API-R85) or is archived
             // (FLOW-ARCHIVE-DELETE-SESSION-R02), said before it is found
             // not running so that nothing resumes it; it is not running
-            // and this send cannot start it; a message is being sent
-            // already. A delete, an archive and a removal are known to
+            // and this send cannot start it; a fork of it is starting; a
+            // message is being sent already. A delete, an archive and a removal are known to
             // admission before they ask whether a message is being sent,
             // so one of the two always sees the other.
             let slot = self
                 .admission
                 .begin_send(id, resumption.is_some())
                 .map_err(|refusal| self.refused_send(&handle, refusal))?;
-            // Under this lock still, and a fork reads the send's slot
-            // through it after raising this, so exactly one of the two
-            // gives way: here the send, which lets go of the slot it took.
-            // After admission's refusals, so a send to a session whose
-            // delete holds its workspace is told `busy` (PROTO-CORE-API,
-            // `session.delete`). #445 moves the fork's mark into the step.
-            if handle.forking.load(Ordering::SeqCst) {
-                // Dropped on the way out, before the lock is let go.
-                return Err(SessionError::InvalidState(
-                    "this session is being forked; send the message again in a moment".into(),
-                ));
-            }
             // What the send reports its progress from, stored with the slot
             // taken.
             *reporting = Some(Reporting {
