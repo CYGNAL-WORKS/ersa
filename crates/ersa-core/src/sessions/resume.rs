@@ -107,11 +107,6 @@ impl SessionManager {
             Err(Refusal::Running) => return Ok(()),
             Err(refusal) => return Err(refused_session(refusal, &workspace_id, &handle.id)),
         };
-        // A run whose task failed before it cleared `live`: left as it is,
-        // never started over.
-        if handle.live().is_some() {
-            return Ok(());
-        }
         self.refuse_if_deleting(handle)?;
         let row = handle.row()?;
         self.refuse_if_claimed(&row.workspace_id)?;
@@ -171,9 +166,8 @@ impl SessionManager {
             resume: start.resume,
             extra: Value::Null,
         };
-        // Launched under the lock `stop_all` takes, as a new session is:
-        // admission refuses the launch once Core is closing.
-        let sessions = lock(&self.sessions);
+        // Admission refuses the launch once Core is closing, as a new
+        // session's.
         let launched = self.launch(
             Arc::clone(handle),
             adapter,
@@ -184,7 +178,6 @@ impl SessionManager {
                 forking: start.forking,
             },
         );
-        drop(sessions);
         launched.map_err(|refusal| refused_session(refusal, &row.workspace_id, &handle.id))
     }
 
@@ -304,8 +297,8 @@ impl SessionManager {
     /// The id of the session whose backend's id is `backend_id`, if Core
     /// lists one.
     fn session_with_backend_id(&self, backend_id: &str) -> Option<String> {
-        lock(&self.sessions)
-            .values()
+        self.handles()
+            .iter()
             .find(|handle| {
                 let row = handle.stored_row();
                 row.and_then(|row| row.backend_session_id).as_deref() == Some(backend_id)

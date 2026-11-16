@@ -656,6 +656,59 @@ async fn interrupting_a_send_that_waits_for_a_resume_leaves_the_session_idle() {
     assert_eq!(stats.starts.load(Ordering::SeqCst), 2);
 }
 
+/// Why a start failed is the answer for that start only. Once a later
+/// start succeeds it is forgotten: a message that then waits for a start
+/// the user stops is told the session is not running, not the old reason.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_that_succeeds_forgets_why_an_earlier_one_failed() {
+    let fake = FakeAdapter::quiet_restart(Records::default());
+    let (fail_start, start_gate) = (Arc::clone(&fake.fail_start), Arc::clone(&fake.start_gate));
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let id = stopped_session(&core, &mut client).await;
+
+    // The backend does not start: the message is answered with its words.
+    fail_start.store(true, Ordering::SeqCst);
+    let error = client
+        .error("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("the fake refused to start"), "{error:#}");
+
+    // It starts, and is stopped.
+    fail_start.store(false, Ordering::SeqCst);
+    client
+        .result("session.send", json!({ "id": id, "text": "once more" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    assert_eq!(stats.starts.load(Ordering::SeqCst), 3);
+    client.clear_notifications();
+
+    // A message waits for the next start, which the user stops before the
+    // backend is ready. That start did not fail.
+    let held = start_gate.lock().await;
+    let send = client
+        .request("session.send", json!({ "id": id, "text": "last" }))
+        .await;
+    client
+        .notification_where(|n| {
+            n["method"] == "session.send_progress" && n["params"]["phase"] == "starting"
+        })
+        .await;
+    let stop = client.request("session.stop", json!({ "id": id })).await;
+    let response = client.response(send).await;
+    drop(held);
+    client.response(stop).await;
+    let error = &response["error"];
+    assert_eq!(kind(error), "invalid_state", "{response:#}");
+    assert_eq!(
+        error["data"]["reason"], "session_not_running",
+        "{response:#}"
+    );
+    let message = error["message"].as_str().unwrap();
+    assert!(!message.contains("refused to start"), "{response:#}");
+}
+
 /// A resumed session is `starting` until its backend answers Core's first
 /// request, then `idle`, though the backend reports no turn.
 // verifies: PROTO-AGENT-EVENTS-R25

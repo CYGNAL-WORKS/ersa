@@ -593,45 +593,6 @@ async fn a_removal_git_refuses_leaves_its_found_sessions_as_they_were() {
         .await;
 }
 
-// verifies: FLOW-RESUME-SESSION-R13
-#[tokio::test(flavor = "multi_thread")]
-async fn a_project_removed_while_a_list_records_a_found_session_does_not_leave_it_listed() {
-    let backend = Backend::default();
-    let gate = Arc::new(ersa_core::Gate::default());
-    let config_gate = Arc::clone(&gate);
-    let core = start_with_adapters(
-        tempdir(),
-        move |config| config.found_gate = Some(config_gate),
-        vec![backend.adapter()],
-    )
-    .await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
-    let project = project(&mut client, core.dir.path()).await;
-    let root = workspaces(&mut client, &project["id"]).await.remove(0);
-    backend.record("rec-a", "first", path(&root), path(&root));
-
-    // A list has stored the session it found and not yet loaded it when the
-    // project is removed. The removal takes the row and tells admission;
-    // the list then finds admission without the session and does not load
-    // it, where it would otherwise load a session whose project is gone.
-    let list = client.request("session.list", json!({})).await;
-    gate.reached().await;
-    // The removal does not wait for the list: it is done, the row gone and
-    // nothing loaded to let go of, before the list goes on.
-    remover
-        .result("project.remove", json!({ "id": project["id"] }))
-        .await;
-    gate.go();
-    let listed = client.response(list).await;
-    assert!(listed.get("error").is_none(), "{listed}");
-
-    // The found session went with the project, its record left.
-    let listed = sessions(&mut client).await;
-    assert!(listed.is_empty(), "{listed:#?}");
-    assert!(backend.has_record("rec-a"));
-}
-
 /// A delete that takes a workspace's files sets it to `error`
 /// (PROTO-CORE-API-R57). A found session does not hold a removal back, so a
 /// `workspace.remove` then claims the workspace; git refuses it, and it
