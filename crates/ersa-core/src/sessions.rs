@@ -290,7 +290,7 @@ fn in_turn(handle: &Handle) -> bool {
 /// The refusal for a request a delete under way holds back.
 fn busy(workspace_id: &str) -> SessionError {
     SessionError::Busy(format!(
-        "a session in workspace {workspace_id} is being deleted; try again once it is done"
+        "workspace {workspace_id} is busy: a session in it is being deleted, or the workspace removed; try again once it is done"
     ))
 }
 

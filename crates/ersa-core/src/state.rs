@@ -48,7 +48,8 @@ pub struct CoreConfig {
     pub wind_down_pause: Duration,
     /// Where `workspace.remove` stops until a test lets it go: before
     /// claiming the workspace, after, once its sessions no longer hold it
-    /// back, and once the sessions found in its folder are held. `None`,
+    /// back, and once the sessions found in its folder are held; and where
+    /// `project.remove` stops once it holds those of its own folder. `None`,
     /// except in tests that need another request to land at one of those.
     pub remove_gate: Option<Arc<Gate>>,
     /// Where the folder inspection of `project.add` and `project.find`
