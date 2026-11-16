@@ -43,6 +43,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0008_session_arrangement.sql"),
     include_str!("persistence/0009_session_fork.sql"),
     include_str!("persistence/0010_session_requested_at.sql"),
+    include_str!("persistence/0011_session_started_elsewhere.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -268,6 +269,18 @@ impl Store {
     pub async fn delete_project(&self, id: String) -> Result<()> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
+            // Sessions found in the backend's records for the project's
+            // folder go with it, their records left (FLOW-RESUME-SESSION-R09).
+            let root: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM workspaces WHERE project_id = ?1 AND kind = 'root'",
+                    [&id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(root) = root {
+                sessions::forget_found_sessions_unless_others(&tx, &root)?;
+            }
             tx.execute(
                 "DELETE FROM workspaces WHERE project_id = ?1 AND kind = 'root'",
                 [&id],
@@ -374,8 +387,13 @@ impl Store {
     /// session refers to it.
     pub async fn delete_workspace(&self, id: String) -> Result<()> {
         self.call(move |conn| {
-            conn.execute("DELETE FROM workspaces WHERE id = ?1", [id])
+            let tx = conn.transaction()?;
+            // Sessions found in the backend's records for the workspace's
+            // folder go with it, their records left (FLOW-RESUME-SESSION-R09).
+            sessions::forget_found_sessions_unless_others(&tx, &id)?;
+            tx.execute("DELETE FROM workspaces WHERE id = ?1", [&id])
                 .map_err(|e| conflict(e, "a session was created in the workspace meanwhile"))?;
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -770,6 +788,8 @@ mod tests {
                 "model_at",
                 "effort_at",
                 "permission_mode_at",
+                // Migration 11's.
+                "started_elsewhere",
             ]
         );
     }

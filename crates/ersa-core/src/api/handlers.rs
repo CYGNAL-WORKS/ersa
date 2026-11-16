@@ -368,11 +368,14 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
                 )));
             }
             WorkspaceKind::Root => {
+                // Sessions started in the backend's own tools don't hold it
+                // back unless Core is running one (FLOW-RESUME-SESSION-R09).
                 if !core
                     .store
-                    .sessions_in_workspace(workspace.id)
+                    .sessions_in_workspace(workspace.id.clone())
                     .await?
                     .is_empty()
+                    || core.sessions.running_found(&workspace.id).is_some()
                 {
                     return Err(ApiError::invalid_state(format!(
                         "project {} has sessions in its own folder; stop and remove them first",
@@ -383,7 +386,17 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
         }
     }
     // Anything created since the checks above makes the delete a conflict.
+    let root = core
+        .store
+        .workspaces(project.id.clone())
+        .await?
+        .into_iter()
+        .find(|w| w.kind == WorkspaceKind::Root);
     core.store.delete_project(project.id.clone()).await?;
+    // The sessions found in its folder went with it, their records left.
+    if let Some(root) = root {
+        core.sessions.forget_found(&root.id).await?;
+    }
     Ok(project)
 }
 
@@ -439,10 +452,16 @@ pub(super) async fn changes_of(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
-    let sessions = core
+    let mut sessions = core
         .store
         .sessions_counted_in_workspace(workspace.id.clone())
         .await?;
+    // A session found in the backend's records counts only while Core runs
+    // it: otherwise it goes with the workspace (FLOW-RESUME-SESSION-R09).
+    if let Some(running) = core.sessions.running_found(&workspace.id) {
+        sessions.push(running);
+        sessions.sort();
+    }
     let found = workspace::git_worktree_changes(
         transport.as_ref(),
         &project.path,
@@ -648,11 +667,14 @@ pub(super) async fn workspace_remove(
     // deleted directory. Checked after the claim, because a session can
     // only be created in a `ready` workspace: one created before the claim
     // is seen here, and none can be created after it.
+    // Sessions started in the backend's own tools don't hold it back unless
+    // Core is running one (FLOW-RESUME-SESSION-R09).
     if !core
         .store
         .sessions_in_workspace(workspace.id.clone())
         .await?
         .is_empty()
+        || core.sessions.running_found(&workspace.id).is_some()
     {
         release_claim(core, &workspace.id, replaced).await?;
         return Err(ApiError::invalid_state(format!(
@@ -686,6 +708,8 @@ pub(super) async fn workspace_remove(
         return Err(e.into());
     }
     core.store.delete_workspace(workspace.id.clone()).await?;
+    // The sessions found in its folder went with it, their records left.
+    core.sessions.forget_found(&workspace.id).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }

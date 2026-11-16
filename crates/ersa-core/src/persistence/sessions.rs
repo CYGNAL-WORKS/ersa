@@ -62,11 +62,16 @@ pub struct SessionRow {
     /// and the last message of that conversation.
     pub forked_from: Option<String>,
     pub forked_through: Option<String>,
+    /// Whether the session was started in the backend's own tools and found
+    /// in its records rather than started in Ersa (FLOW-RESUME-SESSION-R04):
+    /// such a session leaves the list once its record is gone (R06), and is
+    /// forgotten with its workspace (R09).
+    pub started_elsewhere: bool,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
      s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
-     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at";
+     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at, s.started_elsewhere";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -113,6 +118,35 @@ impl Store {
         .await
     }
 
+    /// Records a session found in its backend's records for workspace
+    /// `session.workspace_id`'s folder (FLOW-RESUME-SESSION-R04), marked
+    /// started elsewhere, with none of the user's arrangement and no request
+    /// of Core's (ADR 0033). In one statement, and only while the workspace
+    /// is `ready` and no session of that backend has that backend id: a
+    /// record is one session, whether Ersa started it or found it before.
+    /// Answers whether it was recorded.
+    pub async fn insert_found_session(&self, session: SessionRow) -> Result<bool> {
+        self.call(move |conn| {
+            let inserted = conn.execute(
+                "INSERT INTO sessions
+                 (id, workspace_id, host_id, backend, backend_session_id, started_elsewhere)
+                 SELECT ?1, ?2, ?3, ?4, ?5, 1
+                 WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')
+                   AND NOT EXISTS (SELECT 1 FROM sessions
+                                   WHERE backend = ?4 AND backend_session_id = ?5)",
+                params![
+                    session.id,
+                    session.workspace_id,
+                    session.host_id,
+                    session.backend,
+                    session.backend_session_id,
+                ],
+            )?;
+            Ok(inserted > 0)
+        })
+        .await
+    }
+
     pub async fn sessions(&self) -> Result<Vec<SessionRow>> {
         self.call(|conn| {
             let mut stmt = conn.prepare(&format!(
@@ -132,7 +166,7 @@ impl Store {
     pub async fn sessions_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
         self.call(move |conn| {
             let mut statement =
-                conn.prepare("SELECT id FROM sessions WHERE workspace_id = ?1 ORDER BY id")?;
+                conn.prepare("SELECT id FROM sessions WHERE workspace_id = ?1 AND started_elsewhere = 0 ORDER BY id")?;
             let ids = statement
                 .query_map([workspace_id], |row| row.get(0))?
                 .collect::<rusqlite::Result<Vec<String>>>()?;
@@ -275,7 +309,9 @@ impl Store {
     pub async fn sessions_counted_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
         self.call(move |conn| {
             let mut statement = conn.prepare(
-                "SELECT id FROM sessions WHERE workspace_id = ?1 AND deleting IS NULL ORDER BY id",
+                "SELECT id FROM sessions
+                 WHERE workspace_id = ?1 AND deleting IS NULL AND started_elsewhere = 0
+                 ORDER BY id",
             )?;
             let ids = statement
                 .query_map([workspace_id], |row| row.get(0))?
@@ -357,6 +393,9 @@ impl Store {
             let tx = conn.transaction()?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", [&id])?;
             if let Some(workspace_id) = workspace_id {
+                // Sessions found in the backend's records go with the
+                // workspace, their records left (FLOW-RESUME-SESSION-R09).
+                forget_found_sessions_unless_others(&tx, &workspace_id)?;
                 tx.execute(
                     "DELETE FROM workspaces WHERE id = ?1
                      AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ?1)",
@@ -377,6 +416,22 @@ impl Store {
         })
         .await
     }
+}
+
+/// Forgets the sessions found in the backend's records for workspace
+/// `workspace_id`'s folder, once no session Ersa started is left in it, so
+/// the workspace can go: they never hold it back (FLOW-RESUME-SESSION-R09),
+/// and their records are the backend's, left as they are.
+pub(super) fn forget_found_sessions_unless_others(
+    conn: &Connection,
+    workspace_id: &str,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "DELETE FROM sessions WHERE workspace_id = ?1 AND started_elsewhere = 1
+         AND NOT EXISTS (SELECT 1 FROM sessions
+                         WHERE workspace_id = ?1 AND started_elsewhere = 0)",
+        [workspace_id],
+    )
 }
 
 fn read_session(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
@@ -421,5 +476,6 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         model_at: row.get(17)?,
         effort_at: row.get(18)?,
         permission_mode_at: row.get(19)?,
+        started_elsewhere: row.get(20)?,
     })
 }

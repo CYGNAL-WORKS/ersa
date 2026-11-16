@@ -19,8 +19,8 @@ use common::{fixtures, fixtures_root};
 use ersa_adapter::{Direction, Projector};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{
-    RecordCache, RecordEvent, SessionList, encoded_cwd, find_record, list_sessions, project_record,
-    read_record, record_version,
+    RecordCache, RecordEvent, SessionList, encoded_cwd, find_record, list_records, list_sessions,
+    project_record, read_record, record_version,
 };
 use ersa_protocol::events::*;
 use ersa_protocol::schema::validate_event;
@@ -1657,4 +1657,46 @@ fn a_message_taken_in_just_before_the_record_ends_is_read_back() {
     // Its blocks come from the attachment, so the file is an attachment.
     assert!(events.iter().any(|e| matches!(e, Event::UserMessage(m)
         if m.attachments == [MessageAttachment::File { path: "a.txt".into() }])));
+}
+
+/// A prompt as the CLI records it, with the working directory it ran in.
+fn user_in(cwd: &str, text: &str) -> String {
+    json!({"type": "user", "uuid": "u", "cwd": cwd, "message": {"role": "user", "content": text}})
+        .to_string()
+}
+
+// verifies: FLOW-RESUME-SESSION-R04
+#[test]
+fn listing_a_directory_names_each_records_own_working_directory() {
+    // `C:\work-repo` encodes to the same directory as `C:\work\repo`: the
+    // record's own `cwd` is what tells their sessions apart.
+    let other = r"C:\work-repo";
+    assert_eq!(encoded_cwd(other), encoded_cwd(CWD));
+    let queued = json!({"type": "queue-operation", "operation": "enqueue"}).to_string();
+    let home = home_with(&[
+        (SESSION_A, vec![queued.clone(), user_in(CWD, "here")]),
+        (SESSION_B, vec![user_in(other, "there")]),
+    ]);
+    let dir = home.path().join("projects").join(encoded_cwd(CWD));
+    // Neither a file that is not a record nor a folder named like one is listed.
+    fs::write(dir.join("notes.txt"), "x").unwrap();
+    fs::create_dir(dir.join("2d6ce9f0-3b80-4c5b-9f74-7b3e2e5c9d33.jsonl")).unwrap();
+    // A record that names no directory yet is listed with none.
+    let empty = "3e7df0a1-4c91-4d6c-8a85-8c4f3f6dae44";
+    fs::write(dir.join(format!("{empty}.jsonl")), queued + "\n").unwrap();
+
+    assert_eq!(
+        list_records(home.path(), CWD).unwrap(),
+        vec![
+            (SESSION_A.to_string(), Some(CWD.to_string())),
+            (SESSION_B.to_string(), Some(other.to_string())),
+            (empty.to_string(), None),
+        ]
+    );
+    // A directory the CLI never wrote lists nothing.
+    assert!(
+        list_records(home.path(), r"C:\elsewhere")
+            .unwrap()
+            .is_empty()
+    );
 }
