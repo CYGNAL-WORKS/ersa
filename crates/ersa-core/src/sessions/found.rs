@@ -9,14 +9,14 @@
 //! other session's.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ersa_adapter::{Adapter, BackendChoices, Transport};
 use ersa_protocol::core_api::{Workspace, WorkspaceState};
 
-use super::{Handle, RECORD_READ, STARTUP_SUMMARIES, SessionManager, UNKNOWN_TIME, lock};
+use super::{Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, lock};
 use super::{SessionError, read_summary};
 use crate::persistence::{self, SessionRow};
 use crate::platform;
@@ -25,6 +25,20 @@ use crate::platform;
 /// folder on a file system that stopped answering is skipped for this list,
 /// its sessions kept as they were.
 const FOLDER_LISTING: Duration = Duration::from_secs(5);
+
+/// The folders whose listing is still under way, by backend and path. A
+/// listing past its time keeps its thread until the file system answers, so
+/// a folder still being listed is not listed again: a file system that
+/// stopped answering holds one thread per folder, however often Core lists.
+pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
+
+/// One folder to list: a `ready` workspace, for one backend.
+struct Folder {
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    workspace: Workspace,
+    host_id: String,
+}
 
 impl SessionManager {
     /// Brings the sessions started in the backend's own tools up to date with
@@ -35,24 +49,16 @@ impl SessionManager {
     /// (R05), and a session found before whose record is gone leaves it
     /// (R06). A session Ersa started is never added or left out here.
     ///
-    /// One listing at a time, so two never record one session twice; a
-    /// delete takes the same turn, so a list cannot find a record again
-    /// that the delete removed meanwhile.
+    /// Every folder is listed at once, and the backend asked about missing
+    /// sessions at once, each within a bound and outside any lock. Only
+    /// recording and forgetting take the listing turn, so two lists never
+    /// record one session twice, and a delete, which takes the same turn,
+    /// is never found again.
     pub async fn find_elsewhere(
         &self,
         transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> Result<(), SessionError> {
-        let _listing = self.listing.lock().await;
-        // Every session Core has stored, dormant and deleting ones included:
-        // a record that is one of them is never found as another.
-        let mut known: HashSet<(String, String)> = self
-            .store
-            .sessions()
-            .await?
-            .into_iter()
-            .filter_map(|row| Some((row.backend, row.backend_session_id?)))
-            .collect();
-        let mut summaries = tokio::task::JoinSet::new();
+        let mut folders = Vec::new();
         for project in self.store.projects().await? {
             let Some(transport) = transport_for(&project.host_id) else {
                 continue;
@@ -64,41 +70,75 @@ impl SessionManager {
                     continue;
                 }
                 for adapter in &self.adapters {
-                    let Some(listed) =
-                        list_folder(adapter, Arc::clone(&transport), &workspace).await
-                    else {
-                        continue;
-                    };
-                    for backend_id in &listed {
-                        let key = (adapter.backend().to_string(), backend_id.clone());
-                        if known.contains(&key) {
-                            continue;
-                        }
-                        known.insert(key);
-                        if let Some(handle) = self
-                            .record_found(
-                                adapter.as_ref(),
-                                &workspace,
-                                &project.host_id,
-                                backend_id,
-                            )
-                            .await?
-                        {
-                            let row = lock(&handle.row).clone();
-                            let (store, tiles) = (self.store.clone(), self.tiles.clone());
-                            let (adapter, transport) =
-                                (Arc::clone(adapter), Arc::clone(&transport));
-                            summaries.spawn(async move {
-                                read_summary(&store, &handle, &tiles, adapter, transport, row)
-                                    .await;
-                            });
-                        }
-                    }
-                    self.leave_out_gone(adapter, Arc::clone(&transport), &workspace, &listed)
-                        .await?;
+                    folders.push(Folder {
+                        adapter: Arc::clone(adapter),
+                        transport: Arc::clone(&transport),
+                        workspace: workspace.clone(),
+                        host_id: project.host_id.clone(),
+                    });
                 }
             }
         }
+
+        let mut listings = tokio::task::JoinSet::new();
+        for (index, folder) in folders.iter().enumerate() {
+            let listing = list_folder(
+                Arc::clone(&self.listing_in_flight),
+                Arc::clone(&folder.adapter),
+                Arc::clone(&folder.transport),
+                folder.workspace.clone(),
+            );
+            listings.spawn(async move { (index, listing.await) });
+        }
+        let mut listed: Vec<Option<HashSet<String>>> = vec![None; folders.len()];
+        while let Some(done) = listings.join_next().await {
+            if let Ok((index, records)) = done {
+                listed[index] = records;
+            }
+        }
+
+        let mut summaries = tokio::task::JoinSet::new();
+        let mut missing = Vec::new();
+        {
+            let _listing = self.listing.lock().await;
+            // Every session Core has stored, dormant and deleting ones
+            // included: a record that is one of them is never found as another.
+            let mut known: HashSet<(String, String)> = self
+                .store
+                .sessions()
+                .await?
+                .into_iter()
+                .filter_map(|row| Some((row.backend, row.backend_session_id?)))
+                .collect();
+            for (folder, listed) in folders.iter().zip(&listed) {
+                // A folder that could not be listed says nothing.
+                let Some(listed) = listed else {
+                    continue;
+                };
+                for backend_id in listed {
+                    let key = (folder.adapter.backend().to_string(), backend_id.clone());
+                    if !known.insert(key) {
+                        continue;
+                    }
+                    if let Some(handle) = self.record_found(folder, backend_id).await? {
+                        let row = lock(&handle.row).clone();
+                        let (store, tiles) = (self.store.clone(), self.tiles.clone());
+                        let (adapter, transport) =
+                            (Arc::clone(&folder.adapter), Arc::clone(&folder.transport));
+                        summaries.spawn(async move {
+                            read_summary(&store, &handle, &tiles, adapter, transport, row).await;
+                        });
+                    }
+                }
+                missing.extend(
+                    self.found_missing(folder, listed)
+                        .into_iter()
+                        .map(|handle| (handle, folder)),
+                );
+            }
+        }
+        self.leave_out_gone(missing).await?;
+
         // A new session's title and date come from its record, read before
         // the list answers so it shows titled and in its place; never waited
         // on past a bound, as at startup.
@@ -111,21 +151,19 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Records the session `backend_id` found in `workspace`'s folder, and
-    /// loads it. `None` when it was not recorded: the workspace stopped
-    /// being `ready`, or the session was recorded meanwhile.
+    /// Records the session `backend_id` found in `folder`, and loads it.
+    /// `None` when it was not recorded: the workspace stopped being `ready`,
+    /// or the session was recorded meanwhile.
     async fn record_found(
         &self,
-        adapter: &dyn Adapter,
-        workspace: &Workspace,
-        host_id: &str,
+        folder: &Folder,
         backend_id: &str,
     ) -> Result<Option<Arc<Handle>>, SessionError> {
         let mut row = SessionRow {
             id: persistence::new_id("s"),
-            workspace_id: workspace.id.clone(),
-            host_id: host_id.to_string(),
-            backend: adapter.backend().to_string(),
+            workspace_id: folder.workspace.id.clone(),
+            host_id: folder.host_id.clone(),
+            backend: folder.adapter.backend().to_string(),
             backend_session_id: Some(backend_id.to_string()),
             mode: None,
             model: None,
@@ -134,7 +172,7 @@ impl SessionManager {
             model_at: None,
             effort_at: None,
             permission_mode_at: None,
-            cwd: workspace.path.clone(),
+            cwd: folder.workspace.path.clone(),
             archived: false,
             deleting: None,
             pinned: false,
@@ -149,32 +187,25 @@ impl SessionManager {
         }
         // As at startup: with no request of Core's, the permission mode is
         // the backend's default until the record says otherwise.
-        let default = BackendChoices::default_of(&adapter.choices().permission_modes);
+        let default = BackendChoices::default_of(&folder.adapter.choices().permission_modes);
         row.permission_mode = (!default.is_empty()).then_some(default);
         let handle = Arc::new(Handle::new(row, UNKNOWN_TIME.to_string()));
         lock(&self.sessions).insert(handle.id.clone(), Arc::clone(&handle));
         Ok(Some(handle))
     }
 
-    /// Leaves out the sessions found before in `workspace`'s folder whose
-    /// record `adapter`'s backend no longer holds (FLOW-RESUME-SESSION-R06):
-    /// those missing from `listed` that the backend, asked for each, says
-    /// have no record. One it cannot say for stays, and so does one Core is
-    /// running or deleting.
-    async fn leave_out_gone(
-        &self,
-        adapter: &Arc<dyn Adapter>,
-        transport: Arc<dyn Transport>,
-        workspace: &Workspace,
-        listed: &HashSet<String>,
-    ) -> Result<(), SessionError> {
-        let missing: Vec<Arc<Handle>> = lock(&self.sessions)
+    /// The sessions found before in `folder` that its listing no longer
+    /// holds. Only those started elsewhere: a session Ersa started is never
+    /// left out, since a new session or fork has no record until its first
+    /// message.
+    fn found_missing(&self, folder: &Folder, listed: &HashSet<String>) -> Vec<Arc<Handle>> {
+        lock(&self.sessions)
             .values()
             .filter(|handle| {
                 let row = lock(&handle.row);
                 row.started_elsewhere
-                    && row.workspace_id == workspace.id
-                    && row.backend == adapter.backend()
+                    && row.workspace_id == folder.workspace.id
+                    && row.backend == folder.adapter.backend()
                     && row.deleting.is_none()
                     && row
                         .backend_session_id
@@ -182,27 +213,52 @@ impl SessionManager {
                         .is_some_and(|id| !listed.contains(id))
             })
             .cloned()
-            .collect();
-        for handle in missing {
-            let _op = handle.op.lock().await;
-            if handle.live().is_some() || handle.removed.load(Ordering::SeqCst) {
-                continue;
-            }
+            .collect()
+    }
+
+    /// Leaves out each of `missing` whose backend, asked, says it has no
+    /// record (FLOW-RESUME-SESSION-R06). Asked all at once, each within a
+    /// bound; one the backend cannot say for stays, and so does one Core is
+    /// running or deleting by the time it is forgotten.
+    async fn leave_out_gone(
+        &self,
+        missing: Vec<(Arc<Handle>, &Folder)>,
+    ) -> Result<(), SessionError> {
+        let mut asked = tokio::task::JoinSet::new();
+        for (handle, folder) in missing {
             let Some(backend_id) = lock(&handle.row).backend_session_id.clone() else {
                 continue;
             };
-            let asked =
-                adapter.summarize_record(Arc::clone(&transport), &workspace.path, &backend_id);
-            if let Ok(Ok(None)) = tokio::time::timeout(RECORD_READ, asked).await {
-                self.store.delete_session(handle.id.clone()).await?;
-                self.let_go(&handle).await;
+            let (adapter, transport) = (Arc::clone(&folder.adapter), Arc::clone(&folder.transport));
+            let cwd = folder.workspace.path.clone();
+            asked.spawn(async move {
+                let read = adapter.summarize_record(transport, &cwd, &backend_id);
+                let gone = matches!(tokio::time::timeout(SUMMARY_READ, read).await, Ok(Ok(None)));
+                (handle, gone)
+            });
+        }
+        while let Some(done) = asked.join_next().await {
+            let Ok((handle, true)) = done else {
+                continue;
+            };
+            let _listing = self.listing.lock().await;
+            let _op = handle.op.lock().await;
+            if handle.live().is_some()
+                || handle.removed.load(Ordering::SeqCst)
+                || lock(&handle.row).deleting.is_some()
+            {
+                continue;
             }
+            self.store.delete_session(handle.id.clone()).await?;
+            self.let_go(&handle).await;
         }
         Ok(())
     }
 
     /// Lets go of the sessions found in workspace `workspace_id`'s folder
-    /// whose rows went with the workspace (FLOW-RESUME-SESSION-R13).
+    /// whose rows went with the workspace (FLOW-RESUME-SESSION-R13). One a
+    /// send or resume started after the removal checked is stopped first, so
+    /// no backend is left running where Ersa can no longer reach it.
     pub async fn forget_found(&self, workspace_id: &str) -> Result<(), SessionError> {
         let found: Vec<Arc<Handle>> = lock(&self.sessions)
             .values()
@@ -213,41 +269,62 @@ impl SessionManager {
             .cloned()
             .collect();
         for handle in found {
-            if self.store.session(handle.id.clone()).await?.is_none() {
-                self.let_go(&handle).await;
+            if self.store.session(handle.id.clone()).await?.is_some() {
+                continue;
             }
+            if let Err(e) = self.stop(&handle.id).await {
+                tracing::warn!(session = %handle.id, error = %e, "stopping a session whose workspace was removed failed");
+            }
+            self.let_go(&handle).await;
         }
         Ok(())
     }
 
-    /// A session found in the backend's records that Core is running in
-    /// workspace `workspace_id`, which the workspace cannot go without:
-    /// no backend is left running in a removed folder.
-    pub fn running_found(&self, workspace_id: &str) -> Option<String> {
-        lock(&self.sessions)
-            .values()
-            .find(|handle| {
-                let row = lock(&handle.row);
-                row.started_elsewhere && row.workspace_id == workspace_id && handle.live().is_some()
-            })
-            .map(|handle| handle.id.clone())
+    /// Whether Core is running a session found in the backend's records in
+    /// workspace `workspace_id`, which holds back removing it
+    /// (FLOW-RESUME-SESSION-R14).
+    pub fn runs_found_in(&self, workspace_id: &str) -> bool {
+        lock(&self.sessions).values().any(|handle| {
+            let row = lock(&handle.row);
+            row.started_elsewhere && row.workspace_id == workspace_id && handle.live().is_some()
+        })
     }
 }
 
 /// The sessions `adapter`'s backend holds records of for `workspace`'s
 /// folder, counting only records that name that folder as their own: a
 /// backend may file two folders' records together. `None` when the folder
-/// could not be listed, so nothing is concluded from it.
+/// could not be listed, or is still being listed from an earlier call, so
+/// nothing is concluded from it.
 async fn list_folder(
-    adapter: &Arc<dyn Adapter>,
+    in_flight: InFlight,
+    adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
-    workspace: &Workspace,
+    workspace: Workspace,
 ) -> Option<HashSet<String>> {
-    let listing = adapter.list_records(transport, &workspace.path);
+    let key = (adapter.backend().to_string(), workspace.path.clone());
+    if !lock(&in_flight).insert(key.clone()) {
+        return None;
+    }
+    // Its own task, which lets the folder go only when the listing returns,
+    // past the bound too.
+    let path = workspace.path.clone();
+    let listing = {
+        let adapter = Arc::clone(&adapter);
+        tokio::spawn(async move {
+            let records = adapter.list_records(transport, &path).await;
+            lock(&in_flight).remove(&key);
+            records
+        })
+    };
     let records = match tokio::time::timeout(FOLDER_LISTING, listing).await {
-        Ok(Ok(records)) => records,
-        Ok(Err(e)) => {
+        Ok(Ok(Ok(records))) => records,
+        Ok(Ok(Err(e))) => {
             tracing::warn!(workspace = %workspace.id, backend = adapter.backend(), error = %e, "could not list the backend's sessions for the folder");
+            return None;
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(workspace = %workspace.id, backend = adapter.backend(), error = %e, "listing the backend's sessions for the folder failed");
             return None;
         }
         Err(_) => {
@@ -259,12 +336,7 @@ async fn list_folder(
     Some(
         records
             .into_iter()
-            .filter(|record| {
-                record
-                    .cwd
-                    .as_deref()
-                    .is_some_and(|cwd| platform::path_key(cwd) == folder)
-            })
+            .filter(|record| platform::path_key(&record.cwd) == folder)
             .map(|record| record.backend_session_id)
             .collect(),
     )
