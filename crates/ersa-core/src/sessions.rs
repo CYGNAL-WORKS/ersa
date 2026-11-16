@@ -65,6 +65,7 @@ use crate::projection::View;
 use crate::raw_log::RawLog;
 
 mod fork;
+mod found;
 mod resume;
 mod send;
 mod settings;
@@ -217,24 +218,39 @@ pub struct SessionManager {
     copy_pause: Duration,
     /// A pause before Core lets go of a run that has ended, for tests.
     wind_down_pause: Duration,
+    /// Where a list stops between storing a found session and holding it,
+    /// for tests ([`crate::CoreConfig::found_gate`]).
+    found_gate: Option<Arc<crate::state::Gate>>,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
     /// The workspaces a `session.delete` under way has claimed, each with
-    /// the session it deletes. In memory only, so a restart drops every
-    /// claim (PROTO-CORE-API, `session.delete`).
+    /// the session it deletes, and those a removal holds, with no session
+    /// (`found`). In memory only, so a restart drops every claim
+    /// (PROTO-CORE-API, `session.delete`).
     claims: Claims,
     /// Held while a session's arrangement is written to the store and to
     /// memory, so a `section.remove` and a `session.arrange` into that
     /// section land in the same order in both.
     arrangement: tokio::sync::Mutex<()>,
+    /// Held while Core lists the sessions found in the backends' records,
+    /// and while a delete removes a session's row, so a list never records
+    /// a session twice or finds a deleted one again (`found`).
+    listing: tokio::sync::Mutex<()>,
+    /// The folders whose listing is still under way (`found`).
+    listing_in_flight: found::InFlight,
+    /// How many deletes have removed a session's row, counted under the
+    /// listing turn (`found`).
+    deletes: AtomicU64,
 }
 
-/// Claimed workspaces, by id, with the session each delete is for.
+/// Claimed workspaces, by id, with the session each delete is for; empty
+/// for a workspace a removal holds.
 type Claims = Arc<Mutex<HashMap<String, String>>>;
 
-/// A workspace claimed for one delete; dropping it releases the claim, so
-/// every way out of a delete, a refusal or a failure included, releases it.
+/// A workspace claimed for one delete or one removal; dropping it releases
+/// the claim, so every way out, a refusal or a failure included, releases
+/// it.
 pub struct WorkspaceClaim {
     claims: Claims,
     workspace_id: String,
@@ -280,7 +296,7 @@ fn in_turn(handle: &Handle) -> bool {
 /// The refusal for a request a delete under way holds back.
 fn busy(workspace_id: &str) -> SessionError {
     SessionError::Busy(format!(
-        "a session in workspace {workspace_id} is being deleted; try again once it is done"
+        "workspace {workspace_id} is busy: a session in it is being deleted, or the workspace removed; try again once it is done"
     ))
 }
 
@@ -824,9 +840,13 @@ impl SessionManager {
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
+            found_gate: None,
             closing: AtomicBool::new(false),
             claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
+            listing: tokio::sync::Mutex::new(()),
+            listing_in_flight: Arc::default(),
+            deletes: AtomicU64::new(0),
         }
     }
 
@@ -841,6 +861,13 @@ impl SessionManager {
     /// ([`crate::CoreConfig::wind_down_pause`]).
     pub fn with_wind_down_pause(mut self, pause: Duration) -> Self {
         self.wind_down_pause = pause;
+        self
+    }
+
+    /// The same manager, stopping a list between storing a found session
+    /// and holding it ([`crate::CoreConfig::found_gate`]).
+    pub fn with_found_gate(mut self, gate: Option<Arc<crate::state::Gate>>) -> Self {
+        self.found_gate = gate;
         self
     }
 
@@ -1524,7 +1551,8 @@ impl SessionManager {
     }
 
     /// Claims workspace `workspace_id` for deleting session `session_id`,
-    /// in memory only. Refused while another delete holds it.
+    /// or for removing the workspace when `session_id` is empty, in memory
+    /// only. Refused while another delete or removal holds it.
     pub fn claim_workspace(
         &self,
         workspace_id: &str,
@@ -1656,10 +1684,12 @@ impl SessionManager {
         workspace_id: Option<String>,
     ) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
+        let _listing = self.listing.lock().await;
         let _op = handle.op.lock().await;
         self.store
             .finish_session_delete(id.to_string(), workspace_id)
             .await?;
+        self.deletes.fetch_add(1, Ordering::SeqCst);
         self.let_go(&handle).await;
         Ok(())
     }
@@ -3341,6 +3371,7 @@ mod tests {
             model_at: None,
             effort_at: None,
             permission_mode_at: None,
+            started_elsewhere: false,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
@@ -3638,6 +3669,7 @@ mod tests {
                 model_at: None,
                 effort_at: None,
                 permission_mode_at: None,
+                started_elsewhere: false,
             })
             .await
             .unwrap();

@@ -34,6 +34,11 @@ pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
+    // Sessions started in the backend's own tools join the list, and leave
+    // it once their record is gone (FLOW-RESUME-SESSION-R12, R06).
+    core.sessions
+        .find_elsewhere(|host| core.session_transport_for(host))
+        .await?;
     Ok(core.sessions.list())
 }
 
@@ -168,6 +173,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         model_at: requested.model,
         effort_at: requested.effort,
         permission_mode_at: requested.permission_mode,
+        started_elsewhere: false,
         archived: false,
         deleting: None,
         pinned: false,
@@ -323,6 +329,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         model_at: requested.model,
         effort_at: requested.effort,
         permission_mode_at: requested.permission_mode,
+        started_elsewhere: false,
         archived: false,
         deleting: None,
         pinned: false,

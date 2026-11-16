@@ -24,7 +24,7 @@ use std::time::Duration;
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, ConversationEnd,
-    Direction, ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage,
+    Direction, ImageLimits, LineReader, LineWriter, ListedRecord, OpenElsewhere, OutgoingMessage,
     PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, QuestionReply,
     RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings, Removal, Requested,
     SessionConfig, SessionControl, TitleRules, Transport, async_trait,
@@ -603,6 +603,25 @@ impl Adapter for ClaudeAdapter {
         let home = self.claude_home()?;
         let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
         blocking(move || record::conversation_end(&home, &cwd, &id).map(Some)).await
+    }
+
+    /// The records filed under `cwd`'s directory on this machine, each with
+    /// the working directory it names (FLOW-RESUME-SESSION-R12).
+    async fn list_records(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+    ) -> Result<Vec<ListedRecord>, AdapterError> {
+        let home = self.claude_home()?;
+        let cwd = cwd.to_string();
+        let listed = blocking(move || record::list_records(&home, &cwd)).await?;
+        Ok(listed
+            .into_iter()
+            .map(|(backend_session_id, cwd)| ListedRecord {
+                backend_session_id,
+                cwd,
+            })
+            .collect())
     }
 
     /// The record's title and first time, from its head and tail
