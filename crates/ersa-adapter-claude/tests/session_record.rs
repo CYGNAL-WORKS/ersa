@@ -1700,3 +1700,31 @@ fn listing_a_directory_names_each_records_own_working_directory() {
             .is_empty()
     );
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R79
+#[test]
+fn listing_a_directory_leaves_out_the_runs_the_clis_own_list_hides() {
+    let prompt = |entrypoint: &str| {
+        json!({"type": "user", "uuid": "u", "cwd": CWD, "entrypoint": entrypoint,
+               "message": {"role": "user", "content": "hello"}})
+        .to_string()
+    };
+    let hidden = [
+        "3e7df0a1-4c91-4d6c-8a85-8c4f3f6dae44",
+        "4f8e01b2-5da2-4e7d-9b96-9d5f4f7ebf55",
+        "5a9f12c3-6eb3-4f8e-8ca7-ae6a5a8fc066",
+    ];
+    let home = home_with(&[
+        (SESSION_A, vec![prompt("cli")]),
+        (SESSION_B, vec![prompt("ersa")]),
+        (hidden[0], vec![prompt("sdk-cli")]),
+        (hidden[1], vec![prompt("sdk-ts")]),
+        (hidden[2], vec![prompt("sdk-py")]),
+    ]);
+    let listed: Vec<String> = list_records(home.path(), CWD)
+        .unwrap()
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    assert_eq!(listed, [SESSION_A, SESSION_B]);
+}

@@ -300,9 +300,9 @@ async fn removing_a_workspace_or_project_forgets_its_found_sessions_and_leaves_t
     assert_eq!(listed[0]["workspace_id"], root["id"]);
 }
 
-// verifies: FLOW-RESUME-SESSION-R13
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R05
 #[tokio::test(flavor = "multi_thread")]
-async fn deleting_the_last_session_ersa_started_takes_the_found_ones_with_its_workspace() {
+async fn a_found_session_uses_its_workspace_so_deleting_another_there_keeps_the_files() {
     let backend = Backend::default();
     let core = start(&backend, tempdir()).await;
     let mut client = core.client().await;
@@ -322,22 +322,24 @@ async fn deleting_the_last_session_ersa_started_takes_the_found_ones_with_its_wo
         .await;
     assert_eq!(sessions(&mut client).await.len(), 2);
 
-    // The found session does not count as another session in the workspace,
-    // so the delete takes the workspace's files, and the found session goes
-    // with the workspace, its record left.
+    // The found session is another session using the workspace: the delete
+    // leaves the workspace and its files, and the found session stays.
     let changes = client
         .result("workspace.changes", json!({ "id": isolated["id"] }))
         .await;
-    assert_eq!(changes["sessions"], 1);
+    assert_eq!(changes["sessions"], 2);
     let deleted = client
         .result(
             "session.delete",
             json!({ "id": ersa["id"], "token": changes["token"] }),
         )
         .await;
-    assert_eq!(deleted["workspace_deleted"], true);
-    assert_eq!(workspaces(&mut client, &project["id"]).await.len(), 1);
-    assert!(sessions(&mut client).await.is_empty());
+    assert_eq!(deleted["workspace_deleted"], false);
+    assert!(std::path::Path::new(path(&isolated)).exists());
+    assert_eq!(workspaces(&mut client, &project["id"]).await.len(), 2);
+    let listed = sessions(&mut client).await;
+    assert_eq!(listed.len(), 1, "{listed:#?}");
+    assert_eq!(listed[0]["title"], "found");
     assert!(backend.has_record("rec-isolated"));
 }
 

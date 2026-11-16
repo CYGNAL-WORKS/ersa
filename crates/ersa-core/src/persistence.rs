@@ -270,7 +270,7 @@ impl Store {
         self.call(move |conn| {
             let tx = conn.transaction()?;
             // Sessions found in the backend's records for the project's
-            // folder go with it, their records left (FLOW-RESUME-SESSION-R09).
+            // folder go with it, their records left (FLOW-RESUME-SESSION-R13).
             let root: Option<String> = tx
                 .query_row(
                     "SELECT id FROM workspaces WHERE project_id = ?1 AND kind = 'root'",
@@ -389,7 +389,7 @@ impl Store {
         self.call(move |conn| {
             let tx = conn.transaction()?;
             // Sessions found in the backend's records for the workspace's
-            // folder go with it, their records left (FLOW-RESUME-SESSION-R09).
+            // folder go with it, their records left (FLOW-RESUME-SESSION-R13).
             sessions::forget_found_sessions_unless_others(&tx, &id)?;
             tx.execute("DELETE FROM workspaces WHERE id = ?1", [&id])
                 .map_err(|e| conflict(e, "a session was created in the workspace meanwhile"))?;
