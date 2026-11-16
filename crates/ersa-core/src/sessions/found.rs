@@ -16,7 +16,10 @@ use std::time::Duration;
 use ersa_adapter::{Adapter, BackendChoices, Transport};
 use ersa_protocol::core_api::{Workspace, WorkspaceState};
 
-use super::{Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, lock};
+use super::{
+    Handle, STARTUP_SUMMARIES, STOP_TIMEOUT, SUMMARY_READ, SessionManager, UNKNOWN_TIME,
+    begin_stop, lock, wait_finished,
+};
 use super::{SessionError, read_summary};
 use crate::persistence::{self, SessionRow};
 use crate::platform;
@@ -52,12 +55,17 @@ impl SessionManager {
     /// Every folder is listed at once, and the backend asked about missing
     /// sessions at once, each within a bound and outside any lock. Only
     /// recording and forgetting take the listing turn, so two lists never
-    /// record one session twice, and a delete, which takes the same turn,
-    /// is never found again.
+    /// record one session twice; a delete takes the same turn and counts
+    /// itself, and a listing a delete overlapped records nothing new, so a
+    /// deleted session is never found again.
     pub async fn find_elsewhere(
         &self,
         transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> Result<(), SessionError> {
+        // A delete that lands while the folders are read may have removed a
+        // record this listing still holds: what it lists is then not
+        // recorded as new this time, and the next list reads again.
+        let deletes_before = self.deletes.load(Ordering::SeqCst);
         let mut folders = Vec::new();
         for project in self.store.projects().await? {
             let Some(transport) = transport_for(&project.host_id) else {
@@ -101,6 +109,7 @@ impl SessionManager {
         let mut missing = Vec::new();
         {
             let _listing = self.listing.lock().await;
+            let deleted_meanwhile = self.deletes.load(Ordering::SeqCst) != deletes_before;
             // Every session Core has stored, dormant and deleting ones
             // included: a record that is one of them is never found as another.
             let mut known: HashSet<(String, String)> = self
@@ -115,7 +124,7 @@ impl SessionManager {
                 let Some(listed) = listed else {
                     continue;
                 };
-                for backend_id in listed {
+                for backend_id in listed.iter().filter(|_| !deleted_meanwhile) {
                     let key = (folder.adapter.backend().to_string(), backend_id.clone());
                     if !known.insert(key) {
                         continue;
@@ -272,8 +281,22 @@ impl SessionManager {
             if self.store.session(handle.id.clone()).await?.is_some() {
                 continue;
             }
-            if let Err(e) = self.stop(&handle.id).await {
-                tracing::warn!(session = %handle.id, error = %e, "stopping a session whose workspace was removed failed");
+            {
+                // Under `op`, marked removed first: a send or resume that
+                // comes after finds it removed, and one that came before is
+                // stopped here.
+                let _op = handle.op.lock().await;
+                handle.removed.store(true, Ordering::SeqCst);
+                if let Some(live) = handle.live() {
+                    begin_stop(&live);
+                    if let Err(e) = wait_finished(&live, STOP_TIMEOUT).await {
+                        // Still running: kept where the user can see and
+                        // stop it, rather than left running out of reach.
+                        handle.removed.store(false, Ordering::SeqCst);
+                        tracing::warn!(session = %handle.id, error = %e, "a session whose workspace was removed did not stop; kept");
+                        continue;
+                    }
+                }
             }
             self.let_go(&handle).await;
         }

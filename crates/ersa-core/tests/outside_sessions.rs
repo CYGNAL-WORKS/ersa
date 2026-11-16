@@ -8,6 +8,7 @@
 mod support;
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use ersa_core::Adapter;
 use serde_json::{Value, json};
@@ -20,12 +21,17 @@ use support::{Client, TestCore, project, start_with_adapters, tempdir};
 struct Backend {
     records: Records,
     filed: Filed,
+    /// Holds every folder listing, once read, while a test holds it.
+    list_gate: Arc<tokio::sync::Mutex<()>>,
+    stats: Arc<fake::Stats>,
 }
 
 impl Backend {
     fn adapter(&self) -> Arc<dyn Adapter> {
         let mut adapter = FakeAdapter::with_records(Arc::clone(&self.records));
         adapter.filed = Arc::clone(&self.filed);
+        adapter.list_gate = Arc::clone(&self.list_gate);
+        adapter.stats = Arc::clone(&self.stats);
         Arc::new(adapter)
     }
 
@@ -377,4 +383,75 @@ async fn a_found_session_core_is_running_holds_back_removing_its_workspace() {
         .await;
     assert!(sessions(&mut client).await.is_empty());
     assert!(backend.has_record("rec-isolated"));
+}
+
+/// Waits until the backend has been asked for folder listings `n` times.
+async fn listings(backend: &Backend, n: usize) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while backend.stats.listings.load(Ordering::SeqCst) < n {
+        assert!(tokio::time::Instant::now() < deadline, "no listing");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+// verifies: FLOW-RESUME-SESSION-R12
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_deleted_while_its_folder_is_listed_is_not_found_again() {
+    let backend = Backend::default();
+    let core = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let root = workspaces(&mut client, &project["id"]).await.remove(0);
+    backend.record("rec-a", "found", path(&root), path(&root));
+    let found = titled(&sessions(&mut client).await, "found").expect("listed")["id"].clone();
+
+    // A list reads the folder, still holding the record, and is held there
+    // while the user deletes the session, record and all.
+    let held = backend.list_gate.lock().await;
+    let mut lister = core.client().await;
+    let listing = lister.request("session.list", json!({})).await;
+    listings(&backend, 2).await;
+    client
+        .result("session.delete", json!({ "id": found }))
+        .await;
+    assert!(!backend.has_record("rec-a"));
+    drop(held);
+
+    let listed = lister.response(listing).await["result"].clone();
+    assert_eq!(listed, json!([]), "{listed:#}");
+    assert!(sessions(&mut client).await.is_empty());
+}
+
+// verifies: FLOW-RESUME-SESSION-R12
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_still_being_listed_is_not_listed_again() {
+    let backend = Backend::default();
+    let core = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let root = workspaces(&mut client, &project["id"]).await.remove(0);
+    backend.record("rec-a", "found", path(&root), path(&root));
+
+    // A file system that stopped answering: the list answers without the
+    // folder once its time is up, and the next list leaves the folder to
+    // the listing still under way rather than start another.
+    let held = backend.list_gate.lock().await;
+    assert!(sessions(&mut client).await.is_empty());
+    assert_eq!(backend.stats.listings.load(Ordering::SeqCst), 1);
+    assert!(sessions(&mut client).await.is_empty());
+    assert_eq!(backend.stats.listings.load(Ordering::SeqCst), 1);
+
+    // Once it answers, the folder is listed again.
+    drop(held);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let listed = sessions(&mut client).await;
+        if !listed.is_empty() {
+            assert_eq!(listed[0]["title"], "found");
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "never listed");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(backend.stats.listings.load(Ordering::SeqCst) >= 2);
 }

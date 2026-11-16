@@ -615,14 +615,11 @@ impl Adapter for ClaudeAdapter {
         let home = self.claude_home()?;
         let cwd = cwd.to_string();
         let listed = blocking(move || record::list_records(&home, &cwd)).await?;
-        // A record that names no folder cannot be placed in one.
         Ok(listed
             .into_iter()
-            .filter_map(|(backend_session_id, cwd)| {
-                Some(ListedRecord {
-                    backend_session_id,
-                    cwd: cwd?,
-                })
+            .map(|(backend_session_id, cwd)| ListedRecord {
+                backend_session_id,
+                cwd,
             })
             .collect())
     }
