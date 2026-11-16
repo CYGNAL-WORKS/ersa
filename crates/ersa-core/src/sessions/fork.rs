@@ -16,9 +16,11 @@ pub struct Beginning {
     /// 2.1.316/15-fork-named-no-message), so until then this is the only
     /// place the copied conversation can be read from.
     pub record: Arc<Vec<RecordEvent>>,
-    /// For a fork: keeps the original's `forking` flag raised until the
-    /// fork's backend is ready, by when the CLI has read the record it copies.
-    pub fork_hold: Option<Arc<ForkHold>>,
+    /// For a fork: the operation that marks its original as being forked
+    /// (admission's), shared with the fork's reads and its registry check,
+    /// and kept until the fork's backend is ready, by when the CLI has read
+    /// the record it copies. The mark goes when the last of them lets go.
+    pub forking: Option<Arc<UnderWay>>,
 }
 
 /// How a fork's title ends.
@@ -41,15 +43,6 @@ pub struct Forkable {
     pub name: Option<String>,
     /// What its fork begins with.
     pub beginning: Beginning,
-}
-
-/// Lowers a session's `forking` flag when the last holder lets go.
-pub struct ForkHold(Arc<AtomicBool>);
-
-impl Drop for ForkHold {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
-    }
 }
 
 /// What the reads for a fork need, moved into a task of their own.
@@ -80,10 +73,11 @@ impl SessionManager {
     /// holds it, ends with a finished reply and nothing else is writing it
     /// (FLOW-FORK-SESSION-R03), each case with its own message.
     ///
-    /// The slow reads run in one task, and the session's `forking` flag stays
-    /// raised until that task ends, even after this request has given up on
-    /// it: a disk that hangs then holds one stuck read per session, not one
-    /// per try. It stays raised until the fork's backend is ready too:
+    /// The slow reads run in one task, and the session stays marked as being
+    /// forked, in admission, until that task ends, even after this request
+    /// has given up on it: a disk that hangs then holds one stuck read per
+    /// session, not one per try. It stays marked until the fork's backend
+    /// is ready too:
     /// `session.send` refuses meanwhile, since a turn begun before the CLI has
     /// read the record would be copied part way (fixture 2.1.316/18), and so
     /// does `session.delete`, whose record the CLI is about to read.
@@ -115,13 +109,27 @@ impl SessionManager {
         };
         let adapter = self.adapter_of(&row.backend)?;
 
-        if handle.forking.swap(true, Ordering::SeqCst) {
-            return Err(SessionError::InvalidState(format!(
-                "an earlier fork of session {id} has not finished starting; try again once it \
-                 has"
-            )));
-        }
-        let held = Arc::new(ForkHold(Arc::clone(&handle.forking)));
+        // One step in admission marks the session as being forked, or says
+        // why not. From here a send to it and a delete of it are refused,
+        // and a send that took the slot first refuses this: one of the two
+        // always gives way.
+        let command = Command::Fork {
+            session: id.to_string(),
+        };
+        let forking = match self.admission.command(command).await {
+            Ok(forking) => forking,
+            Err(Refusal::SendInProgress) => return Err(a_turn_is_running(id)),
+            Err(Refusal::Forking) => {
+                return Err(SessionError::InvalidState(format!(
+                    "an earlier fork of session {id} has not finished starting; try again once \
+                     it has"
+                )));
+            }
+            Err(refusal) => return Err(refused_session(refusal, &handle.workspace_id, id)),
+        };
+        // Shared by the reads, the registry check and the fork's start: the
+        // mark goes when the last of them lets go.
+        let held = Arc::new(forking);
         let for_reads = Arc::clone(&held);
         let reads = ForkReads {
             id: id.to_string(),
@@ -162,7 +170,7 @@ impl SessionManager {
             beginning: Beginning {
                 title: None,
                 record,
-                fork_hold: Some(held),
+                forking: Some(held),
             },
         })
     }
@@ -177,15 +185,20 @@ fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
     if (handle.live().is_some() && (turn_running || !session.tile.pending.is_empty()))
         || session.sending.is_some()
     {
-        return Err(SessionError::refused(
-            ErrorReason::SessionBusy,
-            format!(
-                "a turn is running in session {}; it can be forked once the reply finishes",
-                handle.id
-            ),
-        ));
+        return Err(a_turn_is_running(&handle.id));
     }
     Ok(())
+}
+
+/// The refusal of a fork while a turn runs in the session, or a message is
+/// on its way to it.
+fn a_turn_is_running(session_id: &str) -> SessionError {
+    SessionError::refused(
+        ErrorReason::SessionBusy,
+        format!(
+            "a turn is running in session {session_id}; it can be forked once the reply finishes"
+        ),
+    )
 }
 
 /// How the record ends, then who has it open, then the conversation the fork
@@ -193,7 +206,7 @@ fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
 /// finished reply, so that too is a refusal (FLOW-FORK-SESSION-R03).
 async fn read_for_fork(
     reads: ForkReads,
-    held: Arc<ForkHold>,
+    held: Arc<UnderWay>,
 ) -> Result<Arc<Vec<RecordEvent>>, SessionError> {
     let ForkReads {
         id,

@@ -71,7 +71,7 @@ mod resume;
 mod send;
 mod settings;
 
-pub use fork::{Beginning, ForkHold, Forkable};
+pub use fork::{Beginning, Forkable};
 pub use resume::Resumption;
 pub use send::{Pacer, Waiting};
 
@@ -274,6 +274,11 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         Refusal::SessionDeleting => being_deleted(session_id),
         Refusal::Archived => send::archived(),
         Refusal::SendInProgress => send::in_progress(),
+        // A delete's: the one other request a fork's mark refuses. A send
+        // words it where the send is refused.
+        Refusal::BeingForked => SessionError::InvalidState(format!(
+            "session {session_id} is being forked; delete it once the fork has started"
+        )),
         // The run was announced ended, and Core's own wind-down stalled.
         Refusal::GaveUp => SessionError::Internal(format!(
             "session {session_id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
@@ -290,6 +295,8 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         | Refusal::WorkspaceHasSessions
         | Refusal::NoSection
         | Refusal::NoSendToCancel
+        // A fork's own refusal, worded where the fork asks.
+        | Refusal::Forking
         // A send's "not running" is worded where the send is refused, with
         // the backend's own reason when its last start failed.
         | Refusal::NotRunning
@@ -327,11 +334,6 @@ pub(crate) fn busy(workspace_id: &str) -> SessionError {
 
 /// One session, live or not.
 struct Handle {
-    /// Raised from when a fork of this session starts reading its record
-    /// until the fork's backend is ready. While it is, at most one such read
-    /// is stuck on a disk that hangs, however often the user tries again, and
-    /// `session.send` refuses: the CLI has yet to copy the record.
-    forking: Arc<AtomicBool>,
     id: String,
     backend: String,
     /// The workspace the session is in, which never changes.
@@ -374,9 +376,8 @@ struct Handle {
     folder_check: ReadSlot<resume::FolderLook>,
     /// What the send under way reports its progress from, while it
     /// reports. Its lock is the one progress lines are published under, so
-    /// none follows a send's answer; and, until the fork's mark is
-    /// admission's, the one a send looks at the fork's flag under. Which
-    /// send has the session's slot, and how far it is, is admission's.
+    /// none follows a send's answer. Which send has the session's slot,
+    /// and how far it is, is admission's.
     reporting: Mutex<Option<send::Reporting>>,
     /// Held by whatever works in the session's scratch folder: a send's
     /// copying, and removing the folder with the session.
@@ -732,7 +733,6 @@ impl Handle {
         permission_default: Option<String>,
     ) -> Self {
         Handle {
-            forking: Arc::default(),
             id: row.id.clone(),
             backend: row.backend.clone(),
             workspace_id: row.workspace_id.clone(),
@@ -1189,7 +1189,7 @@ impl SessionManager {
         let admission = Arc::clone(&self.admission);
         let handle = Arc::new(Handle::new(&row, now_rfc3339(), admission, None));
         lock(&handle.presented).title = begin.title;
-        let fork_hold = begin.fork_hold;
+        let forking = begin.forking;
         // A new session has no record yet: the backend has not been told
         // anything, so its events are the live stream's from the start. A
         // fork starts from the conversation it copies.
@@ -1212,7 +1212,7 @@ impl SessionManager {
                 transport,
                 config,
                 backend_version,
-                Launched::New { fork_hold },
+                Launched::New { forking },
             );
             if launched.is_ok() {
                 sessions.insert(handle.id.clone(), Arc::clone(&handle));
@@ -1340,6 +1340,11 @@ impl SessionManager {
         match refusal {
             // With the backend's own reason, when its last start failed.
             Refusal::NotRunning => handle.not_running(),
+            // A turn begun before the fork's backend has read the record
+            // would be copied part way.
+            Refusal::BeingForked => SessionError::InvalidState(
+                "this session is being forked; send the message again in a moment".into(),
+            ),
             other => refused_session(other, &handle.workspace_id, &handle.id),
         }
     }
@@ -1739,12 +1744,6 @@ impl SessionManager {
     /// once it holds the claim, so a send cannot start in between.
     pub fn check_deletable(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
-        // The fork's CLI has yet to read the record a delete would take.
-        if handle.forking.load(Ordering::SeqCst) {
-            return Err(SessionError::InvalidState(format!(
-                "session {id} is being forked; delete it once the fork has started"
-            )));
-        }
         if in_turn(&handle) {
             return Err(SessionError::refused(
                 ErrorReason::SessionBusy,
@@ -2777,12 +2776,12 @@ impl AdapterSink for CoreSink {
 
 /// Why Core starts a session's backend.
 enum Launched {
-    /// A new session, or a fork with its hold on the original, let go once
-    /// the start is over.
-    New { fork_hold: Option<Arc<ForkHold>> },
+    /// A new session, or a fork with the operation that marks its original
+    /// as being forked, let go once the start is over.
+    New { forking: Option<Arc<UnderWay>> },
     /// A stopped session started again (FLOW-RESUME-SESSION), and when it
-    /// is a fork made again, its hold on the original, let go likewise.
-    Resumed { fork_hold: Option<Arc<ForkHold>> },
+    /// is a fork made again, that operation, let go likewise.
+    Resumed { forking: Option<Arc<UnderWay>> },
 }
 
 struct SessionTask {
@@ -2825,12 +2824,12 @@ async fn run_session(task: SessionTask) {
     } = task;
     // Ready with no turn to report one: a fork, and a session started again,
     // whose backend reports nothing until its next message.
-    let (fork_hold, ready_fact) = match launched {
-        Launched::New { fork_hold } => {
-            let fact = fork_hold.is_some().then_some(LifecycleFact::ForkReady);
-            (fork_hold, fact)
+    let (forking, ready_fact) = match launched {
+        Launched::New { forking } => {
+            let fact = forking.is_some().then_some(LifecycleFact::ForkReady);
+            (forking, fact)
         }
-        Launched::Resumed { fork_hold } => (fork_hold, Some(LifecycleFact::Resumed)),
+        Launched::Resumed { forking } => (forking, Some(LifecycleFact::Resumed)),
     };
     let sink = Arc::clone(&live.sink);
     sink.record_fact(LifecycleFact::ProcessStarted {
@@ -2859,7 +2858,9 @@ async fn run_session(task: SessionTask) {
             None
         }
     };
-    drop(fork_hold);
+    // The start is over: the fork's backend has read the record it
+    // copies, or never will. The original's mark goes with its last holder.
+    drop(forking);
     let mut pipeline = pipeline;
     let mut pipeline_done = false;
     match outcome {
@@ -4113,7 +4114,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_send_to_a_session_being_forked_gives_way_and_frees_its_slot() {
+    async fn a_send_to_and_a_delete_of_a_session_being_forked_are_refused() {
         let adapter = Arc::new(GatedReads::default());
         let dir = tempfile::tempdir().unwrap();
         let manager = gated_manager(dir.path(), &adapter);
@@ -4131,22 +4132,40 @@ mod tests {
         };
 
         // A fork of it is reading its record.
-        handle.forking.store(true, Ordering::SeqCst);
+        let fork = Command::Fork {
+            session: "s-gated".into(),
+        };
+        let forking = manager.admission.command(fork).await.unwrap();
         let sent = send().await;
         assert!(
             matches!(&sent, Err(SessionError::InvalidState(m)) if m.contains("being forked")),
             "{sent:?}"
         );
-        // The slot it took is free again: the fork finds no message being
-        // sent.
+        // It took no slot: the fork finds no message being sent.
         assert_eq!(slot(), None);
         assert_eq!(handle.send_phase(), None);
+        // The fork has started, or given up: a message may go.
+        drop(forking);
+        let state = manager.admission.snapshot();
+        assert!(!state.session("s-gated").unwrap().forking);
+        let fork = Command::Fork {
+            session: "s-gated".into(),
+        };
+        let forking = manager.admission.command(fork).await.unwrap();
 
         // Its own delete has its workspace too: that is said first, as
         // while the claim is held a send answers `busy`.
         let delete = Command::DeleteSession {
             session: "s-gated".into(),
         };
+        // A delete of it is refused for the fork, with nothing held.
+        let refused = manager.hold_for_delete("s-gated").await.map(drop);
+        assert!(
+            matches!(&refused, Err(SessionError::InvalidState(m)) if m.contains("being forked")),
+            "{refused:?}"
+        );
+        assert!(!manager.admission.workspace_held("w"));
+        drop(forking);
         let deleting = manager.admission.command(delete).await.unwrap();
         let sent = send().await;
         assert!(matches!(&sent, Err(SessionError::Busy(_))), "{sent:?}");
