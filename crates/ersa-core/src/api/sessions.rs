@@ -261,9 +261,11 @@ fn session_model<'a>(
 /// workspace forks into a new one, on a new branch from the commit it has
 /// checked out; one in a root workspace shares it (R05).
 pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiError> {
-    // Said first: a delete's claim turns the workspace away from `ready`, and
-    // its `busy` is the answer that says why.
-    core.sessions.refuse_fork_if_busy(&params.id)?;
+    // The first step, in admission: the original is marked as being
+    // forked, or the fork is refused. A delete's `busy` is said here, first:
+    // its claim turns the workspace away from `ready`, and `busy` is the
+    // answer that says why. Every way out below lets go of the mark.
+    let forking = core.sessions.begin_fork(&params.id).await?;
     let original = core.sessions.row(&params.id)?;
     // Whether the workspace is ready is one of `prepare_fork`'s checks, which
     // a resume of a fork with no record of its own shares (FLOW-RESUME-SESSION-R10).
@@ -274,8 +276,8 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         models,
     } = starting(core, &project, &original.backend).await?;
     // Every refusal comes before the workspace is made. What it returns
-    // keeps the original marked as being forked, so it is neither sent to
-    // nor deleted meanwhile.
+    // carries the mark on, so the original is neither sent to nor deleted
+    // until the fork's backend is ready.
     let Forkable {
         backend_id,
         adapter,
@@ -283,7 +285,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         beginning,
     } = core
         .sessions
-        .prepare_fork(&params.id, Arc::clone(&transport))
+        .prepare_fork(&params.id, Arc::clone(&transport), forking)
         .await?;
     let trusted = trusted_now(core, &project).await?;
     let made_for_it = original_workspace.kind == WorkspaceKind::Isolated;
