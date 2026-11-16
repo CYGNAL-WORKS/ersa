@@ -385,13 +385,10 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
         Some(root) => Some(core.sessions.hold_found(root).await?),
         None => None,
     };
+    pause_for_tests(core).await;
     // Anything created since the checks above makes the delete a conflict.
-    if let Err(e) = core.store.delete_project(project.id.clone()).await {
-        if let Some(held) = held {
-            core.sessions.release_found(held);
-        }
-        return Err(e.into());
-    }
+    // A failure lets the hold go with it.
+    core.store.delete_project(project.id.clone()).await?;
     // The sessions found in its folder went with it, their records left.
     if let Some(held) = held {
         core.sessions.forget_found(held).await?;
@@ -693,7 +690,8 @@ pub(super) async fn workspace_remove(
     )
     .await;
     if let Err(e) = removed {
-        core.sessions.release_found(held);
+        // The removal did not happen: its sessions are theirs again.
+        drop(held);
         // A refusal (locked, local changes without `force`, or a folder git
         // does not list) leaves the worktree as it was, so it goes back to
         // the state it had; any other failure leaves it in an unknown state.
@@ -706,10 +704,8 @@ pub(super) async fn workspace_remove(
         }
         return Err(e.into());
     }
-    if let Err(e) = core.store.delete_workspace(workspace.id.clone()).await {
-        core.sessions.release_found(held);
-        return Err(e.into());
-    }
+    // A failure lets the hold go with it.
+    core.store.delete_workspace(workspace.id.clone()).await?;
     // The sessions found in its folder went with it, their records left.
     core.sessions.forget_found(held).await?;
     workspace.state = WorkspaceState::Removing;
@@ -718,8 +714,9 @@ pub(super) async fn workspace_remove(
 
 /// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go:
 /// before `workspace.remove`'s claim, after it, once its sessions no longer
-/// hold it back, and once the sessions found in its folder are held, so a
-/// test can land another request at each. Nothing outside tests.
+/// hold it back, and once the sessions found in its folder are held; and
+/// once `project.remove` holds those of its own folder. A test can land
+/// another request at each. Nothing outside tests.
 async fn pause_for_tests(core: &Core) {
     if let Some(gate) = &core.config.remove_gate {
         gate.stop().await;
