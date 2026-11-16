@@ -121,6 +121,58 @@ async fn a_send_behind_an_earlier_request_reports_checking() {
     assert_reported_throughout(sent, answered, &reports);
 }
 
+/// A send waiting its turn while another connection's send has the
+/// session's slot: that send reports for the session, and when it ends the
+/// waiting one takes the reports over at once (PROTO-CORE-API,
+/// `session.send_progress`), well inside its own pace of five seconds.
+// verifies: PROTO-CORE-API-R90
+#[tokio::test(flavor = "multi_thread")]
+async fn a_waiting_send_reports_at_once_when_the_send_ahead_of_it_ends() {
+    let core = start_fake(FakeAdapter::slow_stop(HELD), |_| {}).await;
+    let mut client = core.client().await;
+    let id = running_session(&core, &mut client).await;
+    let reports = |phase: &'static str| {
+        let id = id.clone();
+        move |line: &Value| {
+            line["method"] == "session.send_progress"
+                && line["params"]["session_id"] == id.as_str()
+                && line["params"]["phase"] == phase
+        }
+    };
+
+    // Held behind a stop on its own connection, the send reports `checking`.
+    client.request("session.stop", json!({ "id": id })).await;
+    client
+        .request("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    client.notification_where(reports("checking")).await;
+
+    // Another connection's send takes the session's slot, and reports for
+    // the session: its backend is slow to take the message.
+    let mut other = core.client().await;
+    let ahead = other
+        .request(
+            "session.send",
+            json!({ "id": id, "text": "taken once interrupted" }),
+        )
+        .await;
+    client.notification_where(reports("handing_over")).await;
+
+    // It ends. The waiting send reports at once, `checking` again, where
+    // its own pace would have it wait seconds more.
+    let mut third = core.client().await;
+    third.result("session.interrupt", json!({ "id": id })).await;
+    let answered = other.response(ahead).await;
+    assert!(answered.get("result").is_some(), "{answered:#}");
+    let ended = Instant::now();
+    client.notification_where(reports("checking")).await;
+    assert!(
+        ended.elapsed() <= SLACK,
+        "the waiting send reported {:?} after the send ahead of it ended",
+        ended.elapsed()
+    );
+}
+
 /// A send to a session whose run is winding down waits for it to end, and
 /// reports `checking` meanwhile.
 // verifies: PROTO-CORE-API-R90
