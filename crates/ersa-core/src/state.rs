@@ -59,6 +59,10 @@ pub struct CoreConfig {
     /// may take before they answer `permission` (PROTO-CORE-API-R93).
     /// [`FOLDER_INSPECTION_LIMIT`], except in tests that let it run out.
     pub folder_inspection_limit: Duration,
+    /// How long `session.delete` waits for the adapter to delete the
+    /// session's record before it gives up and calls the deletion off.
+    /// [`RECORD_DELETION_LIMIT`], except in tests that let it run out.
+    pub record_deletion_limit: Duration,
     /// The transport git and backends' version commands run through on the
     /// local host. `None` is the local machine's; tests put one in front
     /// of it that holds a command, as a slow repository or backend would.
@@ -144,6 +148,10 @@ pub const FOLDER_INSPECTIONS: usize = 8;
 /// share that stopped answering never answers (PROTO-CORE-API-R93).
 pub const FOLDER_INSPECTION_LIMIT: Duration = Duration::from_secs(10);
 
+/// The default for [`CoreConfig::record_deletion_limit`]: step 6 of
+/// `session.delete` has 30 seconds (PROTO-CORE-API, `session.delete`).
+pub const RECORD_DELETION_LIMIT: Duration = Duration::from_secs(30);
+
 impl CoreConfig {
     /// The configuration for `data_dir` with the platform's default endpoint
     /// and limits. Fails only if the endpoint cannot be named (on Windows, if
@@ -161,6 +169,7 @@ impl CoreConfig {
             remove_gate: None,
             inspect_gate: None,
             folder_inspection_limit: FOLDER_INSPECTION_LIMIT,
+            record_deletion_limit: RECORD_DELETION_LIMIT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })
