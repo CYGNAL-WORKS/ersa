@@ -38,10 +38,7 @@ pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
 /// A workspace held for its removal ([`SessionManager::hold_found`]);
 /// dropping it lets the workspace's sessions be sent to and resumed again.
 #[must_use]
-pub struct HeldFound {
-    workspace_id: String,
-    _claim: WorkspaceClaim,
-}
+pub struct HeldFound(WorkspaceClaim);
 
 /// One folder to list: a `ready` workspace, for one backend.
 struct Folder {
@@ -306,21 +303,26 @@ impl SessionManager {
                 }
             }
         }
-        Ok(HeldFound {
-            workspace_id: workspace_id.to_string(),
-            _claim: claim,
-        })
+        Ok(HeldFound(claim))
     }
 
-    /// Lets go of the sessions found in a removed workspace's folder, whose
-    /// rows went with it (FLOW-RESUME-SESSION-R13), then of the hold. Looked
-    /// up again, so one a listing recorded during the hold goes too; each is
-    /// marked removed and stopped under `op` before it goes.
-    pub async fn forget_found(&self, held: HeldFound) -> Result<(), SessionError> {
-        for handle in self.found_in(&held.workspace_id) {
-            if self.store.session(handle.id.clone()).await?.is_some() {
-                continue;
-            }
+    /// Removes the workspace `held`, by `delete`, which deletes its rows
+    /// and the found sessions' with them, then lets go of those sessions
+    /// (FLOW-RESUME-SESSION-R13), their records left. Both under the listing
+    /// turn, so a list either recorded its sessions before, and they go too,
+    /// or finds the workspace gone. Each is marked removed and stopped under
+    /// `op` before it goes. When `delete` fails, nothing is let go and the
+    /// hold goes.
+    pub async fn remove_held<E: From<SessionError>>(
+        &self,
+        held: HeldFound,
+        delete: impl Future<Output = Result<(), E>>,
+    ) -> Result<(), E> {
+        let _listing = self.listing.lock().await;
+        delete.await?;
+        // Every found row in the workspace went with it, so every found
+        // session loaded there goes.
+        for handle in self.found_in(&held.0.workspace_id) {
             {
                 let _op = handle.op.lock().await;
                 handle.removed.store(true, Ordering::SeqCst);
