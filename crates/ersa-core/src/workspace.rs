@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use ersa_adapter::{ProcessSpec, Transport};
+use ersa_adapter::{CallOff, CallOffOnDrop, ProcessSpec, Removal, Transport, remove_tree};
 
 use crate::platform;
 use crate::transport::{self, Output, RunError};
@@ -429,7 +429,7 @@ async fn git_records(
     })
 }
 
-/// Why blocking work for `workspace.changes` stopped early.
+/// Why blocking file system work stopped early.
 enum Halt {
     /// Its deadline passed; it stopped itself.
     Expired,
@@ -443,8 +443,9 @@ impl From<std::io::Error> for Halt {
     }
 }
 
-/// The most blocking file system jobs `workspace.changes` may have running
-/// at once, Core-wide, as `attachment.inspect` caps its reads. A job
+/// The most blocking file system jobs `workspace.changes` and a delete's
+/// folder removal may have running at once, Core-wide, as
+/// `attachment.inspect` caps its reads. A job
 /// answered at its deadline keeps its place until its thread returns, so a
 /// folder that hangs, asked about again and again, takes this many threads,
 /// never all of Core's.
@@ -469,7 +470,13 @@ async fn blocking<T: Send + 'static>(
         stderr: detail,
     };
     match tokio::time::timeout_at(deadline.at, job).await {
-        Err(_) | Ok(Ok(Err(Halt::Expired))) => Err(deadline.expired(what.into())),
+        Err(_) | Ok(Ok(Err(Halt::Expired))) => Err(VcsError::Failed {
+            message: format!(
+                "{what} did not finish within {} seconds",
+                deadline.limit.as_secs()
+            ),
+            stderr: String::new(),
+        }),
         Ok(Ok(Err(Halt::Io(e)))) => Err(failed(e.to_string())),
         Ok(Err(panicked)) => Err(failed(panicked.to_string())),
         Ok(Ok(Ok(value))) => Ok(value),
@@ -1073,21 +1080,47 @@ pub async fn git_worktree_remove(
         args.push("--force");
     }
     args.extend(["--", path]);
+    let args = &args;
+    retried(
+        || async move {
+            let output = git(transport, repo, args).await?;
+            Ok(if output.exit.success() {
+                Ok(())
+            } else {
+                Err(output.stderr_text())
+            })
+        },
+        |stderr| VcsError::Failed {
+            message: "git worktree remove failed".into(),
+            stderr,
+        },
+    )
+    .await
+}
+
+/// Runs `once` up to [`REMOVE_ATTEMPTS`] times, waiting
+/// [`REMOVE_FIRST_BACKOFF`], doubled each time, between tries. `once`
+/// answers `Ok(Ok(()))` when the removal is done, `Ok(Err(why))` for a try
+/// worth repeating, and `Err` to end at once; the last try's `why` becomes
+/// the error `failed` makes.
+async fn retried<Try>(
+    mut once: impl FnMut() -> Try,
+    failed: impl FnOnce(String) -> VcsError,
+) -> Result<(), VcsError>
+where
+    Try: std::future::Future<Output = Result<Result<(), String>, VcsError>>,
+{
     let mut backoff = REMOVE_FIRST_BACKOFF;
     let mut attempt = 1;
     loop {
-        let output = git(transport, repo, &args).await?;
-        if output.exit.success() {
-            return Ok(());
-        }
-        let stderr = output.stderr_text();
+        let why = match once().await? {
+            Ok(()) => return Ok(()),
+            Err(why) => why,
+        };
         if attempt == REMOVE_ATTEMPTS {
-            return Err(VcsError::Failed {
-                message: "git worktree remove failed".into(),
-                stderr,
-            });
+            return Err(failed(why));
         }
-        tracing::debug!(attempt, %stderr, "worktree removal failed; retrying");
+        tracing::debug!(attempt, %why, "removal failed; retrying");
         tokio::time::sleep(backoff).await;
         backoff *= 2;
         attempt += 1;
@@ -1193,38 +1226,43 @@ pub async fn git_worktree_gone(
 
 /// Deletes the folder at `path` and everything in it, retried while files
 /// are busy, as worktree removal is. A link inside is removed, never
-/// followed. A folder already gone is not an error. Each try is given
-/// [`GIT_TIMEOUT`], as a git call is: a folder on a drive that stops
-/// answering fails the delete, leaving its thread behind, rather than hold
-/// the delete for ever.
+/// followed. A folder already gone is not an error. Each try is a blocking
+/// job under [`FILE_SYSTEM`]'s cap, given [`GIT_TIMEOUT`] as a git call is,
+/// so a folder on a drive that stops answering fails the delete rather than
+/// hold it for ever.
 async fn remove_folder(path: &str) -> Result<(), VcsError> {
-    let mut backoff = REMOVE_FIRST_BACKOFF;
-    let mut attempt = 1;
-    loop {
-        let folder = path.to_string();
-        let removal = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&folder));
-        let removed = tokio::time::timeout(GIT_TIMEOUT, removal)
+    remove_folder_within(path, GIT_TIMEOUT).await
+}
+
+/// [`remove_folder`], each try given `limit`. Once Core gives up on a try,
+/// at its deadline or because the request was dropped, the try begins no
+/// further deletion (PROTO-CORE-API-R91): it asks before each one.
+async fn remove_folder_within(path: &str, limit: Duration) -> Result<(), VcsError> {
+    let call_off = CallOff::default();
+    let _called_off_on_return = CallOffOnDrop(call_off.clone());
+    let call_off = &call_off;
+    retried(
+        || async move {
+            let folder = std::path::PathBuf::from(path);
+            let call_off = call_off.clone();
+            let deadline = Deadline::after(limit);
+            blocking(deadline, "deleting the workspace's folder", move |at| {
+                let stop = || call_off.is_called_off() || std::time::Instant::now() >= at;
+                match remove_tree(&folder, &stop) {
+                    Ok(Removal::Removed) => Ok(Ok(())),
+                    Ok(Removal::CalledOff) => Err(Halt::Expired),
+                    // Busy files are worth another try.
+                    Err(e) => Ok(Err(e.to_string())),
+                }
+            })
             .await
-            .map_err(|_| VcsError::Failed {
-                message: format!("deleting the workspace's folder {path} did not finish"),
-                stderr: format!("still running after {} seconds", GIT_TIMEOUT.as_secs()),
-            })?
-            .map_err(|e| VcsError::Incomplete(std::io::Error::other(e.to_string())))?;
-        match removed {
-            Ok(()) => return Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) if attempt == REMOVE_ATTEMPTS => {
-                return Err(VcsError::Failed {
-                    message: format!("the workspace's folder {path} could not be deleted"),
-                    stderr: e.to_string(),
-                });
-            }
-            Err(e) => tracing::debug!(attempt, error = %e, "deleting a folder failed; retrying"),
-        }
-        tokio::time::sleep(backoff).await;
-        backoff *= 2;
-        attempt += 1;
-    }
+        },
+        |stderr| VcsError::Failed {
+            message: format!("the workspace's folder {path} could not be deleted"),
+            stderr,
+        },
+    )
+    .await
 }
 
 /// Whether the worktree at `path` has anything `git worktree remove` would
@@ -1541,6 +1579,41 @@ mod tests {
 
     /// The cap's tests take its places, so they run one at a time.
     static CAP_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// A try at a folder that Core has given up on deletes nothing after:
+    /// it asks before each deletion, and a deadline already passed stops it
+    /// before the first. The runtime is dropped before the files are looked
+    /// at, which waits for the try's thread to return.
+    // verifies: PROTO-CORE-API-R91
+    #[test]
+    fn a_folder_removal_given_up_on_deletes_nothing_after() {
+        let _one_at_a_time = CAP_TESTS.blocking_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("workspace");
+        let files = ["a.txt", "b.txt", "sub/c.txt"];
+        for name in files {
+            let file = folder.join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, name).unwrap();
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let path = folder.display().to_string();
+        let result = runtime.block_on(remove_folder_within(&path, Duration::ZERO));
+        drop(runtime);
+        let Err(VcsError::Failed { message, .. }) = result else {
+            panic!("{result:?}");
+        };
+        assert_eq!(
+            message,
+            "deleting the workspace's folder did not finish within 0 seconds"
+        );
+        for name in files {
+            assert!(folder.join(name).exists(), "{name}");
+        }
+    }
 
     // No requirement names the cap: it keeps a folder that hangs from
     // taking all of Core's blocking threads, as `attachment.inspect`'s does.
