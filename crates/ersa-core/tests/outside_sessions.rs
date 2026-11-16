@@ -455,3 +455,47 @@ async fn a_folder_still_being_listed_is_not_listed_again() {
     }
     assert!(backend.stats.listings.load(Ordering::SeqCst) >= 2);
 }
+
+// verifies: FLOW-RESUME-SESSION-R13
+#[tokio::test(flavor = "multi_thread")]
+async fn a_found_session_resumed_while_its_workspace_is_removed_is_stopped_not_left_running() {
+    let backend = Backend::default();
+    let gate = Arc::new(ersa_core::Gate::default());
+    let config_gate = Arc::clone(&gate);
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| config.remove_gate = Some(config_gate),
+        vec![backend.adapter()],
+    )
+    .await;
+    let mut client = core.client().await;
+    let mut remover = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let isolated = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
+    let found = sessions(&mut client).await.remove(0);
+
+    // The removal passes its check with nothing running, then the user
+    // writes to the found session before the folder goes.
+    let removal = remover
+        .request("workspace.remove", json!({ "id": isolated["id"] }))
+        .await;
+    for _ in 0..2 {
+        gate.reached().await;
+        gate.go();
+    }
+    gate.reached().await;
+    client
+        .result("session.resume", json!({ "id": found["id"] }))
+        .await;
+    let stops = backend.stats.stops.load(Ordering::SeqCst);
+    gate.go();
+    remover.response(removal).await;
+
+    // Core stopped the backend it started rather than lose it.
+    assert_eq!(backend.stats.stops.load(Ordering::SeqCst), stops + 1);
+    assert!(sessions(&mut client).await.is_empty());
+    assert!(backend.has_record("rec-isolated"));
+}

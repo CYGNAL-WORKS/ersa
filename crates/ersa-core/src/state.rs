@@ -46,10 +46,11 @@ pub struct CoreConfig {
     /// of its run. Zero, except in tests that need a request to land while
     /// a run winds down.
     pub wind_down_pause: Duration,
-    /// Where `workspace.remove` stops, before claiming the workspace and
-    /// again after, until a test lets it go. `None`, except in tests that
-    /// need another request to land between its read and its claim, or
-    /// while it holds the claim.
+    /// Where `workspace.remove` stops, before claiming the workspace, again
+    /// after, and once its sessions no longer hold it back, until a test
+    /// lets it go. `None`, except in tests that need another request to land
+    /// between its read and its claim, while it holds the claim, or after
+    /// its check.
     pub remove_gate: Option<Arc<Gate>>,
     /// Where the folder inspection of `project.add` and `project.find`
     /// stops, on its own thread before it touches the folder, until a test
