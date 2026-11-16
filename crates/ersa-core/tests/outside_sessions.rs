@@ -702,3 +702,43 @@ async fn a_session_found_while_a_project_is_removed_goes_with_it() {
     assert!(listed.is_empty(), "{listed:#?}");
     assert!(backend.has_record("rec-a") && backend.has_record("rec-b"));
 }
+
+// verifies: FLOW-RESUME-SESSION-R13
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_removed_while_a_list_records_a_found_session_waits_and_takes_it_along() {
+    let backend = Backend::default();
+    let gate = Arc::new(ersa_core::Gate::default());
+    let config_gate = Arc::clone(&gate);
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| config.found_gate = Some(config_gate),
+        vec![backend.adapter()],
+    )
+    .await;
+    let mut client = core.client().await;
+    let mut remover = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let root = workspaces(&mut client, &project["id"]).await.remove(0);
+    backend.record("rec-a", "first", path(&root), path(&root));
+
+    // A list has stored the session it found and not yet loaded it when the
+    // project is removed. The removal waits for the list's turn; without
+    // that, it would delete the row now and the list would then load a
+    // session whose project is gone.
+    let list = client.request("session.list", json!({})).await;
+    gate.reached().await;
+    let removal = remover
+        .request("project.remove", json!({ "id": project["id"] }))
+        .await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    gate.go();
+    let listed = client.response(list).await;
+    assert!(listed.get("error").is_none(), "{listed}");
+    let removed = remover.response(removal).await;
+    assert!(removed.get("error").is_none(), "{removed}");
+
+    // The found session went with the project, its record left.
+    let listed = sessions(&mut client).await;
+    assert!(listed.is_empty(), "{listed:#?}");
+    assert!(backend.has_record("rec-a"));
+}

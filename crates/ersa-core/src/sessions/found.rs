@@ -199,6 +199,9 @@ impl SessionManager {
         if !self.store.insert_found_session(row.clone()).await? {
             return Ok(None);
         }
+        if let Some(gate) = &self.found_gate {
+            gate.stop().await;
+        }
         // As at startup: with no request of Core's, the permission mode is
         // the backend's default until the record says otherwise.
         let default = BackendChoices::default_of(&folder.adapter.choices().permission_modes);
@@ -313,7 +316,7 @@ impl SessionManager {
     /// or finds the workspace gone. Each is marked removed and stopped under
     /// `op` before it goes. When `delete` fails, nothing is let go and the
     /// hold goes.
-    pub async fn remove_held<E: From<SessionError>>(
+    pub async fn remove_held<E>(
         &self,
         held: HeldFound,
         delete: impl Future<Output = Result<(), E>>,
