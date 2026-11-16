@@ -456,7 +456,10 @@ struct Conversation {
 /// summary; only the boundary's `preservedSegment` names the summary, as its
 /// anchor, with the segment's first entry as its head. So the chain runs from
 /// that head both to the summary (and through it the boundary) and on to the
-/// head's own parent. The chain is a set and entries project in file order,
+/// head's own parent. Such a boundary's `logicalParentUuid` names the
+/// segment's tail, which the chain already reaches when it is still the
+/// conversation, so the boundary does not follow it: the history before the
+/// compaction comes through the head. The chain is a set and entries project in file order,
 /// so the summary shows after the kept segment, where the compaction
 /// happened, and every entry shows once.
 ///
@@ -564,8 +567,8 @@ fn conversation(entries: &[&Value]) -> Conversation {
     };
 
     // Each entry has one link back, or two at a kept segment's head; the
-    // chain set doubles as the walk's visited set, so a cycle (a boundary's
-    // logical parent is often the kept segment itself) ends that path.
+    // chain set doubles as the walk's visited set, so an entry reached by
+    // both links is walked once and a cycle ends that path.
     let mut chain = HashSet::new();
     let mut to_walk = vec![last_message];
     let mut break_at: Option<(usize, &str)> = None;
@@ -596,7 +599,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
             }
         }
         format!(
-            "the record's chain names entry {parent}, which it does not have; \n             the entries before the break are shown in file order"
+            "the record's chain names entry {parent}, which it does not have; the entries before the break are shown in file order"
         )
     });
     Conversation {
