@@ -84,8 +84,19 @@ pub struct SessionEntry {
     pub found: bool,
     /// Whether its row is stored yet.
     pub stored: bool,
-    /// Whether a `session.remove` of it is under way.
-    pub removing: bool,
+    /// Its one exclusive operation, if one is under way: a session has
+    /// at most one, and another asked for meanwhile waits.
+    pub exclusive: Option<Exclusive>,
+}
+
+/// A session's exclusive operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Exclusive {
+    /// A `session.remove`: when it ends well, the session is gone.
+    Removal,
+    /// Any other: a stop, a start, a view being opened, an archive, an
+    /// arrangement, a delete's mark.
+    Other,
 }
 
 /// Everything admission decides from. Ordered maps and no counters, so two
@@ -142,7 +153,7 @@ impl State {
                     workspace,
                     found,
                     stored,
-                    removing: false,
+                    exclusive: None,
                 },
             );
         }
@@ -283,8 +294,13 @@ pub enum Command {
     DeleteSession {
         session: Id,
     },
-    /// `session.remove`.
+    /// `session.remove`: the session's exclusive operation while it runs.
     RemoveSession {
+        session: Id,
+    },
+    /// Any other exclusive operation on the session: admitted when none is
+    /// under way on it, held until then.
+    BeginExclusive {
         session: Id,
     },
 }
@@ -299,6 +315,7 @@ pub enum Operation {
     CreateSession(Id),
     DeleteSession(Id),
     RemoveSession(Id),
+    Exclusive(Id),
 }
 
 /// What happened, said once it is stored. A report is never refused or
@@ -662,7 +679,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 workspace: workspace.clone(),
                 found: *found,
                 stored: false,
-                removing: false,
+                exclusive: None,
             };
             state.sessions.insert(session.clone(), entry);
             Outcome::Admitted(Operation::CreateSession(session.clone()))
@@ -678,7 +695,8 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             // Whether there is a session to delete is not known until its
             // removal reports; nor what the delete would count, until every
             // session admitted into the workspace is stored.
-            if entry.removing || state.has_arriving_session(&workspace) {
+            if entry.exclusive == Some(Exclusive::Removal) || state.has_arriving_session(&workspace)
+            {
                 return Outcome::Held;
             }
             if let Some(entry) = state.workspaces.get_mut(&workspace) {
@@ -693,16 +711,28 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             if state.workspace_held(&entry.workspace) {
                 return Outcome::Refused(Refusal::WorkspaceHeld);
             }
-            // Its row is still being stored, or another removal of it is
-            // under way: whether there is a session to remove is known once
-            // that reports.
-            if !entry.stored || entry.removing {
+            // Its row is still being stored, or an exclusive operation is
+            // under way on it, another removal among them: whether there is
+            // a session to remove is known once that ends.
+            if !entry.stored || entry.exclusive.is_some() {
                 return Outcome::Held;
             }
             if let Some(entry) = state.sessions.get_mut(session) {
-                entry.removing = true;
+                entry.exclusive = Some(Exclusive::Removal);
             }
             Outcome::Admitted(Operation::RemoveSession(session.clone()))
+        }
+        Command::BeginExclusive { session } => {
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            // One at a time: the next waits for the one under way to end.
+            // So does one asked of a session whose row is being stored.
+            if !entry.stored || entry.exclusive.is_some() {
+                return Outcome::Held;
+            }
+            entry.exclusive = Some(Exclusive::Other);
+            Outcome::Admitted(Operation::Exclusive(session.clone()))
         }
     }
 }
@@ -872,13 +902,8 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     None => Outcome::Stale,
                 }
             }
-            Operation::RemoveSession(session) => match state.sessions.get_mut(&session) {
-                Some(entry) if entry.removing => {
-                    entry.removing = false;
-                    Outcome::Noted
-                }
-                Some(_) | None => Outcome::Stale,
-            },
+            Operation::RemoveSession(session) => end_exclusive(state, &session, Exclusive::Removal),
+            Operation::Exclusive(session) => end_exclusive(state, &session, Exclusive::Other),
         },
     }
 }
@@ -899,6 +924,17 @@ fn set_workspace(
             Outcome::Noted
         }
         None => Outcome::Stale,
+    }
+}
+
+/// Ends the session's exclusive operation, when it is `which`.
+fn end_exclusive(state: &mut State, session: &str, which: Exclusive) -> Outcome {
+    match state.sessions.get_mut(session) {
+        Some(entry) if entry.exclusive == Some(which) => {
+            entry.exclusive = None;
+            Outcome::Noted
+        }
+        Some(_) | None => Outcome::Stale,
     }
 }
 
