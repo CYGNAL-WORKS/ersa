@@ -312,6 +312,7 @@ async fn a_fork_of_an_archived_session_is_not_archived() {
 
 // verifies: FLOW-FORK-SESSION-R03
 // verifies: PROTO-CORE-API-R79
+// verifies: PROTO-CORE-API-R62
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_refused_unless_the_record_ends_with_a_finished_reply() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -362,6 +363,7 @@ async fn a_fork_is_refused_unless_the_record_ends_with_a_finished_reply() {
 
 // verifies: FLOW-FORK-SESSION-R03
 // verifies: PROTO-CORE-API-R79
+// verifies: PROTO-CORE-API-R62
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_refused_while_a_turn_runs() {
     for text in ["work", "ask"] {
@@ -385,6 +387,40 @@ async fn a_fork_is_refused_while_a_turn_runs() {
 
 // verifies: FLOW-FORK-SESSION-R03
 // verifies: PROTO-CORE-API-R79
+// verifies: FLOW-FORK-SESSION-R03
+// verifies: PROTO-CORE-API-R62
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_is_refused_while_a_message_is_on_its_way() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    // A message the backend is slow to take: no turn runs yet, and the one
+    // it starts would be copied part way.
+    let send = client
+        .request(
+            "session.send",
+            json!({ "id": id, "text": "taken once interrupted" }),
+        )
+        .await;
+    let mut other = core.client().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(&mut other, &id).await.get("sending") != Some(&json!("handing_over")) {
+        assert!(tokio::time::Instant::now() < deadline, "never handed over");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let error = refusal_now(&mut other, &id).await;
+    assert_eq!(error["data"]["reason"], "session_busy", "{error:#}");
+    let message = error["message"].as_str().unwrap();
+    assert!(message.contains("a turn is running"), "{message}");
+
+    // The backend takes the message; the send is answered.
+    other.result("session.interrupt", json!({ "id": id })).await;
+    let sent = client.response(send).await;
+    assert!(sent.get("result").is_some(), "{sent:#}");
+}
+
+// verifies: PROTO-CORE-API-R62
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_refused_before_the_backend_has_named_the_session() {
     let fake = Arc::new(FakeAdapter::slow_start(Duration::from_secs(2)));
@@ -402,6 +438,7 @@ async fn a_fork_is_refused_before_the_backend_has_named_the_session() {
 // verifies: FLOW-FORK-SESSION-R03
 // verifies: PROTO-CORE-API-R79
 // verifies: PROTO-CORE-API-R87
+// verifies: PROTO-CORE-API-R62
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_counts_the_registrys_processes_against_cores_own() {
     let fake = Arc::new(FakeAdapter::new(1));

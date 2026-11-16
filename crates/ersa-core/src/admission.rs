@@ -1236,12 +1236,19 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             let Some(row) = &entry.row else {
                 return Outcome::Refused(Refusal::NoSession);
             };
-            // In the order a fork has always been told them.
-            if state.workspace_held(&entry.workspace) {
+            // In the order a fork has always been told them: its own
+            // delete has its workspace, it is marked deleting, something
+            // else holds its workspace.
+            let workspace = state.workspaces.get(&entry.workspace);
+            let own_delete = workspace.and_then(|workspace| workspace.deleting.as_ref());
+            if own_delete == Some(session) {
                 return Outcome::Refused(Refusal::WorkspaceHeld);
             }
             if row.deleting.is_some() {
                 return Outcome::Refused(Refusal::SessionDeleting);
+            }
+            if state.workspace_held(&entry.workspace) {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
             }
             // A message on its way starts a turn the fork would copy part
             // of.

@@ -1512,15 +1512,24 @@ fn a_fork_is_told_why_it_may_not_begin_in_one_order() {
     ended(&mut state, Operation::Fork("s1".into()));
     command(&mut state, send("s1"));
     wrote(&mut state, "s1", RowChange::Deleting(Deleting::Failed));
-    command(&mut state, delete_session("s2"));
+    command(&mut state, delete_session("s1"));
     let before = state.clone();
 
-    // Its workspace is held, here by another session's delete.
+    // Its own delete has its workspace.
     assert_eq!(refused(&mut state), Refusal::WorkspaceHeld);
-    ended(&mut state, Operation::DeleteSession("s2".into()));
-    // It is marked deleting.
+    assert_eq!(state, before);
+    ended(&mut state, Operation::DeleteSession("s1".into()));
+    // It is marked deleting: said before a hold of its workspace that is
+    // not its own delete's.
+    command(&mut state, delete_session("s2"));
     assert_eq!(refused(&mut state), Refusal::SessionDeleting);
-    assert_eq!(state.sessions().count(), before.sessions().count());
+
+    // Something else holds its workspace, here another session's delete.
+    let mut state = world_with(&["s1", "s2"]);
+    command(&mut state, send("s1"));
+    command(&mut state, delete_session("s2"));
+    assert_eq!(refused(&mut state), Refusal::WorkspaceHeld);
+    assert!(!forking(&state, "s1"));
 
     // A message is on its way: the turn it starts would be copied part way.
     let mut state = world_with(&["s1"]);
