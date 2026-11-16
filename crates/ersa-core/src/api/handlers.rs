@@ -387,11 +387,17 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     };
     pause_for_tests(core).await;
     // Anything created since the checks above makes the delete a conflict.
-    // A failure lets the hold go with it.
-    core.store.delete_project(project.id.clone()).await?;
-    // The sessions found in its folder went with it, their records left.
-    if let Some(held) = held {
-        core.sessions.forget_found(held).await?;
+    // The sessions found in its folder go with it, their records left; a
+    // failure lets the hold go with it.
+    let delete = async {
+        core.store
+            .delete_project(project.id.clone())
+            .await
+            .map_err(ApiError::from)
+    };
+    match held {
+        Some(held) => core.sessions.remove_held(held, delete).await?,
+        None => delete.await?,
     }
     Ok(project)
 }
@@ -704,10 +710,15 @@ pub(super) async fn workspace_remove(
         }
         return Err(e.into());
     }
-    // A failure lets the hold go with it.
-    core.store.delete_workspace(workspace.id.clone()).await?;
-    // The sessions found in its folder went with it, their records left.
-    core.sessions.forget_found(held).await?;
+    // The sessions found in its folder go with it, their records left; a
+    // failure lets the hold go with it.
+    let delete = async {
+        core.store
+            .delete_workspace(workspace.id.clone())
+            .await
+            .map_err(ApiError::from)
+    };
+    core.sessions.remove_held(held, delete).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }

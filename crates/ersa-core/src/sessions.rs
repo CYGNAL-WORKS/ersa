@@ -222,8 +222,9 @@ pub struct SessionManager {
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
     /// The workspaces a `session.delete` under way has claimed, each with
-    /// the session it deletes. In memory only, so a restart drops every
-    /// claim (PROTO-CORE-API, `session.delete`).
+    /// the session it deletes, and those a removal holds, with no session
+    /// (`found`). In memory only, so a restart drops every claim
+    /// (PROTO-CORE-API, `session.delete`).
     claims: Claims,
     /// Held while a session's arrangement is written to the store and to
     /// memory, so a `section.remove` and a `session.arrange` into that
@@ -240,11 +241,13 @@ pub struct SessionManager {
     deletes: AtomicU64,
 }
 
-/// Claimed workspaces, by id, with the session each delete is for.
+/// Claimed workspaces, by id, with the session each delete is for; empty
+/// for a workspace a removal holds.
 type Claims = Arc<Mutex<HashMap<String, String>>>;
 
-/// A workspace claimed for one delete; dropping it releases the claim, so
-/// every way out of a delete, a refusal or a failure included, releases it.
+/// A workspace claimed for one delete or one removal; dropping it releases
+/// the claim, so every way out, a refusal or a failure included, releases
+/// it.
 pub struct WorkspaceClaim {
     claims: Claims,
     workspace_id: String,
@@ -1537,7 +1540,8 @@ impl SessionManager {
     }
 
     /// Claims workspace `workspace_id` for deleting session `session_id`,
-    /// in memory only. Refused while another delete holds it.
+    /// or for removing the workspace when `session_id` is empty, in memory
+    /// only. Refused while another delete or removal holds it.
     pub fn claim_workspace(
         &self,
         workspace_id: &str,
