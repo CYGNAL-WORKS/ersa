@@ -234,7 +234,7 @@ impl SessionManager {
             // before the session is found not running, so the refusal names
             // the reason, and an archive that finished while this send waited
             // for a run winding down is never undone by the resume below.
-            if lock(&handle.row).archived {
+            if handle.row()?.archived {
                 return Err(SessionError::refused(
                     ErrorReason::SessionArchived,
                     "the session is archived; unarchive or resume it to send it a message",
@@ -305,9 +305,7 @@ impl SessionManager {
         };
         // Removed while this send waited: its scratch folder is gone, and
         // must not be made again.
-        if handle.removed.load(Ordering::SeqCst) {
-            return Err(SessionError::NotFound(handle.id.clone()));
-        }
+        let _still_there = handle.row()?;
         let session = match ready {
             Ok(session) => session,
             Err(SessionError::Refused {
@@ -398,7 +396,7 @@ impl SessionManager {
         if let Some(sending) = lock(&handle.sending).as_mut() {
             sending.work = Some(Arc::clone(&work));
         }
-        let row = lock(&handle.row).clone();
+        let row = handle.row()?;
         let images = self.adapter_of(&row.backend)?.image_limits();
         // One job per session in its scratch folder at a time, even one a
         // send gave up on that has not noticed yet. Waited for here, never
