@@ -148,21 +148,21 @@ fn a_removal_admitted_first_refuses_a_session_in_the_workspace() {
     assert!(state.session("s1").is_none() && state.session("s2").is_none());
 }
 
+// verifies: FLOW-RESUME-SESSION-R13
 #[test]
-fn a_session_found_in_the_backends_records_does_not_hold_a_workspace_back() {
+fn a_found_session_and_its_workspaces_removal_in_both_orders() {
+    // Recorded first: it does not hold the removal back, and goes with the
+    // workspace.
     let mut state = world();
     command(&mut state, find_session(W, "s1"));
-    report(
-        &mut state,
-        Report::SessionStored {
-            session: "s1".into(),
-        },
-    );
+    let stored = Report::SessionStored {
+        session: "s1".into(),
+    };
+    report(&mut state, stored.clone());
     assert_eq!(
         command(&mut state, remove_workspace(W)),
         admitted(Operation::RemoveWorkspace(W.into()))
     );
-    // It goes with the workspace.
     report(
         &mut state,
         Report::WorkspaceRemoved {
@@ -170,7 +170,100 @@ fn a_session_found_in_the_backends_records_does_not_hold_a_workspace_back() {
         },
     );
     assert!(state.workspace(W).is_none());
+    assert!(state.session("s1").is_none(), "left listed: {state:#?}");
+
+    // Still being stored when the removal is asked for: the removal waits
+    // for its row, so the row is there to go with the workspace's.
+    let mut state = world();
+    command(&mut state, find_session(W, "s1"));
+    assert_eq!(command(&mut state, remove_workspace(W)), Outcome::Held);
+    let reported = step(&mut state, Input::Report(stored));
+    assert_eq!(
+        reported.released,
+        [(0, admitted(Operation::RemoveWorkspace(W.into())))]
+    );
+
+    // A session Ersa starts, admitted meanwhile, answers the waiting
+    // removal: it is refused.
+    let mut state = world();
+    command(&mut state, find_session(W, "s1"));
+    command(&mut state, remove_workspace(W));
+    let created = step(&mut state, Input::Command(create_session(W, "s2")));
+    assert_eq!(
+        created.released,
+        [(0, Outcome::Refused(Refusal::WorkspaceHasSessions))]
+    );
+
+    // The removal first: the session is never recorded.
+    let mut state = world();
+    command(&mut state, remove_workspace(W));
+    assert_eq!(
+        command(&mut state, find_session(W, "s1")),
+        Outcome::Refused(Refusal::WorkspaceNotReady)
+    );
+    report(
+        &mut state,
+        Report::WorkspaceRemoved {
+            workspace: W.into(),
+        },
+    );
     assert!(state.session("s1").is_none());
+}
+
+// verifies: FLOW-RESUME-SESSION-R13
+#[test]
+fn a_found_session_and_its_projects_removal_in_both_orders() {
+    // Recorded in the project's own folder first: it does not hold the
+    // removal back, and goes with the project.
+    let mut state = bare_project();
+    command(&mut state, find_session(ROOT, "s1"));
+    report(
+        &mut state,
+        Report::SessionStored {
+            session: "s1".into(),
+        },
+    );
+    assert_eq!(
+        command(&mut state, remove_project()),
+        admitted(Operation::RemoveProject(P.into()))
+    );
+    report(&mut state, Report::ProjectRemoved { project: P.into() });
+    assert!(state.project(P).is_none());
+    assert!(state.session("s1").is_none(), "left listed: {state:#?}");
+
+    // Still being stored when the removal is asked for: the removal waits
+    // for its row. One that was not recorded after all lets it go on too.
+    let mut state = bare_project();
+    command(&mut state, find_session(ROOT, "s1"));
+    assert_eq!(command(&mut state, remove_project()), Outcome::Held);
+    let gone = step(
+        &mut state,
+        Input::Report(Report::SessionGone {
+            session: "s1".into(),
+        }),
+    );
+    assert_eq!(
+        gone.released,
+        [(0, admitted(Operation::RemoveProject(P.into())))]
+    );
+
+    // The removal first: the session is never recorded, and when the
+    // removal is then refused the next list records it.
+    let mut state = bare_project();
+    command(&mut state, remove_project());
+    assert_eq!(
+        command(&mut state, find_session(ROOT, "s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+    assert!(state.session("s1").is_none());
+    report(
+        &mut state,
+        Report::ProjectRemovalRefused { project: P.into() },
+    );
+    assert_eq!(
+        command(&mut state, find_session(ROOT, "s1")),
+        admitted(Operation::CreateSession("s1".into()))
+    );
 }
 
 #[test]
@@ -269,6 +362,12 @@ fn an_error_mark_set_while_a_removal_holds_the_workspace_stays_when_it_is_refuse
     // Only a found session is there, so the removal is admitted; its delete
     // then marks the workspace.
     command(&mut state, find_session(W, "s1"));
+    report(
+        &mut state,
+        Report::SessionStored {
+            session: "s1".into(),
+        },
+    );
     command(&mut state, remove_workspace(W));
     report(
         &mut state,
@@ -516,15 +615,10 @@ fn a_project_removal_admitted_first_decides_a_session_and_holds_a_workspace() {
         command(&mut state, remove_project()),
         admitted(Operation::RemoveProject(P.into()))
     );
-    // A session Ersa would start in its folder is refused as busy; one found
-    // in the backend's records is recorded and goes with the project.
+    // A session in its folder is refused as busy.
     assert_eq!(
         command(&mut state, create_session(ROOT, "s1")),
         Outcome::Refused(Refusal::WorkspaceHeld)
-    );
-    assert_eq!(
-        command(&mut state, find_session(ROOT, "s2")),
-        admitted(Operation::CreateSession("s2".into()))
     );
     // A second removal is busy, and a new workspace waits for the first.
     assert_eq!(
@@ -549,7 +643,6 @@ fn a_project_removal_admitted_first_decides_a_session_and_holds_a_workspace() {
     );
     assert!(state.project(P).is_none());
     assert!(state.workspace(ROOT).is_none());
-    assert!(state.session("s2").is_none());
 }
 
 // verifies: ARCH-CORE-R14
@@ -797,20 +890,20 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             context()
         );
     }
-    // A session is admitted only into a ready workspace, and one Ersa
-    // starts never into a folder whose project is being removed.
-    if let (
-        Input::Command(Command::CreateSession {
-            workspace, found, ..
-        }),
-        Outcome::Admitted(_),
-    ) = (input, outcome)
+    // No session, found ones included, is admitted into a workspace that is
+    // not ready or is held: one being removed, or the own folder of a
+    // project being removed.
+    if let (Input::Command(Command::CreateSession { workspace, .. }), Outcome::Admitted(_)) =
+        (input, outcome)
     {
         let entry = before.workspace(workspace).expect("an admitted workspace");
         assert_eq!(entry.phase, WorkspacePhase::Ready, "{}", context());
-        let removing =
-            before.project(&entry.project).map(|p| p.phase) == Some(ProjectPhase::Removing);
-        assert!(*found || !removing, "{}", context());
+        assert_eq!(
+            before.project(&entry.project).map(|p| p.phase),
+            Some(ProjectPhase::Present),
+            "{}",
+            context()
+        );
     }
 }
 
@@ -838,9 +931,12 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
             let stepped = step(&mut after, input.clone());
             steps += 1;
             check_step(&before, input, &stepped.outcome, &after);
-            // Only commands are held, and only a report releases them.
-            if matches!(input, Input::Command(_)) {
-                assert!(stepped.released.is_empty(), "{input:?}");
+            // Only a step that changed the state answers a held command.
+            match stepped.outcome {
+                Outcome::Refused(_) | Outcome::Held | Outcome::Stale => {
+                    assert!(stepped.released.is_empty(), "{input:?}");
+                }
+                Outcome::Admitted(_) | Outcome::Noted => {}
             }
             if after.held().len() <= HELD && seen.insert(after.clone()) {
                 queue.push_back(after);
