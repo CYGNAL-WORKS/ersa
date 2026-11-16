@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use ersa_core::admission::{
     Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase, Setting, State,
-    WorkspacePhase, step,
+    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase, SendIs, SendStage,
+    Sending, Setting, State, WorkspacePhase, step,
 };
 use ersa_core::persistence::SessionRow;
 use ersa_protocol::core_api::Deleting;
@@ -984,10 +984,42 @@ fn remove_section(section: &str) -> Command {
     }
 }
 
+/// A `session.send` from a sender that can start the session again.
 fn send(session: &str) -> Command {
     Command::Send {
         session: session.into(),
+        resumes: true,
     }
+}
+
+/// One from a sender that cannot.
+fn send_to_running(session: &str) -> Command {
+    Command::Send {
+        session: session.into(),
+        resumes: false,
+    }
+}
+
+fn interrupt(session: &str) -> Command {
+    Command::Interrupt {
+        session: session.into(),
+    }
+}
+
+fn await_send(session: &str, until: SendIs) -> Command {
+    Command::AwaitSend {
+        session: session.into(),
+        until,
+    }
+}
+
+fn stage(state: &mut State, session: &str, stage: SendStage) -> Outcome {
+    let session = session.into();
+    report(state, Report::SendStage { session, stage })
+}
+
+fn sending(state: &State, session: &str) -> Option<Sending> {
+    state.session(session).and_then(|entry| entry.send)
 }
 
 fn ended(state: &mut State, operation: Operation) -> ersa_core::admission::Step {
@@ -1073,18 +1105,28 @@ fn an_operation_s_end_ends_only_its_own_kind() {
 #[test]
 fn a_send_is_refused_while_an_archive_is_under_way_or_waiting_its_turn() {
     let mut state = world_with(&["s1", "s2"]);
-    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+    let sent = |state: &mut State, session: &str| {
+        let admitted = command(state, send(session));
+        ended(state, Operation::Send(session.into()));
+        admitted
+    };
+    let may_go = admitted(Operation::Send("s1".into()));
+    assert_eq!(sent(&mut state, "s1"), may_go);
 
     // An archive waiting its turn, here behind a view being opened, already
     // refuses a send: none starts only to be stopped by the archive.
     command(&mut state, begin_exclusive("s1"));
-    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+    assert_eq!(sent(&mut state, "s1"), may_go);
     assert_eq!(command(&mut state, archive("s1")), Outcome::Held);
     assert!(state.being_archived("s1"));
     let refused = Outcome::Refused(Refusal::BeingArchived);
     assert_eq!(command(&mut state, send("s1")), refused);
-    // Another session's sends go on, and the question changes nothing.
-    assert_eq!(command(&mut state, send("s2")), Outcome::Done);
+    assert_eq!(sending(&state, "s1"), None);
+    // Another session's sends go on.
+    assert_eq!(
+        sent(&mut state, "s2"),
+        admitted(Operation::Send("s2".into()))
+    );
     assert!(!state.being_archived("s2"));
 
     // Under way: still refused.
@@ -1095,19 +1137,333 @@ fn a_send_is_refused_while_an_archive_is_under_way_or_waiting_its_turn() {
     );
     assert_eq!(command(&mut state, send("s1")), refused);
 
-    // Over: a send may go, as far as admission knows.
+    // Over, and not archived after all: a send may go.
     ended(&mut state, Operation::Archive("s1".into()));
     assert!(!state.being_archived("s1"));
-    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+    assert_eq!(sent(&mut state, "s1"), may_go);
 
-    // An unarchive, or any other exclusive operation, refuses no send; a
-    // session that is gone has none.
+    // An unarchive, or any other exclusive operation, refuses no send.
     command(&mut state, begin_exclusive("s1"));
-    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+    assert_eq!(sent(&mut state, "s1"), may_go);
+}
+
+// -- The send slot (ARCH-CORE-R14) ------------------------------------------
+
+// verifies: ARCH-CORE-R14
+// verifies: ARCH-CORE-R16
+#[test]
+fn a_second_send_is_refused_while_one_holds_the_slot() {
+    let mut state = world_with(&["s1", "s2"]);
+    let first = admitted(Operation::Send("s1".into()));
+    assert_eq!(command(&mut state, send("s1")), first);
+    let checking = Sending {
+        stage: SendStage::Checking,
+        canceled: false,
+    };
+    assert_eq!(sending(&state, "s1"), Some(checking));
+
+    // One at a time: refused, never queued, and nothing changes.
+    let before = state.clone();
+    let in_progress = Outcome::Refused(Refusal::SendInProgress);
+    assert_eq!(command(&mut state, send("s1")), in_progress);
+    assert_eq!(state, before);
+    // Another session has a slot of its own.
     assert_eq!(
-        command(&mut state, send("s9")),
+        command(&mut state, send("s2")),
+        admitted(Operation::Send("s2".into()))
+    );
+
+    // Through its stages, each once and in order.
+    assert_eq!(stage(&mut state, "s1", SendStage::Checking), Outcome::Stale);
+    assert_eq!(stage(&mut state, "s1", SendStage::Starting), Outcome::Noted);
+    assert_eq!(stage(&mut state, "s1", SendStage::Starting), Outcome::Stale);
+    assert_eq!(command(&mut state, send("s1")), in_progress);
+    assert_eq!(
+        stage(&mut state, "s1", SendStage::HandingOver),
+        Outcome::Noted
+    );
+    assert_eq!(stage(&mut state, "s1", SendStage::Starting), Outcome::Stale);
+    assert_eq!(
+        stage(&mut state, "s1", SendStage::HandingOver),
+        Outcome::Stale
+    );
+    assert_eq!(command(&mut state, send("s1")), in_progress);
+
+    // However it ends, the slot is free, and only once.
+    assert_eq!(
+        ended(&mut state, Operation::Send("s1".into())).outcome,
+        Outcome::Noted
+    );
+    assert_eq!(sending(&state, "s1"), None);
+    assert_eq!(
+        ended(&mut state, Operation::Send("s1".into())).outcome,
+        Outcome::Stale
+    );
+    assert_eq!(command(&mut state, send("s1")), first);
+    // A stage reported for a session with no send is stale.
+    ended(&mut state, Operation::Send("s1".into()));
+    assert_eq!(stage(&mut state, "s1", SendStage::Starting), Outcome::Stale);
+}
+
+// verifies: PROTO-CORE-API-R25
+#[test]
+fn an_interrupt_cancels_a_send_or_finds_it_handed_over_never_both() {
+    let no_send = Outcome::Refused(Refusal::NoSendToCancel);
+
+    // The interrupt first: the send is cancelled, and is not handed over.
+    for started in [false, true] {
+        let mut state = world_with(&["s1"]);
+        assert_eq!(command(&mut state, interrupt("s1")), no_send);
+        command(&mut state, send("s1"));
+        if started {
+            stage(&mut state, "s1", SendStage::Starting);
+        }
+        assert_eq!(command(&mut state, interrupt("s1")), Outcome::Done);
+        assert!(sending(&state, "s1").is_some_and(|send| send.canceled));
+        let before = state.clone();
+        assert_eq!(
+            stage(&mut state, "s1", SendStage::HandingOver),
+            Outcome::Stale
+        );
+        assert_eq!(state, before);
+        // A second interrupt of it is the same answer.
+        assert_eq!(command(&mut state, interrupt("s1")), Outcome::Done);
+        // Stopped, its slot is free, and a new send is not cancelled.
+        ended(&mut state, Operation::Send("s1".into()));
+        command(&mut state, send("s1"));
+        assert!(sending(&state, "s1").is_some_and(|send| !send.canceled));
+    }
+
+    // The hand-over first: the interrupt finds no send to cancel, and goes
+    // on to the turn.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, send("s1"));
+    assert_eq!(
+        stage(&mut state, "s1", SendStage::HandingOver),
+        Outcome::Noted
+    );
+    let before = state.clone();
+    assert_eq!(command(&mut state, interrupt("s1")), no_send);
+    assert_eq!(state, before);
+    assert!(sending(&state, "s1").is_some_and(|send| !send.canceled));
+
+    // A session that is gone has none.
+    assert_eq!(
+        command(&mut state, interrupt("s9")),
         Outcome::Refused(Refusal::NoSession)
     );
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn a_send_is_told_why_it_may_not_go_in_one_order() {
+    let refused = |state: &mut State, command_: Command| match command(state, command_) {
+        Outcome::Refused(refusal) => refusal,
+        other => panic!("not refused: {other:?}"),
+    };
+    // Every reason at once, taken away one at a time.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, delete_session("s1"));
+    wrote(&mut state, "s1", RowChange::Deleting(Deleting::Failed));
+    wrote(&mut state, "s1", RowChange::Archived(true));
+    command(&mut state, begin_exclusive("s1"));
+    command(&mut state, archive("s1"));
+    command(&mut state, send_to_running("s1"));
+    assert_eq!(sending(&state, "s1"), None);
+
+    // Its own delete has its workspace.
+    assert_eq!(refused(&mut state, send("s1")), Refusal::WorkspaceHeld);
+    ended(&mut state, Operation::DeleteSession("s1".into()));
+    // It is marked deleting.
+    assert_eq!(refused(&mut state, send("s1")), Refusal::SessionDeleting);
+
+    // Without the mark: being archived comes before archived, and archived
+    // before not running, so nothing resumes an archived session.
+    let mut state = world_with(&["s1"]);
+    wrote(&mut state, "s1", RowChange::Archived(true));
+    command(&mut state, begin_exclusive("s1"));
+    command(&mut state, archive("s1"));
+    assert_eq!(
+        refused(&mut state, send_to_running("s1")),
+        Refusal::BeingArchived
+    );
+    ended(&mut state, Operation::Exclusive("s1".into()));
+    ended(&mut state, Operation::Archive("s1".into()));
+    assert_eq!(
+        refused(&mut state, send_to_running("s1")),
+        Refusal::Archived
+    );
+    assert_eq!(refused(&mut state, send("s1")), Refusal::Archived);
+    wrote(&mut state, "s1", RowChange::Archived(false));
+
+    // Stopped: only a sender that can start it again may send.
+    assert_eq!(
+        refused(&mut state, send_to_running("s1")),
+        Refusal::NotRunning
+    );
+    // Not running comes before a send already under way.
+    command(&mut state, send("s1"));
+    assert_eq!(
+        refused(&mut state, send_to_running("s1")),
+        Refusal::NotRunning
+    );
+    assert_eq!(refused(&mut state, send("s1")), Refusal::SendInProgress);
+    ended(&mut state, Operation::Send("s1".into()));
+
+    // Running, or ending (the start the send asks for waits for that): any
+    // sender.
+    command(&mut state, launch("s1"));
+    assert_eq!(
+        command(&mut state, send_to_running("s1")),
+        admitted(Operation::Send("s1".into()))
+    );
+    ended(&mut state, Operation::Send("s1".into()));
+    report(&mut state, run_ending("s1"));
+    assert_eq!(
+        command(&mut state, send_to_running("s1")),
+        admitted(Operation::Send("s1".into()))
+    );
+
+    // A session that is gone, or whose row is not stored yet.
+    assert_eq!(refused(&mut state, send("s9")), Refusal::NoSession);
+    command(&mut state, create_session(W, "s2"));
+    assert_eq!(refused(&mut state, send("s2")), Refusal::NoSession);
+    // Another session's delete in the same workspace refuses no send here.
+    let mut state = world_with(&["s1", "s2"]);
+    command(&mut state, delete_session("s2"));
+    assert_eq!(
+        command(&mut state, send("s1")),
+        admitted(Operation::Send("s1".into()))
+    );
+}
+
+// verifies: PROTO-CORE-API-R90
+#[test]
+fn a_waiting_send_s_reporter_hears_of_a_send_that_takes_the_slot_and_of_its_end() {
+    let mut state = world_with(&["s1", "s2"]);
+    // No send has the slot: "free" is so already, "taken" waits.
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Free)),
+        Outcome::Done
+    );
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Taken)),
+        Outcome::Held
+    );
+    // Another session's send is not this one's.
+    command(&mut state, send("s2"));
+    assert_eq!(state.held().len(), 1);
+
+    // A send takes the slot: the reporter hears of it in that step, however
+    // short the send turns out to be.
+    let taken = step(&mut state, Input::Command(send("s1")));
+    assert_eq!(taken.outcome, admitted(Operation::Send("s1".into())));
+    assert_eq!(taken.released, [(0, Outcome::Done)]);
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Taken)),
+        Outcome::Done
+    );
+
+    // And then waits for it to end, however it ends.
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Free)),
+        Outcome::Held
+    );
+    stage(&mut state, "s1", SendStage::HandingOver);
+    assert_eq!(state.held().len(), 1);
+    let freed = ended(&mut state, Operation::Send("s1".into()));
+    assert_eq!(freed.released, [(0, Outcome::Done)]);
+    assert!(state.held().is_empty());
+
+    // A session that goes while its reporter waits: there is nothing to
+    // report for.
+    command(&mut state, await_send("s1", SendIs::Taken));
+    let gone = Report::SessionGone {
+        session: "s1".into(),
+    };
+    let went = step(&mut state, Input::Report(gone));
+    assert_eq!(went.released, [(0, Outcome::Refused(Refusal::NoSession))]);
+}
+
+// verifies: PROTO-CORE-API-R25
+#[test]
+fn a_send_hears_in_admission_that_it_was_cancelled() {
+    let cancelled = || await_send("s1", SendIs::Cancelled);
+    let no_send = Outcome::Refused(Refusal::NoSendToCancel);
+    let mut state = world_with(&["s1"]);
+    // No send: nothing to hear of.
+    assert_eq!(command(&mut state, cancelled()), no_send);
+
+    // The send waits to hear, and an interrupt tells it in its own step.
+    command(&mut state, send("s1"));
+    assert_eq!(command(&mut state, cancelled()), Outcome::Held);
+    let interrupted = step(&mut state, Input::Command(interrupt("s1")));
+    assert_eq!(interrupted.outcome, Outcome::Done);
+    assert_eq!(interrupted.released, [(0, Outcome::Done)]);
+    // One that asks after it was cancelled is told at once.
+    assert_eq!(command(&mut state, cancelled()), Outcome::Done);
+    ended(&mut state, Operation::Send("s1".into()));
+
+    // A send that ends without being cancelled: its wait ends with it, and
+    // a later send's cancel is not heard by it.
+    command(&mut state, send("s1"));
+    assert_eq!(command(&mut state, cancelled()), Outcome::Held);
+    let over = ended(&mut state, Operation::Send("s1".into()));
+    assert_eq!(over.released, [(0, no_send.clone())]);
+    command(&mut state, send("s1"));
+    let interrupted = step(&mut state, Input::Command(interrupt("s1")));
+    assert!(interrupted.released.is_empty());
+
+    // An interrupt that finds the send handed over tells nobody.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, send("s1"));
+    command(&mut state, cancelled());
+    stage(&mut state, "s1", SendStage::HandingOver);
+    let late = step(&mut state, Input::Command(interrupt("s1")));
+    assert_eq!(late.outcome, no_send);
+    assert!(late.released.is_empty());
+    assert_eq!(state.held().len(), 1);
+}
+
+// verifies: PROTO-CORE-API-R41
+#[test]
+fn a_session_is_removed_while_a_message_to_it_is_still_copying() {
+    // A send to a stopped session, still copying its attachments.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, send("s1"));
+
+    // A removal does not wait for it.
+    assert_eq!(
+        command(&mut state, remove_session("s1")),
+        admitted(Operation::RemoveSession("s1".into()))
+    );
+    assert_eq!(
+        command(&mut state, begin_removal("s1")),
+        admitted(Operation::Exclusive("s1".into()))
+    );
+    let gone = Report::SessionGone {
+        session: "s1".into(),
+    };
+    assert_eq!(report(&mut state, gone), Outcome::Noted);
+    assert_eq!(sending(&state, "s1"), None);
+
+    // Every later step of the send finds no session: it starts nothing,
+    // hands nothing over, and its end frees nothing.
+    let before = state.clone();
+    assert_eq!(stage(&mut state, "s1", SendStage::Starting), Outcome::Stale);
+    assert_eq!(
+        command(&mut state, begin_start("s1")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+    assert_eq!(
+        stage(&mut state, "s1", SendStage::HandingOver),
+        Outcome::Stale
+    );
+    assert_eq!(
+        ended(&mut state, Operation::Send("s1".into())).outcome,
+        Outcome::Stale
+    );
+    assert_eq!(state, before);
 }
 
 // verifies: PROTO-CORE-API-R39
@@ -1903,7 +2259,7 @@ fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
 /// Every command and report over a world of one project in one folder, its
 /// root and one isolated workspace, and `sessions`. Without `runs`, those
 /// that begin or end a run, wait for one, or close Core are left out.
-fn every_input(sessions: &[&str], runs: bool, sections: bool) -> Vec<Input> {
+fn every_input(sessions: &[&str], runs: bool, sections: bool, sends: bool) -> Vec<Input> {
     let mut inputs = Vec::new();
     let workspaces = [ROOT, W];
     inputs.push(Input::Command(add_project(P)));
@@ -1928,7 +2284,36 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool) -> Vec<Input> {
             inputs.push(Input::Command(archive(session)));
             inputs.push(Input::Command(arrange(session, None)));
             inputs.push(Input::Command(arrange(session, Some(SECTION))));
+        }
+        if sends {
+            inputs.push(Input::Command(archive(session)));
             inputs.push(Input::Command(send(session)));
+            inputs.push(Input::Command(send_to_running(session)));
+            inputs.push(Input::Command(interrupt(session)));
+            for until in [SendIs::Taken, SendIs::Free, SendIs::Cancelled] {
+                inputs.push(Input::Command(await_send(session, until)));
+            }
+            for stage in [
+                SendStage::Checking,
+                SendStage::Starting,
+                SendStage::HandingOver,
+            ] {
+                let session = session.to_string();
+                inputs.push(Input::Report(Report::SendStage { session, stage }));
+            }
+            for operation in [Operation::Send, Operation::Archive] {
+                let ended = Report::Ended(operation(session.to_string()));
+                inputs.push(Input::Report(ended));
+            }
+            // The writes a send's row reads.
+            for change in [
+                RowChange::Archived(true),
+                RowChange::Archived(false),
+                RowChange::Deleting(Deleting::Running),
+            ] {
+                let session = session.to_string();
+                inputs.push(Input::Report(Report::RowWritten { session, change }));
+            }
         }
         if runs {
             inputs.push(Input::Command(begin_start(session)));
@@ -2007,14 +2392,18 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool) -> Vec<Input> {
                 reports.push(stored_in(workspace, &session, found));
             }
         }
-        reports.extend(
-            writes(&session)
-                .into_iter()
-                .map(|change| Report::RowWritten {
-                    session: session.clone(),
-                    change,
-                }),
-        );
+        // Every kind of write, checked and not explored from; in a world
+        // with sends, the writes a send's row reads are explored, above.
+        if !sends {
+            reports.extend(
+                writes(&session)
+                    .into_iter()
+                    .map(|change| Report::RowWritten {
+                        session: session.clone(),
+                        change,
+                    }),
+            );
+        }
         reports.extend([
             Report::SessionGone {
                 session: session.clone(),
@@ -2039,7 +2428,50 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool) -> Vec<Input> {
         reports.push(Report::GaveUp { place });
     }
     inputs.extend(reports.into_iter().map(Input::Report));
+    // The send's world leaves the project and its workspaces as they are:
+    // a send's row reads its session, its session's own delete, an archive
+    // and the run, never a project's or a workspace's phase, and the other
+    // worlds take those through every phase.
+    if sends {
+        inputs.retain(|input| !about_a_place(input));
+    }
     inputs
+}
+
+/// Whether `input` is about a project or a workspace, not a session.
+fn about_a_place(input: &Input) -> bool {
+    let operation = |operation: &Operation| {
+        matches!(
+            operation,
+            Operation::AddProject(_)
+                | Operation::RemoveProject(_)
+                | Operation::CreateWorkspace(_)
+                | Operation::RemoveWorkspace(_)
+        )
+    };
+    match input {
+        Input::Command(command) => matches!(
+            command,
+            Command::AddProject { .. }
+                | Command::RemoveProject { .. }
+                | Command::CreateWorkspace { .. }
+                | Command::RemoveWorkspace { .. }
+        ),
+        Input::Report(Report::Ended(ended)) => operation(ended),
+        Input::Report(report) => matches!(
+            report,
+            Report::ProjectStored { .. }
+                | Report::ProjectRemoved { .. }
+                | Report::ProjectRemovalRefused { .. }
+                | Report::WorkspaceReady { .. }
+                | Report::WorkspaceCreateFailed { .. }
+                | Report::WorkspaceRemoved { .. }
+                | Report::WorkspaceRemovalRefused { .. }
+                | Report::WorkspaceRemovalFailed { .. }
+                | Report::WorkspaceErrored { .. }
+                | Report::WorkspaceDeleted { .. }
+        ),
+    }
 }
 
 /// The sessions Ersa started in `workspace`.
@@ -2063,6 +2495,13 @@ fn check_state(state: &State) {
             assert_eq!(
                 state.section(into),
                 Some(SectionPhase::Present),
+                "{state:#?}"
+            );
+        }
+        // A send is cancelled or handed over, never both.
+        if let Some(send) = session.send {
+            assert!(
+                !(send.canceled && send.stage == SendStage::HandingOver),
                 "{state:#?}"
             );
         }
@@ -2183,6 +2622,9 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
             }
             None => {}
         }
+        if session.send.is_some() {
+            reports.push(Report::Ended(Operation::Send(id.clone())));
+        }
         match session.run {
             Run::Running | Run::Ending => {
                 reports.push(Report::Ended(Operation::Run(id.clone())));
@@ -2200,9 +2642,16 @@ fn check_every_held_command_is_answered(state: &State) {
     if state.held().is_empty() {
         return;
     }
+    // A reporter waiting for a send to take the slot waits on nothing that
+    // is under way: it leaves when its reporter does (`Admission::ask`
+    // withdraws it).
+    let for_a_beginning = |held: &Command| {
+        let until = SendIs::Taken;
+        matches!(held, Command::AwaitSend { until: u, .. } if *u == until)
+    };
     let mut settling = state.clone();
     for _ in 0..16 {
-        if settling.held().is_empty() {
+        if settling.held().iter().all(for_a_beginning) {
             return;
         }
         let ends = ends_of_what_is_under_way(&settling);
@@ -2222,11 +2671,68 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     let context = || format!("{input:?} -> {outcome:?}\nbefore {before:#?}\nafter {after:#?}");
     // A refusal, a hold's own state aside, and a report that does not fit
     // change nothing.
-    match outcome {
-        Outcome::Refused(_) | Outcome::Done | Outcome::Stale => {
+    match (input, outcome) {
+        // An interrupt that is done marks the send cancelled, and that is
+        // all it changes.
+        (Input::Command(Command::Interrupt { session }), Outcome::Done) => {
+            let was = before.session(session).and_then(|entry| entry.send);
+            let was = was.expect("a send to cancel");
+            assert_ne!(was.stage, SendStage::HandingOver, "{}", context());
+            let mut marked = before.clone();
+            step(&mut marked, input.clone());
+            assert_eq!(&marked, after, "{}", context());
+            let now = after.session(session).and_then(|entry| entry.send);
+            let cancelled = Sending {
+                canceled: true,
+                ..was
+            };
+            assert_eq!(now, Some(cancelled), "{}", context());
+            let unmarked = |state: &State| {
+                let sessions = state.sessions().map(|(id, entry)| {
+                    let mut entry = entry.clone();
+                    entry.send = None;
+                    (id.clone(), entry)
+                });
+                sessions.collect::<Vec<_>>()
+            };
+            assert_eq!(unmarked(before), unmarked(after), "{}", context());
+            // And whoever waited to hear of it is told.
+            let told = await_send(session, SendIs::Cancelled);
+            let still: Vec<_> = before.held().iter().filter(|held| **held != told).collect();
+            assert_eq!(
+                still,
+                after.held().iter().collect::<Vec<_>>(),
+                "{}",
+                context()
+            );
+        }
+        (_, Outcome::Refused(_) | Outcome::Done | Outcome::Stale) => {
             assert_eq!(before, after, "{}", context());
         }
-        Outcome::Admitted(_) | Outcome::Held | Outcome::Noted => {}
+        (_, Outcome::Admitted(_) | Outcome::Held | Outcome::Noted) => {}
+    }
+    // A send is given the slot only when it is free, and its session is
+    // neither being archived, archived, nor being deleted.
+    if let (Input::Command(Command::Send { session, resumes }), Outcome::Admitted(_)) =
+        (input, outcome)
+    {
+        let was = before.session(session).expect("an admitted session");
+        let row = was.row.as_ref().expect("a stored row");
+        assert_eq!(was.send, None, "{}", context());
+        assert!(!before.being_archived(session), "{}", context());
+        assert!(!row.archived && row.deleting.is_none(), "{}", context());
+        let own_delete = before
+            .workspace(&was.workspace)
+            .and_then(|w| w.deleting.clone());
+        assert_ne!(own_delete.as_ref(), Some(session), "{}", context());
+        assert!(*resumes || was.run != Run::Stopped, "{}", context());
+    }
+    // A send is handed over only when it was not cancelled.
+    if let (Input::Report(Report::SendStage { session, stage }), Outcome::Noted) = (input, outcome)
+        && *stage == SendStage::HandingOver
+    {
+        let was = before.session(session).and_then(|entry| entry.send);
+        assert!(was.is_some_and(|send| !send.canceled), "{}", context());
     }
     // No input takes a workspace from `error` to `ready`.
     for (id, workspace) in before.workspaces() {
@@ -2249,11 +2755,6 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             "{id} went with a session Ersa started: {}",
             context()
         );
-    }
-    // No message is sent to a session that is being archived
-    // (PROTO-CORE-API-R85).
-    if let (Input::Command(Command::Send { session }), Outcome::Done) = (input, outcome) {
-        assert!(!before.being_archived(session), "{}", context());
     }
     // An archive or an arrangement is the session's one exclusive
     // operation: admitted only when none was under way.
@@ -2358,8 +2859,14 @@ fn same_but_rows(before: &State, after: &State, changed: impl Fn(&str) -> bool) 
         && before.closing() == after.closing()
 }
 
-fn explore(sessions: &[&str], held: usize, runs: bool, sections: bool) -> HashSet<State> {
-    let inputs = every_input(sessions, runs, sections);
+fn explore(
+    sessions: &[&str],
+    held: usize,
+    runs: bool,
+    sections: bool,
+    sends: bool,
+) -> HashSet<State> {
+    let inputs = every_input(sessions, runs, sections, sends);
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
     for start in [State::default(), world()] {
@@ -2378,18 +2885,20 @@ fn explore(sessions: &[&str], held: usize, runs: bool, sections: bool) -> HashSe
             steps += 1;
             check_step(&before, input, &stepped.outcome, &after);
             // Only a step that changed the state answers a held command.
-            match stepped.outcome {
-                Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale => {
+            match (input, &stepped.outcome) {
+                // An interrupt that is done marked a send cancelled.
+                (Input::Command(Command::Interrupt { .. }), Outcome::Done) => {}
+                (_, Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale) => {
                     assert!(stepped.released.is_empty(), "{input:?}");
                 }
-                Outcome::Admitted(_) | Outcome::Noted => {}
+                (_, Outcome::Admitted(_) | Outcome::Noted) => {}
             }
             // A write changes one session's row and nothing else, answers no
             // held command, and no row of the table reads a row's contents:
             // the state it leads to decides every input as this one does, so
             // it is checked here and not explored again.
             match input {
-                Input::Report(Report::RowWritten { session, .. }) => {
+                Input::Report(Report::RowWritten { session, .. }) if !sends => {
                     assert!(stepped.released.is_empty(), "{input:?}");
                     assert!(
                         same_but_rows(&before, &after, |id| id == session),
@@ -2419,7 +2928,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // Every phase of a project, a workspace, a session and its run, every
     // operation, shutdown, and every way one command waits behind another
     // is reached.
-    let whole = explore(&["s1"], 2, true, false);
+    let whole = explore(&["s1"], 2, true, false, false);
     assert!(whole.len() > 10_000, "only {} states", whole.len());
     for wanted in [
         WorkspacePhase::Creating,
@@ -2459,7 +2968,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // sessions and one command held at a time, without the inputs of a
     // run, which act on one session alone (a removal's "does any found
     // session run" over several is a fed sequence).
-    let pairs = explore(&["s1", "s2"], 1, false, false);
+    let pairs = explore(&["s1", "s2"], 1, false, false, false);
     assert!(pairs.len() > 1_000, "only {} states", pairs.len());
     assert!(
         pairs
@@ -2472,7 +2981,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // session's exclusive operation, whether its row is stored, and the
     // section's phase, never the run. One session, one section, up to two
     // commands held at once.
-    let arranged = explore(&["s1"], 2, false, true);
+    let arranged = explore(&["s1"], 2, false, true, false);
     assert!(arranged.len() > 1_000, "only {} states", arranged.len());
     for wanted in [SectionPhase::Present, SectionPhase::Removing] {
         assert!(
@@ -2495,6 +3004,35 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     assert!(held(|c| matches!(c, Command::Archive { .. })));
     assert!(held(|c| matches!(c, Command::RemoveSection { .. })));
     assert!(held(|c| matches!(c, Command::Arrange { .. })));
+
+    // The send slot: one session, with every input of a run (a stopped
+    // session takes a message only from a sender that can start it), the
+    // archive, the session's delete and the row's marks a send is refused
+    // for, and one command held at a time.
+    let sent = explore(&["s1"], 1, true, false, true);
+    assert!(sent.len() > 1_000, "only {} states", sent.len());
+    let reached = |wanted: Sending| sent.iter().any(|s| sending(s, "s1") == Some(wanted));
+    for stage in [
+        SendStage::Checking,
+        SendStage::Starting,
+        SendStage::HandingOver,
+    ] {
+        let canceled = false;
+        assert!(reached(Sending { stage, canceled }), "{stage:?}");
+    }
+    for stage in [SendStage::Checking, SendStage::Starting] {
+        let canceled = true;
+        assert!(reached(Sending { stage, canceled }), "{stage:?} cancelled");
+    }
+    // A send under way in a session that has since been archived, marked
+    // deleting, or lost its run: each was let in before.
+    let with_send =
+        |wanted: fn(&State) -> bool| sent.iter().any(|s| sending(s, "s1").is_some() && wanted(s));
+    assert!(with_send(|s| s.row("s1").is_some_and(|row| row.archived)));
+    assert!(with_send(|s| s
+        .row("s1")
+        .is_some_and(|row| row.deleting.is_some())));
+    assert!(with_send(|s| run_of(s, "s1") == Some(Run::Ending)));
 }
 
 // -- Operations under way and waiters (the wrapper around the function) -----
@@ -2649,6 +3187,59 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     // The first to come was not answered by the others' limits.
     assert_eq!(patient, (Err(Refusal::GaveUp), 60));
     assert!(admission.snapshot().held().is_empty());
+}
+
+// verifies: ARCH-CORE-R17
+#[tokio::test]
+async fn a_question_whose_asker_left_is_withdrawn_and_one_that_stays_is_answered() {
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(row("s1", W, false));
+    admission.restore(stored);
+    let ask = |until: SendIs| {
+        let admission = Arc::clone(&admission);
+        tokio::spawn(async move { admission.ask(await_send("s1", until)).await })
+    };
+
+    // A reporter waiting for a send that never comes, and then gone: its
+    // question does not stay behind.
+    let waiting = ask(SendIs::Taken);
+    until_held(&admission).await;
+    waiting.abort();
+    let _ = waiting.await;
+    assert!(admission.snapshot().held().is_empty());
+
+    // One that stays is answered when a send takes the slot, and a
+    // question that is so already is answered at once.
+    let waiting = ask(SendIs::Taken);
+    until_held(&admission).await;
+    let sending = admission.begin_send("s1", true).expect("the slot is free");
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(5), waiting);
+    assert_eq!(
+        waited.await.expect("answered in time").expect("joined"),
+        Outcome::Done
+    );
+    assert!(admission.snapshot().held().is_empty());
+    assert_eq!(
+        admission.ask(await_send("s1", SendIs::Taken)).await,
+        Outcome::Done
+    );
+
+    // A send hears it was cancelled; one that ends first hears there is
+    // none.
+    let cancelled = ask(SendIs::Cancelled);
+    until_held(&admission).await;
+    assert!(admission.interrupt_send("s1"));
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(5), cancelled);
+    assert_eq!(
+        waited.await.expect("answered in time").expect("joined"),
+        Outcome::Done
+    );
+    drop(sending);
+    assert_eq!(
+        admission.ask(await_send("s1", SendIs::Cancelled)).await,
+        Outcome::Refused(Refusal::NoSendToCancel)
+    );
 }
 
 // verifies: ARCH-CORE-R16
