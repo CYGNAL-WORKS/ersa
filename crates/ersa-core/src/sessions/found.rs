@@ -18,7 +18,7 @@ use ersa_protocol::core_api::{Workspace, WorkspaceState};
 
 use super::{Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, lock};
 use super::{SessionError, read_summary};
-use crate::admission::{Command, Report};
+use crate::admission::{Command, Report, UnderWay};
 use crate::persistence::{self, SessionRow};
 use crate::platform;
 
@@ -32,6 +32,14 @@ const FOLDER_LISTING: Duration = Duration::from_secs(5);
 /// a folder still being listed is not listed again: a file system that
 /// stopped answering holds one thread per folder, however often Core lists.
 pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
+
+/// The exclusive operations of a workspace's found sessions, held while a
+/// removal takes their rows ([`SessionManager::quiet_found`]).
+#[must_use]
+pub struct QuietFound {
+    /// Held only to be dropped: each drop ends that session's operation.
+    _held: Vec<UnderWay>,
+}
 
 /// One folder to list: a `ready` workspace, for one backend.
 struct Folder {
@@ -277,7 +285,10 @@ impl SessionManager {
                 continue;
             };
             let _listing = self.listing.lock().await;
-            let _op = handle.op.lock().await;
+            // Gone already, by a removal or a delete: nothing to leave out.
+            let Ok(_exclusive) = self.exclusive(&handle.id).await else {
+                continue;
+            };
             if handle.live().is_some()
                 || handle.removed.load(Ordering::SeqCst)
                 || lock(&handle.row).deleting.is_some()
@@ -305,13 +316,14 @@ impl SessionManager {
     /// Whether Core runs a session found in workspace `workspace_id`'s
     /// folder (FLOW-RESUME-SESSION-R14), once any start under way has
     /// settled. For a workspace a removal holds in admission: a send or
-    /// resume holds its session's `op` from before it asks whether the
-    /// workspace is held until its backend is live, so one that got in
-    /// before the hold is waited for and seen here, and none starts after.
-    /// An answer of no stays no while the workspace is held.
+    /// resume has its session's exclusive operation from before it asks
+    /// whether the workspace is held until its backend is live, so one that
+    /// got in before the hold is waited for and seen here, and none starts
+    /// after. An answer of no stays no while the workspace is held.
     pub async fn runs_found(&self, workspace_id: &str) -> bool {
         for handle in self.found_in(workspace_id) {
-            let _op = handle.op.lock().await;
+            // Taken to wait for a start under way, and let go at once.
+            let _exclusive = self.exclusive(&handle.id).await;
             if handle.live().is_some() {
                 return true;
             }
@@ -319,22 +331,39 @@ impl SessionManager {
         false
     }
 
+    /// Takes the exclusive operation of each found session loaded in
+    /// workspace `workspace_id`, waiting for any under way, before a removal
+    /// deletes their rows: an archive or an arrangement still writing one
+    /// finishes first, and nothing else begins on them. Given to
+    /// [`SessionManager::forget_found`] once admission was told the
+    /// workspace is gone; dropped when the delete fails, which lets them go
+    /// on.
+    pub async fn quiet_found(&self, workspace_id: &str) -> QuietFound {
+        let mut quiet = Vec::new();
+        for handle in self.found_in(workspace_id) {
+            // One that is gone already has nothing under way.
+            if let Ok(exclusive) = self.exclusive(&handle.id).await {
+                quiet.push(exclusive);
+            }
+        }
+        QuietFound { _held: quiet }
+    }
+
     /// Lets go of the found sessions loaded in workspace `workspace_id`,
     /// whose rows went with it, their records left
     /// (FLOW-RESUME-SESSION-R13). Called once admission was told the
-    /// workspace is gone:
-    /// a list that stored a found session there loads it before this reads
-    /// the registry, or finds admission without it and loads nothing. None
-    /// is running ([`SessionManager::runs_found`]). Each is marked removed
-    /// under `op`, so a request waiting there finds it gone.
-    pub async fn forget_found(&self, workspace_id: &str) {
+    /// workspace is gone: a list that stored a found session there loads it
+    /// before this reads the registry, or finds admission without it and
+    /// loads nothing. None is running ([`SessionManager::runs_found`]), and
+    /// none has an operation under way: `quiet` holds each one's, taken
+    /// before the rows went, and lets go last. A request that waited there
+    /// finds the session gone.
+    pub async fn forget_found(&self, workspace_id: &str, quiet: QuietFound) {
         for handle in self.found_in(workspace_id) {
-            {
-                let _op = handle.op.lock().await;
-                handle.removed.store(true, Ordering::SeqCst);
-            }
+            handle.removed.store(true, Ordering::SeqCst);
             self.let_go(&handle).await;
         }
+        drop(quiet);
     }
 }
 

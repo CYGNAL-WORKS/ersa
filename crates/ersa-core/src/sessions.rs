@@ -325,10 +325,6 @@ struct Handle {
     row: Mutex<SessionRow>,
     /// What the session's record says of it, as last read.
     presented: Mutex<Presented>,
-    /// Serialises the operations that change whether the session is live or
-    /// which view it has: stop, remove, and opening a view. Held across
-    /// awaits, so an async mutex.
-    op: tokio::sync::Mutex<()>,
     hub: Mutex<Hub>,
     live: Mutex<Option<Arc<Live>>>,
     /// The lines exchanged with the backend since Core started it, for the
@@ -724,7 +720,6 @@ impl Handle {
                 recorded: Default::default(),
                 reported: Default::default(),
             }),
-            op: tokio::sync::Mutex::new(()),
             hub: Mutex::default(),
             live: Mutex::new(None),
             raw: Mutex::default(),
@@ -1225,11 +1220,28 @@ impl SessionManager {
         }
     }
 
+    /// Takes session `id`'s exclusive operation from admission: the
+    /// operations that change whether the session is live, which view it
+    /// has, or what its row says run one at a time, and one asked for
+    /// meanwhile waits here, held in admission, in the order it came. A
+    /// session admission no longer has answers `not_found`. Dropping what
+    /// this returns ends the operation, however the task ends.
+    pub(crate) async fn exclusive(&self, id: &str) -> Result<UnderWay, SessionError> {
+        let command = Command::BeginExclusive {
+            session: id.to_string(),
+        };
+        // The one refusal there is: no such session.
+        self.admission
+            .command(command)
+            .await
+            .map_err(|_| SessionError::NotFound(id.to_string()))
+    }
+
     /// Stops a session and waits until its backend has ended and every line
     /// is projected. Stopping a session that is not running does nothing.
     pub async fn stop(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
-        let _op = handle.op.lock().await;
+        let _exclusive = self.exclusive(id).await?;
         let Some(live) = handle.live() else {
             return Ok(());
         };
@@ -1267,8 +1279,9 @@ impl SessionManager {
         self.refuse_if_deleting(&handle)?;
         let workspace_id = lock(&handle.row).workspace_id.clone();
         // Admission refuses it while a delete or a removal holds its
-        // workspace. Every way out below that does not remove the session
-        // lets go, which ends the removal there.
+        // workspace, and has a delete of this session wait for it. Every
+        // way out below that does not remove the session lets go, which
+        // ends the removal there.
         let command = Command::RemoveSession {
             session: id.to_string(),
         };
@@ -1281,8 +1294,9 @@ impl SessionManager {
         };
         // A session whose ending is already queued is only winding down: a
         // client may have seen `session.ended` before Core let it go, and
-        // can remove it, so wait for it to finish. Waited for before taking
-        // `op`, so nothing else on the session queues behind the wait.
+        // can remove it, so wait for it to finish. Waited for before the
+        // removal takes the session's exclusive operation, so nothing else
+        // on the session queues behind the wait.
         if let Some(live) = handle.live()
             && live.sink.has_ended()
             && wait_finished(&live, STOP_TIMEOUT).await.is_err()
@@ -1291,7 +1305,7 @@ impl SessionManager {
                 "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
             )));
         }
-        let _op = handle.op.lock().await;
+        let _exclusive = self.exclusive(id).await?;
         if handle.live().is_some() {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is running; stop it first"
@@ -1495,12 +1509,10 @@ impl SessionManager {
         }
         // Taken after the stop, which takes it itself. Held while marking,
         // so two marks of one session land in the store and in memory in
-        // the same order, and a `session.remove` (which also holds it) is
-        // either finished, and seen here, or waits for the mark.
-        let _op = handle.op.lock().await;
-        if handle.removed.load(Ordering::SeqCst) {
-            return Err(SessionError::NotFound(id.to_string()));
-        }
+        // the same order, and a `session.remove` (which is one too) is
+        // either finished, so that there is no session to mark, or waits
+        // for the mark.
+        let _exclusive = self.exclusive(id).await?;
         // Stored first, then kept in memory: a store that fails leaves both
         // as they were, so `session.list` never reports what a restart would
         // lose.
@@ -1521,13 +1533,11 @@ impl SessionManager {
         section_id: Option<Option<String>>,
     ) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
-        // As `set_archived`: a `session.remove` is either finished, and seen
-        // here, or waits for the change. A delete marks the session under
-        // the same lock, so the refusal below sees a mark made meanwhile.
-        let _op = handle.op.lock().await;
-        if handle.removed.load(Ordering::SeqCst) {
-            return Err(SessionError::NotFound(id.to_string()));
-        }
+        // As `set_archived`: a `session.remove` is either finished, so that
+        // there is no session to arrange, or waits for the change. A delete
+        // marks the session as its exclusive operation too, so the refusal
+        // below sees a mark made meanwhile.
+        let _exclusive = self.exclusive(id).await?;
         self.refuse_if_deleting(&handle)?;
         let _arrangement = self.arrangement.lock().await;
         // Stored first, then kept in memory, so `session.list` never reports
@@ -1669,10 +1679,7 @@ impl SessionManager {
     /// kept in memory, as an archive mark is.
     pub async fn mark_deleting(&self, id: &str, files: bool) -> Result<bool, SessionError> {
         let handle = self.handle(id)?;
-        let _op = handle.op.lock().await;
-        if handle.removed.load(Ordering::SeqCst) {
-            return Err(SessionError::NotFound(id.to_string()));
-        }
+        let _exclusive = self.exclusive(id).await?;
         let recorded = self
             .store
             .mark_session_deleting(id.to_string(), files)
@@ -1739,7 +1746,7 @@ impl SessionManager {
     ) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
         let _listing = self.listing.lock().await;
-        let _op = handle.op.lock().await;
+        let _exclusive = self.exclusive(id).await?;
         let workspace_went = self
             .store
             .finish_session_delete(id.to_string(), workspace_id.clone())
@@ -1881,8 +1888,9 @@ impl SessionManager {
                     break register(&mut hub, subscriber, from_seq);
                 }
             }
-            // Opened outside the hub's lock, one opening at a time.
-            let _op = handle.op.lock().await;
+            // Opened outside the hub's lock, one opening at a time: it is
+            // the session's exclusive operation.
+            let _exclusive = self.exclusive(&handle.id).await?;
             if handle.live().is_some() || !wants_view(&lock(&handle.hub), false) {
                 continue;
             }
@@ -3554,9 +3562,9 @@ mod tests {
         let manager = gated_manager(dir.path(), &adapter);
         let handle = manager.handle("s-gated").unwrap();
         lock(&handle.row).started_elsewhere = true;
-        // A resume that got in before the claim holds the session's `op`
-        // until its backend is live.
-        let starting = handle.op.lock().await;
+        // A resume that got in before the removal's hold has the session's
+        // exclusive operation until its backend is live.
+        let starting = manager.exclusive("s-gated").await.unwrap();
 
         let look = manager.runs_found("w");
         tokio::pin!(look);
@@ -3647,8 +3655,12 @@ mod tests {
         });
         tokio::time::sleep(Duration::from_millis(1)).await;
         // While it waits, the session's other operations are not held up.
-        let handle = manager.handle("s-gated").unwrap();
-        assert!(handle.op.try_lock().is_ok());
+        let other = tokio::time::timeout(Duration::from_millis(1), manager.exclusive("s-gated"));
+        assert!(matches!(other.await, Ok(Ok(_))), "held up behind the wait");
+        // The removal is under way in admission all the same, so a delete
+        // of the session asked for now waits for it.
+        let waiting = manager.admission.snapshot();
+        assert!(waiting.session("s-gated").is_some_and(|s| s.removing));
         // Core's own wind-down is what stalled, and the error says so.
         match removing.await.unwrap() {
             Err(SessionError::Internal(message)) => {
