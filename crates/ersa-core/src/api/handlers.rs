@@ -379,11 +379,22 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
             }
         }
     }
+    // The sessions found in its folder are held before it goes: none is
+    // sent to or resumed meanwhile, and one that will not stop refuses it.
+    let held = match &root {
+        Some(root) => Some(core.sessions.hold_found(root).await?),
+        None => None,
+    };
     // Anything created since the checks above makes the delete a conflict.
-    core.store.delete_project(project.id.clone()).await?;
+    if let Err(e) = core.store.delete_project(project.id.clone()).await {
+        if let Some(held) = held {
+            core.sessions.release_found(held);
+        }
+        return Err(e.into());
+    }
     // The sessions found in its folder went with it, their records left.
-    if let Some(root) = root {
-        core.sessions.forget_found(&root).await?;
+    if let Some(held) = held {
+        core.sessions.forget_found(held).await?;
     }
     Ok(project)
 }
@@ -659,6 +670,16 @@ pub(super) async fn workspace_remove(
         )));
     }
     pause_for_tests(core).await;
+    // The sessions found in its folder are held before it goes: none is
+    // sent to or resumed meanwhile, and one that will not stop refuses it.
+    let held = match core.sessions.hold_found(&workspace.id).await {
+        Ok(held) => held,
+        Err(e) => {
+            release_claim(core, &workspace.id, replaced).await?;
+            return Err(e.into());
+        }
+    };
+    pause_for_tests(core).await;
 
     let force = params.force.unwrap_or(false);
     let removed = workspace::git_worktree_remove(
@@ -672,6 +693,7 @@ pub(super) async fn workspace_remove(
     )
     .await;
     if let Err(e) = removed {
+        core.sessions.release_found(held);
         // A refusal (locked, local changes without `force`, or a folder git
         // does not list) leaves the worktree as it was, so it goes back to
         // the state it had; any other failure leaves it in an unknown state.
@@ -684,17 +706,20 @@ pub(super) async fn workspace_remove(
         }
         return Err(e.into());
     }
-    core.store.delete_workspace(workspace.id.clone()).await?;
+    if let Err(e) = core.store.delete_workspace(workspace.id.clone()).await {
+        core.sessions.release_found(held);
+        return Err(e.into());
+    }
     // The sessions found in its folder went with it, their records left.
-    core.sessions.forget_found(&workspace.id).await?;
+    core.sessions.forget_found(held).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }
 
 /// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go:
-/// before `workspace.remove`'s claim, after it, and once its sessions no
-/// longer hold it back, so a test can land another request at each.
-/// Nothing outside tests.
+/// before `workspace.remove`'s claim, after it, once its sessions no longer
+/// hold it back, and once the sessions found in its folder are held, so a
+/// test can land another request at each. Nothing outside tests.
 async fn pause_for_tests(core: &Core) {
     if let Some(gate) = &core.config.remove_gate {
         gate.stop().await;
