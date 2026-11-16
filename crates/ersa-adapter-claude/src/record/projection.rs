@@ -571,15 +571,13 @@ fn conversation(entries: &[&Value]) -> Conversation {
             to_walk.push(anchor);
         }
         match node.parent {
-            None => {}
             Some(parent) if nodes.contains_key(parent) => to_walk.push(parent),
             // The chain names an entry the record does not have. Of two
             // such breaks, the later one keeps more of the history.
-            Some(parent) => {
-                if break_at.is_none_or(|(root, _)| node.index > root) {
-                    break_at = Some((node.index, parent));
-                }
+            Some(parent) if break_at.is_none_or(|(root, _)| node.index > root) => {
+                break_at = Some((node.index, parent));
             }
+            _ => {}
         }
     }
     let problem = break_at.map(|(root, parent)| {
