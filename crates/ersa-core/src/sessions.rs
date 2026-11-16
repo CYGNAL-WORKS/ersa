@@ -65,6 +65,7 @@ use crate::projection::View;
 use crate::raw_log::RawLog;
 
 mod fork;
+mod found;
 mod resume;
 mod send;
 mod settings;
@@ -228,6 +229,10 @@ pub struct SessionManager {
     /// memory, so a `section.remove` and a `session.arrange` into that
     /// section land in the same order in both.
     arrangement: tokio::sync::Mutex<()>,
+    /// Held while Core lists the sessions found in the backends' records,
+    /// and while a delete removes a session's row, so a list never records
+    /// a session twice or finds a deleted one again (`found`).
+    listing: tokio::sync::Mutex<()>,
 }
 
 /// Claimed workspaces, by id, with the session each delete is for.
@@ -827,6 +832,7 @@ impl SessionManager {
             closing: AtomicBool::new(false),
             claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
+            listing: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1650,11 +1656,17 @@ impl SessionManager {
         workspace_id: Option<String>,
     ) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
+        let _listing = self.listing.lock().await;
         let _op = handle.op.lock().await;
         self.store
-            .finish_session_delete(id.to_string(), workspace_id)
+            .finish_session_delete(id.to_string(), workspace_id.clone())
             .await?;
         self.let_go(&handle).await;
+        // Sessions found in the workspace's folder went with its row, when
+        // it went (FLOW-RESUME-SESSION-R09).
+        if let Some(workspace_id) = workspace_id {
+            self.forget_found(&workspace_id).await?;
+        }
         Ok(())
     }
 
@@ -3323,6 +3335,7 @@ mod tests {
             model_at: None,
             effort_at: None,
             permission_mode_at: None,
+            started_elsewhere: false,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
@@ -3620,6 +3633,7 @@ mod tests {
                 model_at: None,
                 effort_at: None,
                 permission_mode_at: None,
+                started_elsewhere: false,
             })
             .await
             .unwrap();

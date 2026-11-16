@@ -302,6 +302,22 @@ pub struct FakeAdapter {
     /// What each session's record says of its model, effort and permission
     /// mode, by the backend's id for it; none for a session not in it.
     pub recorded_settings: RecordedSettingsMap,
+    /// Where the backend files each record, by its id for the session: the
+    /// folder it lists the record under, and the working folder the record
+    /// itself names. A record filed nowhere is listed under no folder.
+    pub filed: Filed,
+}
+
+/// Where the fake files its records, shared like [`Records`].
+pub type Filed = Arc<Mutex<HashMap<String, FiledRecord>>>;
+
+/// Where one record is filed.
+#[derive(Debug, Clone)]
+pub struct FiledRecord {
+    /// The folder the backend lists it under.
+    pub under: String,
+    /// The working folder the record names.
+    pub cwd: String,
 }
 
 /// The fake records' settings, by backend session id, shared like
@@ -334,6 +350,7 @@ impl FakeAdapter {
                 one_line: true,
             },
             recorded_settings: Arc::default(),
+            filed: Arc::default(),
         }
     }
 
@@ -656,6 +673,28 @@ impl Adapter for FakeAdapter {
     ) -> Result<Option<String>, AdapterError> {
         let records = self.records.lock().unwrap();
         Ok(records.get(backend_session_id).map(|r| r.len().to_string()))
+    }
+
+    async fn list_records(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+    ) -> Result<Vec<ersa_adapter::ListedRecord>, AdapterError> {
+        let records = self.records.lock().unwrap();
+        let mut listed: Vec<ersa_adapter::ListedRecord> = self
+            .filed
+            .lock()
+            .unwrap()
+            .iter()
+            // A record the backend no longer keeps is not listed.
+            .filter(|(id, filed)| filed.under == cwd && records.contains_key(*id))
+            .map(|(id, filed)| ersa_adapter::ListedRecord {
+                backend_session_id: id.clone(),
+                cwd: Some(filed.cwd.clone()),
+            })
+            .collect();
+        listed.sort_by(|a, b| a.backend_session_id.cmp(&b.backend_session_id));
+        Ok(listed)
     }
 
     async fn summarize_record(

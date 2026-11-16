@@ -168,6 +168,22 @@ pub trait Adapter: Send + Sync {
     /// record, which Ersa no longer shows (the session was removed).
     fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {}
 
+    /// The session records the backend files under working folder `cwd` on
+    /// the transport's host, those started in the backend's own tools
+    /// included, each with the working folder the record itself names: a
+    /// backend may file two folders' records together (Claude Code's
+    /// directory names are lossy), so Core counts only those naming `cwd`
+    /// (FLOW-RESUME-SESSION-R04). A record that cannot be read is left out;
+    /// a folder that cannot be read is an error. A backend without records
+    /// lists none, which is the default.
+    async fn list_records(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+    ) -> Result<Vec<ListedRecord>, AdapterError> {
+        Ok(Vec::new())
+    }
+
     /// What the backend's session record says of the session as a whole: its
     /// title and when it began. Read without reading the whole record, since
     /// Core asks for every session it lists. `None` when the session has no
@@ -342,6 +358,16 @@ pub struct TitleRules {
     /// Whether a title is a single line. When it is, Core turns line
     /// breaks into spaces; otherwise it keeps them.
     pub one_line: bool,
+}
+
+/// One session record a backend files under a working folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedRecord {
+    /// The backend's own id for the session, which resumes it.
+    pub backend_session_id: String,
+    /// The working folder the record itself names, spelled as the backend
+    /// spelled it; `None` when the part of the record read names none.
+    pub cwd: Option<String>,
 }
 
 /// A session as its record presents it.
