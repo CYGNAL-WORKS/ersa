@@ -7,8 +7,9 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use ersa_core::admission::{
-    Admission, Command, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, Setting, State, WorkspacePhase, step,
+    Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
+    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase, Setting, State,
+    WorkspacePhase, step,
 };
 use ersa_core::persistence::SessionRow;
 use ersa_protocol::core_api::Deleting;
@@ -48,6 +49,7 @@ fn existing() -> Existing {
             },
         ],
         sessions: Vec::new(),
+        sections: Vec::new(),
     }
 }
 
@@ -938,12 +940,20 @@ fn a_section_that_is_removed_leaves_every_row_that_named_it_and_no_other() {
     let mut also = row("s4", ROOT, true);
     also.section_id = Some(SECTION.into());
     stored.sessions.push(also);
+    stored.sections = vec![SECTION.into(), "sec2".into()];
     let mut state = State::restored(stored);
 
     let removed = Report::SectionRemoved {
         section: SECTION.into(),
     };
+    // Said only by a removal under way: before one, it changes nothing.
+    let before = state.clone();
+    assert_eq!(report(&mut state, removed.clone()), Outcome::Stale);
+    assert_eq!(state, before);
+    command(&mut state, remove_section(SECTION));
     assert_eq!(report(&mut state, removed), Outcome::Noted);
+    assert_eq!(state.section(SECTION), None);
+    assert_eq!(state.section("sec2"), Some(SectionPhase::Present));
     let section = |state: &State, id: &str| state.row(id).and_then(|row| row.section_id.clone());
     assert_eq!(section(&state, "s1"), None);
     assert_eq!(section(&state, "s4"), None);
@@ -951,6 +961,276 @@ fn a_section_that_is_removed_leaves_every_row_that_named_it_and_no_other() {
     assert_eq!(section(&state, "s3"), None);
     // Nothing else about a row changes.
     assert!(state.row("s1").is_some_and(|row| row.pinned));
+}
+
+// -- Archive, arrange and sections (ARCH-CORE-R14) --------------------------
+
+fn archive(session: &str) -> Command {
+    Command::Archive {
+        session: session.into(),
+    }
+}
+
+fn arrange(session: &str, section: Option<&str>) -> Command {
+    Command::Arrange {
+        session: session.into(),
+        section: section.map(str::to_string),
+    }
+}
+
+fn remove_section(section: &str) -> Command {
+    Command::RemoveSection {
+        section: section.into(),
+    }
+}
+
+fn send(session: &str) -> Command {
+    Command::Send {
+        session: session.into(),
+    }
+}
+
+fn ended(state: &mut State, operation: Operation) -> ersa_core::admission::Step {
+    step(state, Input::Report(Report::Ended(operation)))
+}
+
+/// [`world_with`], and the section [`SECTION`].
+fn world_with_section(sessions: &[&str]) -> State {
+    let mut existing = existing();
+    for session in sessions {
+        existing.sessions.push(row(session, W, false));
+    }
+    existing.sections.push(SECTION.into());
+    State::restored(existing)
+}
+
+// verifies: ARCH-CORE-R16
+#[test]
+fn two_archives_at_once_both_have_their_turn() {
+    let mut state = world_with(&["s1"]);
+    let archiving = admitted(Operation::Archive("s1".into()));
+    assert_eq!(command(&mut state, archive("s1")), archiving);
+    // The second waits for the first, as any exclusive operation does, and
+    // so does anything else asked of the session meanwhile.
+    assert_eq!(command(&mut state, archive("s1")), Outcome::Held);
+    assert_eq!(command(&mut state, begin_exclusive("s1")), Outcome::Held);
+    wrote(&mut state, "s1", RowChange::Archived(true));
+
+    // The first ends: the second has its turn, and finds the session
+    // archived.
+    let first = ended(&mut state, Operation::Archive("s1".into()));
+    assert_eq!(first.released, [(0, archiving.clone())]);
+    assert!(state.row("s1").is_some_and(|row| row.archived));
+    let second = ended(&mut state, Operation::Archive("s1".into()));
+    let other = admitted(Operation::Exclusive("s1".into()));
+    assert_eq!(second.released, [(0, other)]);
+    ended(&mut state, Operation::Exclusive("s1".into()));
+    assert!(!exclusive(&state, "s1"));
+    assert!(state.held().is_empty());
+
+    // An archive of a session that is gone is refused.
+    assert_eq!(
+        command(&mut state, archive("s9")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+}
+
+// verifies: ARCH-CORE-R16
+#[test]
+fn an_operation_s_end_ends_only_its_own_kind() {
+    let mut state = world_with(&["s1"]);
+    command(&mut state, archive("s1"));
+    let before = state.clone();
+    for other in [
+        Operation::Exclusive("s1".into()),
+        Operation::Arrange("s1".into()),
+    ] {
+        assert_eq!(ended(&mut state, other).outcome, Outcome::Stale);
+    }
+    assert_eq!(state, before);
+    assert_eq!(
+        ended(&mut state, Operation::Archive("s1".into())).outcome,
+        Outcome::Noted
+    );
+
+    command(&mut state, arrange("s1", None));
+    let before = state.clone();
+    for other in [
+        Operation::Exclusive("s1".into()),
+        Operation::Archive("s1".into()),
+    ] {
+        assert_eq!(ended(&mut state, other).outcome, Outcome::Stale);
+    }
+    assert_eq!(state, before);
+    assert_eq!(
+        ended(&mut state, Operation::Arrange("s1".into())).outcome,
+        Outcome::Noted
+    );
+    assert!(!exclusive(&state, "s1"));
+}
+
+// verifies: PROTO-CORE-API-R85
+#[test]
+fn a_send_is_refused_while_an_archive_is_under_way_or_waiting_its_turn() {
+    let mut state = world_with(&["s1", "s2"]);
+    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+
+    // An archive waiting its turn, here behind a view being opened, already
+    // refuses a send: none starts only to be stopped by the archive.
+    command(&mut state, begin_exclusive("s1"));
+    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+    assert_eq!(command(&mut state, archive("s1")), Outcome::Held);
+    assert!(state.being_archived("s1"));
+    let refused = Outcome::Refused(Refusal::BeingArchived);
+    assert_eq!(command(&mut state, send("s1")), refused);
+    // Another session's sends go on, and the question changes nothing.
+    assert_eq!(command(&mut state, send("s2")), Outcome::Done);
+    assert!(!state.being_archived("s2"));
+
+    // Under way: still refused.
+    let opened = ended(&mut state, Operation::Exclusive("s1".into()));
+    assert_eq!(
+        opened.released,
+        [(0, admitted(Operation::Archive("s1".into())))]
+    );
+    assert_eq!(command(&mut state, send("s1")), refused);
+
+    // Over: a send may go, as far as admission knows.
+    ended(&mut state, Operation::Archive("s1".into()));
+    assert!(!state.being_archived("s1"));
+    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+
+    // An unarchive, or any other exclusive operation, refuses no send; a
+    // session that is gone has none.
+    command(&mut state, begin_exclusive("s1"));
+    assert_eq!(command(&mut state, send("s1")), Outcome::Done);
+    assert_eq!(
+        command(&mut state, send("s9")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+}
+
+// verifies: PROTO-CORE-API-R39
+#[test]
+fn a_section_s_removal_and_an_arrangement_into_it_land_in_one_order() {
+    let section = |state: &State, id: &str| state.row(id).and_then(|row| row.section_id.clone());
+    let into = || RowChange::Arranged {
+        pinned: None,
+        section: Some(Some(SECTION.into())),
+    };
+    let removed = || Report::SectionRemoved {
+        section: SECTION.into(),
+    };
+
+    // The arrangement first: the removal waits for it, and then takes the
+    // session out of the section with the rest.
+    let mut state = world_with_section(&["s1", "s2"]);
+    let arranging = admitted(Operation::Arrange("s1".into()));
+    assert_eq!(command(&mut state, arrange("s1", Some(SECTION))), arranging);
+    assert_eq!(command(&mut state, remove_section(SECTION)), Outcome::Held);
+    assert_eq!(state.section(SECTION), Some(SectionPhase::Present));
+    wrote(&mut state, "s1", into());
+    let arranged = ended(&mut state, Operation::Arrange("s1".into()));
+    let removing = admitted(Operation::RemoveSection(SECTION.into()));
+    assert_eq!(arranged.released, [(0, removing.clone())]);
+    assert_eq!(state.section(SECTION), Some(SectionPhase::Removing));
+    report(&mut state, removed());
+    assert_eq!(section(&state, "s1"), None);
+    assert_eq!(state.section(SECTION), None);
+
+    // The removal first: an arrangement into the section waits for it, and
+    // then finds no such section. One that does not move its session into
+    // that section does not wait.
+    let mut state = world_with_section(&["s1", "s2"]);
+    assert_eq!(command(&mut state, remove_section(SECTION)), removing);
+    assert_eq!(
+        command(&mut state, arrange("s1", Some(SECTION))),
+        Outcome::Held
+    );
+    assert!(!exclusive(&state, "s1"));
+    assert_eq!(
+        command(&mut state, arrange("s2", None)),
+        admitted(Operation::Arrange("s2".into()))
+    );
+    // A second removal of it waits too.
+    assert_eq!(command(&mut state, remove_section(SECTION)), Outcome::Held);
+    let gone = step(&mut state, Input::Report(removed()));
+    let no_section = Outcome::Refused(Refusal::NoSection);
+    assert_eq!(
+        gone.released,
+        [(0, no_section.clone()), (1, no_section.clone())]
+    );
+    assert_eq!(section(&state, "s1"), None);
+    assert!(!exclusive(&state, "s1"));
+
+    // A removal that fails leaves the section, and what waited goes on.
+    let mut state = world_with_section(&["s1"]);
+    command(&mut state, remove_section(SECTION));
+    command(&mut state, arrange("s1", Some(SECTION)));
+    let failed = ended(&mut state, Operation::RemoveSection(SECTION.into()));
+    assert_eq!(failed.released, [(0, arranging)]);
+    assert_eq!(state.section(SECTION), Some(SectionPhase::Present));
+}
+
+// verifies: PROTO-CORE-API-R39
+#[test]
+fn a_section_that_does_not_exist_is_neither_arranged_into_nor_removed() {
+    let mut state = world_with_section(&["s1"]);
+    let before = state.clone();
+    let no_section = Outcome::Refused(Refusal::NoSection);
+    assert_eq!(command(&mut state, arrange("s1", Some("sec9"))), no_section);
+    assert_eq!(command(&mut state, remove_section("sec9")), no_section);
+    // A session that is gone is said first.
+    assert_eq!(
+        command(&mut state, arrange("s9", Some("sec9"))),
+        Outcome::Refused(Refusal::NoSession)
+    );
+    assert_eq!(state, before);
+
+    // A section is there once it is stored, and only once.
+    let stored = || Report::SectionStored {
+        section: "sec9".into(),
+    };
+    assert_eq!(report(&mut state, stored()), Outcome::Noted);
+    assert_eq!(state.section("sec9"), Some(SectionPhase::Present));
+    assert_eq!(report(&mut state, stored()), Outcome::Stale);
+    assert_eq!(
+        command(&mut state, arrange("s1", Some("sec9"))),
+        admitted(Operation::Arrange("s1".into()))
+    );
+}
+
+// verifies: PROTO-CORE-API-R39
+#[test]
+fn a_row_stored_in_a_section_that_went_meanwhile_is_kept_in_none() {
+    // A fork is stored in its original's section. A removal of that section
+    // that lands between the store and the report took the row out of it
+    // there, so admission keeps it in none.
+    let mut state = world_with_section(&["s1"]);
+    command(&mut state, create_session(W, "s2"));
+    command(&mut state, remove_section(SECTION));
+    report(
+        &mut state,
+        Report::SectionRemoved {
+            section: SECTION.into(),
+        },
+    );
+    let mut fork = row("s2", W, false);
+    fork.section_id = Some(SECTION.into());
+    let stored = Report::SessionStored {
+        row: Box::new(fork.clone()),
+    };
+    assert_eq!(report(&mut state, stored), Outcome::Noted);
+    assert_eq!(state.row("s2"), Some(&row("s2", W, false)));
+
+    // In a section that is there, it stays.
+    let mut state = world_with_section(&["s1"]);
+    command(&mut state, create_session(W, "s2"));
+    let stored = Report::SessionStored {
+        row: Box::new(fork.clone()),
+    };
+    report(&mut state, stored);
+    assert_eq!(state.row("s2"), Some(&fork));
 }
 
 /// [`world`] with `sessions` Ersa started, stored, in the isolated
@@ -1136,7 +1416,9 @@ fn begin_exclusive(session: &str) -> Command {
 }
 
 fn exclusive(state: &State, session: &str) -> bool {
-    state.session(session).is_some_and(|s| s.exclusive)
+    state
+        .session(session)
+        .is_some_and(|s| s.exclusive.is_some())
 }
 
 // verifies: ARCH-CORE-R14
@@ -1621,7 +1903,7 @@ fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
 /// Every command and report over a world of one project in one folder, its
 /// root and one isolated workspace, and `sessions`. Without `runs`, those
 /// that begin or end a run, wait for one, or close Core are left out.
-fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
+fn every_input(sessions: &[&str], runs: bool, sections: bool) -> Vec<Input> {
     let mut inputs = Vec::new();
     let workspaces = [ROOT, W];
     inputs.push(Input::Command(add_project(P)));
@@ -1642,6 +1924,12 @@ fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
         inputs.push(Input::Command(delete_session(session)));
         inputs.push(Input::Command(remove_session(session)));
         inputs.push(Input::Command(begin_exclusive(session)));
+        if sections {
+            inputs.push(Input::Command(archive(session)));
+            inputs.push(Input::Command(arrange(session, None)));
+            inputs.push(Input::Command(arrange(session, Some(SECTION))));
+            inputs.push(Input::Command(send(session)));
+        }
         if runs {
             inputs.push(Input::Command(begin_start(session)));
             inputs.push(Input::Command(begin_removal(session)));
@@ -1654,10 +1942,24 @@ fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
         workspace: W.into(),
     }));
 
+    if sections {
+        inputs.push(Input::Command(remove_section(SECTION)));
+        let section = || SECTION.to_string();
+        for report in [
+            Report::SectionStored { section: section() },
+            Report::SectionRemoved { section: section() },
+            Report::Ended(Operation::RemoveSection(section())),
+        ] {
+            inputs.push(Input::Report(report));
+        }
+        for &session in sessions {
+            for operation in [Operation::Archive, Operation::Arrange] {
+                let ended = Report::Ended(operation(session.to_string()));
+                inputs.push(Input::Report(ended));
+            }
+        }
+    }
     let mut reports = vec![
-        Report::SectionRemoved {
-            section: SECTION.into(),
-        },
         Report::ProjectStored { project: P.into() },
         Report::ProjectRemoved { project: P.into() },
         Report::ProjectRemovalRefused { project: P.into() },
@@ -1755,6 +2057,15 @@ fn check_state(state: &State) {
             state.workspace(&session.workspace).is_some(),
             "session {id} is in no workspace: {state:#?}"
         );
+        // An arrangement under way into a section: the section is there,
+        // and is not being removed.
+        if let Some(Exclusive::Arrange { into: Some(into) }) = &session.exclusive {
+            assert_eq!(
+                state.section(into),
+                Some(SectionPhase::Present),
+                "{state:#?}"
+            );
+        }
         // A row is the row of the session it is kept for.
         if let Some(row) = &session.row {
             let named = (&row.id, &row.workspace_id, row.started_elsewhere);
@@ -1822,6 +2133,14 @@ fn check_state(state: &State) {
 /// drop would, or stores what is being stored.
 fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
     let mut reports = Vec::new();
+    for (id, phase) in state.sections() {
+        match phase {
+            SectionPhase::Removing => {
+                reports.push(Report::Ended(Operation::RemoveSection(id.clone())));
+            }
+            SectionPhase::Present => {}
+        }
+    }
     for (id, project) in state.projects() {
         match project.phase {
             ProjectPhase::Adding => reports.push(Report::Ended(Operation::AddProject(id.clone()))),
@@ -1852,8 +2171,17 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
         if session.removing {
             reports.push(Report::Ended(Operation::RemoveSession(id.clone())));
         }
-        if session.exclusive {
-            reports.push(Report::Ended(Operation::Exclusive(id.clone())));
+        match &session.exclusive {
+            Some(Exclusive::Archive) => {
+                reports.push(Report::Ended(Operation::Archive(id.clone())));
+            }
+            Some(Exclusive::Arrange { .. }) => {
+                reports.push(Report::Ended(Operation::Arrange(id.clone())));
+            }
+            Some(Exclusive::Other) => {
+                reports.push(Report::Ended(Operation::Exclusive(id.clone())));
+            }
+            None => {}
         }
         match session.run {
             Run::Running | Run::Ending => {
@@ -1921,6 +2249,26 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             "{id} went with a session Ersa started: {}",
             context()
         );
+    }
+    // No message is sent to a session that is being archived
+    // (PROTO-CORE-API-R85).
+    if let (Input::Command(Command::Send { session }), Outcome::Done) = (input, outcome) {
+        assert!(!before.being_archived(session), "{}", context());
+    }
+    // An archive or an arrangement is the session's one exclusive
+    // operation: admitted only when none was under way.
+    if let (
+        Input::Command(Command::Archive { session } | Command::Arrange { session, .. }),
+        Outcome::Admitted(_),
+    ) = (input, outcome)
+    {
+        let was = before.session(session).expect("an admitted session");
+        assert_eq!(was.exclusive, None, "{}", context());
+    }
+    // A section is removed only by a removal of it that is under way.
+    for (id, _) in before.sections() {
+        let removing = before.section(id) == Some(SectionPhase::Removing);
+        assert!(after.section(id).is_some() || removing, "{}", context());
     }
     // No session, found ones included, is admitted into a workspace that is
     // not ready or is held: by its removal, by its project's, or by a
@@ -2010,8 +2358,8 @@ fn same_but_rows(before: &State, after: &State, changed: impl Fn(&str) -> bool) 
         && before.closing() == after.closing()
 }
 
-fn explore(sessions: &[&str], held: usize, runs: bool) -> HashSet<State> {
-    let inputs = every_input(sessions, runs);
+fn explore(sessions: &[&str], held: usize, runs: bool, sections: bool) -> HashSet<State> {
+    let inputs = every_input(sessions, runs, sections);
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
     for start in [State::default(), world()] {
@@ -2050,11 +2398,6 @@ fn explore(sessions: &[&str], held: usize, runs: bool) -> HashSet<State> {
                     check_state(&after);
                     continue;
                 }
-                Input::Report(Report::SectionRemoved { .. }) => {
-                    assert!(stepped.released.is_empty(), "{input:?}");
-                    assert!(same_but_rows(&before, &after, |_| true), "{input:?}");
-                    continue;
-                }
                 Input::Command(_) | Input::Report(_) => {}
             }
             if after.held().len() <= held && seen.insert(after.clone()) {
@@ -2076,7 +2419,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // Every phase of a project, a workspace, a session and its run, every
     // operation, shutdown, and every way one command waits behind another
     // is reached.
-    let whole = explore(&["s1"], 2, true);
+    let whole = explore(&["s1"], 2, true, false);
     assert!(whole.len() > 10_000, "only {} states", whole.len());
     for wanted in [
         WorkspacePhase::Creating,
@@ -2116,13 +2459,42 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // sessions and one command held at a time, without the inputs of a
     // run, which act on one session alone (a removal's "does any found
     // session run" over several is a fed sequence).
-    let pairs = explore(&["s1", "s2"], 1, false);
+    let pairs = explore(&["s1", "s2"], 1, false, false);
     assert!(pairs.len() > 1_000, "only {} states", pairs.len());
     assert!(
         pairs
             .iter()
             .any(|s| s.sessions().filter(|(_, session)| session.stored()).count() == 2)
     );
+
+    // Archive, arrange, a section's coming and going, and a send's
+    // question, with every other input but a run's: their rows read the
+    // session's exclusive operation, whether its row is stored, and the
+    // section's phase, never the run. One session, one section, up to two
+    // commands held at once.
+    let arranged = explore(&["s1"], 2, false, true);
+    assert!(arranged.len() > 1_000, "only {} states", arranged.len());
+    for wanted in [SectionPhase::Present, SectionPhase::Removing] {
+        assert!(
+            arranged.iter().any(|s| s.section(SECTION) == Some(wanted)),
+            "{wanted:?} was never reached"
+        );
+    }
+    let has = |wanted: fn(&Exclusive) -> bool| {
+        let under_way = |s: &State| s.session("s1").and_then(|entry| entry.exclusive.clone());
+        arranged
+            .iter()
+            .any(|s| under_way(s).as_ref().is_some_and(wanted))
+    };
+    assert!(has(|e| matches!(e, Exclusive::Archive)));
+    assert!(has(|e| matches!(e, Exclusive::Arrange { into: Some(_) })));
+    assert!(has(|e| matches!(e, Exclusive::Arrange { into: None })));
+    assert!(has(|e| matches!(e, Exclusive::Other)));
+    // An archive waiting its turn, and a removal waiting for an arrangement.
+    let held = |wanted: fn(&Command) -> bool| arranged.iter().any(|s| s.held().iter().any(wanted));
+    assert!(held(|c| matches!(c, Command::Archive { .. })));
+    assert!(held(|c| matches!(c, Command::RemoveSection { .. })));
+    assert!(held(|c| matches!(c, Command::Arrange { .. })));
 }
 
 // -- Operations under way and waiters (the wrapper around the function) -----
