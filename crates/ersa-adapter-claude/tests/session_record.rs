@@ -605,6 +605,35 @@ fn a_compaction_that_keeps_a_segment_shows_its_summary_once() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
+fn an_edit_inside_a_kept_segment_leaves_the_old_entry_out() {
+    // After the compaction, the person rewound into the kept segment and
+    // edited its second entry: the old one is on an abandoned branch.
+    let entries = [
+        prompt("u1", None, "Before"),
+        prompt("k1", Some("u1"), "Kept one"),
+        prompt("k2", Some("k1"), "Kept two"),
+        json!({"type": "system", "subtype": "compact_boundary", "uuid": "c1",
+            "parentUuid": null, "logicalParentUuid": "k2", "isSidechain": false,
+            "compactMetadata": {"preservedSegment":
+                {"headUuid": "k1", "anchorUuid": "s1", "tailUuid": "k2"}}}),
+        json!({"type": "user", "uuid": "s1", "parentUuid": "c1", "isSidechain": false,
+            "isCompactSummary": true, "message": {"role": "user", "content": "Summary"}}),
+        prompt("u2", Some("k2"), "After"),
+        prompt("k2b", Some("k1"), "Kept two, edited"),
+    ];
+    assert_eq!(
+        texts(&events_of(&entries)),
+        [
+            "user: Before",
+            "user: Kept one",
+            "user: Summary",
+            "user: Kept two, edited"
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
+#[test]
 fn a_kept_segment_whose_summary_is_missing_still_keeps_its_history() {
     let entries = [
         prompt("u1", None, "Before"),
@@ -1068,7 +1097,7 @@ fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
 }
 
 /// Whether a stream line is a subagent's own message. Its entries are a
-/// sidechain, kept outside the conversation's record (R20), so the record has
+/// sidechain, kept outside the conversation's record (R78), so the record has
 /// no match for it.
 fn from_a_subagent(line: &Value) -> bool {
     line["parent_tool_use_id"].is_string()
