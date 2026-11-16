@@ -87,12 +87,19 @@ const problems = [];
 // ---- Briefs ---------------------------------------------------------------
 
 // The recorded fixtures by base name ("22-message-during-turn"), whatever their
-// version folder and extension. A brief cites one as `fixture 22-…`, as
-// `2.1.316/22-…`, or as a code span; a citation of a recording nobody made is
-// a claim about a vendor's behavior with nothing behind it.
+// version folder and extension. A brief cites one as `fixture 22-…` or as
+// `2.1.316/22-…` anywhere, and as a code span on a line that speaks of fixtures
+// or recordings, which is how a list of several is written. A citation of a
+// recording nobody made is a claim about a vendor's behavior with nothing behind it.
 const FIXTURES_DIR = join(BRIEFS_DIR, "protocol", "fixtures");
 const fixtures = new Set(existsSync(FIXTURES_DIR) ? walk(FIXTURES_DIR).map((f) => basename(f).replace(/\..*$/, "")) : []);
-const FIXTURE = /(?:fixtures?\s+`?|\d+\.\d+\.\d+\/(?:record\/)?)(\d{2}-[a-z][a-z0-9]*(?:-[a-z0-9]+)*)|`(\d{2}-[a-z][a-z0-9]*(?:-[a-z0-9]+){2,})(?:\.[a-z.]+)?`/g;
+const FIXTURE_NAME = "(\\d{2,}-[a-z][a-z0-9]*(?:-[a-z0-9]+)*)";
+const FIXTURE_NAMED = new RegExp(`(?:fixtures?\\s+|\\d+\\.\\d+\\.\\d+/(?:record/)?)${FIXTURE_NAME}`, "g");
+const FIXTURE_SPAN = new RegExp("`" + FIXTURE_NAME + "(?:\\.[a-z.]+)?`", "g");
+const citedFixtures = (line) => [
+  ...[...line.matchAll(FIXTURE_NAMED)].map((m) => m[1]),
+  ...(/fixture|record/i.test(line) ? [...line.matchAll(FIXTURE_SPAN)].map((m) => m[1]) : []),
+];
 
 const briefs = [];
 for (const file of walk(BRIEFS_DIR)) {
@@ -153,7 +160,7 @@ for (const file of walk(BRIEFS_DIR)) {
       if (labels.has(key)) problems.push(`${fm.id}: ${label} appears twice under "${section}"`);
       labels.add(key);
     }
-    if (!fenced) for (const m of line.matchAll(FIXTURE)) if (!fixtures.has(m[1] ?? m[2])) missing.add(m[1] ?? m[2]);
+    if (!fenced) for (const name of citedFixtures(line)) if (!fixtures.has(name)) missing.add(name);
     for (const m of line.matchAll(REQ_ID)) {
       const id = m[1];
       if (!id.startsWith(fm.id + "-R")) continue;
