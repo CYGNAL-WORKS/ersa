@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use ersa_adapter::ConversationEnd;
+use ersa_adapter::{ConversationEnd, Removal, remove_tree};
 use ersa_protocol::events::{Event, MessageAttachment, UserMessage};
 
 pub(crate) use listing::MAX_TITLE_CHARS;
@@ -266,28 +266,39 @@ pub fn record_version(
 /// The folder goes first and the file last, so a deletion that fails part
 /// way leaves the file, and a second try finds the folder beside it again,
 /// wherever the record was filed. Only a real folder is deleted: a link of
-/// that name is not the CLI's to follow. Checking that no other process has
-/// the session open is the caller's.
-pub fn delete_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Result<()> {
+/// that name is not the CLI's to follow, nor is one inside it. `stop` is
+/// asked before each deletion, the record file's included, and once it says
+/// yes nothing more is deleted (PROTO-CLAUDE-CODE-STREAM-R55): a deletion
+/// called off before the record file's removal leaves the session in the
+/// CLI's own tools. Checking that no other process has the session open is
+/// the caller's.
+pub fn delete_record(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+    stop: &dyn Fn() -> bool,
+) -> io::Result<Removal> {
     let file = find_record(claude_home, cwd, session_id)?;
     // `find_record` checked the id, so it is a plain name, never a path.
     let folder = match &file {
         Some(file) => file.with_file_name(session_id),
         None => project_dir(claude_home, cwd).join(session_id),
     };
-    if fs::symlink_metadata(&folder).is_ok_and(|m| m.file_type().is_dir()) {
-        match fs::remove_dir_all(&folder) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-            _ => {}
-        }
+    if fs::symlink_metadata(&folder).is_ok_and(|m| m.file_type().is_dir())
+        && remove_tree(&folder, stop)? == Removal::CalledOff
+    {
+        return Ok(Removal::CalledOff);
     }
-    if let Some(file) = file {
-        match fs::remove_file(&file) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-            _ => {}
-        }
+    let Some(file) = file else {
+        return Ok(Removal::Removed);
+    };
+    if stop() {
+        return Ok(Removal::CalledOff);
     }
-    Ok(())
+    match fs::remove_file(&file) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(Removal::Removed),
+    }
 }
 
 /// Renames session `session_id` by appending one `custom-title` entry to its
