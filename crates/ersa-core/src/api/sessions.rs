@@ -273,8 +273,9 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         backend_version,
         models,
     } = starting(core, &project, &original.backend).await?;
-    // Every refusal comes before the workspace is made. Holding `hold`
-    // keeps the original from being sent to or deleted meanwhile.
+    // Every refusal comes before the workspace is made. What it returns
+    // keeps the original marked as being forked, so it is neither sent to
+    // nor deleted meanwhile.
     let Forkable {
         backend_id,
         adapter,
