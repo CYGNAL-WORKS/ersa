@@ -116,7 +116,7 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
 /// The records the CLI filed under working directory `cwd`'s directory, each
 /// with the working directory the record itself names: the directory's name
 /// is lossy (`D:\a-b` and `D:\a\b` share one), so a caller tells the two
-/// apart by it (FLOW-RESUME-SESSION-R04). Only the head is read, up to the
+/// apart by it (FLOW-RESUME-SESSION-R12). Only the head is read, up to the
 /// first entry that names one, which is the first prompt; a record that
 /// names none there has `None`. A directory with no records lists nothing; a
 /// directory that cannot be read is an error; a record that cannot be read

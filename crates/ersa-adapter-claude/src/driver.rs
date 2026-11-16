@@ -606,7 +606,7 @@ impl Adapter for ClaudeAdapter {
     }
 
     /// The records filed under `cwd`'s directory on this machine, each with
-    /// the working directory it names (FLOW-RESUME-SESSION-R04).
+    /// the working directory it names (FLOW-RESUME-SESSION-R12).
     async fn list_records(
         &self,
         _transport: Arc<dyn Transport>,
