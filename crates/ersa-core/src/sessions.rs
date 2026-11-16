@@ -59,7 +59,7 @@ use ersa_protocol::events::{
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
-use crate::admission::{Admission, Command, Refusal, Report, RowChange, UnderWay};
+use crate::admission::{Admission, Attached, Command, Refusal, Report, RowChange, UnderWay};
 use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
@@ -213,18 +213,12 @@ pub struct SessionManager {
     /// Decides whether a workspace takes a session, and is told which
     /// sessions exist (ARCH-CORE, Admission).
     admission: Arc<Admission>,
-    /// Every session in the database, by id. A std mutex: only held to look
-    /// up, insert, or remove, never across an await.
-    sessions: Mutex<HashMap<String, Arc<Handle>>>,
     /// Where `session.tile` notifications go, for every attached client.
     tiles: Arc<TileHub>,
     /// A pause after each chunk an attachment's copy writes, for tests.
     copy_pause: Duration,
     /// A pause before Core lets go of a run that has ended, for tests.
     wind_down_pause: Duration,
-    /// Where a list stops between storing a found session and holding it,
-    /// for tests ([`crate::CoreConfig::found_gate`]).
-    found_gate: Option<Arc<crate::state::Gate>>,
     /// Held while Core lists the sessions found in the backends' records,
     /// and while a delete removes a session's row, so a list never records
     /// a session twice or finds a deleted one again (`found`).
@@ -347,7 +341,6 @@ struct Handle {
     /// What the session's record says of it, as last read.
     presented: Mutex<Presented>,
     hub: Mutex<Hub>,
-    live: Mutex<Option<Arc<Live>>>,
     /// The lines exchanged with the backend since Core started it, for the
     /// developer pane.
     raw: Mutex<RawLog>,
@@ -355,10 +348,6 @@ struct Handle {
     /// Core learnt it: shown again at the end of a view opened afresh, since
     /// it is Core's knowledge and never in the record.
     ending: Mutex<Option<(LifecycleFact, String)>>,
-    /// Why the backend did not start, the last time Core started it: a
-    /// message sent to the session is answered with it, so whoever sent the
-    /// first message learns the backend's own reason (FLOW-NEW-SESSION-R08).
-    start_failure: Mutex<Option<String>>,
     /// A read of the session's record still running after its caller gave
     /// up waiting; the next open waits on it rather than start another, so
     /// a file system that hangs gathers one stuck read per session, not one
@@ -745,10 +734,8 @@ impl Handle {
                 reported: Default::default(),
             }),
             hub: Mutex::default(),
-            live: Mutex::new(None),
             raw: Mutex::default(),
             ending: Mutex::new(None),
-            start_failure: Mutex::new(None),
             record_read: tokio::sync::Mutex::new(None),
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
@@ -758,8 +745,12 @@ impl Handle {
         }
     }
 
+    /// The session's backend as Core runs it, attached to its run in
+    /// admission: there from the step that admitted the launch until the
+    /// step that ends the run.
     fn live(&self) -> Option<Arc<Live>> {
-        lock(&self.live).clone()
+        let live = self.admission.live(&self.id);
+        live.and_then(|live| live.downcast::<Live>().ok())
     }
 
     /// The error for a request that needs the backend running when it is
@@ -768,7 +759,7 @@ impl Handle {
     /// signed in, say) rather than its words for a stopped session
     /// (FLOW-NEW-SESSION-R08).
     fn not_running(&self) -> SessionError {
-        match &*lock(&self.start_failure) {
+        match &self.admission.start_failure(&self.id) {
             Some(message) => {
                 SessionError::InvalidState(format!("the backend could not be started: {message}"))
             }
@@ -916,11 +907,9 @@ impl SessionManager {
             adapters: registered,
             app_log,
             admission,
-            sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
-            found_gate: None,
             listing: tokio::sync::Mutex::new(()),
             listing_in_flight: Arc::default(),
             deletes: AtomicU64::new(0),
@@ -938,13 +927,6 @@ impl SessionManager {
     /// ([`crate::CoreConfig::wind_down_pause`]).
     pub fn with_wind_down_pause(mut self, pause: Duration) -> Self {
         self.wind_down_pause = pause;
-        self
-    }
-
-    /// The same manager, stopping a list between storing a found session
-    /// and holding it ([`crate::CoreConfig::found_gate`]).
-    pub fn with_found_gate(mut self, gate: Option<Arc<crate::state::Gate>>) -> Self {
-        self.found_gate = gate;
         self
     }
 
@@ -1021,7 +1003,7 @@ impl SessionManager {
                     read_summary(&store, &handle, &tiles, adapter, transport, row).await;
                 });
             }
-            lock(&self.sessions).insert(handle.id.clone(), handle);
+            self.attach(&handle);
         }
         // Read side by side, and not waited on past a bound: a file system
         // that hangs leaves those titles to the next time a session opens,
@@ -1088,11 +1070,32 @@ impl SessionManager {
         types
     }
 
+    /// What Core keeps for session `id`, found where it was attached: in
+    /// admission, the one index of sessions. `not_found` for a session
+    /// admission does not have, from the step that reported it gone.
     fn handle(&self, id: &str) -> Result<Arc<Handle>, SessionError> {
-        lock(&self.sessions)
-            .get(id)
-            .cloned()
+        let attached = self.admission.attached(id);
+        attached
+            .and_then(|handle| handle.downcast::<Handle>().ok())
             .ok_or_else(|| SessionError::NotFound(id.to_string()))
+    }
+
+    /// Every session Core has loaded.
+    fn handles(&self) -> Vec<Arc<Handle>> {
+        let attached = self.admission.all_attached();
+        attached
+            .into_iter()
+            .filter_map(|handle| handle.downcast::<Handle>().ok())
+            .collect()
+    }
+
+    /// Attaches `handle` to its session in admission, which is how it is
+    /// found from then on, and with which it goes. False for a session
+    /// admission does not have.
+    fn attach(&self, handle: &Arc<Handle>) -> bool {
+        let kept: Arc<Handle> = Arc::clone(handle);
+        let attached: Attached = kept;
+        self.admission.attach(&handle.id, attached)
     }
 
     fn live(&self, id: &str) -> Result<Arc<Live>, SessionError> {
@@ -1101,8 +1104,8 @@ impl SessionManager {
 
     /// Every session, oldest first.
     pub fn list(&self) -> Vec<Session> {
-        let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
-        // One that is gone, and not let go of yet, is not listed.
+        let handles = self.handles();
+        // One that went since is not listed.
         let mut sessions: Vec<Session> = handles.iter().filter_map(|h| h.describe()).collect();
         sessions.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
         sessions
@@ -1115,7 +1118,7 @@ impl SessionManager {
 
     /// How many sessions are running, and how many are waiting on the user.
     pub fn counts(&self) -> (u64, u64) {
-        let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
+        let handles = self.handles();
         let (mut running, mut waiting) = (0, 0);
         for handle in handles.iter().filter(|h| h.live().is_some()) {
             let Some(session) = handle.describe() else {
@@ -1200,25 +1203,19 @@ impl SessionManager {
             &begin.record,
         );
         lock(&handle.hub).install(&handle.id, view, &events);
-        // Launched and registered under the lock `stop_all` takes, so a
-        // session either starts before shutdown and is stopped by it, or
+        // A session either starts before shutdown and is stopped by it, or
         // does not start at all: admission refuses the launch once Core is
-        // closing, and then the session is not registered.
-        let launched = {
-            let mut sessions = lock(&self.sessions);
-            let launched = self.launch(
-                Arc::clone(&handle),
-                adapter,
-                transport,
-                config,
-                backend_version,
-                Launched::New { forking },
-            );
-            if launched.is_ok() {
-                sessions.insert(handle.id.clone(), Arc::clone(&handle));
-            }
-            launched
-        };
+        // closing, and the session is then forgotten. The step that admits
+        // the launch attaches the handle: the session is found from then,
+        // launched, and not before, so nobody else starts it first.
+        let launched = self.launch(
+            Arc::clone(&handle),
+            adapter,
+            transport,
+            config,
+            backend_version,
+            Launched::New { forking },
+        );
         match launched {
             Ok(()) => handle.session(),
             Err(refusal) => {
@@ -1248,11 +1245,6 @@ impl SessionManager {
         backend_version: String,
         launched: Launched,
     ) -> Result<(), Refusal> {
-        // Admission's last word on the start: refused once Core is closing,
-        // and in a folder a removal holds. Admitted, the run is recorded
-        // there until `run_session` lets go of it. Not waited for, so the
-        // caller may hold the registry's lock.
-        let run = self.admission.launch(&handle.id)?;
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
         let sink = Arc::new(CoreSink::new(
             &handle.id,
@@ -1270,7 +1262,21 @@ impl SessionManager {
             progress: progress_rx,
             finished: finished_rx,
         });
-        *lock(&handle.live) = Some(Arc::clone(&live));
+        // Admission's last word on the start: refused once Core is closing,
+        // and in a folder a removal holds. Admitted, the run is recorded
+        // there, with `live` attached to it in that step, until
+        // `run_session` lets go of it: from that step whoever looks for the
+        // session's backend finds it, shutdown included. A new session's
+        // handle is attached in that step too.
+        let run_s: Arc<Live> = Arc::clone(&live);
+        let attached: Attached = run_s;
+        let run = match &launched {
+            Launched::New { .. } => {
+                let first: Arc<Handle> = Arc::clone(&handle);
+                self.admission.launch_new(&handle.id, first, attached)?
+            }
+            Launched::Resumed { .. } => self.admission.launch(&handle.id, attached)?,
+        };
 
         let pipeline = tokio::spawn(run_pipeline(Pipeline {
             store: self.store.clone(),
@@ -1352,17 +1358,15 @@ impl SessionManager {
     /// Stops every running session, for `core.shutdown`: all at once, then
     /// waits for them together.
     pub async fn stop_all(&self) {
-        let running: Vec<Arc<Live>> = {
-            let sessions = lock(&self.sessions);
-            // Told under the lock a launch is asked under: from here
-            // admission refuses every launch, and every run it admitted
-            // before is live below.
-            self.admission.report(Report::Closing);
-            sessions
-                .values()
-                .filter_map(|handle| handle.live())
-                .collect()
-        };
+        // From here admission refuses every launch, and every run it
+        // admitted before is attached there.
+        self.admission.report(Report::Closing);
+        let running: Vec<Arc<Live>> = self
+            .admission
+            .all_live()
+            .into_iter()
+            .filter_map(|live| live.downcast::<Live>().ok())
+            .collect();
         for live in &running {
             begin_stop(live);
         }
@@ -1449,7 +1453,6 @@ impl SessionManager {
             }
             Err(_) => tracing::warn!(session = %id, "removing the scratch folder took too long"),
         }
-        lock(&self.sessions).remove(id);
         self.app_log.forget(id);
         // What the adapter kept of its record goes too. A read still
         // running finds the session gone once it ends, and forgets what it
@@ -2866,7 +2869,11 @@ async fn run_session(task: SessionTask) {
     match outcome {
         Some(Ok(session)) => {
             let session: Arc<dyn AdapterSession> = Arc::from(session);
-            *lock(&handle.start_failure) = None;
+            let failure = None;
+            sink.admission.report(Report::StartEnded {
+                session: handle.id.clone(),
+                failure,
+            });
             // Before the session can be sent anything, so a first message's
             // lines come after this.
             if let Some(fact) = ready_fact {
@@ -2895,7 +2902,11 @@ async fn run_session(task: SessionTask) {
         }
         Some(Err(e)) => {
             tracing::warn!(session = %handle.id, error = %e, "the backend did not start");
-            *lock(&handle.start_failure) = Some(e.to_string());
+            let failure = Some(e.to_string());
+            sink.admission.report(Report::StartEnded {
+                session: handle.id.clone(),
+                failure,
+            });
             sink.start_finished(Err(StartFailure {
                 message: e.to_string(),
                 stopped_by_user: false,
@@ -2929,9 +2940,9 @@ async fn run_session(task: SessionTask) {
     // here waits for the run's end below rather than finding the session
     // running.
     sink.let_go();
-    *lock(&handle.live) = None;
-    // Core has let go of the run. Admission is told after `live` is
-    // cleared, so what waited for the run's end finds none.
+    // Core has let go of the run. Admission is told, and what was attached
+    // to the run goes in that step, so what waited for the run's end finds
+    // none.
     drop(run);
     // Nobody reading it: nothing more will be added, so it goes.
     handle.close_if_idle();
@@ -3674,7 +3685,7 @@ mod tests {
             Arc::clone(&admission),
         );
         let handle = Arc::new(Handle::new(&row, now_rfc3339(), admission, None));
-        lock(&manager.sessions).insert(handle.id.clone(), handle);
+        assert!(manager.attach(&handle));
         manager
     }
 
@@ -3746,8 +3757,6 @@ mod tests {
     /// sink, the sender that marks it finished, and the run as admission
     /// has it, which the session task drops when it lets go of the run.
     fn make_live(manager: &SessionManager) -> (Arc<CoreSink>, watch::Sender<bool>, UnderWay) {
-        let handle = manager.handle("s-gated").unwrap();
-        let run = manager.admission.launch("s-gated").unwrap();
         let sink = Arc::new(CoreSink::new(
             "s-gated",
             Arc::clone(&manager.app_log),
@@ -3762,7 +3771,10 @@ mod tests {
             progress: watch::channel(Progress::default()).1,
             finished: finished.subscribe(),
         };
-        *lock(&handle.live) = Some(Arc::new(live));
+        // Launched as the session manager launches: admitted, with the
+        // run's own attached in that step.
+        let attached: Attached = Arc::new(live);
+        let run = manager.admission.launch("s-gated", attached).unwrap();
         (sink, finished, run)
     }
 
@@ -3912,7 +3924,7 @@ mod tests {
         });
         let admission = Arc::clone(&manager.admission);
         let handle = Arc::new(Handle::new(&found, now_rfc3339(), admission, None));
-        lock(&manager.sessions).insert(handle.id.clone(), handle);
+        assert!(manager.attach(&handle));
 
         // As a removal does: quiet them, take their rows, then let go.
         let quiet = manager.quiet_found("w").await;
@@ -4237,7 +4249,7 @@ mod tests {
         // Admission was told, so the launch of a start that was under way
         // is refused, and the session is not live.
         assert!(matches!(
-            manager.admission.launch("s-gated"),
+            manager.admission.launch("s-gated", Arc::new(())),
             Err(Refusal::Closing)
         ));
         assert!(manager.handle("s-gated").unwrap().live().is_none());
@@ -4273,10 +4285,8 @@ mod tests {
             // Its end is queued, so a client may have seen `session.ended`,
             // while Core still holds it live for a while.
             end(&sink);
-            let handle = manager.handle("s-gated").unwrap();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                *lock(&handle.live) = None;
                 drop(run);
                 finished.send_replace(true);
             });

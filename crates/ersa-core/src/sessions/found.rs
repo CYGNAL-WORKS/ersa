@@ -37,9 +37,10 @@ pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
 /// removal takes their rows ([`SessionManager::quiet_found`]).
 #[must_use]
 pub struct QuietFound {
-    /// Each session's row as it was when its operation was taken, and
-    /// the operation, which ends when dropped.
-    held: Vec<(SessionRow, UnderWay)>,
+    /// Each session's row as it was when its operation was taken, what
+    /// Core keeps for it when it is loaded, and the operation, which ends
+    /// when dropped.
+    held: Vec<(SessionRow, Option<Arc<Handle>>, UnderWay)>,
 }
 
 /// One folder to list: a `ready` workspace, for one backend.
@@ -215,12 +216,6 @@ impl SessionManager {
             admitted.end(Report::SessionGone { session: row.id });
             return Ok(None);
         }
-        admitted.end(Report::SessionStored {
-            row: Box::new(row.clone()),
-        });
-        if let Some(gate) = &self.found_gate {
-            gate.stop().await;
-        }
         // As at startup: with no request of Core's, the permission mode is
         // the backend's default until the record says otherwise.
         let default = BackendChoices::default_of(&folder.adapter.choices().permission_modes);
@@ -228,18 +223,16 @@ impl SessionManager {
         let admission = Arc::clone(&self.admission);
         let started = UNKNOWN_TIME.to_string();
         let handle = Arc::new(Handle::new(&row, started, admission, default));
-        // Loaded only while admission still has it. A removal that took its
-        // row since tells admission before it reads this registry
-        // ([`SessionManager::forget_found`]), so the session is either
-        // loaded before the removal looks, and goes with it, or is not
-        // loaded: it is never left listed in what was removed
-        // (FLOW-RESUME-SESSION-R13).
-        let mut sessions = lock(&self.sessions);
-        if !self.admission.has_session(&handle.id) {
-            return Ok(None);
-        }
-        sessions.insert(handle.id.clone(), Arc::clone(&handle));
-        drop(sessions);
+        // Attached before its row is reported stored. A removal of its
+        // workspace or project waits while a session there is not stored
+        // yet, so one admitted after this finds the session loaded and
+        // lets go of it ([`SessionManager::forget_found`]): it is never
+        // left listed in what was removed (FLOW-RESUME-SESSION-R13).
+        // Admission has the session: its creation is under way here.
+        self.attach(&handle);
+        admitted.end(Report::SessionStored {
+            row: Box::new(row.clone()),
+        });
         Ok(Some(handle))
     }
 
@@ -248,8 +241,8 @@ impl SessionManager {
     /// left out, since a new session or fork has no record until its first
     /// message.
     fn found_missing(&self, folder: &Folder, listed: &HashSet<String>) -> Vec<Arc<Handle>> {
-        lock(&self.sessions)
-            .values()
+        self.handles()
+            .into_iter()
             .filter(|handle| {
                 handle.stored_row().is_some_and(|row| {
                     row.started_elsewhere
@@ -262,7 +255,6 @@ impl SessionManager {
                             .is_some_and(|id| !listed.contains(id))
                 })
             })
-            .cloned()
             .collect()
     }
 
@@ -328,8 +320,11 @@ impl SessionManager {
                 continue;
             };
             // Read again with the operation held: nothing writes it now.
+            // Its handle is taken here too: it goes from admission with the
+            // workspace, and is let go of after. One never loaded (its
+            // backend has no adapter here) has none.
             if let Some(row) = self.admission.row(&found.id) {
-                quiet.push((row, exclusive));
+                quiet.push((row, self.handle(&found.id).ok(), exclusive));
             }
         }
         QuietFound { held: quiet }
@@ -338,19 +333,15 @@ impl SessionManager {
     /// Lets go of the found sessions `quiet` names that are loaded, whose
     /// rows went with their workspace, their records left
     /// (FLOW-RESUME-SESSION-R13). Called once admission was told the
-    /// workspace is gone: a list that stored a found session there loads it
-    /// before this reads the registry, or finds admission without it and
-    /// loads nothing. None is running, or admission had refused the removal, and
+    /// workspace is gone: a list that was storing a found session there
+    /// had it loaded before the removal was admitted. None is running, or admission had refused the removal, and
     /// none has an operation under way: `quiet` holds each one's, taken
     /// before the rows went, and lets go last. A request that waited there
     /// finds the session gone.
     pub async fn forget_found(&self, quiet: QuietFound) {
-        for (row, _exclusive) in &quiet.held {
-            // One never loaded (its backend has no adapter here, or a list
-            // found admission without it) has nothing to let go of.
-            let loaded = lock(&self.sessions).get(&row.id).cloned();
+        for (row, loaded, _exclusive) in &quiet.held {
             if let Some(handle) = loaded {
-                self.let_go(&handle, row).await;
+                self.let_go(handle, row).await;
             }
         }
         drop(quiet);

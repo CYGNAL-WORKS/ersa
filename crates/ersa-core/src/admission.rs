@@ -17,7 +17,8 @@
 //! lint on the next line makes a catch-all arm a build failure.
 #![deny(clippy::wildcard_enum_match_arm)]
 
-use std::collections::BTreeMap;
+use std::any::Any;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -100,6 +101,10 @@ pub struct SessionEntry {
     pub exclusive: Option<Exclusive>,
     /// The message being sent to it, if one is: one at a time.
     pub send: Option<Sending>,
+    /// Why its backend did not start, the last time Core started it: kept
+    /// until a later start succeeds, so whoever sends it a message learns
+    /// the backend's own reason (FLOW-NEW-SESSION-R08).
+    pub start_failure: Option<String>,
     /// Whether a fork of it is starting: from its reads until the fork's
     /// backend has read the record it copies. No message is sent to it and
     /// it is not deleted meanwhile, and no second fork of it begins.
@@ -244,6 +249,7 @@ impl State {
                     removing: false,
                     exclusive: None,
                     send: None,
+                    start_failure: None,
                     forking: false,
                     run: Run::Stopped,
                 },
@@ -643,6 +649,12 @@ pub enum Report {
     /// The session's row is gone.
     SessionGone {
         session: Id,
+    },
+    /// The start of the session's backend is over: it started (`failure`
+    /// is none), or did not, and this is why.
+    StartEnded {
+        session: Id,
+        failure: Option<String>,
     },
     /// The end of the session's run was announced: it is winding down.
     RunEnding {
@@ -1072,6 +1084,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 removing: false,
                 exclusive: None,
                 send: None,
+                start_failure: None,
                 forking: false,
                 run: Run::Stopped,
             };
@@ -1661,6 +1674,15 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 None => Outcome::Stale,
             },
         },
+        // A start that succeeds forgets why an earlier one failed; one that
+        // was stopped reports nothing, and the reason stays.
+        Report::StartEnded { session, failure } => match state.sessions.get_mut(&session) {
+            Some(entry) => {
+                entry.start_failure = failure;
+                Outcome::Noted
+            }
+            None => Outcome::Stale,
+        },
         Report::RunEnding { session } => match state.sessions.get_mut(&session) {
             Some(entry) => match entry.run {
                 Run::Running => {
@@ -1779,6 +1801,12 @@ pub struct Admission {
     inner: Mutex<Inner>,
 }
 
+/// Something Core keeps for a session or for a run, attached to it in
+/// admission so that admission is the one index of sessions: it is found
+/// through admission, and goes in the step in which its session, or its run,
+/// does. Admission never looks inside.
+pub type Attached = Arc<dyn Any + Send + Sync>;
+
 #[derive(Default)]
 struct Inner {
     state: State,
@@ -1788,6 +1816,10 @@ struct Inner {
     waiting: Vec<(u64, oneshot::Sender<Outcome>)>,
     /// The next waiter's number.
     next_waiter: u64,
+    /// What Core attached to each session the state has.
+    sessions: HashMap<Id, Attached>,
+    /// What Core attached to each run that is not stopped.
+    runs: HashMap<Id, Attached>,
 }
 
 impl Admission {
@@ -1797,6 +1829,56 @@ impl Admission {
         let mut inner = self.lock();
         inner.state = State::restored(existing);
         inner.waiting.clear();
+        // Let go of once the lock is: what is attached is Core's, and its
+        // destructor may ask admission.
+        let attached = (
+            std::mem::take(&mut inner.sessions),
+            std::mem::take(&mut inner.runs),
+        );
+        drop(inner);
+        drop(attached);
+    }
+
+    /// Attaches `value` to `session`: found again with
+    /// [`Admission::attached`] for as long as admission has the session,
+    /// and gone in the step that reports it gone. False, with nothing kept,
+    /// for a session admission does not have.
+    pub fn attach(&self, session: &str, value: Attached) -> bool {
+        let mut inner = self.lock();
+        if inner.state.session(session).is_none() {
+            return false;
+        }
+        let replaced = inner.sessions.insert(session.to_string(), value);
+        drop(inner);
+        drop(replaced);
+        true
+    }
+
+    /// What is attached to `session`, if it is there and something is.
+    pub fn attached(&self, session: &str) -> Option<Attached> {
+        self.lock().sessions.get(session).cloned()
+    }
+
+    /// What is attached to every session.
+    pub fn all_attached(&self) -> Vec<Attached> {
+        self.lock().sessions.values().cloned().collect()
+    }
+
+    /// What was attached to `session`'s run when it was launched, while
+    /// the run is not stopped.
+    pub fn live(&self, session: &str) -> Option<Attached> {
+        self.lock().runs.get(session).cloned()
+    }
+
+    /// Why `session`'s backend did not start, the last time Core started
+    /// it, unless a later start succeeded.
+    pub fn start_failure(&self, session: &str) -> Option<String> {
+        self.lock().state.session(session)?.start_failure.clone()
+    }
+
+    /// What is attached to every run that is not stopped.
+    pub fn all_live(&self) -> Vec<Attached> {
+        self.lock().runs.values().cloned().collect()
     }
 
     /// Asks to begin an operation. Answers at once unless the command is
@@ -1965,12 +2047,45 @@ impl Admission {
     }
 
     /// Asks to launch `session`'s backend, without waiting: a launch is
-    /// admitted or refused in the step, so its caller may hold a lock.
-    pub fn launch(self: &Arc<Self>, session: &str) -> Result<UnderWay, Refusal> {
+    /// admitted or refused in the step. Admitted, `live` is attached to the
+    /// run in that step, and goes in the step that ends the run: whoever
+    /// finds the run finds it, and shutdown, told after, finds every run
+    /// launched before. Refused, nothing is kept.
+    pub fn launch(self: &Arc<Self>, session: &str, live: Attached) -> Result<UnderWay, Refusal> {
+        self.launch_with(session, None, live)
+    }
+
+    /// [`Admission::launch`] for a new session, to which nothing is
+    /// attached yet: admitted, `first` is attached to the session in that
+    /// step too. A new session is so found from the step that admits its
+    /// launch and not before, and nobody else can start it first. Refused,
+    /// nothing is kept.
+    pub fn launch_new(
+        self: &Arc<Self>,
+        session: &str,
+        first: Attached,
+        live: Attached,
+    ) -> Result<UnderWay, Refusal> {
+        self.launch_with(session, Some(first), live)
+    }
+
+    fn launch_with(
+        self: &Arc<Self>,
+        session: &str,
+        first: Option<Attached>,
+        live: Attached,
+    ) -> Result<UnderWay, Refusal> {
         let command = Command::Launch {
             session: session.to_string(),
         };
-        let (outcome, _) = self.apply(Input::Command(command));
+        let (outcome, _) = self.apply_then(Input::Command(command), |inner, outcome| {
+            if let Outcome::Admitted(_) = outcome {
+                inner.runs.insert(session.to_string(), live);
+                if let Some(first) = first {
+                    inner.sessions.insert(session.to_string(), first);
+                }
+            }
+        });
         self.answered(outcome)
     }
 
@@ -2063,8 +2178,19 @@ impl Admission {
     /// One step under the lock. For a command that is held, also its
     /// waiter's number and the channel its answer arrives on.
     fn apply(&self, input: Input) -> (Outcome, Option<(u64, oneshot::Receiver<Outcome>)>) {
+        self.apply_then(input, |_, _| {})
+    }
+
+    /// [`Admission::apply`], with `then` run under the same lock right
+    /// after the step, with its outcome.
+    fn apply_then(
+        &self,
+        input: Input,
+        then: impl FnOnce(&mut Inner, &Outcome),
+    ) -> (Outcome, Option<(u64, oneshot::Receiver<Outcome>)>) {
         let mut inner = self.lock();
         let Step { outcome, released } = step(&mut inner.state, input);
+        then(&mut inner, &outcome);
         let waiter = match outcome {
             Outcome::Held => {
                 let (answer, waiter) = oneshot::channel();
@@ -2080,6 +2206,12 @@ impl Admission {
             | Outcome::Stale => None,
         };
         answer_released(&mut inner, released);
+        // What was attached to a session or a run that this step, or one it
+        // set off, took away goes with it. Dropped once the lock is let
+        // go: what Core attached may do anything when it is dropped.
+        let gone = sweep(&mut inner);
+        drop(inner);
+        drop(gone);
         (outcome, waiter)
     }
 
@@ -2091,6 +2223,30 @@ impl Admission {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+}
+
+/// Takes out what is attached to a session the state no longer has, and to
+/// a run that is stopped or whose session is gone.
+fn sweep(inner: &mut Inner) -> Vec<Attached> {
+    let Inner {
+        state,
+        sessions,
+        runs,
+        ..
+    } = inner;
+    let mut gone = Vec::new();
+    let there = |id: &Id| state.session(id).is_some();
+    let stale: Vec<Id> = sessions.keys().filter(|id| !there(id)).cloned().collect();
+    gone.extend(stale.iter().filter_map(|id| sessions.remove(id)));
+    let running = |id: &Id| {
+        state.session(id).is_some_and(|entry| match entry.run {
+            Run::Running | Run::Ending => true,
+            Run::Stopped => false,
+        })
+    };
+    let ended: Vec<Id> = runs.keys().filter(|id| !running(id)).cloned().collect();
+    gone.extend(ended.iter().filter_map(|id| runs.remove(id)));
+    gone
 }
 
 /// Withdraws a held command whose asker stopped waiting

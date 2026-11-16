@@ -267,7 +267,8 @@ pub fn fake_models() -> Vec<ModelChoice> {
 
 pub struct FakeAdapter {
     projector_version: u32,
-    fail_start: bool,
+    /// While set, every backend exits during its handshake.
+    pub fail_start: Arc<AtomicBool>,
     panic_start: bool,
     /// How long the handshake takes.
     start_delay: std::time::Duration,
@@ -341,7 +342,7 @@ impl FakeAdapter {
     pub fn new(projector_version: u32) -> Self {
         FakeAdapter {
             projector_version,
-            fail_start: false,
+            fail_start: Arc::default(),
             panic_start: false,
             start_delay: std::time::Duration::ZERO,
             stats: Arc::default(),
@@ -438,7 +439,7 @@ impl FakeAdapter {
     /// An adapter whose backend exits with code 1 during the handshake.
     pub fn failing() -> Self {
         FakeAdapter {
-            fail_start: true,
+            fail_start: Arc::new(AtomicBool::new(true)),
             ..FakeAdapter::new(1)
         }
     }
@@ -519,7 +520,7 @@ impl Adapter for FakeAdapter {
         }
         tokio::time::sleep(self.start_delay).await;
         drop(self.start_gate.lock().await);
-        if self.fail_start {
+        if self.fail_start.load(Ordering::SeqCst) {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
         }
