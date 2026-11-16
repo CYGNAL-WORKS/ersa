@@ -98,8 +98,31 @@ pub struct SessionEntry {
     /// row, a delete's mark, or a removal once it goes on. A session has at
     /// most one, and another asked for meanwhile waits.
     pub exclusive: Option<Exclusive>,
+    /// The message being sent to it, if one is: one at a time.
+    pub send: Option<Sending>,
     /// Whether Core runs its backend.
     pub run: Run,
+}
+
+/// A message being sent to a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Sending {
+    pub stage: SendStage,
+    /// Whether `session.interrupt` cancelled it. Only before it is handed
+    /// over: an interrupt cancels a send or finds it handed over, never
+    /// both (PROTO-CORE-API-R25).
+    pub canceled: bool,
+}
+
+/// How far a send has come. Copying its attachments is part of checking:
+/// the copy job knows when it began, not admission.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SendStage {
+    Checking,
+    /// The session's backend is being started for it.
+    Starting,
+    /// Given to the backend, or about to be: past cancelling.
+    HandingOver,
 }
 
 /// Which exclusive operation is under way on a session.
@@ -204,6 +227,7 @@ impl State {
                     row: Some(row),
                     removing: false,
                     exclusive: None,
+                    send: None,
                     run: Run::Stopped,
                 },
             );
@@ -451,9 +475,18 @@ pub enum Command {
     RemoveSection {
         section: Id,
     },
-    /// Asks whether a message may be sent to the session now: refused while
-    /// it is being archived. It begins nothing and is never held.
+    /// A `session.send`: takes the session's one send slot, or is refused.
+    /// Never held: a second message is refused, not queued. `resumes` says
+    /// whether the sender can start the session's backend again, so a
+    /// stopped session takes the message.
     Send {
+        session: Id,
+        resumes: bool,
+    },
+    /// A `session.interrupt`, asking to cancel the message being sent:
+    /// done while the send is not yet handed over, refused when there is
+    /// none or it is handed over.
+    Interrupt {
         session: Id,
     },
     /// The exclusive operation of a start (a resume, or a send to a stopped
@@ -495,6 +528,9 @@ pub enum Operation {
     Exclusive(Id),
     Archive(Id),
     Arrange(Id),
+    /// A message being sent, from the step that gives it the session's
+    /// slot.
+    Send(Id),
     RemoveSection(Id),
     /// A session's run, from its launch until Core has let go of it.
     Run(Id),
@@ -553,6 +589,12 @@ pub enum Report {
     RowWritten {
         session: Id,
         change: RowChange,
+    },
+    /// The send has come to `stage`. Handing over is not noted for a send
+    /// that was cancelled.
+    SendStage {
+        session: Id,
+        stage: SendStage,
     },
     /// A new section is stored.
     SectionStored {
@@ -650,6 +692,17 @@ pub enum Refusal {
     WorkspaceBusy,
     /// The session is being archived: no message is sent to it.
     BeingArchived,
+    /// The session is marked deleting.
+    SessionDeleting,
+    /// The session is archived.
+    Archived,
+    /// The session's backend is not running, and the sender cannot start
+    /// it.
+    NotRunning,
+    /// A message is being sent to the session already.
+    SendInProgress,
+    /// No message is being sent, or it is handed over.
+    NoSendToCancel,
     NoSection,
     WorkspaceHasSessions,
     WorkspaceNotReady,
@@ -671,7 +724,8 @@ pub enum Refusal {
 pub enum Outcome {
     /// A command: the operation may begin, and is recorded.
     Admitted(Operation),
-    /// A command that only asks: answered, with nothing begun or changed.
+    /// A command with nothing to end: a question answered, with nothing
+    /// changed; or an interrupt that cancelled the send in the slot.
     Done,
     /// A command: nothing changed.
     Refused(Refusal),
@@ -974,6 +1028,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 row: None,
                 removing: false,
                 exclusive: None,
+                send: None,
                 run: Run::Stopped,
             };
             state.sessions.insert(session.clone(), entry);
@@ -1075,13 +1130,64 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 .insert(section.clone(), SectionPhase::Removing);
             Outcome::Admitted(Operation::RemoveSection(section.clone()))
         }
-        Command::Send { session } => {
-            if !state.sessions.contains_key(session) {
-                Outcome::Refused(Refusal::NoSession)
-            } else if state.being_archived(session) {
-                Outcome::Refused(Refusal::BeingArchived)
+        Command::Send { session, resumes } => {
+            let being_archived = state.being_archived(session);
+            let Some(entry) = state.sessions.get(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            let Some(row) = &entry.row else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            let deleting = state
+                .workspaces
+                .get(&entry.workspace)
+                .and_then(|workspace| workspace.deleting.as_ref());
+            // Each refusal in the order a sender has always been told them.
+            let refusal = if deleting == Some(session) {
+                // Its own delete has its workspace.
+                Some(Refusal::WorkspaceHeld)
+            } else if row.deleting.is_some() {
+                Some(Refusal::SessionDeleting)
+            } else if being_archived {
+                Some(Refusal::BeingArchived)
+            } else if row.archived {
+                Some(Refusal::Archived)
             } else {
-                Outcome::Done
+                match (entry.run, *resumes) {
+                    (Run::Stopped, false) => Some(Refusal::NotRunning),
+                    // One that is ending is started again by the send,
+                    // which waits for the run's end, or is refused then.
+                    (Run::Stopped, true) | (Run::Running | Run::Ending, _) => None,
+                }
+            };
+            if let Some(refusal) = refusal {
+                return Outcome::Refused(refusal);
+            }
+            if entry.send.is_some() {
+                return Outcome::Refused(Refusal::SendInProgress);
+            }
+            let sending = Sending {
+                stage: SendStage::Checking,
+                canceled: false,
+            };
+            if let Some(entry) = state.sessions.get_mut(session) {
+                entry.send = Some(sending);
+            }
+            Outcome::Admitted(Operation::Send(session.clone()))
+        }
+        Command::Interrupt { session } => {
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            match &mut entry.send {
+                Some(sending) => match sending.stage {
+                    SendStage::Checking | SendStage::Starting => {
+                        sending.canceled = true;
+                        Outcome::Done
+                    }
+                    SendStage::HandingOver => Outcome::Refused(Refusal::NoSendToCancel),
+                },
+                None => Outcome::Refused(Refusal::NoSendToCancel),
             }
         }
         Command::BeginStart { session } => begin_after_run(state, session, true),
@@ -1293,6 +1399,35 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 None => Outcome::Stale,
             }
         }
+        Report::SendStage { session, stage } => {
+            let sending = state
+                .sessions
+                .get_mut(&session)
+                .and_then(|entry| entry.send.as_mut());
+            match (sending, stage) {
+                (Some(sending), SendStage::Starting) => match sending.stage {
+                    SendStage::Checking => {
+                        sending.stage = SendStage::Starting;
+                        Outcome::Noted
+                    }
+                    SendStage::Starting | SendStage::HandingOver => Outcome::Stale,
+                },
+                // The one step that decides a send against an interrupt:
+                // cancelled before it, the send is not handed over.
+                (Some(sending), SendStage::HandingOver) => {
+                    match (sending.stage, sending.canceled) {
+                        (SendStage::Checking | SendStage::Starting, false) => {
+                            sending.stage = SendStage::HandingOver;
+                            Outcome::Noted
+                        }
+                        (SendStage::Checking | SendStage::Starting, true)
+                        | (SendStage::HandingOver, _) => Outcome::Stale,
+                    }
+                }
+                // A send begins there, and never goes back to it.
+                (Some(_), SendStage::Checking) | (None, _) => Outcome::Stale,
+            }
+        }
         Report::SectionStored { section } => match state.sections.entry(section) {
             std::collections::btree_map::Entry::Vacant(vacant) => {
                 vacant.insert(SectionPhase::Present);
@@ -1385,6 +1520,17 @@ fn note(state: &mut State, report: Report) -> Outcome {
             Operation::Arrange(session) => end_exclusive(state, &session, |exclusive| {
                 matches!(exclusive, Exclusive::Arrange { .. })
             }),
+            // However the send ended, the slot is free.
+            Operation::Send(session) => {
+                match state
+                    .sessions
+                    .get_mut(&session)
+                    .map(|entry| entry.send.take())
+                {
+                    Some(Some(_)) => Outcome::Noted,
+                    Some(None) | None => Outcome::Stale,
+                }
+            }
             // Not removed, as far as anyone said: the section is still
             // there.
             Operation::RemoveSection(section) => match state.sections.get_mut(&section) {
@@ -1588,19 +1734,41 @@ impl Admission {
         self.answered(outcome)
     }
 
-    /// Asks whether a message may be sent to `session` now
-    /// ([`Command::Send`]). Never waits.
-    pub fn may_send(&self, session: &str) -> Result<(), Refusal> {
+    /// Asks for `session`'s send slot ([`Command::Send`]), without waiting:
+    /// admitted or refused in the step, so its caller may hold a lock.
+    pub fn begin_send(self: &Arc<Self>, session: &str, resumes: bool) -> Result<UnderWay, Refusal> {
         let command = Command::Send {
             session: session.to_string(),
+            resumes,
         };
-        match self.apply(Input::Command(command)).0 {
-            Outcome::Done => Ok(()),
-            Outcome::Refused(refusal) => Err(refusal),
-            Outcome::Admitted(_) | Outcome::Held | Outcome::Noted | Outcome::Stale => {
-                unreachable!("a question about a send is answered or refused")
-            }
-        }
+        let (outcome, _) = self.apply(Input::Command(command));
+        self.answered(outcome)
+    }
+
+    /// Says the send to `session` has come to `stage`. False when it has
+    /// not: there is no such send, or it was cancelled before a hand-over.
+    pub fn send_reached(&self, session: &str, stage: SendStage) -> bool {
+        let report = Report::SendStage {
+            session: session.to_string(),
+            stage,
+        };
+        matches!(self.apply(Input::Report(report)).0, Outcome::Noted)
+    }
+
+    /// Cancels the message being sent to `session`
+    /// ([`Command::Interrupt`]). False when none is, or it is handed over.
+    pub fn interrupt_send(&self, session: &str) -> bool {
+        let command = Command::Interrupt {
+            session: session.to_string(),
+        };
+        matches!(self.apply(Input::Command(command)).0, Outcome::Done)
+    }
+
+    /// The stage of the message being sent to `session`, if one is.
+    pub fn send_stage(&self, session: &str) -> Option<SendStage> {
+        let inner = self.lock();
+        let sending = inner.state.session(session)?.send?;
+        Some(sending.stage)
     }
 
     /// Asks whether Core runs `session` ([`Command::AwaitRunEnd`]), waiting

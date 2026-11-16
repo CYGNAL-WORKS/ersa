@@ -1961,6 +1961,38 @@ async fn archiving_an_unknown_session_is_not_found() {
 
 // verifies: PROTO-CORE-API-R25
 #[tokio::test(flavor = "multi_thread")]
+async fn an_interrupt_finds_a_send_handed_over_and_goes_on_to_the_backend() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    let sent = stats.messages.lock().unwrap().len();
+    let send = client
+        .request(
+            "session.send",
+            json!({ "id": id, "text": "taken once interrupted" }),
+        )
+        .await;
+
+    // The backend is taking the message: handed over, as the session lists
+    // it, and past cancelling.
+    let mut other = core.client().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while session_row(&mut other, &id).await.get("sending") != Some(&json!("handing_over")) {
+        assert!(tokio::time::Instant::now() < deadline, "never handed over");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // So the interrupt does not stop the send: it is the turn's, and goes
+    // on to the backend.
+    other.result("session.interrupt", json!({ "id": id })).await;
+    assert_eq!(stats.interrupts.load(Ordering::SeqCst), 1);
+    let response = client.response(send).await;
+    assert!(response.get("result").is_some(), "{response:#}");
+    assert_eq!(stats.messages.lock().unwrap().len(), sent + 1);
+}
+
+// verifies: PROTO-CORE-API-R25
+#[tokio::test(flavor = "multi_thread")]
 async fn interrupt_ends_a_running_turn_as_interrupted_and_otherwise_does_nothing() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
