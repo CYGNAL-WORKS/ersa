@@ -382,6 +382,9 @@ impl Store {
             })?;
             existing.workspaces = collect(rows)?;
             existing.sessions = sessions::read_sessions(conn)?;
+            let mut sections = conn.prepare("SELECT id FROM sections")?;
+            let rows = sections.query_map([], |row| row.get(0))?;
+            existing.sections = collect(rows)?;
             Ok(existing)
         })
         .await

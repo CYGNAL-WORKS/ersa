@@ -124,7 +124,7 @@ impl Drop for Copies {
 
 /// The refusal of a send while an archive is under way: no `reason`, since
 /// the archive may still fail or be refused (PROTO-CORE-API-R85).
-fn being_archived() -> SessionError {
+pub(super) fn being_archived() -> SessionError {
     SessionError::InvalidState(
         "the session is being archived; unarchive or resume it to send it a message".into(),
     )
@@ -200,12 +200,6 @@ impl SessionManager {
     ) -> Result<Option<u32>, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
-        // Before the session is found not running: between an archive's stop
-        // and its mark, the refusal is this one, and nothing resumes it
-        // (PROTO-CORE-API-R85). Checked again under the `sending` lock below.
-        if handle.archiving.load(Ordering::SeqCst) > 0 {
-            return Err(being_archived());
-        }
         let resuming = !self.runs_once_settled(&handle).await?;
         let (cancel, mut canceled) = watch::channel(false);
         let changed = Arc::new(Notify::new());
@@ -222,12 +216,12 @@ impl SessionManager {
                     "this session is being forked; send the message again in a moment".into(),
                 ));
             }
-            // Under this lock too, and an archive checks `sending` after
-            // raising this, so one of the two always sees the other
-            // (PROTO-CORE-API-R85).
-            if handle.archiving.load(Ordering::SeqCst) > 0 {
-                return Err(being_archived());
-            }
+            // Asked of admission under this lock, and an archive checks
+            // `sending` after admission knows of it, so one of the two
+            // always sees the other (PROTO-CORE-API-R85). Before the
+            // session is found not running: between an archive's stop and
+            // its mark the refusal is this one, and nothing resumes it.
+            self.may_send(&handle)?;
             // An archived session is read-only until it is unarchived, or a
             // resume is accepted (FLOW-ARCHIVE-DELETE-SESSION-R02). Read
             // here, under the lock an archive checks `sending` through, and
