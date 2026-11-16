@@ -202,7 +202,7 @@ impl SessionManager {
     }
 
     /// Lets go of the sessions found in workspace `workspace_id`'s folder
-    /// whose rows went with the workspace (FLOW-RESUME-SESSION-R09).
+    /// whose rows went with the workspace (FLOW-RESUME-SESSION-R13).
     pub async fn forget_found(&self, workspace_id: &str) -> Result<(), SessionError> {
         let found: Vec<Arc<Handle>> = lock(&self.sessions)
             .values()

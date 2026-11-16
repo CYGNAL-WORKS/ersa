@@ -118,7 +118,8 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
 /// is lossy (`D:\a-b` and `D:\a\b` share one), so a caller tells the two
 /// apart by it (FLOW-RESUME-SESSION-R12). Only the head is read, up to the
 /// first entry that names one, which is the first prompt; a record that
-/// names none there has `None`. A directory with no records lists nothing; a
+/// names none there has `None`. A record of a run the CLI's own list hides
+/// (an SDK entrypoint) is left out. A directory with no records lists nothing; a
 /// directory that cannot be read is an error; a record that cannot be read
 /// is left out.
 pub fn list_records(claude_home: &Path, cwd: &str) -> io::Result<Vec<(String, Option<String>)>> {
@@ -142,17 +143,33 @@ pub fn list_records(claude_home: &Path, cwd: &str) -> io::Result<Vec<(String, Op
         if !is_session_id(id) || !entry.file_type().is_ok_and(|t| t.is_file()) {
             continue;
         }
-        if let Ok(named) = named_cwd(&entry.path()) {
-            records.push((id.to_string(), named));
+        match head_of(&entry.path()) {
+            // A run the SDK made with no one at the keyboard: the CLI's own
+            // list hides it, and so does Ersa's (PROTO-CLAUDE-CODE-STREAM-R79).
+            Ok(head) if head.entrypoint.as_deref().is_some_and(is_sdk) => {}
+            Ok(head) => records.push((id.to_string(), head.cwd)),
+            Err(_) => {}
         }
     }
     records.sort();
     Ok(records)
 }
 
-/// The `cwd` the first entry of the record at `path` that has one names,
-/// read line by line from the head, at most [`CHUNK`] bytes.
-fn named_cwd(path: &Path) -> io::Result<Option<String>> {
+/// The entrypoints of runs the CLI's own session list hides.
+fn is_sdk(entrypoint: &str) -> bool {
+    matches!(entrypoint, "sdk-cli" | "sdk-ts" | "sdk-py")
+}
+
+/// What a record's first prompt says of where and how it ran.
+struct Head {
+    cwd: Option<String>,
+    entrypoint: Option<String>,
+}
+
+/// The `cwd` and `entrypoint` of the first entry of the record at `path`
+/// that names a `cwd` (the first prompt, which carries both), read line by
+/// line from the head, at most [`CHUNK`] bytes.
+fn head_of(path: &Path) -> io::Result<Head> {
     let head = BufReader::new(File::open(path)?.take(CHUNK));
     for line in head.split(b'\n') {
         let line = line?;
@@ -160,10 +177,19 @@ fn named_cwd(path: &Path) -> io::Result<Option<String>> {
             continue;
         };
         if let Some(cwd) = entry.get("cwd").and_then(|cwd| cwd.as_str()) {
-            return Ok(Some(cwd.to_string()));
+            return Ok(Head {
+                cwd: Some(cwd.to_string()),
+                entrypoint: entry
+                    .get("entrypoint")
+                    .and_then(|e| e.as_str())
+                    .map(String::from),
+            });
         }
     }
-    Ok(None)
+    Ok(Head {
+        cwd: None,
+        entrypoint: None,
+    })
 }
 
 /// The summary of one session, read from the head and tail of its record

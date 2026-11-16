@@ -1659,14 +1659,9 @@ impl SessionManager {
         let _listing = self.listing.lock().await;
         let _op = handle.op.lock().await;
         self.store
-            .finish_session_delete(id.to_string(), workspace_id.clone())
+            .finish_session_delete(id.to_string(), workspace_id)
             .await?;
         self.let_go(&handle).await;
-        // Sessions found in the workspace's folder went with its row, when
-        // it went (FLOW-RESUME-SESSION-R09).
-        if let Some(workspace_id) = workspace_id {
-            self.forget_found(&workspace_id).await?;
-        }
         Ok(())
     }
 
