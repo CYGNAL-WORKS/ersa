@@ -1278,26 +1278,10 @@ impl SessionManager {
         // One a delete marked is finished by deleting it again.
         self.refuse_if_deleting(&handle)?;
         let workspace_id = lock(&handle.row).workspace_id.clone();
-        // Said before the wait below: a delete or a removal holds its
-        // workspace.
-        self.refuse_if_claimed(&workspace_id)?;
-        // A session whose ending is already queued is only winding down: a
-        // client may have seen `session.ended` before Core let it go, and
-        // can remove it, so wait for it to finish. Waited for before the
-        // removal is admitted, so nothing else on the session queues behind
-        // the wait.
-        if let Some(live) = handle.live()
-            && live.sink.has_ended()
-            && wait_finished(&live, STOP_TIMEOUT).await.is_err()
-        {
-            return Err(SessionError::Internal(format!(
-                "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
-            )));
-        }
-        // The removal is the session's exclusive operation: admission
-        // admits it once no other is under way, and refuses it while a
-        // delete or a removal holds its workspace. Every way out below that
-        // does not remove the session lets go, which ends the removal there.
+        // Admission refuses it while a delete or a removal holds its
+        // workspace, and has a delete of this session wait for it. Every
+        // way out below that does not remove the session lets go, which
+        // ends the removal there.
         let command = Command::RemoveSession {
             session: id.to_string(),
         };
@@ -1308,6 +1292,20 @@ impl SessionManager {
             Err(Refusal::NoSession) => return Ok(handle.describe()),
             Err(refusal) => return Err(refused_session(refusal, &workspace_id, id)),
         };
+        // A session whose ending is already queued is only winding down: a
+        // client may have seen `session.ended` before Core let it go, and
+        // can remove it, so wait for it to finish. Waited for before the
+        // removal takes the session's exclusive operation, so nothing else
+        // on the session queues behind the wait.
+        if let Some(live) = handle.live()
+            && live.sink.has_ended()
+            && wait_finished(&live, STOP_TIMEOUT).await.is_err()
+        {
+            return Err(SessionError::Internal(format!(
+                "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
+            )));
+        }
+        let _exclusive = self.exclusive(id).await?;
         if handle.live().is_some() {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is running; stop it first"
@@ -3659,6 +3657,10 @@ mod tests {
         // While it waits, the session's other operations are not held up.
         let other = tokio::time::timeout(Duration::from_millis(1), manager.exclusive("s-gated"));
         assert!(matches!(other.await, Ok(Ok(_))), "held up behind the wait");
+        // The removal is under way in admission all the same, so a delete
+        // of the session asked for now waits for it.
+        let waiting = manager.admission.snapshot();
+        assert!(waiting.session("s-gated").is_some_and(|s| s.removing));
         // Core's own wind-down is what stalled, and the error says so.
         match removing.await.unwrap() {
             Err(SessionError::Internal(message)) => {
