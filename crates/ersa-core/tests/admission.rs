@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ersa_core::admission::{
     Admission, Command, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, Run, State, Timed, WorkspacePhase, step,
+    ProjectPhase, Refusal, Replaced, Report, Run, State, WorkspacePhase, step,
 };
 
 const P: &str = "p1";
@@ -1011,6 +1011,12 @@ fn launch(session: &str) -> Command {
     }
 }
 
+fn await_run_end(session: &str) -> Command {
+    Command::AwaitRunEnd {
+        session: session.into(),
+    }
+}
+
 fn run_of(state: &State, session: &str) -> Option<Run> {
     state.session(session).map(|s| s.run)
 }
@@ -1102,10 +1108,7 @@ fn a_removal_behind_a_run_that_is_ending_waits_for_it_or_gives_up() {
     command(&mut state, remove_session("s1"));
     command(&mut state, begin_removal("s1"));
     let before = state.clone();
-    let gave_up = step(
-        &mut state,
-        Input::Report(Report::GaveUp(Timed::Removal("s1".into()))),
-    );
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 0 }));
     assert_eq!(gave_up.outcome, Outcome::Noted);
     assert_eq!(gave_up.released, [(0, Outcome::Refused(Refusal::GaveUp))]);
     assert!(state.held().is_empty());
@@ -1115,7 +1118,7 @@ fn a_removal_behind_a_run_that_is_ending_waits_for_it_or_gives_up() {
     );
     // A limit reported for nothing that waits changes nothing.
     assert_eq!(
-        report(&mut state, Report::GaveUp(Timed::Removal("s1".into()))),
+        report(&mut state, Report::GaveUp { place: 0 }),
         Outcome::Stale
     );
 
@@ -1148,10 +1151,7 @@ fn a_start_behind_a_run_that_is_ending_waits_for_it_or_gives_up() {
 
     let mut state = winding_down();
     command(&mut state, begin_start("s1"));
-    let gave_up = step(
-        &mut state,
-        Input::Report(Report::GaveUp(Timed::Start("s1".into()))),
-    );
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 0 }));
     assert_eq!(gave_up.released, [(0, Outcome::Refused(Refusal::GaveUp))]);
 
     // A session that runs needs no start.
@@ -1160,6 +1160,64 @@ fn a_start_behind_a_run_that_is_ending_waits_for_it_or_gives_up() {
     assert_eq!(
         command(&mut state, begin_start("s1")),
         Outcome::Refused(Refusal::Running)
+    );
+}
+
+// verifies: PROTO-CORE-API-R90
+#[test]
+fn a_send_asks_whether_the_session_runs_and_waits_for_a_run_that_is_ending() {
+    // A message sent just after the session ended waits for Core to let go
+    // of the run, to know that it resumes; it begins nothing by asking.
+    let mut state = winding_down();
+    let before = state.clone();
+    assert_eq!(command(&mut state, await_run_end("s1")), Outcome::Held);
+    let ended = step(&mut state, run_ended("s1"));
+    assert_eq!(ended.released, [(0, Outcome::Done)]);
+    assert!(!exclusive(&state, "s1"));
+
+    // Its time limit passes first.
+    let mut state = before;
+    command(&mut state, await_run_end("s1"));
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 0 }));
+    assert_eq!(gave_up.released, [(0, Outcome::Refused(Refusal::GaveUp))]);
+
+    // Running: so it says. Stopped: done, and nothing changed.
+    let mut state = world_with(&["s1"]);
+    assert_eq!(command(&mut state, await_run_end("s1")), Outcome::Done);
+    command(&mut state, launch("s1"));
+    let running = state.clone();
+    assert_eq!(
+        command(&mut state, await_run_end("s1")),
+        Outcome::Refused(Refusal::Running)
+    );
+    assert_eq!(state, running);
+    assert_eq!(
+        command(&mut state, await_run_end("s9")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+}
+
+// verifies: ARCH-CORE-R17
+#[test]
+fn a_time_limit_answers_the_command_at_its_place_and_no_other_like_it() {
+    // Two resumes of one session wait behind its run that is ending: the
+    // same command twice. The second's limit passes: it alone is answered,
+    // and the first still waits, and is admitted when the run ends.
+    let mut state = winding_down();
+    command(&mut state, begin_start("s1"));
+    command(&mut state, begin_start("s1"));
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 1 }));
+    assert_eq!(gave_up.released, [(1, Outcome::Refused(Refusal::GaveUp))]);
+    assert_eq!(state.held().len(), 1);
+    let ended = step(&mut state, run_ended("s1"));
+    assert_eq!(
+        ended.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+    // A place nothing waits at: nothing changes.
+    assert_eq!(
+        report(&mut state, Report::GaveUp { place: 0 }),
+        Outcome::Stale
     );
 }
 
@@ -1349,6 +1407,7 @@ fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
             inputs.push(Input::Command(begin_start(session)));
             inputs.push(Input::Command(begin_removal(session)));
             inputs.push(Input::Command(launch(session)));
+            inputs.push(Input::Command(await_run_end(session)));
         }
     }
     inputs.push(Input::Command(Command::CreateWorkspace {
@@ -1414,13 +1473,15 @@ fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
             reports.extend([
                 Report::Ended(Operation::Run(session.clone())),
                 run_ending(&session),
-                Report::GaveUp(Timed::Start(session.clone())),
-                Report::GaveUp(Timed::Removal(session)),
             ]);
         }
     }
     if runs {
         reports.push(Report::Closing);
+    }
+    // Whoever waits at any place of the queue may stop waiting.
+    for place in 0..3 {
+        reports.push(Report::GaveUp { place });
     }
     inputs.extend(reports.into_iter().map(Input::Report));
     inputs
@@ -1575,7 +1636,9 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     // A refusal, a hold's own state aside, and a report that does not fit
     // change nothing.
     match outcome {
-        Outcome::Refused(_) | Outcome::Stale => assert_eq!(before, after, "{}", context()),
+        Outcome::Refused(_) | Outcome::Done | Outcome::Stale => {
+            assert_eq!(before, after, "{}", context());
+        }
         Outcome::Admitted(_) | Outcome::Held | Outcome::Noted => {}
     }
     // No input takes a workspace from `error` to `ready`.
@@ -1687,7 +1750,7 @@ fn explore(sessions: &[&str], held: usize, runs: bool) -> HashSet<State> {
             check_step(&before, input, &stepped.outcome, &after);
             // Only a step that changed the state answers a held command.
             match stepped.outcome {
-                Outcome::Refused(_) | Outcome::Held | Outcome::Stale => {
+                Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale => {
                     assert!(stepped.released.is_empty(), "{input:?}");
                 }
                 Outcome::Admitted(_) | Outcome::Noted => {}
@@ -1851,6 +1914,49 @@ async fn a_delete_whose_task_ends_without_a_report_releases_its_workspace() {
     // The workspace takes a session again.
     let created = admit(&admission, create_session(W, "s2")).await;
     drop(created);
+}
+
+// verifies: ARCH-CORE-R17
+// Paused time: each limit passes when the test's clock says so.
+#[tokio::test(start_paused = true)]
+async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_command() {
+    let limit = std::time::Duration::from_secs(30);
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(("s1".into(), W.into(), false));
+    admission.restore(stored);
+    // A run that was announced ended and that Core never lets go of.
+    let _run = admission.launch("s1").expect("launched");
+    admission.report(run_ending("s1"));
+
+    let began = tokio::time::Instant::now();
+    let waiter = |admission: Arc<Admission>| async move {
+        let answer = admission.begin_start("s1", limit).await.map(|_| ());
+        (answer, began.elapsed())
+    };
+    // Two resumes, ten seconds apart: the same command, held twice.
+    let first = tokio::spawn(waiter(Arc::clone(&admission)));
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    let second = tokio::spawn(waiter(Arc::clone(&admission)));
+    // And a send asking whether the session runs, five seconds later.
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    let asking = tokio::spawn({
+        let admission = Arc::clone(&admission);
+        async move { (admission.run_settled("s1", limit).await, began.elapsed()) }
+    });
+
+    let (answer, after) = first.await.expect("joined");
+    assert_eq!(answer, Err(Refusal::GaveUp));
+    assert_eq!(after.as_secs(), 30);
+    // The first gave up, and took only its own command from the queue.
+    assert_eq!(admission.snapshot().held().len(), 2);
+    let (answer, after) = second.await.expect("joined");
+    assert_eq!(answer, Err(Refusal::GaveUp));
+    assert_eq!(after.as_secs(), 40);
+    let (answer, after) = asking.await.expect("joined");
+    assert_eq!(answer, Err(Refusal::GaveUp));
+    assert_eq!(after.as_secs(), 45);
+    assert!(admission.snapshot().held().is_empty());
 }
 
 // verifies: ARCH-CORE-R16
