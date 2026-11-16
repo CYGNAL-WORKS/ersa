@@ -404,7 +404,6 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     // into the workspace meanwhile, leaves it as it is.
     let removal = Command::RemoveWorkspace {
         workspace: workspace.id.clone(),
-        runs_found: false,
     };
     let Ok(removing) = core.admission.command(removal).await else {
         return;

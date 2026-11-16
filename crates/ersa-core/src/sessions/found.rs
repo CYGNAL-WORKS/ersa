@@ -349,17 +349,6 @@ impl SessionManager {
             self.let_go(&handle).await;
         }
     }
-
-    /// Whether Core is running a session found in the backend's records in
-    /// workspace `workspace_id`, which holds back removing it
-    /// (FLOW-RESUME-SESSION-R14): a look without the claim, which one
-    /// starting meanwhile escapes ([`SessionManager::runs_found`] does not).
-    pub fn runs_found_in(&self, workspace_id: &str) -> bool {
-        lock(&self.sessions).values().any(|handle| {
-            let row = lock(&handle.row);
-            row.started_elsewhere && row.workspace_id == workspace_id && handle.live().is_some()
-        })
-    }
 }
 
 /// The sessions `adapter`'s backend holds records of for `workspace`'s

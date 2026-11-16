@@ -236,21 +236,15 @@ pub enum Command {
         root: Id,
         folder: Folder,
     },
-    /// `root_runs_found`: whether Core is running a session found in the
-    /// backend's records in the project's own folder, which holds the
-    /// removal back as a session Ersa started does.
     RemoveProject {
         project: Id,
-        root_runs_found: bool,
     },
     CreateWorkspace {
         project: Id,
         workspace: Id,
     },
-    /// `runs_found`: as [`Command::RemoveProject`]'s flag, for this workspace.
     RemoveWorkspace {
         workspace: Id,
-        runs_found: bool,
     },
     /// A new session in `workspace`: one Ersa starts, or one `found` in the
     /// backend's records.
@@ -346,7 +340,9 @@ pub enum Refusal {
     ProjectBusy {
         root: Option<Id>,
     },
-    /// A session Ersa started, or one Core is running, is in its folder.
+    /// A session Ersa started is in its folder. (One found in the backend's
+    /// records that Core runs refuses a removal too, after admission: the
+    /// run phase is not admission's yet.)
     ProjectHasSessions,
     ProjectHasWorkspaces,
     NoWorkspace,
@@ -498,10 +494,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 }
             }
         }
-        Command::RemoveProject {
-            project,
-            root_runs_found,
-        } => {
+        Command::RemoveProject { project } => {
             let root = state.root_of(project).cloned();
             match state.projects.get(project).map(|entry| entry.phase) {
                 None => Outcome::Refused(Refusal::NoProject),
@@ -510,10 +503,9 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 Some(ProjectPhase::Adding) => Outcome::Held,
                 Some(ProjectPhase::Removing) => Outcome::Refused(Refusal::ProjectBusy { root }),
                 Some(ProjectPhase::Present) => {
-                    let sessions = *root_runs_found
-                        || root
-                            .as_ref()
-                            .is_some_and(|root| state.has_started_session(root));
+                    let sessions = root
+                        .as_ref()
+                        .is_some_and(|root| state.has_started_session(root));
                     let isolated = state
                         .workspaces
                         .values()
@@ -556,10 +548,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 }
             }
         }
-        Command::RemoveWorkspace {
-            workspace,
-            runs_found,
-        } => {
+        Command::RemoveWorkspace { workspace } => {
             let Some(entry) = state.workspaces.get(workspace) else {
                 return Outcome::Refused(Refusal::NoWorkspace);
             };
@@ -573,7 +562,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 WorkspacePhase::Ready => Replaced::Ready,
                 WorkspacePhase::Error => Replaced::Error,
             };
-            if *runs_found || state.has_started_session(workspace) {
+            if state.has_started_session(workspace) {
                 return Outcome::Refused(Refusal::WorkspaceHasSessions);
             }
             if state.has_arriving_found_session(workspace) {
