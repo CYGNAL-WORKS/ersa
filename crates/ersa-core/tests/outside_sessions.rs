@@ -475,13 +475,13 @@ async fn a_found_session_resumed_while_its_workspace_is_removed_is_stopped_not_l
     backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
     let found = sessions(&mut client).await.remove(0);
 
-    // The removal passes its check with nothing running (stopped before
-    // claiming, after, and after its check), then the user writes to the
-    // found session before the folder goes.
+    // The removal looks with nothing running and stops before it is
+    // admitted, then the user writes to the found session before the
+    // folder goes.
     let removal = remover
         .request("workspace.remove", json!({ "id": isolated["id"] }))
         .await;
-    removal_past(&gate, 2).await;
+    removal_past(&gate, 0).await;
     client
         .result("session.resume", json!({ "id": found["id"] }))
         .await;
@@ -537,12 +537,12 @@ async fn a_found_session_written_to_once_its_workspace_holds_it_is_refused_and_n
     backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
     let found = sessions(&mut client).await.remove(0);
 
-    // Stopped once the removal holds the found sessions: before claiming,
-    // after, after its check, and here.
+    // Stopped once the removal holds the found sessions: before it is
+    // admitted, and here.
     let removal = remover
         .request("workspace.remove", json!({ "id": isolated["id"] }))
         .await;
-    removal_past(&gate, 3).await;
+    removal_past(&gate, 1).await;
     let starts = backend.stats.starts.load(Ordering::SeqCst);
     // Refused as busy, as while a delete holds the workspace.
     for (method, params) in [
@@ -586,11 +586,11 @@ async fn a_found_session_that_will_not_stop_refuses_the_removal_and_stays_reacha
     backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
     let found = sessions(&mut client).await.remove(0);
 
-    // Resumed once the removal has checked, and its backend never exits.
+    // Resumed once the removal has looked, and its backend never exits.
     let removal = remover
         .request("workspace.remove", json!({ "id": isolated["id"] }))
         .await;
-    removal_past(&gate, 2).await;
+    removal_past(&gate, 0).await;
     client
         .result("session.resume", json!({ "id": found["id"] }))
         .await;
@@ -741,4 +741,46 @@ async fn a_project_removed_while_a_list_records_a_found_session_waits_and_takes_
     let listed = sessions(&mut client).await;
     assert!(listed.is_empty(), "{listed:#?}");
     assert!(backend.has_record("rec-a"));
+}
+
+/// A delete that takes a workspace's files sets it to `error`
+/// (PROTO-CORE-API-R57). A found session does not hold a removal back, so a
+/// `workspace.remove` then claims the workspace; git refuses it, and it
+/// leaves `error`, not the `ready` a workspace it took from `ready` gets
+/// back.
+// verifies: PROTO-CORE-API-R94
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_git_refuses_leaves_the_error_a_delete_set() {
+    let backend = Backend::default();
+    let core = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let isolated = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
+    let found = sessions(&mut client).await.remove(0);
+    // A locked worktree stops the delete at the files, its session kept,
+    // and stops the removal after it.
+    let repo = std::path::Path::new(project["path"].as_str().unwrap());
+    support::git(repo, &["worktree", "lock", path(&isolated)]);
+    let changes = client
+        .result("workspace.changes", json!({ "id": isolated["id"] }))
+        .await;
+    let error = client
+        .error(
+            "session.delete",
+            json!({ "id": found["id"], "token": changes["token"] }),
+        )
+        .await;
+    assert_eq!(support::kind(&error), "vcs_error", "{error}");
+    let listed = workspaces(&mut client, &project["id"]).await;
+    assert_eq!(listed[1]["state"], "error", "{listed:#?}");
+
+    let refused = client
+        .error("workspace.remove", json!({ "id": isolated["id"] }))
+        .await;
+    assert_eq!(support::kind(&refused), "vcs_error", "{refused}");
+    let listed = workspaces(&mut client, &project["id"]).await;
+    assert_eq!(listed[1]["state"], "error", "{listed:#?}");
 }

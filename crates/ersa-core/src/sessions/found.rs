@@ -21,6 +21,7 @@ use super::{
     WorkspaceClaim, begin_stop, lock, wait_finished,
 };
 use super::{SessionError, read_summary};
+use crate::admission::{Command, Report};
 use crate::persistence::{self, SessionRow};
 use crate::platform;
 
@@ -35,7 +36,7 @@ const FOLDER_LISTING: Duration = Duration::from_secs(5);
 /// stopped answering holds one thread per folder, however often Core lists.
 pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
 
-/// A workspace held for its removal ([`SessionManager::hold_found`]);
+/// A workspace held for its removal ([`SessionManager::claim_found`]);
 /// dropping it lets the workspace's sessions be sent to and resumed again.
 #[must_use]
 pub struct HeldFound(WorkspaceClaim);
@@ -166,8 +167,9 @@ impl SessionManager {
     }
 
     /// Records the session `backend_id` found in `folder`, and loads it.
-    /// `None` when it was not recorded: the workspace stopped being `ready`,
-    /// or the session was recorded meanwhile.
+    /// `None` when it was not recorded: admission did not take it into the
+    /// workspace, which stopped being `ready`, or the session was recorded
+    /// meanwhile.
     async fn record_found(
         &self,
         folder: &Folder,
@@ -196,9 +198,21 @@ impl SessionManager {
             forked_through: None,
             started_elsewhere: true,
         };
+        let command = Command::CreateSession {
+            workspace: row.workspace_id.clone(),
+            session: row.id.clone(),
+            found: true,
+        };
+        let Ok(admitted) = self.admission.command(command).await else {
+            return Ok(None);
+        };
         if !self.store.insert_found_session(row.clone()).await? {
+            admitted.end(Report::SessionGone { session: row.id });
             return Ok(None);
         }
+        admitted.end(Report::SessionStored {
+            session: row.id.clone(),
+        });
         if let Some(gate) = &self.found_gate {
             gate.stop().await;
         }
@@ -266,7 +280,7 @@ impl SessionManager {
             {
                 continue;
             }
-            self.store.delete_session(handle.id.clone()).await?;
+            self.forget_row(&handle.id).await?;
             self.let_go(&handle).await;
         }
         Ok(())
@@ -284,17 +298,21 @@ impl SessionManager {
             .collect()
     }
 
-    /// Holds the sessions found in workspace `workspace_id`'s folder for its
-    /// removal, before the folder goes (FLOW-RESUME-SESSION-R13, R14). The
-    /// workspace is claimed as a delete claims it, so a send or resume in it
-    /// meanwhile is refused as busy, and one a send or resume started since
-    /// the removal checked is stopped. When one does not stop, the claim
-    /// goes and the removal is refused: no backend is left running in a
-    /// removed folder.
-    pub async fn hold_found(&self, workspace_id: &str) -> Result<HeldFound, SessionError> {
+    /// Claims workspace `workspace_id` for its removal, as a delete claims
+    /// it and without waiting: a send or resume in it meanwhile is refused
+    /// as busy, and no delete can mark it (FLOW-RESUME-SESSION-R13).
+    pub fn claim_found(&self, workspace_id: &str) -> Result<HeldFound, SessionError> {
         // Claimed for no session of its own: every session in it is refused.
-        let claim = self.claim_workspace(workspace_id, "")?;
-        for handle in self.found_in(workspace_id) {
+        Ok(HeldFound(self.claim_workspace(workspace_id, "")?))
+    }
+
+    /// Stops the sessions found in the `held` workspace's folder that a
+    /// send or resume started before it was held, before the folder goes
+    /// (FLOW-RESUME-SESSION-R13, R14). When one does not stop, the removal
+    /// is to be refused and the hold dropped: no backend is left running
+    /// in a removed folder.
+    pub async fn stop_found(&self, held: &HeldFound) -> Result<(), SessionError> {
+        for handle in self.found_in(&held.0.workspace_id) {
             let _op = handle.op.lock().await;
             if let Some(live) = handle.live() {
                 begin_stop(&live);
@@ -306,7 +324,7 @@ impl SessionManager {
                 }
             }
         }
-        Ok(HeldFound(claim))
+        Ok(())
     }
 
     /// Removes the workspace `held`, by `delete`, which deletes its rows
