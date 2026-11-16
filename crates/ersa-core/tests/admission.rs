@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use ersa_core::admission::{
     Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase, SendStage, Sending,
-    Setting, State, WorkspacePhase, step,
+    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase, SendIs, SendStage,
+    Sending, Setting, State, WorkspacePhase, step,
 };
 use ersa_core::persistence::SessionRow;
 use ersa_protocol::core_api::Deleting;
@@ -1006,6 +1006,13 @@ fn interrupt(session: &str) -> Command {
     }
 }
 
+fn await_send(session: &str, until: SendIs) -> Command {
+    Command::AwaitSend {
+        session: session.into(),
+        until,
+    }
+}
+
 fn stage(state: &mut State, session: &str, stage: SendStage) -> Outcome {
     let session = session.into();
     report(state, Report::SendStage { session, stage })
@@ -1142,7 +1149,8 @@ fn a_send_is_refused_while_an_archive_is_under_way_or_waiting_its_turn() {
 
 // -- The send slot (ARCH-CORE-R14) ------------------------------------------
 
-// verifies: PROTO-CORE-API-R86
+// verifies: ARCH-CORE-R14
+// verifies: ARCH-CORE-R16
 #[test]
 fn a_second_send_is_refused_while_one_holds_the_slot() {
     let mut state = world_with(&["s1", "s2"]);
@@ -1246,7 +1254,7 @@ fn an_interrupt_cancels_a_send_or_finds_it_handed_over_never_both() {
     );
 }
 
-// verifies: PROTO-CORE-API-R86
+// verifies: ARCH-CORE-R14
 #[test]
 fn a_send_is_told_why_it_may_not_go_in_one_order() {
     let refused = |state: &mut State, command_: Command| match command(state, command_) {
@@ -1327,6 +1335,94 @@ fn a_send_is_told_why_it_may_not_go_in_one_order() {
         command(&mut state, send("s1")),
         admitted(Operation::Send("s1".into()))
     );
+}
+
+// verifies: PROTO-CORE-API-R90
+#[test]
+fn a_waiting_send_s_reporter_hears_of_a_send_that_takes_the_slot_and_of_its_end() {
+    let mut state = world_with(&["s1", "s2"]);
+    // No send has the slot: "free" is so already, "taken" waits.
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Free)),
+        Outcome::Done
+    );
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Taken)),
+        Outcome::Held
+    );
+    // Another session's send is not this one's.
+    command(&mut state, send("s2"));
+    assert_eq!(state.held().len(), 1);
+
+    // A send takes the slot: the reporter hears of it in that step, however
+    // short the send turns out to be.
+    let taken = step(&mut state, Input::Command(send("s1")));
+    assert_eq!(taken.outcome, admitted(Operation::Send("s1".into())));
+    assert_eq!(taken.released, [(0, Outcome::Done)]);
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Taken)),
+        Outcome::Done
+    );
+
+    // And then waits for it to end, however it ends.
+    assert_eq!(
+        command(&mut state, await_send("s1", SendIs::Free)),
+        Outcome::Held
+    );
+    stage(&mut state, "s1", SendStage::HandingOver);
+    assert_eq!(state.held().len(), 1);
+    let freed = ended(&mut state, Operation::Send("s1".into()));
+    assert_eq!(freed.released, [(0, Outcome::Done)]);
+    assert!(state.held().is_empty());
+
+    // A session that goes while its reporter waits: there is nothing to
+    // report for.
+    command(&mut state, await_send("s1", SendIs::Taken));
+    let gone = Report::SessionGone {
+        session: "s1".into(),
+    };
+    let went = step(&mut state, Input::Report(gone));
+    assert_eq!(went.released, [(0, Outcome::Refused(Refusal::NoSession))]);
+}
+
+// verifies: PROTO-CORE-API-R25
+#[test]
+fn a_send_hears_in_admission_that_it_was_cancelled() {
+    let cancelled = || await_send("s1", SendIs::Cancelled);
+    let no_send = Outcome::Refused(Refusal::NoSendToCancel);
+    let mut state = world_with(&["s1"]);
+    // No send: nothing to hear of.
+    assert_eq!(command(&mut state, cancelled()), no_send);
+
+    // The send waits to hear, and an interrupt tells it in its own step.
+    command(&mut state, send("s1"));
+    assert_eq!(command(&mut state, cancelled()), Outcome::Held);
+    let interrupted = step(&mut state, Input::Command(interrupt("s1")));
+    assert_eq!(interrupted.outcome, Outcome::Done);
+    assert_eq!(interrupted.released, [(0, Outcome::Done)]);
+    // One that asks after it was cancelled is told at once.
+    assert_eq!(command(&mut state, cancelled()), Outcome::Done);
+    ended(&mut state, Operation::Send("s1".into()));
+
+    // A send that ends without being cancelled: its wait ends with it, and
+    // a later send's cancel is not heard by it.
+    command(&mut state, send("s1"));
+    assert_eq!(command(&mut state, cancelled()), Outcome::Held);
+    let over = ended(&mut state, Operation::Send("s1".into()));
+    assert_eq!(over.released, [(0, no_send.clone())]);
+    command(&mut state, send("s1"));
+    let interrupted = step(&mut state, Input::Command(interrupt("s1")));
+    assert!(interrupted.released.is_empty());
+
+    // An interrupt that finds the send handed over tells nobody.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, send("s1"));
+    command(&mut state, cancelled());
+    stage(&mut state, "s1", SendStage::HandingOver);
+    let late = step(&mut state, Input::Command(interrupt("s1")));
+    assert_eq!(late.outcome, no_send);
+    assert!(late.released.is_empty());
+    assert_eq!(state.held().len(), 1);
 }
 
 // verifies: PROTO-CORE-API-R41
@@ -2194,6 +2290,9 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool, sends: bool) -> Ve
             inputs.push(Input::Command(send(session)));
             inputs.push(Input::Command(send_to_running(session)));
             inputs.push(Input::Command(interrupt(session)));
+            for until in [SendIs::Taken, SendIs::Free, SendIs::Cancelled] {
+                inputs.push(Input::Command(await_send(session, until)));
+            }
             for stage in [
                 SendStage::Checking,
                 SendStage::Starting,
@@ -2543,9 +2642,16 @@ fn check_every_held_command_is_answered(state: &State) {
     if state.held().is_empty() {
         return;
     }
+    // A reporter waiting for a send to take the slot waits on nothing that
+    // is under way: it leaves when its reporter does (`Admission::ask`
+    // withdraws it).
+    let for_a_beginning = |held: &Command| {
+        let until = SendIs::Taken;
+        matches!(held, Command::AwaitSend { until: u, .. } if *u == until)
+    };
     let mut settling = state.clone();
     for _ in 0..16 {
-        if settling.held().is_empty() {
+        if settling.held().iter().all(for_a_beginning) {
             return;
         }
         let ends = ends_of_what_is_under_way(&settling);
@@ -2590,7 +2696,15 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
                 sessions.collect::<Vec<_>>()
             };
             assert_eq!(unmarked(before), unmarked(after), "{}", context());
-            assert_eq!(before.held(), after.held(), "{}", context());
+            // And whoever waited to hear of it is told.
+            let told = await_send(session, SendIs::Cancelled);
+            let still: Vec<_> = before.held().iter().filter(|held| **held != told).collect();
+            assert_eq!(
+                still,
+                after.held().iter().collect::<Vec<_>>(),
+                "{}",
+                context()
+            );
         }
         (_, Outcome::Refused(_) | Outcome::Done | Outcome::Stale) => {
             assert_eq!(before, after, "{}", context());
@@ -2771,11 +2885,13 @@ fn explore(
             steps += 1;
             check_step(&before, input, &stepped.outcome, &after);
             // Only a step that changed the state answers a held command.
-            match stepped.outcome {
-                Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale => {
+            match (input, &stepped.outcome) {
+                // An interrupt that is done marked a send cancelled.
+                (Input::Command(Command::Interrupt { .. }), Outcome::Done) => {}
+                (_, Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale) => {
                     assert!(stepped.released.is_empty(), "{input:?}");
                 }
-                Outcome::Admitted(_) | Outcome::Noted => {}
+                (_, Outcome::Admitted(_) | Outcome::Noted) => {}
             }
             // A write changes one session's row and nothing else, answers no
             // held command, and no row of the table reads a row's contents:
@@ -3071,6 +3187,59 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     // The first to come was not answered by the others' limits.
     assert_eq!(patient, (Err(Refusal::GaveUp), 60));
     assert!(admission.snapshot().held().is_empty());
+}
+
+// verifies: ARCH-CORE-R17
+#[tokio::test]
+async fn a_question_whose_asker_left_is_withdrawn_and_one_that_stays_is_answered() {
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(row("s1", W, false));
+    admission.restore(stored);
+    let ask = |until: SendIs| {
+        let admission = Arc::clone(&admission);
+        tokio::spawn(async move { admission.ask(await_send("s1", until)).await })
+    };
+
+    // A reporter waiting for a send that never comes, and then gone: its
+    // question does not stay behind.
+    let waiting = ask(SendIs::Taken);
+    until_held(&admission).await;
+    waiting.abort();
+    let _ = waiting.await;
+    assert!(admission.snapshot().held().is_empty());
+
+    // One that stays is answered when a send takes the slot, and a
+    // question that is so already is answered at once.
+    let waiting = ask(SendIs::Taken);
+    until_held(&admission).await;
+    let sending = admission.begin_send("s1", true).expect("the slot is free");
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(5), waiting);
+    assert_eq!(
+        waited.await.expect("answered in time").expect("joined"),
+        Outcome::Done
+    );
+    assert!(admission.snapshot().held().is_empty());
+    assert_eq!(
+        admission.ask(await_send("s1", SendIs::Taken)).await,
+        Outcome::Done
+    );
+
+    // A send hears it was cancelled; one that ends first hears there is
+    // none.
+    let cancelled = ask(SendIs::Cancelled);
+    until_held(&admission).await;
+    assert!(admission.interrupt_send("s1"));
+    let waited = tokio::time::timeout(std::time::Duration::from_secs(5), cancelled);
+    assert_eq!(
+        waited.await.expect("answered in time").expect("joined"),
+        Outcome::Done
+    );
+    drop(sending);
+    assert_eq!(
+        admission.ask(await_send("s1", SendIs::Cancelled)).await,
+        Outcome::Refused(Refusal::NoSendToCancel)
+    );
 }
 
 // verifies: ARCH-CORE-R16
