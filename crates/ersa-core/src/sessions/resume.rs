@@ -65,7 +65,24 @@ impl SessionManager {
     /// has wound down.
     pub async fn is_running(&self, id: &str) -> Result<bool, SessionError> {
         let handle = self.handle(id)?;
-        Ok(current_run(&handle).await?.is_some())
+        self.runs_once_settled(&handle).await
+    }
+
+    /// Whether Core runs the session, once a run that has ended and is only
+    /// winding down has been let go of. That is waited for first, held in
+    /// admission, up to the stop limit: a client may have seen
+    /// `session.ended` before Core let go of the run, and a resume or a
+    /// send then starts the session again rather than finding it still
+    /// running.
+    pub(super) async fn runs_once_settled(&self, handle: &Handle) -> Result<bool, SessionError> {
+        match self.admission.run_settled(&handle.id, STOP_TIMEOUT).await {
+            Ok(()) => Ok(false),
+            Err(Refusal::Running) => Ok(true),
+            Err(refusal) => {
+                let workspace_id = lock(&handle.row).workspace_id.clone();
+                Err(refused_session(refusal, &workspace_id, &handle.id))
+            }
+        }
     }
 
     /// Starts the backend of `handle` again unless it is running. Returns
@@ -76,25 +93,30 @@ impl SessionManager {
         how: Resumption,
         folder: FolderChecked,
     ) -> Result<(), SessionError> {
-        // Waited for before the start is admitted, so nothing else on the
-        // session queues behind the wait.
-        current_run(handle).await?;
         // The start is the session's exclusive operation throughout, so a
         // stop, a removal or a view opened meanwhile waits for the session
-        // to be live, and two resumes start it once. A session that is gone
-        // answers `not_found`.
-        let _exclusive = self.exclusive(&handle.id).await?;
+        // to be live, and two resumes start it once. Admission holds it
+        // behind whatever is under way on the session, and behind a run
+        // that has ended and is winding down (a client may have seen
+        // `session.ended` before Core let go of the run), that wait up to
+        // the stop limit and holding nothing itself. A session that runs
+        // needs no start; nothing starts once Core is shutting down; one
+        // that is gone answers `not_found`.
+        let workspace_id = lock(&handle.row).workspace_id.clone();
+        let begun = self.admission.begin_start(&handle.id, STOP_TIMEOUT).await;
+        let _exclusive = match begun {
+            Ok(exclusive) => exclusive,
+            Err(Refusal::Running) => return Ok(()),
+            Err(refusal) => return Err(refused_session(refusal, &workspace_id, &handle.id)),
+        };
+        // A run whose task failed before it cleared `live`: left as it is,
+        // never started over.
         if handle.live().is_some() {
             return Ok(());
         }
         self.refuse_if_deleting(handle)?;
         let row = lock(&handle.row).clone();
         self.refuse_if_claimed(&row.workspace_id)?;
-        if self.closing.load(Ordering::SeqCst) {
-            return Err(SessionError::InvalidState(
-                "Core is shutting down; no session can start".into(),
-            ));
-        }
         if folder == FolderChecked::No {
             check_folder(handle).await?;
         }
@@ -151,14 +173,10 @@ impl SessionManager {
             resume: start.resume,
             extra: Value::Null,
         };
-        // Launched under the lock `stop_all` takes, as a new session is.
+        // Launched under the lock `stop_all` takes, as a new session is:
+        // admission refuses the launch once Core is closing.
         let sessions = lock(&self.sessions);
-        if self.closing.load(Ordering::SeqCst) {
-            return Err(SessionError::InvalidState(
-                "Core is shutting down; no session can start".into(),
-            ));
-        }
-        self.launch(
+        let launched = self.launch(
             Arc::clone(handle),
             adapter,
             how.transport,
@@ -169,7 +187,7 @@ impl SessionManager {
             },
         );
         drop(sessions);
-        Ok(())
+        launched.map_err(|refusal| refused_session(refusal, &row.workspace_id, &handle.id))
     }
 
     /// The model, effort and permission mode a relaunch passes the backend
@@ -327,24 +345,5 @@ pub(super) async fn check_folder(handle: &Handle) -> Result<(), SessionError> {
         None => Err(SessionError::InvalidState(format!(
             "the session's folder {cwd} did not answer within {FOLDER_CHECK:?}"
         ))),
-    }
-}
-
-/// The session's run, unless it has ended and is only winding down, which
-/// is waited for first, as `session.remove` waits: a client may have seen
-/// `session.ended` before Core let go of the run, and a resume or a send
-/// then starts the session again rather than finding it still running.
-pub(super) async fn current_run(handle: &Handle) -> Result<Option<Arc<Live>>, SessionError> {
-    match handle.live() {
-        Some(live) if live.sink.has_ended() => {
-            if wait_finished(&live, STOP_TIMEOUT).await.is_err() {
-                return Err(SessionError::Internal(format!(
-                    "session {} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}",
-                    handle.id
-                )));
-            }
-            Ok(handle.live())
-        }
-        run => Ok(run),
     }
 }

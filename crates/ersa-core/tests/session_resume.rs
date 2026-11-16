@@ -802,3 +802,42 @@ async fn a_send_just_after_the_backend_exited_resumes_the_session() {
     let configs = started(&stats, 2).await;
     assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
 }
+
+/// The same for `session.resume`: asked for once the session was announced
+/// ended and before Core has let go of its run, it waits for that and
+/// starts the backend again rather than finding the session still running.
+// verifies: FLOW-RESUME-SESSION-R02
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
+    let core = start_with_adapters(
+        tempdir(),
+        |config| config.wind_down_pause = std::time::Duration::from_secs(2),
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+    let id = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "exit" }))
+        .await;
+    client.events_until("session.ended").await;
+
+    client.result("session.resume", json!({ "id": id })).await;
+    let configs = started(&stats, 2).await;
+    assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
+}
