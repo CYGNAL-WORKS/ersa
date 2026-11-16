@@ -59,7 +59,7 @@ use ersa_protocol::events::{
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
-use crate::admission::{Admission, Command, Refusal, Report};
+use crate::admission::{Admission, Command, Refusal, Report, UnderWay};
 use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
@@ -72,7 +72,6 @@ mod send;
 mod settings;
 
 pub use fork::{Beginning, ForkHold, Forkable};
-pub use found::HeldFound;
 pub use resume::Resumption;
 pub use send::{Pacer, Waiting};
 
@@ -229,11 +228,6 @@ pub struct SessionManager {
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
-    /// The workspaces a `session.delete` under way has claimed, each with
-    /// the session it deletes, and those a removal holds, with no session
-    /// (`found`). In memory only, so a restart drops every claim
-    /// (PROTO-CORE-API, `session.delete`).
-    claims: Claims,
     /// Held while a session's arrangement is written to the store and to
     /// memory, so a `section.remove` and a `session.arrange` into that
     /// section land in the same order in both.
@@ -247,24 +241,6 @@ pub struct SessionManager {
     /// How many deletes have removed a session's row, counted under the
     /// listing turn (`found`).
     deletes: AtomicU64,
-}
-
-/// Claimed workspaces, by id, with the session each delete is for; empty
-/// for a workspace a removal holds.
-type Claims = Arc<Mutex<HashMap<String, String>>>;
-
-/// A workspace claimed for one delete or one removal; dropping it releases
-/// the claim, so every way out, a refusal or a failure included, releases
-/// it.
-pub struct WorkspaceClaim {
-    claims: Claims,
-    workspace_id: String,
-}
-
-impl Drop for WorkspaceClaim {
-    fn drop(&mut self) {
-        lock(&self.claims).remove(&self.workspace_id);
-    }
 }
 
 /// Keeps a session's `archiving` count raised while an archive is under way.
@@ -298,14 +274,16 @@ fn in_turn(handle: &Handle) -> bool {
     (handle.live().is_some() && (working || waiting)) || session.sending.is_some()
 }
 
-/// The answer for a session admission did not take into workspace
-/// `workspace_id`, worded as before admission decided it.
-fn refused_session(refusal: Refusal, workspace_id: &str) -> SessionError {
+/// The answer for a command about session `session_id`, in workspace
+/// `workspace_id`, that admission refused, worded as before admission
+/// decided it.
+fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> SessionError {
     match refusal {
         Refusal::WorkspaceHeld => busy(workspace_id),
         Refusal::NoWorkspace | Refusal::WorkspaceNotReady => {
             SessionError::InvalidState(format!("workspace {workspace_id} is not ready"))
         }
+        Refusal::NoSession => SessionError::NotFound(session_id.to_string()),
         // Answers to other commands, or an id used twice: Core's fault.
         Refusal::AlreadyProject { .. }
         | Refusal::NoProject
@@ -317,7 +295,7 @@ fn refused_session(refusal: Refusal, workspace_id: &str) -> SessionError {
         | Refusal::WorkspaceBusy
         | Refusal::WorkspaceHasSessions
         | Refusal::SessionExists => SessionError::Internal(format!(
-            "admission refused a session in workspace {workspace_id}: {refusal:?}"
+            "admission refused session {session_id} in workspace {workspace_id}: {refusal:?}"
         )),
     }
 }
@@ -880,7 +858,6 @@ impl SessionManager {
             wind_down_pause: Duration::ZERO,
             found_gate: None,
             closing: AtomicBool::new(false),
-            claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
             listing: tokio::sync::Mutex::new(()),
             listing_in_flight: Arc::default(),
@@ -1138,19 +1115,12 @@ impl SessionManager {
                 found: false,
             })
             .await
-            .map_err(|refusal| refused_session(refusal, &row.workspace_id))?;
+            .map_err(|refusal| refused_session(refusal, &row.workspace_id, &row.id))?;
         // Only what was given the backend is stored, with when (PROTO-CORE-API-R71).
         self.store.insert_session(row.clone()).await?;
         admitted.end(Report::SessionStored {
             session: row.id.clone(),
         });
-        // Checked once the row exists, so a delete that claims the workspace
-        // after this check counts the new session, and one that claimed it
-        // before is seen here.
-        if let Err(busy) = self.refuse_if_claimed(&row.workspace_id) {
-            self.forget_row(&row.id).await?;
-            return Err(busy);
-        }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = begin.title;
         let fork_hold = begin.fork_hold;
@@ -1293,9 +1263,22 @@ impl SessionManager {
     /// Forgets a stopped session. Its record is the backend's, and stays.
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
+        // One a delete marked is finished by deleting it again.
         self.refuse_if_deleting(&handle)?;
         let workspace_id = lock(&handle.row).workspace_id.clone();
-        self.refuse_if_claimed(&workspace_id)?;
+        // Admission refuses it while a delete or a removal holds its
+        // workspace. Every way out below that does not remove the session
+        // lets go, which ends the removal there.
+        let command = Command::RemoveSession {
+            session: id.to_string(),
+        };
+        let removing = match self.admission.command(command).await {
+            Ok(removing) => removing,
+            // Another removal of it was under way when this one was asked
+            // for, and took it: the session is gone, as asked.
+            Err(Refusal::NoSession) => return Ok(handle.describe()),
+            Err(refusal) => return Err(refused_session(refusal, &workspace_id, id)),
+        };
         // A session whose ending is already queued is only winding down: a
         // client may have seen `session.ended` before Core let it go, and
         // can remove it, so wait for it to finish. Waited for before taking
@@ -1315,7 +1298,10 @@ impl SessionManager {
             )));
         }
         let session = handle.describe();
-        self.forget_row(id).await?;
+        self.store.delete_session(id.to_string()).await?;
+        removing.end(Report::SessionGone {
+            session: id.to_string(),
+        });
         self.let_go(&handle).await;
         Ok(session)
     }
@@ -1612,42 +1598,39 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Claims workspace `workspace_id` for deleting session `session_id`,
-    /// or for removing the workspace when `session_id` is empty, in memory
-    /// only. Refused while another delete or removal holds it.
-    pub fn claim_workspace(
-        &self,
-        workspace_id: &str,
-        session_id: &str,
-    ) -> Result<WorkspaceClaim, SessionError> {
-        let mut claims = lock(&self.claims);
-        if claims.contains_key(workspace_id) {
-            return Err(busy(workspace_id));
-        }
-        claims.insert(workspace_id.to_string(), session_id.to_string());
-        Ok(WorkspaceClaim {
-            claims: Arc::clone(&self.claims),
-            workspace_id: workspace_id.to_string(),
-        })
+    /// Holds session `id`'s workspace for its `session.delete`: admitted
+    /// by admission, which refuses it `busy` while another delete or a
+    /// removal holds the workspace. Dropping what this returns ends the
+    /// delete there and releases the workspace.
+    pub async fn hold_for_delete(&self, id: &str) -> Result<UnderWay, SessionError> {
+        let workspace_id = self.row(id)?.workspace_id;
+        let command = Command::DeleteSession {
+            session: id.to_string(),
+        };
+        self.admission
+            .command(command)
+            .await
+            .map_err(|refusal| refused_session(refusal, &workspace_id, id))
     }
 
     /// Refuses a request that would change workspace `workspace_id` while a
-    /// delete holds it.
+    /// delete or a removal holds it, as admission says.
     fn refuse_if_claimed(&self, workspace_id: &str) -> Result<(), SessionError> {
-        if lock(&self.claims).contains_key(workspace_id) {
+        if self.admission.workspace_held(workspace_id) {
             return Err(busy(workspace_id));
         }
         Ok(())
     }
 
     /// Refuses a request about session `handle` while a delete is under
-    /// way for it, or it is marked deleting.
+    /// way for it, as admission says, or its workspace went with one or with
+    /// a removal; or it is marked deleting.
     fn refuse_if_deleting(&self, handle: &Handle) -> Result<(), SessionError> {
         let (workspace_id, deleting) = {
             let row = lock(&handle.row);
             (row.workspace_id.clone(), row.deleting)
         };
-        if lock(&self.claims).get(&workspace_id) == Some(&handle.id) {
+        if self.admission.deleting(&workspace_id, &handle.id) {
             return Err(busy(&workspace_id));
         }
         if deleting.is_some() {
@@ -3424,11 +3407,30 @@ mod tests {
     fn gated_manager(dir: &std::path::Path, adapter: &Arc<GatedReads>) -> SessionManager {
         let store = Store::open(&dir.join("ersa.db")).unwrap();
         let (app_log, _) = AppLog::open(dir).unwrap();
+        // Admission has the session and its workspace, as once it is
+        // created: a removal is decided there.
+        let admission = Arc::new(Admission::default());
+        admission.restore(crate::admission::Existing {
+            projects: vec![(
+                "p".into(),
+                crate::admission::Folder {
+                    host: "local".into(),
+                    key: "c:/work".into(),
+                },
+            )],
+            workspaces: vec![crate::admission::ExistingWorkspace {
+                id: "w".into(),
+                project: "p".into(),
+                root: true,
+                phase: crate::admission::WorkspacePhase::Ready,
+            }],
+            sessions: vec![("s-gated".into(), "w".into(), false)],
+        });
         let manager = SessionManager::new(
             store,
             vec![Arc::clone(adapter) as Arc<dyn Adapter>],
             Arc::new(app_log),
-            Arc::default(),
+            admission,
         );
         let row = SessionRow {
             id: "s-gated".into(),
@@ -3555,9 +3557,8 @@ mod tests {
         // A resume that got in before the claim holds the session's `op`
         // until its backend is live.
         let starting = handle.op.lock().await;
-        let held = manager.claim_found("w").unwrap();
 
-        let look = manager.runs_found(&held);
+        let look = manager.runs_found("w");
         tokio::pin!(look);
         // Not answered while the start is under way.
         let waited = tokio::time::timeout(Duration::from_secs(60), &mut look).await;
@@ -3569,7 +3570,7 @@ mod tests {
 
         // With nothing running, the answer is no.
         *lock(&handle.live) = None;
-        assert!(!manager.runs_found(&held).await);
+        assert!(!manager.runs_found("w").await);
     }
 
     // verifies: PROTO-CORE-API-R41
