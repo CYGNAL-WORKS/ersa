@@ -195,7 +195,7 @@ async function addFromChip() {
 }
 
 describe("adding a project from the new-session screen", () => {
-  // verifies: FLOW-RESUME-SESSION-R04
+  // verifies: FLOW-RESUME-SESSION-R12
   it("lists sessions again once the project is added, so those the backend recorded in its folder join the rail", async () => {
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
     await addFromChip();

@@ -63,7 +63,7 @@ pub struct SessionRow {
     pub forked_from: Option<String>,
     pub forked_through: Option<String>,
     /// Whether the session was started in the backend's own tools and found
-    /// in its records rather than started in Ersa (FLOW-RESUME-SESSION-R04):
+    /// in its records rather than started in Ersa (FLOW-RESUME-SESSION-R12):
     /// such a session leaves the list once its record is gone (R06), and is
     /// forgotten with its workspace (R09).
     pub started_elsewhere: bool,
@@ -119,7 +119,7 @@ impl Store {
     }
 
     /// Records a session found in its backend's records for workspace
-    /// `session.workspace_id`'s folder (FLOW-RESUME-SESSION-R04), marked
+    /// `session.workspace_id`'s folder (FLOW-RESUME-SESSION-R12), marked
     /// started elsewhere, with none of the user's arrangement and no request
     /// of Core's (ADR 0033). In one statement, and only while the workspace
     /// is `ready` and no session of that backend has that backend id: a

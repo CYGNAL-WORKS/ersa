@@ -24,7 +24,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 3. The user chooses **Unarchive**. The session is no longer archived and returns to its group, stopped; the next message resumes it.
 4. The user chooses **Delete…**, which is unavailable, saying to stop the session first, while the session is starting, working or waiting on the user. Ersa asks first. The question names the session, says its conversation is deleted for good, naming no backend, and says what else goes with it:
    - For a session alone in an isolated workspace: the workspace's folder is deleted, and its branch, by name, unless the branch holds commits that no other branch or remote holds, when the question says the branch is kept and why. When the folder holds uncommitted or untracked files, ignored files, or commits no branch holds (made on a detached checkout), the question says so and how many, and its confirming button reads as deleting them.
-   - For a session in the root workspace, or in a workspace another session also uses: the files stay, and the question says where.
+   - For a session in the root workspace, or in a workspace another session also uses: the files stay, and the question says where. A session started in the backend's own tools that the rail lists there is another session (FLOW-RESUME-SESSION).
 5. The user confirms. Ersa stops the session, deletes the workspace, and its branch, as step 4 said, deletes the session's record from the backend, and removes the session. Its tile leaves the rail (ADR 0026).
 6. Cancelling the question leaves everything as it was.
 
@@ -62,6 +62,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-15: from #328 inbox: a session started in the backend's own tools counts as another session using a workspace, so deleting a session there leaves the files. Meaning of R05 unchanged; no requirement IDs changed.
 - 2026-11-14: owner's decision: the delete question names no backend, as Claude Desktop's names no CLI; "deleted for good" already says it is gone from the backend's own tools. No requirement IDs changed.
 - 2026-11-13: a refused Resume's example is now a folder that is gone, since resuming is specified (FLOW-RESUME-SESSION). No requirement IDs changed.
 - 2026-11-09: owner's decision from the audit against Claude Desktop: Archive is unavailable while the session is starting, working or waiting on the user, which closes the open question on asking first. R11 added.

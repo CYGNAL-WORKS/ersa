@@ -31,7 +31,7 @@ impl SessionManager {
     /// the backend's records, for `session.list`: every record a registered
     /// backend holds for a `ready` workspace's folder, counting only records
     /// that name that folder as their own, joins the list in that workspace
-    /// (FLOW-RESUME-SESSION-R04) under a new Ersa id that is then kept
+    /// (FLOW-RESUME-SESSION-R12) under a new Ersa id that is then kept
     /// (R05), and a session found before whose record is gone leaves it
     /// (R06). A session Ersa started is never added or left out here.
     ///

@@ -35,7 +35,7 @@ pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
     // Sessions started in the backend's own tools join the list, and leave
-    // it once their record is gone (FLOW-RESUME-SESSION-R04, R06).
+    // it once their record is gone (FLOW-RESUME-SESSION-R12, R06).
     core.sessions
         .find_elsewhere(|host| core.session_transport_for(host))
         .await?;

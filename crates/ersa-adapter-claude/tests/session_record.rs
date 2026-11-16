@@ -1665,7 +1665,7 @@ fn user_in(cwd: &str, text: &str) -> String {
         .to_string()
 }
 
-// verifies: FLOW-RESUME-SESSION-R04
+// verifies: FLOW-RESUME-SESSION-R12
 #[test]
 fn listing_a_directory_names_each_records_own_working_directory() {
     // `C:\work-repo` encodes to the same directory as `C:\work\repo`: the

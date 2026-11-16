@@ -94,7 +94,7 @@ fn titled<'a>(sessions: &'a [Value], title: &str) -> Option<&'a Value> {
     sessions.iter().find(|s| s["title"] == title)
 }
 
-// verifies: FLOW-RESUME-SESSION-R04
+// verifies: FLOW-RESUME-SESSION-R12
 #[tokio::test(flavor = "multi_thread")]
 async fn the_list_holds_every_session_recorded_for_a_projects_folders_in_its_workspace() {
     let backend = Backend::default();
@@ -250,7 +250,7 @@ async fn a_found_session_whose_record_is_gone_leaves_the_list_and_one_ersa_start
     assert_eq!(listed[0]["id"], ersa["id"]);
 }
 
-// verifies: FLOW-RESUME-SESSION-R09
+// verifies: FLOW-RESUME-SESSION-R13
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_a_workspace_or_project_forgets_its_found_sessions_and_leaves_their_records() {
     let backend = Backend::default();
@@ -300,7 +300,7 @@ async fn removing_a_workspace_or_project_forgets_its_found_sessions_and_leaves_t
     assert_eq!(listed[0]["workspace_id"], root["id"]);
 }
 
-// verifies: FLOW-RESUME-SESSION-R09
+// verifies: FLOW-RESUME-SESSION-R13
 #[tokio::test(flavor = "multi_thread")]
 async fn deleting_the_last_session_ersa_started_takes_the_found_ones_with_its_workspace() {
     let backend = Backend::default();
@@ -341,7 +341,7 @@ async fn deleting_the_last_session_ersa_started_takes_the_found_ones_with_its_wo
     assert!(backend.has_record("rec-isolated"));
 }
 
-// verifies: FLOW-RESUME-SESSION-R09
+// verifies: FLOW-RESUME-SESSION-R14
 #[tokio::test(flavor = "multi_thread")]
 async fn a_found_session_core_is_running_holds_back_removing_its_workspace() {
     let backend = Backend::default();

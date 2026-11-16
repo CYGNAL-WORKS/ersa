@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// Sessions started outside Ersa with real Claude Code (#328; FLOW-RESUME-SESSION-R04, R01): a session the CLI ran in a
+// Sessions started outside Ersa with real Claude Code (#328; FLOW-RESUME-SESSION-R12, R01): a session the CLI ran in a
 // folder shows in the rail once the folder is added as a project, and continues in the same record when written to.
 test.use({ backend: "claude" });
 
