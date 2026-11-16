@@ -35,6 +35,11 @@ const FOLDER_LISTING: Duration = Duration::from_secs(5);
 /// stopped answering holds one thread per folder, however often Core lists.
 pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
 
+/// The sessions found in a workspace's folder, held for its removal
+/// ([`SessionManager::hold_found`]).
+#[must_use]
+pub struct HeldFound(Vec<Arc<Handle>>);
+
 /// One folder to list: a `ready` workspace, for one backend.
 struct Folder {
     adapter: Arc<dyn Adapter>,
@@ -264,11 +269,14 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Lets go of the sessions found in workspace `workspace_id`'s folder
-    /// whose rows went with the workspace (FLOW-RESUME-SESSION-R13). One a
-    /// send or resume started after the removal checked is stopped first, so
-    /// no backend is left running where Ersa can no longer reach it.
-    pub async fn forget_found(&self, workspace_id: &str) -> Result<(), SessionError> {
+    /// Holds the sessions found in workspace `workspace_id`'s folder for its
+    /// removal, before the folder goes (FLOW-RESUME-SESSION-R13, R14): each
+    /// is marked removed under `op`, so a send or resume that comes after is
+    /// refused, and one a send or resume started since the removal checked
+    /// is stopped. When one does not stop, those held are let go of the mark
+    /// and the removal is refused: no backend is left running in a removed
+    /// folder.
+    pub async fn hold_found(&self, workspace_id: &str) -> Result<HeldFound, SessionError> {
         let found: Vec<Arc<Handle>> = lock(&self.sessions)
             .values()
             .filter(|handle| {
@@ -277,26 +285,42 @@ impl SessionManager {
             })
             .cloned()
             .collect();
+        let mut held = HeldFound(Vec::new());
         for handle in found {
-            if self.store.session(handle.id.clone()).await?.is_some() {
-                continue;
-            }
-            {
-                // Under `op`, marked removed first: a send or resume that
-                // comes after finds it removed, and one that came before is
-                // stopped here.
-                let _op = handle.op.lock().await;
-                handle.removed.store(true, Ordering::SeqCst);
-                if let Some(live) = handle.live() {
-                    begin_stop(&live);
-                    if let Err(e) = wait_finished(&live, STOP_TIMEOUT).await {
-                        // Still running: kept where the user can see and
-                        // stop it, rather than left running out of reach.
-                        handle.removed.store(false, Ordering::SeqCst);
-                        tracing::warn!(session = %handle.id, error = %e, "a session whose workspace was removed did not stop; kept");
-                        continue;
-                    }
+            let _op = handle.op.lock().await;
+            handle.removed.store(true, Ordering::SeqCst);
+            held.0.push(Arc::clone(&handle));
+            if let Some(live) = handle.live() {
+                begin_stop(&live);
+                if let Err(e) = wait_finished(&live, STOP_TIMEOUT).await {
+                    drop(_op);
+                    self.release_found(held);
+                    return Err(SessionError::InvalidState(format!(
+                        "session {} is running and did not stop ({e}); stop it, then remove again",
+                        handle.id
+                    )));
                 }
+            }
+        }
+        Ok(held)
+    }
+
+    /// Lets the sessions `held` for a removal that did not happen be sent
+    /// to and resumed again.
+    pub fn release_found(&self, held: HeldFound) {
+        for handle in held.0 {
+            handle.removed.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// Lets go of the sessions `held` for a removal, once their rows went
+    /// with the workspace (FLOW-RESUME-SESSION-R13); one whose row is still
+    /// there is released instead.
+    pub async fn forget_found(&self, held: HeldFound) -> Result<(), SessionError> {
+        for handle in held.0 {
+            if self.store.session(handle.id.clone()).await?.is_some() {
+                handle.removed.store(false, Ordering::SeqCst);
+                continue;
             }
             self.let_go(&handle).await;
         }
