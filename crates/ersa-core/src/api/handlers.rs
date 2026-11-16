@@ -409,8 +409,8 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
         .find(|workspace| workspace.kind == WorkspaceKind::Root)
         .map(|workspace| workspace.id);
     // A session found in its folder holds the removal back only while Core
-    // runs it (FLOW-RESUME-SESSION-R14); one started after this look is
-    // stopped below.
+    // runs it (FLOW-RESUME-SESSION-R14). This look is for the order of the
+    // refusals; the one that counts is taken below, under the claim.
     let root_runs_found = root
         .as_ref()
         .is_some_and(|root| core.sessions.runs_found_in(root));
@@ -428,55 +428,38 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     let not_removed = Report::ProjectRemovalRefused {
         project: project.id.clone(),
     };
-    // The sessions found in its folder are held before it goes: none is
-    // sent to or resumed meanwhile, and one that will not stop refuses it.
+    // Its own folder is claimed as a delete claims a workspace, so none of
+    // the sessions found there is sent to or resumed meanwhile. One whose
+    // start was under way holds the removal back, as one running does.
     let held = match &root {
-        Some(root) => match hold_found(core, root).await {
+        Some(root) => match core.sessions.claim_found(root) {
             Ok(held) => Some(held),
             Err(e) => {
                 removing.end(not_removed);
-                return Err(e);
+                return Err(e.into());
             }
         },
         None => None,
     };
-    pause_for_tests(core).await;
-    // The sessions found in its folder go with it, their records left; a
-    // failure lets the hold go with it.
-    let delete = async {
-        core.store
-            .delete_project(project.id.clone())
-            .await
-            .map_err(ApiError::from)
-    };
-    let deleted = match held {
-        Some(held) => core.sessions.remove_held(held, delete).await,
-        None => delete.await,
-    };
-    match deleted {
-        Ok(()) => {
-            removing.end(Report::ProjectRemoved {
-                project: project.id.clone(),
-            });
-            Ok(project)
-        }
-        // The delete is one transaction: nothing of the project went.
-        Err(e) => {
-            removing.end(not_removed);
-            Err(e)
-        }
+    if let Some(held) = &held
+        && core.sessions.runs_found(held).await
+    {
+        removing.end(not_removed);
+        return Err(refused(Refusal::ProjectHasSessions, &project.id));
     }
-}
-
-/// Claims workspace `workspace_id` for its removal and stops the sessions
-/// found in its folder; the claim goes when one does not stop.
-async fn hold_found(
-    core: &Core,
-    workspace_id: &str,
-) -> Result<crate::sessions::HeldFound, ApiError> {
-    let held = core.sessions.claim_found(workspace_id)?;
-    core.sessions.stop_found(&held).await?;
-    Ok(held)
+    // One transaction: on a failure nothing of the project went. The rows
+    // of the sessions found in its folder go with it, their records left.
+    if let Err(e) = core.store.delete_project(project.id.clone()).await {
+        removing.end(not_removed);
+        return Err(e.into());
+    }
+    removing.end(Report::ProjectRemoved {
+        project: project.id.clone(),
+    });
+    if let Some(held) = held {
+        core.sessions.forget_found(held).await;
+    }
+    Ok(project)
 }
 
 pub(super) async fn find_project(core: &Core, id: &str) -> Result<Project, ApiError> {
@@ -740,10 +723,9 @@ pub(super) async fn workspace_remove(
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
     // A session found in its folder holds the removal back only while Core
-    // runs it (FLOW-RESUME-SESSION-R14); one started after this look is
-    // stopped below.
+    // runs it (FLOW-RESUME-SESSION-R14). This look is for the order of the
+    // refusals; the one that counts is taken below, under the claim.
     let runs_found = core.sessions.runs_found_in(&workspace.id);
-    pause_for_tests(core).await;
 
     // Admission decides the removal in one step: refused while the
     // workspace is being made or removed, or has a session Ersa started or
@@ -761,7 +743,7 @@ pub(super) async fn workspace_remove(
         })
         .await
         .map_err(|refusal| refused(refusal, &id))?;
-    let refused_report = Report::WorkspaceRemovalRefused {
+    let not_removed = Report::WorkspaceRemovalRefused {
         workspace: id.clone(),
     };
     // Claimed as a delete claims it, at once: none of its found sessions is
@@ -771,10 +753,16 @@ pub(super) async fn workspace_remove(
     let held = match core.sessions.claim_found(&id) {
         Ok(held) => held,
         Err(e) => {
-            removing.end(refused_report);
+            removing.end(not_removed);
             return Err(e.into());
         }
     };
+    // A found session whose start was under way when the claim was taken
+    // holds the removal back, as one running does.
+    if core.sessions.runs_found(&held).await {
+        removing.end(not_removed);
+        return Err(refused(Refusal::WorkspaceHasSessions, &id));
+    }
     // What a refusal puts back: the state the removal took the workspace
     // from, `error` if a delete marked it before the claim
     // (PROTO-CORE-API-R94). A workspace whose row a delete took meanwhile
@@ -783,17 +771,15 @@ pub(super) async fn workspace_remove(
         Some(Replaced::Error) => WorkspaceState::Error,
         Some(Replaced::Ready) | None => WorkspaceState::Ready,
     };
-    core.store
+    let stored = core
+        .store
         .set_workspace_state(id.clone(), WorkspaceState::Removing)
-        .await?;
-    // A found session a send or resume started since the look above is
-    // stopped before the folder goes; one that will not stop refuses it.
-    if let Err(e) = core.sessions.stop_found(&held).await {
-        core.store.set_workspace_state(id, replaced).await?;
-        removing.end(refused_report);
+        .await;
+    if let Err(e) = stored {
+        // Nothing was written: the workspace is as it was.
+        removing.end(not_removed);
         return Err(e.into());
     }
-    pause_for_tests(core).await;
 
     let force = params.force.unwrap_or(false);
     let removed = workspace::git_worktree_remove(
@@ -814,7 +800,7 @@ pub(super) async fn workspace_remove(
         // it the found sessions are theirs again.
         if e.is_refusal() {
             core.store.set_workspace_state(id, replaced).await?;
-            removing.end(refused_report);
+            removing.end(not_removed);
         } else {
             core.store
                 .set_workspace_state(id.clone(), WorkspaceState::Error)
@@ -823,29 +809,14 @@ pub(super) async fn workspace_remove(
         }
         return Err(e.into());
     }
-    // The sessions found in its folder go with it, their records left; a
-    // failure lets the hold go with it, and leaves the row `removing` for
-    // the next start to mark `error`, as admission then holds it.
-    let delete = async {
-        core.store
-            .delete_workspace(id.clone())
-            .await
-            .map_err(ApiError::from)
-    };
-    core.sessions.remove_held(held, delete).await?;
+    // The rows of the sessions found in its folder go with it, their
+    // records left. A failure leaves the row `removing` for the next start
+    // to mark `error`, which is how admission then holds it.
+    core.store.delete_workspace(id.clone()).await?;
     removing.end(Report::WorkspaceRemoved { workspace: id });
+    core.sessions.forget_found(held).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
-}
-
-/// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go:
-/// before `workspace.remove` asks admission, and once the sessions found in
-/// its folder are held; and once `project.remove` holds those of its own
-/// folder. A test can land another request at each. Nothing outside tests.
-async fn pause_for_tests(core: &Core) {
-    if let Some(gate) = &core.config.remove_gate {
-        gate.stop().await;
-    }
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by

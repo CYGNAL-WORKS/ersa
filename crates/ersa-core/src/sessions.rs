@@ -847,7 +847,15 @@ impl Handle {
 }
 
 impl SessionManager {
-    pub fn new(store: Store, adapters: Vec<Arc<dyn Adapter>>, app_log: Arc<AppLog>) -> Self {
+    /// A manager over `store`, starting sessions with `adapters`, asking
+    /// `admission` whether a workspace takes a session and telling it which
+    /// sessions exist.
+    pub fn new(
+        store: Store,
+        adapters: Vec<Arc<dyn Adapter>>,
+        app_log: Arc<AppLog>,
+        admission: Arc<Admission>,
+    ) -> Self {
         // One adapter per backend: a second registration of a name is a
         // mistake in the build, and the first one stands.
         let mut registered: Vec<Arc<dyn Adapter>> = Vec::new();
@@ -865,7 +873,7 @@ impl SessionManager {
             store,
             adapters: registered,
             app_log,
-            admission: Arc::default(),
+            admission,
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
@@ -878,13 +886,6 @@ impl SessionManager {
             listing_in_flight: Arc::default(),
             deletes: AtomicU64::new(0),
         }
-    }
-
-    /// The same manager, using Core's `admission` rather than an empty one
-    /// of its own.
-    pub fn with_admission(mut self, admission: Arc<Admission>) -> Self {
-        self.admission = admission;
-        self
     }
 
     /// The same manager, pausing after each chunk an attachment's copy
@@ -3427,6 +3428,7 @@ mod tests {
             store,
             vec![Arc::clone(adapter) as Arc<dyn Adapter>],
             Arc::new(app_log),
+            Arc::default(),
         );
         let row = SessionRow {
             id: "s-gated".into(),
@@ -3539,6 +3541,35 @@ mod tests {
         };
         *lock(&handle.live) = Some(Arc::new(live));
         (sink, finished)
+    }
+
+    // verifies: FLOW-RESUME-SESSION-R14
+    // Paused time: the wait below ends only once nothing else can run.
+    #[tokio::test(start_paused = true)]
+    async fn a_removal_waits_for_a_found_sessions_start_under_way_and_sees_it_running() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let handle = manager.handle("s-gated").unwrap();
+        lock(&handle.row).started_elsewhere = true;
+        // A resume that got in before the claim holds the session's `op`
+        // until its backend is live.
+        let starting = handle.op.lock().await;
+        let held = manager.claim_found("w").unwrap();
+
+        let look = manager.runs_found(&held);
+        tokio::pin!(look);
+        // Not answered while the start is under way.
+        let waited = tokio::time::timeout(Duration::from_secs(60), &mut look).await;
+        assert!(waited.is_err(), "answered before the start settled");
+        // The backend is live, and the start lets go: it is seen running.
+        let _live = make_live(&manager);
+        drop(starting);
+        assert!(look.await);
+
+        // With nothing running, the answer is no.
+        *lock(&handle.live) = None;
+        assert!(!manager.runs_found(&held).await);
     }
 
     // verifies: PROTO-CORE-API-R41
@@ -3764,7 +3795,7 @@ mod tests {
         // This Core has no adapter for it.
         let (log, facts) = AppLog::open(dir.path()).unwrap();
         let log = Arc::new(log);
-        let manager = SessionManager::new(store, Vec::new(), Arc::clone(&log));
+        let manager = SessionManager::new(store, Vec::new(), Arc::clone(&log), Arc::default());
         manager.recover(&facts, |_| None).await.unwrap();
         assert!(manager.list().is_empty());
         // Enough facts about another session to rotate the log twice over.

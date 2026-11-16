@@ -17,12 +17,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
+use ersa_adapter::{Process, ProcessSpec, Transport};
 use ersa_core::platform::{self, BoxStream};
 use ersa_core::replay::Replay;
-use ersa_core::{Adapter, CoreConfig, Server};
+use ersa_core::transport::LocalTreeTransport;
+use ersa_core::{Adapter, CoreConfig, Gate, Server};
 use ersa_protocol::schema::{validate_notification, validate_response};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf};
@@ -90,6 +92,56 @@ pub async fn start_with(
     configure: impl FnOnce(&mut CoreConfig),
 ) -> TestCore {
     start_with_adapters(dir, configure, Vec::new()).await
+}
+
+/// Holds the next process Core starts, once armed, at its [`Gate`] until
+/// the test lets it go: a git call or a backend's version command that does
+/// not answer.
+pub struct Stall {
+    armed: AtomicBool,
+    gate: Gate,
+}
+
+impl Stall {
+    pub fn new() -> Arc<Stall> {
+        Arc::new(Stall {
+            armed: AtomicBool::new(false),
+            gate: Gate::default(),
+        })
+    }
+
+    /// The next process started waits until [`Stall::go`].
+    pub fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    /// Waits until a process is held, failing instead of hanging.
+    pub async fn reached(&self) {
+        tokio::time::timeout(READ_TIMEOUT, self.gate.reached())
+            .await
+            .expect("Core started the process in time");
+    }
+
+    pub fn go(&self) {
+        self.gate.go();
+    }
+}
+
+/// Core's command transport for a test ([`CoreConfig::command_transport`]):
+/// the local one, behind a [`Stall`].
+pub struct StallingTransport {
+    pub stall: Arc<Stall>,
+    pub inner: LocalTreeTransport,
+}
+
+#[ersa_adapter::async_trait]
+impl Transport for StallingTransport {
+    async fn spawn(&self, spec: ProcessSpec) -> io::Result<Box<dyn Process>> {
+        if self.stall.armed.swap(false, Ordering::SeqCst) {
+            self.stall.gate.stop().await;
+        }
+        self.inner.spawn(spec).await
+    }
 }
 
 /// [`start_with`], with adapters registered.

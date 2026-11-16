@@ -17,8 +17,7 @@ use ersa_adapter::{Adapter, BackendChoices, Transport};
 use ersa_protocol::core_api::{Workspace, WorkspaceState};
 
 use super::{
-    Handle, STARTUP_SUMMARIES, STOP_TIMEOUT, SUMMARY_READ, SessionManager, UNKNOWN_TIME,
-    WorkspaceClaim, begin_stop, lock, wait_finished,
+    Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, WorkspaceClaim, lock,
 };
 use super::{SessionError, read_summary};
 use crate::admission::{Command, Report};
@@ -63,7 +62,8 @@ impl SessionManager {
     /// recording and forgetting take the listing turn, so two lists never
     /// record one session twice; a delete takes the same turn and counts
     /// itself, and a listing a delete overlapped records nothing new, so a
-    /// deleted session is never found again.
+    /// deleted session is never found again. Whether a workspace takes a
+    /// found session is admission's to decide, so a removal needs no turn.
     pub async fn find_elsewhere(
         &self,
         transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
@@ -221,7 +221,18 @@ impl SessionManager {
         let default = BackendChoices::default_of(&folder.adapter.choices().permission_modes);
         row.permission_mode = (!default.is_empty()).then_some(default);
         let handle = Arc::new(Handle::new(row, UNKNOWN_TIME.to_string()));
-        lock(&self.sessions).insert(handle.id.clone(), Arc::clone(&handle));
+        // Loaded only while admission still has it. A removal that took its
+        // row since tells admission before it reads this registry
+        // ([`SessionManager::forget_found`]), so the session is either
+        // loaded before the removal looks, and goes with it, or is not
+        // loaded: it is never left listed in what was removed
+        // (FLOW-RESUME-SESSION-R13).
+        let mut sessions = lock(&self.sessions);
+        if !self.admission.has_session(&handle.id) {
+            return Ok(None);
+        }
+        sessions.insert(handle.id.clone(), Arc::clone(&handle));
+        drop(sessions);
         Ok(Some(handle))
     }
 
@@ -306,62 +317,43 @@ impl SessionManager {
         Ok(HeldFound(self.claim_workspace(workspace_id, "")?))
     }
 
-    /// Stops the sessions found in the `held` workspace's folder that a
-    /// send or resume started before it was held, before the folder goes
-    /// (FLOW-RESUME-SESSION-R13, R14). When one does not stop, the removal
-    /// is to be refused and the hold dropped: no backend is left running
-    /// in a removed folder.
-    pub async fn stop_found(&self, held: &HeldFound) -> Result<(), SessionError> {
+    /// Whether Core runs a session found in the `held` workspace's folder
+    /// (FLOW-RESUME-SESSION-R14), once any start under way has settled. A
+    /// send or resume holds its session's `op` from before it looks for the
+    /// claim until its backend is live, so one that got in before the claim
+    /// is waited for and seen here, and none starts after: an answer of no
+    /// stays no while the workspace is held.
+    pub async fn runs_found(&self, held: &HeldFound) -> bool {
         for handle in self.found_in(&held.0.workspace_id) {
             let _op = handle.op.lock().await;
-            if let Some(live) = handle.live() {
-                begin_stop(&live);
-                if let Err(e) = wait_finished(&live, STOP_TIMEOUT).await {
-                    return Err(SessionError::InvalidState(format!(
-                        "session {} is running and did not stop ({e}); stop it, then remove again",
-                        handle.id
-                    )));
-                }
+            if handle.live().is_some() {
+                return true;
             }
         }
-        Ok(())
+        false
     }
 
-    /// Removes the workspace `held`, by `delete`, which deletes its rows
-    /// and the found sessions' with them, then lets go of those sessions
-    /// (FLOW-RESUME-SESSION-R13), their records left. Both under the listing
-    /// turn, so a list either recorded its sessions before, and they go too,
-    /// or finds the workspace gone. Each is marked removed and stopped under
-    /// `op` before it goes. When `delete` fails, nothing is let go and the
-    /// hold goes.
-    pub async fn remove_held<E>(
-        &self,
-        held: HeldFound,
-        delete: impl Future<Output = Result<(), E>>,
-    ) -> Result<(), E> {
-        let _listing = self.listing.lock().await;
-        delete.await?;
-        // Every found row in the workspace went with it, so every found
-        // session loaded there goes.
+    /// Lets go of the found sessions loaded in the `held` workspace, whose
+    /// rows went with it, their records left (FLOW-RESUME-SESSION-R13); then
+    /// the hold goes. Called once admission was told the workspace is gone:
+    /// a list that stored a found session there loads it before this reads
+    /// the registry, or finds admission without it and loads nothing. None
+    /// is running ([`SessionManager::runs_found`]). Each is marked removed
+    /// under `op`, so a request waiting there finds it gone.
+    pub async fn forget_found(&self, held: HeldFound) {
         for handle in self.found_in(&held.0.workspace_id) {
             {
                 let _op = handle.op.lock().await;
                 handle.removed.store(true, Ordering::SeqCst);
-                if let Some(live) = handle.live() {
-                    begin_stop(&live);
-                    if let Err(e) = wait_finished(&live, STOP_TIMEOUT).await {
-                        tracing::warn!(session = %handle.id, error = %e, "a session whose workspace was removed did not stop");
-                    }
-                }
             }
             self.let_go(&handle).await;
         }
-        Ok(())
     }
 
     /// Whether Core is running a session found in the backend's records in
     /// workspace `workspace_id`, which holds back removing it
-    /// (FLOW-RESUME-SESSION-R14).
+    /// (FLOW-RESUME-SESSION-R14): a look without the claim, which one
+    /// starting meanwhile escapes ([`SessionManager::runs_found`] does not).
     pub fn runs_found_in(&self, workspace_id: &str) -> bool {
         lock(&self.sessions).values().any(|handle| {
             let row = lock(&handle.row);
