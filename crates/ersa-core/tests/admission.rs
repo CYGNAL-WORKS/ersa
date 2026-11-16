@@ -7,7 +7,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use ersa_core::admission::{
-    Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
+    Admission, Command, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
     ProjectPhase, Refusal, Replaced, Report, State, WorkspacePhase, step,
 };
 
@@ -889,8 +889,8 @@ fn begin_exclusive(session: &str) -> Command {
     }
 }
 
-fn exclusive(state: &State, session: &str) -> Option<Exclusive> {
-    state.session(session).and_then(|s| s.exclusive)
+fn exclusive(state: &State, session: &str) -> bool {
+    state.session(session).is_some_and(|s| s.exclusive)
 }
 
 // verifies: ARCH-CORE-R14
@@ -901,7 +901,7 @@ fn a_second_exclusive_operation_waits_and_is_admitted_when_the_first_ends() {
         command(&mut state, begin_exclusive("s1")),
         admitted(Operation::Exclusive("s1".into()))
     );
-    assert_eq!(exclusive(&state, "s1"), Some(Exclusive::Other));
+    assert!(exclusive(&state, "s1"));
     // Another session's is its own.
     assert_eq!(
         command(&mut state, begin_exclusive("s2")),
@@ -921,7 +921,7 @@ fn a_second_exclusive_operation_waits_and_is_admitted_when_the_first_ends() {
         ended.released,
         [(0, admitted(Operation::Exclusive("s1".into())))]
     );
-    assert_eq!(exclusive(&state, "s1"), Some(Exclusive::Other));
+    assert!(exclusive(&state, "s1"));
     assert_eq!(state.held().len(), 1);
 
     // One asked of a session admission does not have is refused.
@@ -933,63 +933,44 @@ fn a_second_exclusive_operation_waits_and_is_admitted_when_the_first_ends() {
 
 // verifies: ARCH-CORE-R14
 #[test]
-fn a_removal_of_a_session_and_another_operation_on_it_in_both_orders() {
-    // The removal first: the other waits, and finds no session once the
-    // removal has removed it.
+fn a_removal_takes_the_exclusive_operation_as_a_second_step() {
+    // A removal asked for marks the session, so a delete of it waits, and
+    // does not yet have the session's exclusive operation: while it waits
+    // for a run that is winding down, another operation goes on.
     let mut state = world_with(&["s1"]);
     command(&mut state, remove_session("s1"));
-    assert_eq!(exclusive(&state, "s1"), Some(Exclusive::Removal));
-    assert_eq!(command(&mut state, begin_exclusive("s1")), Outcome::Held);
-    let gone = step(
-        &mut state,
-        Input::Report(Report::SessionGone {
-            session: "s1".into(),
-        }),
-    );
-    assert_eq!(gone.released, [(0, Outcome::Refused(Refusal::NoSession))]);
-
-    // The removal first, and it ends without removing the session ("it is
-    // running; stop it first"): the other goes on.
-    let mut state = world_with(&["s1"]);
-    command(&mut state, remove_session("s1"));
-    command(&mut state, begin_exclusive("s1"));
-    let ended = step(
-        &mut state,
-        Input::Report(Report::Ended(Operation::RemoveSession("s1".into()))),
-    );
+    assert!(!exclusive(&state, "s1"));
+    assert_eq!(command(&mut state, delete_session("s1")), Outcome::Held);
     assert_eq!(
-        ended.released,
-        [(0, admitted(Operation::Exclusive("s1".into())))]
+        command(&mut state, begin_exclusive("s1")),
+        admitted(Operation::Exclusive("s1".into()))
     );
-
-    // The other first: the removal waits for it, and is admitted when it
-    // ends.
-    let mut state = world_with(&["s1"]);
-    command(&mut state, begin_exclusive("s1"));
-    assert_eq!(command(&mut state, remove_session("s1")), Outcome::Held);
+    // The removal's own, asked for next, waits for that one to end.
+    assert_eq!(command(&mut state, begin_exclusive("s1")), Outcome::Held);
     let ended = step(
         &mut state,
         Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
     );
     assert_eq!(
         ended.released,
-        [(0, admitted(Operation::RemoveSession("s1".into())))]
+        [(1, admitted(Operation::Exclusive("s1".into())))]
     );
 
-    // A delete of the session does not wait for the other operation, since
-    // a delete holds the workspace, not the session. Its admission answers
-    // the removal waiting there: the workspace is held now, so it is busy.
-    let mut state = world_with(&["s1"]);
+    // The session goes: the delete that waited finds none, and so does an
+    // operation asked for behind the removal's.
     command(&mut state, begin_exclusive("s1"));
-    command(&mut state, remove_session("s1"));
-    let deleted = step(&mut state, Input::Command(delete_session("s1")));
-    assert_eq!(
-        deleted.outcome,
-        admitted(Operation::DeleteSession("s1".into()))
+    let gone = step(
+        &mut state,
+        Input::Report(Report::SessionGone {
+            session: "s1".into(),
+        }),
     );
     assert_eq!(
-        deleted.released,
-        [(0, Outcome::Refused(Refusal::WorkspaceHeld))]
+        gone.released,
+        [
+            (0, Outcome::Refused(Refusal::NoSession)),
+            (1, Outcome::Refused(Refusal::NoSession)),
+        ]
     );
 }
 
@@ -1194,14 +1175,11 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
         if !session.stored {
             reports.push(Report::Ended(Operation::CreateSession(id.clone())));
         }
-        match session.exclusive {
-            Some(Exclusive::Removal) => {
-                reports.push(Report::Ended(Operation::RemoveSession(id.clone())));
-            }
-            Some(Exclusive::Other) => {
-                reports.push(Report::Ended(Operation::Exclusive(id.clone())));
-            }
-            None => {}
+        if session.removing {
+            reports.push(Report::Ended(Operation::RemoveSession(id.clone())));
+        }
+        if session.exclusive {
+            reports.push(Report::Ended(Operation::Exclusive(id.clone())));
         }
     }
     reports
@@ -1295,29 +1273,19 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     }
     // A session has one exclusive operation at most: one is admitted only
     // on a session with none.
-    if let (
-        Input::Command(Command::RemoveSession { session } | Command::BeginExclusive { session }),
-        Outcome::Admitted(_),
-    ) = (input, outcome)
+    if let (Input::Command(Command::BeginExclusive { session }), Outcome::Admitted(_)) =
+        (input, outcome)
     {
-        assert_eq!(exclusive(before, session), None, "{}", context());
+        assert!(!exclusive(before, session), "{}", context());
     }
 }
 
-// verifies: ARCH-CORE-R18
-// verifies: ARCH-CORE-R15
-// verifies: ARCH-CORE-R17
-#[test]
-fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
-    // Two sessions meet every pair of things a workspace's sessions can be
-    // at once (started by Ersa or found, stored or not, with an exclusive
-    // operation or none, being deleted); a third multiplies the states past
-    // a minute's run and adds no pair. One held command at a time meets
-    // every way a command is held and answered; how several queue is the
-    // fed sequences' above, which hold up to three.
-    let sessions = ["s1", "s2"];
-    const HELD: usize = 1;
-    let inputs = every_input(&sessions);
+/// Applies every command and report over `sessions` (and the one project
+/// and its two workspaces) to every state reachable from nothing and from
+/// [`world`], checking each state and each step, and returns the states.
+/// States with more than `held` commands held are not explored further.
+fn explore(sessions: &[&str], held: usize) -> HashSet<State> {
+    let inputs = every_input(sessions);
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
     for start in [State::default(), world()] {
@@ -1342,14 +1310,29 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
                 }
                 Outcome::Admitted(_) | Outcome::Noted => {}
             }
-            if after.held().len() <= HELD && seen.insert(after.clone()) {
+            if after.held().len() <= held && seen.insert(after.clone()) {
                 queue.push_back(after);
             }
         }
     }
-    // The world is not trivially small: every phase is reached.
-    assert!(seen.len() > 1_000, "only {} states", seen.len());
     assert!(steps > seen.len());
+    seen
+}
+
+// verifies: ARCH-CORE-R18
+// verifies: ARCH-CORE-R15
+// verifies: ARCH-CORE-R17
+#[test]
+fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
+    // Two small worlds, each given every input. In the first, two sessions
+    // meet every pair of things a workspace's sessions can be at once
+    // (started by Ersa or found, stored or not, with an exclusive operation
+    // or none, being removed or deleted), with one command held at a time;
+    // a third session, or a second held command, multiplies its states past
+    // a minute's run.
+    let pairs = explore(&["s1", "s2"], 1);
+    // The world is not trivially small: every phase is reached.
+    assert!(pairs.len() > 1_000, "only {} states", pairs.len());
     for wanted in [
         WorkspacePhase::Creating,
         WorkspacePhase::Ready,
@@ -1362,18 +1345,29 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
         },
     ] {
         assert!(
-            seen.iter().any(|s| phase(s, W) == Some(wanted)),
+            pairs.iter().any(|s| phase(s, W) == Some(wanted)),
             "{wanted:?} was never reached"
         );
     }
     // And so is each hold a delete or a removal of a session takes.
     assert!(
-        seen.iter()
+        pairs
+            .iter()
             .any(|s| s.workspace(W).is_some_and(|w| w.deleting.is_some()))
     );
     assert!(
-        seen.iter()
-            .any(|s| s.sessions().any(|(_, session)| session.exclusive.is_some()))
+        pairs
+            .iter()
+            .any(|s| s.sessions().any(|(_, session)| session.exclusive))
+    );
+
+    // In the second, one session and up to three commands held at once:
+    // every way commands queue behind one another on a session, a
+    // workspace or a project, and are answered in the order they came.
+    let queues = explore(&["s1"], 3);
+    assert!(
+        queues.iter().any(|s| s.held().len() == 3),
+        "no state held three commands"
     );
 }
 
