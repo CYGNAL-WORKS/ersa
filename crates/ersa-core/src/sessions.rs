@@ -40,7 +40,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -225,10 +225,6 @@ pub struct SessionManager {
     /// Where a list stops between storing a found session and holding it,
     /// for tests ([`crate::CoreConfig::found_gate`]).
     found_gate: Option<Arc<crate::state::Gate>>,
-    /// Held while a session's arrangement is written to the store and to
-    /// memory, so a `section.remove` and a `session.arrange` into that
-    /// section land in the same order in both.
-    arrangement: tokio::sync::Mutex<()>,
     /// Held while Core lists the sessions found in the backends' records,
     /// and while a delete removes a session's row, so a list never records
     /// a session twice or finds a deleted one again (`found`).
@@ -238,22 +234,6 @@ pub struct SessionManager {
     /// How many deletes have removed a session's row, counted under the
     /// listing turn (`found`).
     deletes: AtomicU64,
-}
-
-/// Keeps a session's `archiving` count raised while an archive is under way.
-struct ArchiveHold<'a>(&'a AtomicUsize);
-
-impl<'a> ArchiveHold<'a> {
-    fn raise(handle: &'a Handle) -> Self {
-        handle.archiving.fetch_add(1, Ordering::SeqCst);
-        ArchiveHold(&handle.archiving)
-    }
-}
-
-impl Drop for ArchiveHold<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
-    }
 }
 
 /// Whether the session is starting, a turn is running in it (one waiting
@@ -290,6 +270,7 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         Refusal::Running => {
             SessionError::InvalidState(format!("session {session_id} is running; stop it first"))
         }
+        Refusal::BeingArchived => send::being_archived(),
         // The run was announced ended, and Core's own wind-down stalled.
         Refusal::GaveUp => SessionError::Internal(format!(
             "session {session_id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
@@ -304,10 +285,22 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         | Refusal::RootWorkspace
         | Refusal::WorkspaceBusy
         | Refusal::WorkspaceHasSessions
+        | Refusal::NoSection
         | Refusal::SessionExists => SessionError::Internal(format!(
             "admission refused session {session_id} in workspace {workspace_id}: {refusal:?}"
         )),
     }
+}
+
+/// Stops `handle`'s backend and waits until it has ended and every line is
+/// projected, for a caller that holds the session's exclusive operation.
+/// One that is not running is left as it is.
+async fn stop_held(handle: &Handle) -> Result<(), SessionError> {
+    let Some(live) = handle.live() else {
+        return Ok(());
+    };
+    begin_stop(&live);
+    wait_finished(&live, STOP_TIMEOUT).await
 }
 
 /// The refusal for a request a delete under way holds back.
@@ -324,11 +317,6 @@ struct Handle {
     /// is stuck on a disk that hangs, however often the user tries again, and
     /// `session.send` refuses: the CLI has yet to copy the record.
     forking: Arc<AtomicBool>,
-    /// How many `session.set_archived { archived: true }` are between their
-    /// busy check and their mark. While any is, `session.send` refuses, so
-    /// no send starts after the check only to be stopped by the archive
-    /// (PROTO-CORE-API-R85).
-    archiving: AtomicUsize,
     id: String,
     backend: String,
     /// The workspace the session is in, which never changes.
@@ -729,7 +717,6 @@ impl Handle {
     ) -> Self {
         Handle {
             forking: Arc::default(),
-            archiving: AtomicUsize::new(0),
             id: row.id.clone(),
             backend: row.backend.clone(),
             workspace_id: row.workspace_id.clone(),
@@ -919,7 +906,6 @@ impl SessionManager {
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
             found_gate: None,
-            arrangement: tokio::sync::Mutex::new(()),
             listing: tokio::sync::Mutex::new(()),
             listing_in_flight: Arc::default(),
             deletes: AtomicU64::new(0),
@@ -1330,11 +1316,15 @@ impl SessionManager {
     pub async fn stop(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
         let _exclusive = self.exclusive(id).await?;
-        let Some(live) = handle.live() else {
-            return Ok(());
-        };
-        begin_stop(&live);
-        wait_finished(&live, STOP_TIMEOUT).await
+        stop_held(&handle).await
+    }
+
+    /// Refuses a message to a session that is being archived, as admission
+    /// says (PROTO-CORE-API-R85).
+    fn may_send(&self, handle: &Handle) -> Result<(), SessionError> {
+        self.admission
+            .may_send(&handle.id)
+            .map_err(|refusal| refused_session(refusal, &handle.workspace_id, &handle.id))
     }
 
     /// Stops every running session, for `core.shutdown`: all at once, then
@@ -1473,7 +1463,22 @@ impl SessionManager {
                 "the session's backend has not named it yet, so there is nothing to rename",
             )
         };
-        if let Some(live) = handle.live() {
+        // A stopped session's record is rewritten under the session's
+        // exclusive operation: a start under way is waited for, and none
+        // begins meanwhile, so the backend never starts on a record being
+        // rewritten. A live session is renamed through its backend, which
+        // needs no turn of Core's.
+        let (live, _exclusive) = loop {
+            if let Some(live) = handle.live() {
+                break (Some(live), None);
+            }
+            let exclusive = self.exclusive(id).await?;
+            // Still stopped, or started while this waited its turn.
+            if handle.live().is_none() {
+                break (None, Some(exclusive));
+            }
+        };
+        if let Some(live) = live {
             // A session still starting takes the rename once its backend is
             // ready, which for Claude Code is once the CLI has answered
             // `initialize` (PROTO-CLAUDE-CODE-STREAM-R36,
@@ -1575,12 +1580,26 @@ impl SessionManager {
     pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
-        // Raised before the busy check, and `session.send` reads it under the
-        // lock it sets `sending` with, while the check reads `sending`
-        // through that lock: either the check sees the send, or the send
-        // sees this archive and refuses. Lowered when this call returns.
-        let _archiving = archived.then(|| ArchiveHold::raise(&handle));
-        if archived {
+        // The session's exclusive operation, held from here to the mark:
+        // two marks of one session land in the store and in admission in
+        // the same order, and a `session.remove` (which is one too) is
+        // either finished, so that there is no session to mark, or waits
+        // for the mark.
+        let _exclusive = if archived {
+            // An archive is known to admission from when it is asked for,
+            // waiting its turn or under way, and `session.send` asks
+            // admission under the lock it sets `sending` with, while the
+            // busy check below reads `sending` through that lock: either
+            // the check sees the send, or the send sees this archive and
+            // refuses (PROTO-CORE-API-R85).
+            let command = Command::Archive {
+                session: id.to_string(),
+            };
+            let archiving = self
+                .admission
+                .command(command)
+                .await
+                .map_err(|refusal| refused_session(refusal, &handle.workspace_id, id))?;
             // Refused before the stop, so a busy session is left exactly as
             // it was (PROTO-CORE-API-R77).
             if in_turn(&handle) {
@@ -1589,14 +1608,11 @@ impl SessionManager {
                     format!("session {id} is starting or working; stop it before archiving it"),
                 ));
             }
-            self.stop(id).await?;
-        }
-        // Taken after the stop, which takes it itself. Held while marking,
-        // so two marks of one session land in the store and in memory in
-        // the same order, and a `session.remove` (which is one too) is
-        // either finished, so that there is no session to mark, or waits
-        // for the mark.
-        let _exclusive = self.exclusive(id).await?;
+            stop_held(&handle).await?;
+            archiving
+        } else {
+            self.exclusive(id).await?
+        };
         // Stored first, then kept in memory: a store that fails leaves both
         // as they were, so `session.list` never reports what a restart would
         // lose.
@@ -1617,13 +1633,32 @@ impl SessionManager {
         section_id: Option<Option<String>>,
     ) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
-        // As `set_archived`: a `session.remove` is either finished, so that
-        // there is no session to arrange, or waits for the change. A delete
-        // marks the session as its exclusive operation too, so the refusal
-        // below sees a mark made meanwhile.
-        let _exclusive = self.exclusive(id).await?;
+        // The session's exclusive operation, as `set_archived`: a
+        // `session.remove` is either finished, so that there is no session
+        // to arrange, or waits for the change. Admission also orders it
+        // against a `section.remove` of the section it moves the session
+        // into: one waits for the other, so the two land in the same order
+        // in the store and in admission's rows (PROTO-CORE-API-R39).
+        let command = Command::Arrange {
+            session: id.to_string(),
+            section: section_id.clone().flatten(),
+        };
+        let arranging = match self.admission.command(command).await {
+            Err(Refusal::NoSession) => return Err(SessionError::NotFound(id.to_string())),
+            answered => answered,
+        };
+        // A delete marks the session as its exclusive operation too, so
+        // this sees a mark made while the arrangement waited; and it is
+        // said before a section that does not exist is.
         self.refuse_if_deleting(&handle)?;
-        let _arrangement = self.arrangement.lock().await;
+        let _exclusive = match arranging {
+            Ok(arranging) => arranging,
+            Err(Refusal::NoSection) => {
+                let missing = section_id.flatten().unwrap_or_default();
+                return Err(SessionError::NoSection(missing));
+            }
+            Err(refusal) => return Err(refused_session(refusal, &handle.workspace_id, id)),
+        };
         // Stored first, then kept in memory, so `session.list` never reports
         // what a restart would lose.
         let stored = self
@@ -1643,14 +1678,19 @@ impl SessionManager {
     /// (PROTO-CORE-API-R39). Returns the section as it was; `None` when
     /// there is no such section.
     pub async fn remove_section(&self, id: &str) -> Result<Option<Section>, SessionError> {
-        let _arrangement = self.arrangement.lock().await;
-        let removed = self.store.delete_section(id.to_string()).await?;
-        if removed.is_some() {
-            // One step, while the arrangement is still held: no row is left
-            // naming the section.
-            let section = id.to_string();
-            self.admission.report(Report::SectionRemoved { section });
-        }
+        // Admission knows which sections there are, and holds this while
+        // an arrangement into the section is under way. A store that fails
+        // drops the removal, which leaves the section as it was.
+        let section = id.to_string();
+        let command = Command::RemoveSection {
+            section: section.clone(),
+        };
+        let Ok(removing) = self.admission.command(command).await else {
+            return Ok(None);
+        };
+        let removed = self.store.delete_section(section.clone()).await?;
+        // One step: no row is left naming the section.
+        removing.end(Report::SectionRemoved { section });
         Ok(removed)
     }
 
@@ -1780,6 +1820,7 @@ impl SessionManager {
     /// Marks the session's delete failed, for the user to try again.
     pub async fn mark_delete_failed(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
+        let _exclusive = self.exclusive(id).await?;
         self.store.set_session_delete_failed(id.to_string()).await?;
         self.wrote(&handle, RowChange::Deleting(Deleting::Failed))
     }
@@ -1847,6 +1888,9 @@ impl SessionManager {
     /// Takes effect on the session's next start.
     pub async fn set_mode(&self, id: &str, mode: String) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
+        // The session's exclusive operation, as any stored change takes:
+        // one that is gone is `not_found`, and nothing is written for it.
+        let _exclusive = self.exclusive(id).await?;
         self.store
             .set_session_mode(id.to_string(), mode.clone())
             .await?;
@@ -3591,6 +3635,7 @@ mod tests {
                 phase: crate::admission::WorkspacePhase::Ready,
             }],
             sessions: vec![row.clone()],
+            sections: Vec::new(),
         });
         let manager = SessionManager::new(
             store,
@@ -3853,6 +3898,151 @@ mod tests {
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 1);
         // One Ersa started is not theirs to take.
         assert!(manager.handle("s-gated").is_ok());
+    }
+
+    // verifies: ARCH-CORE-R14
+    // verifies: PROTO-CORE-API-R12
+    #[tokio::test]
+    async fn a_write_to_a_stopped_session_waits_for_its_exclusive_operation() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        store_gated(&manager).await;
+        type Write = fn(Arc<SessionManager>) -> tokio::task::JoinHandle<bool>;
+        let writes: [(&str, Write); 3] = [
+            ("a mode change", |manager| {
+                tokio::spawn(async move {
+                    let mode = "plan".to_string();
+                    manager.set_mode("s-gated", mode).await.is_ok()
+                })
+            }),
+            ("a delete's failed mark", |manager| {
+                tokio::spawn(async move { manager.mark_delete_failed("s-gated").await.is_ok() })
+            }),
+            // Its record is rewritten, so no start may begin meanwhile.
+            ("a rename", |manager| {
+                tokio::spawn(async move {
+                    let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+                    let found = |_: &str| Some(transport);
+                    // Whatever the adapter answers: it was asked.
+                    let _ = manager.set_title("s-gated", "Renamed", found).await;
+                    true
+                })
+            }),
+        ];
+        for (name, write) in writes {
+            // Something else has the session: a start, say.
+            let held = manager.exclusive("s-gated").await.unwrap();
+            let writing = write(Arc::clone(&manager));
+            // The write waits its turn, held in admission.
+            let waiting = async {
+                while manager.admission.snapshot().held().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            };
+            let waited = tokio::time::timeout(Duration::from_secs(5), waiting).await;
+            assert!(waited.is_ok(), "{name} did not wait");
+            let wanted = Command::BeginExclusive {
+                session: "s-gated".into(),
+            };
+            assert_eq!(manager.admission.snapshot().held(), [wanted], "{name}");
+            assert!(!writing.is_finished(), "{name}");
+            // With its turn it goes on, and lets go when it is done.
+            drop(held);
+            let done = tokio::time::timeout(Duration::from_secs(5), writing).await;
+            assert!(done.expect("ended in time").expect("joined"), "{name}");
+            let state = manager.admission.snapshot();
+            assert_eq!(state.session("s-gated").unwrap().exclusive, None, "{name}");
+        }
+        assert_eq!(
+            manager.get("s-gated").unwrap().mode.as_deref(),
+            Some("plan")
+        );
+    }
+
+    /// What admission holds, once it holds something.
+    async fn held_in(manager: &SessionManager) -> Vec<Command> {
+        let waiting = async {
+            loop {
+                let state = manager.admission.snapshot();
+                if !state.held().is_empty() {
+                    return state.held().to_vec();
+                }
+                tokio::task::yield_now().await;
+            }
+        };
+        let waited = tokio::time::timeout(Duration::from_secs(5), waiting).await;
+        waited.expect("a command is held in time")
+    }
+
+    // verifies: PROTO-CORE-API-R39
+    #[tokio::test]
+    async fn an_arrangement_into_a_section_and_the_section_s_removal_wait_for_each_other() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        store_gated(&manager).await;
+        let (name, key) = ("Later".to_string(), "later".to_string());
+        let section = manager.store.insert_section(name, key).await.unwrap().id;
+        manager.admission.report(Report::SectionStored {
+            section: section.clone(),
+        });
+        let into = |manager: Arc<SessionManager>, section: String| {
+            tokio::spawn(async move {
+                let section = Some(Some(section));
+                manager.arrange("s-gated", None, section).await
+            })
+        };
+
+        // A removal of the section is under way: an arrangement into it
+        // waits, named to admission with the section it moves into.
+        let remove = Command::RemoveSection {
+            section: section.clone(),
+        };
+        let removing = manager.admission.command(remove.clone()).await.unwrap();
+        let arranging = into(Arc::clone(&manager), section.clone());
+        let arrange = Command::Arrange {
+            session: "s-gated".into(),
+            section: Some(section.clone()),
+        };
+        let held = held_in(&manager).await;
+        assert_eq!(held.as_slice(), std::slice::from_ref(&arrange));
+        // The removal fails: the section stays, and the arrangement goes on.
+        drop(removing);
+        let arranged = arranging.await.unwrap().unwrap();
+        assert_eq!(arranged.section_id.as_ref(), Some(&section));
+
+        // An arrangement into it is under way: its removal waits, and then
+        // takes the session out of the section with the rest.
+        let arranging = manager.admission.command(arrange).await.unwrap();
+        let removing = tokio::spawn({
+            let (manager, section) = (Arc::clone(&manager), section.clone());
+            async move { manager.remove_section(&section).await }
+        });
+        assert_eq!(held_in(&manager).await, [remove]);
+        drop(arranging);
+        let removed = removing.await.unwrap().unwrap();
+        assert_eq!(removed.map(|removed| removed.id), Some(section.clone()));
+        assert_eq!(manager.get("s-gated").unwrap().section_id, None);
+        assert_eq!(manager.admission.snapshot().section(&section), None);
+        let stored = manager.store.session("s-gated".into()).await.unwrap();
+        assert_eq!(stored.and_then(|row| row.section_id), None);
+
+        // No such section now, for an arrangement or a removal.
+        let missing = into(Arc::clone(&manager), section.clone()).await.unwrap();
+        assert!(
+            matches!(missing, Err(SessionError::NoSection(_))),
+            "{missing:?}"
+        );
+        assert!(manager.remove_section(&section).await.unwrap().is_none());
+        // That the session is being deleted is said before that.
+        manager.mark_deleting("s-gated", false).await.unwrap();
+        let deleting = into(Arc::clone(&manager), section).await.unwrap();
+        let reason = ErrorReason::SessionDeleting;
+        assert!(
+            matches!(&deleting, Err(SessionError::Refused { reason: r, .. }) if *r == reason),
+            "{deleting:?}"
+        );
     }
 
     // verifies: PROTO-CORE-API-R71

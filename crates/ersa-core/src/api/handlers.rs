@@ -234,6 +234,8 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
         | Refusal::NoSession
         | Refusal::Closing
         | Refusal::Running
+        | Refusal::BeingArchived
+        | Refusal::NoSection
         | Refusal::GaveUp => ApiError::internal(format!("admission refused {named}: {refusal:?}")),
     }
 }

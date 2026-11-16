@@ -4,6 +4,7 @@
 use ersa_protocol::core_api::{Empty, IdParams, Section, SectionCreateParams, SectionRenameParams};
 
 use super::ApiError;
+use crate::admission::Report;
 use crate::persistence;
 use crate::sessions::SessionError;
 use crate::state::Core;
@@ -17,10 +18,16 @@ pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Section>, ApiError
 
 pub(super) async fn create(core: &Core, params: SectionCreateParams) -> Result<Section, ApiError> {
     let (name, key) = checked_name(&params.name)?;
-    core.store
+    let section = core
+        .store
         .insert_section(name, key)
         .await
-        .map_err(name_taken)
+        .map_err(name_taken)?;
+    // Told before the answer, so no client has an id admission has not.
+    core.admission.report(Report::SectionStored {
+        section: section.id.clone(),
+    });
+    Ok(section)
 }
 
 pub(super) async fn rename(core: &Core, params: SectionRenameParams) -> Result<Section, ApiError> {

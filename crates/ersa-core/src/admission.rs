@@ -93,13 +93,34 @@ pub struct SessionEntry {
     /// perhaps still waiting for a run that is winding down, before it
     /// takes the session's exclusive operation.
     pub removing: bool,
-    /// Whether its one exclusive operation is under way: a stop, a start,
-    /// a view being opened, an archive, an arrangement, a delete's mark, or
-    /// a removal once it goes on. A session has at most one, and another
-    /// asked for meanwhile waits.
-    pub exclusive: bool,
+    /// Its one exclusive operation, if one is under way: a stop, a start,
+    /// a view being opened, an archive, an arrangement, a write to its
+    /// row, a delete's mark, or a removal once it goes on. A session has at
+    /// most one, and another asked for meanwhile waits.
+    pub exclusive: Option<Exclusive>,
     /// Whether Core runs its backend.
     pub run: Run,
+}
+
+/// Which exclusive operation is under way on a session.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Exclusive {
+    /// An archive: no message is sent to the session meanwhile
+    /// (PROTO-CORE-API-R85).
+    Archive,
+    /// An arrangement, into section `into` when it moves the session into
+    /// one: that section is not removed meanwhile.
+    Arrange { into: Option<Id> },
+    /// Any other.
+    Other,
+}
+
+/// Whether a section is there, or on its way out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SectionPhase {
+    Present,
+    /// A `section.remove` of it is under way.
+    Removing,
 }
 
 impl SessionEntry {
@@ -127,6 +148,8 @@ pub struct State {
     projects: BTreeMap<Id, ProjectEntry>,
     workspaces: BTreeMap<Id, WorkspaceEntry>,
     sessions: BTreeMap<Id, SessionEntry>,
+    /// The sections the user groups sessions in.
+    sections: BTreeMap<Id, SectionPhase>,
     /// Whether Core is shutting down: from then nothing starts.
     closing: bool,
     /// Commands waiting for a report, in the order they arrived.
@@ -140,6 +163,8 @@ pub struct Existing {
     pub workspaces: Vec<ExistingWorkspace>,
     /// Each session's row.
     pub sessions: Vec<SessionRow>,
+    /// Each section's id.
+    pub sections: Vec<Id>,
 }
 
 #[derive(Clone, Debug)]
@@ -167,6 +192,9 @@ impl State {
             };
             state.workspaces.insert(workspace.id, entry);
         }
+        for section in existing.sections {
+            state.sections.insert(section, SectionPhase::Present);
+        }
         for row in existing.sessions {
             state.sessions.insert(
                 row.id.clone(),
@@ -175,7 +203,7 @@ impl State {
                     found: row.started_elsewhere,
                     row: Some(row),
                     removing: false,
-                    exclusive: false,
+                    exclusive: None,
                     run: Run::Stopped,
                 },
             );
@@ -213,6 +241,38 @@ impl State {
         self.sessions.iter()
     }
 
+    /// Section `id`'s phase; `None` when there is no such section.
+    pub fn section(&self, id: &str) -> Option<SectionPhase> {
+        self.sections.get(id).copied()
+    }
+
+    pub fn sections(&self) -> impl Iterator<Item = (&Id, &SectionPhase)> {
+        self.sections.iter()
+    }
+
+    /// Whether session `id` is being archived: an archive of it is under
+    /// way, or is waiting its turn. No message is sent to it meanwhile, so
+    /// none starts only to be stopped by the archive (PROTO-CORE-API-R85).
+    pub fn being_archived(&self, id: &str) -> bool {
+        let under_way = self
+            .sessions
+            .get(id)
+            .is_some_and(|entry| entry.exclusive == Some(Exclusive::Archive));
+        let waiting = self
+            .held
+            .iter()
+            .any(|command| matches!(command, Command::Archive { session } if session == id));
+        under_way || waiting
+    }
+
+    /// Whether an arrangement into section `id` is under way.
+    fn arranging_into(&self, id: &str) -> bool {
+        self.sessions.values().any(|entry| match &entry.exclusive {
+            Some(Exclusive::Arrange { into }) => into.as_deref() == Some(id),
+            Some(Exclusive::Archive | Exclusive::Other) | None => false,
+        })
+    }
+
     /// The commands waiting for a report, in the order they arrived.
     pub fn held(&self) -> &[Command] {
         &self.held
@@ -227,9 +287,9 @@ impl State {
     /// an exclusive operation under way, which may be a start: a removal
     /// waits to see what it comes to.
     fn has_busy_found_session(&self, workspace: &str) -> bool {
-        self.sessions
-            .values()
-            .any(|session| session.workspace == workspace && session.found && session.exclusive)
+        self.sessions.values().any(|session| {
+            session.workspace == workspace && session.found && session.exclusive.is_some()
+        })
     }
 
     /// Whether Core runs a session found in the backend's records in
@@ -371,6 +431,31 @@ pub enum Command {
     BeginExclusive {
         session: Id,
     },
+    /// A `session.set_archived` that archives: the session's exclusive
+    /// operation, as [`Command::BeginExclusive`]. From when it is asked
+    /// for, waiting or under way, no message is sent to the session.
+    Archive {
+        session: Id,
+    },
+    /// A `session.arrange`: the session's exclusive operation, as
+    /// [`Command::BeginExclusive`]. `section` is the section it moves the
+    /// session into, if it moves it into one: held while that section is
+    /// being removed, refused when there is no such section.
+    Arrange {
+        session: Id,
+        section: Option<Id>,
+    },
+    /// A `section.remove`: held while an arrangement into the section is
+    /// under way, so the two land in one order in the store and here
+    /// (PROTO-CORE-API-R39).
+    RemoveSection {
+        section: Id,
+    },
+    /// Asks whether a message may be sent to the session now: refused while
+    /// it is being archived. It begins nothing and is never held.
+    Send {
+        session: Id,
+    },
     /// The exclusive operation of a start (a resume, or a send to a stopped
     /// session): as [`Command::BeginExclusive`], and held while a run of
     /// the session is winding down, refused while one runs or Core is
@@ -408,6 +493,9 @@ pub enum Operation {
     DeleteSession(Id),
     RemoveSession(Id),
     Exclusive(Id),
+    Archive(Id),
+    Arrange(Id),
+    RemoveSection(Id),
     /// A session's run, from its launch until Core has let go of it.
     Run(Id),
 }
@@ -465,6 +553,10 @@ pub enum Report {
     RowWritten {
         session: Id,
         change: RowChange,
+    },
+    /// A new section is stored.
+    SectionStored {
+        section: Id,
     },
     /// The section is gone from the store, and with it from every session's
     /// row there.
@@ -556,6 +648,9 @@ pub enum Refusal {
     RootWorkspace,
     /// It is being made or removed.
     WorkspaceBusy,
+    /// The session is being archived: no message is sent to it.
+    BeingArchived,
+    NoSection,
     WorkspaceHasSessions,
     WorkspaceNotReady,
     /// A removal or a delete holds the workspace.
@@ -878,7 +973,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 found: *found,
                 row: None,
                 removing: false,
-                exclusive: false,
+                exclusive: None,
                 run: Run::Stopped,
             };
             state.sessions.insert(session.clone(), entry);
@@ -927,11 +1022,67 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             };
             // One at a time: the next waits for the one under way to end.
             // So does one asked of a session whose row is being stored.
-            if !entry.stored() || entry.exclusive {
+            if !entry.stored() || entry.exclusive.is_some() {
                 return Outcome::Held;
             }
-            entry.exclusive = true;
+            entry.exclusive = Some(Exclusive::Other);
             Outcome::Admitted(Operation::Exclusive(session.clone()))
+        }
+        Command::Archive { session } => {
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            // Its turn, as any exclusive operation's. A second archive
+            // waits for the first, and then finds the session archived.
+            if !entry.stored() || entry.exclusive.is_some() {
+                return Outcome::Held;
+            }
+            entry.exclusive = Some(Exclusive::Archive);
+            Outcome::Admitted(Operation::Archive(session.clone()))
+        }
+        Command::Arrange { session, section } => {
+            let target = section.as_ref().map(|id| state.sections.get(id).copied());
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            if !entry.stored() || entry.exclusive.is_some() {
+                return Outcome::Held;
+            }
+            match target {
+                // The section's removal lands first: this then finds none.
+                Some(Some(SectionPhase::Removing)) => return Outcome::Held,
+                Some(None) => return Outcome::Refused(Refusal::NoSection),
+                Some(Some(SectionPhase::Present)) | None => {}
+            }
+            let into = section.clone();
+            entry.exclusive = Some(Exclusive::Arrange { into });
+            Outcome::Admitted(Operation::Arrange(session.clone()))
+        }
+        Command::RemoveSection { section } => {
+            match state.sections.get(section) {
+                None => return Outcome::Refused(Refusal::NoSection),
+                // Another removal of it: this one then finds none.
+                Some(SectionPhase::Removing) => return Outcome::Held,
+                Some(SectionPhase::Present) => {}
+            }
+            // An arrangement into it lands first: this then takes the
+            // session out of the section with the rest.
+            if state.arranging_into(section) {
+                return Outcome::Held;
+            }
+            state
+                .sections
+                .insert(section.clone(), SectionPhase::Removing);
+            Outcome::Admitted(Operation::RemoveSection(section.clone()))
+        }
+        Command::Send { session } => {
+            if !state.sessions.contains_key(session) {
+                Outcome::Refused(Refusal::NoSession)
+            } else if state.being_archived(session) {
+                Outcome::Refused(Refusal::BeingArchived)
+            } else {
+                Outcome::Done
+            }
         }
         Command::BeginStart { session } => begin_after_run(state, session, true),
         Command::BeginRemoval { session } => begin_after_run(state, session, false),
@@ -982,7 +1133,7 @@ fn begin_after_run(state: &mut State, session: &Id, starts: bool) -> Outcome {
     let Some(entry) = state.sessions.get_mut(session) else {
         return Outcome::Refused(Refusal::NoSession);
     };
-    if !entry.stored() || entry.exclusive {
+    if !entry.stored() || entry.exclusive.is_some() {
         return Outcome::Held;
     }
     match entry.run {
@@ -993,7 +1144,7 @@ fn begin_after_run(state: &mut State, session: &Id, starts: bool) -> Outcome {
     if starts && closing {
         return Outcome::Refused(Refusal::Closing);
     }
-    entry.exclusive = true;
+    entry.exclusive = Some(Exclusive::Other);
     Outcome::Admitted(Operation::Exclusive(session.clone()))
 }
 
@@ -1114,7 +1265,16 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     && entry.workspace == row.workspace_id
                     && entry.found == row.started_elsewhere =>
             {
-                entry.row = Some(*row);
+                let mut row = *row;
+                // A section removed while the row was being stored took the
+                // row out of it in the store: a fork is stored in its
+                // original's section.
+                if let Some(section) = &row.section_id
+                    && !state.sections.contains_key(section)
+                {
+                    row.section_id = None;
+                }
+                entry.row = Some(row);
                 Outcome::Noted
             }
             Some(_) | None => Outcome::Stale,
@@ -1133,8 +1293,21 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 None => Outcome::Stale,
             }
         }
-        // One step, so no row is left naming a section that is gone.
+        Report::SectionStored { section } => match state.sections.entry(section) {
+            std::collections::btree_map::Entry::Vacant(vacant) => {
+                vacant.insert(SectionPhase::Present);
+                Outcome::Noted
+            }
+            std::collections::btree_map::Entry::Occupied(_) => Outcome::Stale,
+        },
+        // Said by the section's removal, and by nothing else. One step, so
+        // no row is left naming a section that is gone.
         Report::SectionRemoved { section } => {
+            match state.sections.get(&section) {
+                Some(SectionPhase::Removing) => {}
+                Some(SectionPhase::Present) | None => return Outcome::Stale,
+            }
+            state.sections.remove(&section);
             for row in state
                 .sessions
                 .values_mut()
@@ -1203,12 +1376,23 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 }
                 Some(_) | None => Outcome::Stale,
             },
-            Operation::Exclusive(session) => match state.sessions.get_mut(&session) {
-                Some(entry) if entry.exclusive => {
-                    entry.exclusive = false;
+            Operation::Exclusive(session) => end_exclusive(state, &session, |exclusive| {
+                matches!(exclusive, Exclusive::Other)
+            }),
+            Operation::Archive(session) => end_exclusive(state, &session, |exclusive| {
+                matches!(exclusive, Exclusive::Archive)
+            }),
+            Operation::Arrange(session) => end_exclusive(state, &session, |exclusive| {
+                matches!(exclusive, Exclusive::Arrange { .. })
+            }),
+            // Not removed, as far as anyone said: the section is still
+            // there.
+            Operation::RemoveSection(section) => match state.sections.get_mut(&section) {
+                Some(phase @ SectionPhase::Removing) => {
+                    *phase = SectionPhase::Present;
                     Outcome::Noted
                 }
-                Some(_) | None => Outcome::Stale,
+                Some(SectionPhase::Present) | None => Outcome::Stale,
             },
             // Core has let go of the run, however its task ended.
             Operation::Run(session) => match state.sessions.get_mut(&session) {
@@ -1247,6 +1431,17 @@ fn note(state: &mut State, report: Report) -> Outcome {
 
 /// Moves `workspace` to the phase `next` gives for the one it is in;
 /// `Stale` when there is no such workspace or `next` gives none.
+/// Ends `session`'s exclusive operation, when the one under way is `ours`.
+fn end_exclusive(state: &mut State, session: &str, ours: impl Fn(&Exclusive) -> bool) -> Outcome {
+    match state.sessions.get_mut(session) {
+        Some(entry) if entry.exclusive.as_ref().is_some_and(ours) => {
+            entry.exclusive = None;
+            Outcome::Noted
+        }
+        Some(_) | None => Outcome::Stale,
+    }
+}
+
 /// Applies one stored change to `row`.
 fn write(row: &mut SessionRow, change: RowChange) {
     match change {
@@ -1391,6 +1586,21 @@ impl Admission {
         };
         let outcome = self.within(session, command, limit).await;
         self.answered(outcome)
+    }
+
+    /// Asks whether a message may be sent to `session` now
+    /// ([`Command::Send`]). Never waits.
+    pub fn may_send(&self, session: &str) -> Result<(), Refusal> {
+        let command = Command::Send {
+            session: session.to_string(),
+        };
+        match self.apply(Input::Command(command)).0 {
+            Outcome::Done => Ok(()),
+            Outcome::Refused(refusal) => Err(refusal),
+            Outcome::Admitted(_) | Outcome::Held | Outcome::Noted | Outcome::Stale => {
+                unreachable!("a question about a send is answered or refused")
+            }
+        }
     }
 
     /// Asks whether Core runs `session` ([`Command::AwaitRunEnd`]), waiting
