@@ -8,8 +8,10 @@ use std::sync::Arc;
 
 use ersa_core::admission::{
     Admission, Command, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, Run, State, WorkspacePhase, step,
+    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, Setting, State, WorkspacePhase, step,
 };
+use ersa_core::persistence::SessionRow;
+use ersa_protocol::core_api::Deleting;
 
 const P: &str = "p1";
 const ROOT: &str = "w0";
@@ -46,6 +48,48 @@ fn existing() -> Existing {
             },
         ],
         sessions: Vec::new(),
+    }
+}
+
+/// Session `id`'s row as it is first stored, in workspace `workspace`;
+/// `found` when it was found in the backend's records.
+fn row(id: &str, workspace: &str, found: bool) -> SessionRow {
+    SessionRow {
+        id: id.into(),
+        workspace_id: workspace.into(),
+        host_id: "local".into(),
+        backend: "fake".into(),
+        backend_session_id: None,
+        mode: None,
+        model: None,
+        effort: None,
+        permission_mode: None,
+        model_at: None,
+        effort_at: None,
+        permission_mode_at: None,
+        cwd: format!("c:/work/{workspace}"),
+        archived: false,
+        deleting: None,
+        pinned: false,
+        section_id: None,
+        last_activity_at: None,
+        forked_from: None,
+        forked_through: None,
+        started_elsewhere: found,
+    }
+}
+
+/// The report that a session Ersa started in the isolated workspace has
+/// its row stored.
+fn session_stored(session: &str) -> Report {
+    stored_in(W, session, false)
+}
+
+/// The report that session `session` in workspace `workspace` has its row
+/// stored; `found` as [`row`] takes it.
+fn stored_in(workspace: &str, session: &str, found: bool) -> Report {
+    Report::SessionStored {
+        row: Box::new(row(session, workspace, found)),
     }
 }
 
@@ -151,9 +195,7 @@ fn a_found_session_and_its_workspaces_removal_in_both_orders() {
     // workspace.
     let mut state = world();
     command(&mut state, find_session(W, "s1"));
-    let stored = Report::SessionStored {
-        session: "s1".into(),
-    };
+    let stored = stored_in(W, "s1", true);
     report(&mut state, stored.clone());
     assert_eq!(
         command(&mut state, remove_workspace(W)),
@@ -216,12 +258,7 @@ fn a_found_session_and_its_projects_removal_in_both_orders() {
     // removal back, and goes with the project.
     let mut state = bare_project();
     command(&mut state, find_session(ROOT, "s1"));
-    report(
-        &mut state,
-        Report::SessionStored {
-            session: "s1".into(),
-        },
-    );
+    report(&mut state, stored_in(ROOT, "s1", true));
     assert_eq!(
         command(&mut state, remove_project()),
         admitted(Operation::RemoveProject(P.into()))
@@ -348,12 +385,7 @@ fn an_error_mark_set_while_a_removal_holds_the_workspace_stays_when_it_is_refuse
     // Only a found session is there, so the removal is admitted; its delete
     // then marks the workspace.
     command(&mut state, find_session(W, "s1"));
-    report(
-        &mut state,
-        Report::SessionStored {
-            session: "s1".into(),
-        },
-    );
+    report(&mut state, stored_in(W, "s1", true));
     command(&mut state, remove_workspace(W));
     report(
         &mut state,
@@ -698,12 +730,235 @@ fn remove_session(session: &str) -> Command {
     }
 }
 
+// -- A session's row (ARCH-CORE-R14) ----------------------------------------
+
+const SECTION: &str = "sec1";
+
+/// One of each kind of write to a session's row.
+fn writes(_session: &str) -> Vec<RowChange> {
+    vec![
+        RowChange::Archived(true),
+        RowChange::Arranged {
+            pinned: Some(true),
+            section: Some(Some(SECTION.into())),
+        },
+        RowChange::Deleting(Deleting::Running),
+        RowChange::Mode("plan".into()),
+        RowChange::BackendId("b-1".into()),
+        RowChange::LastActivity("2026-11-16T10:00:00Z".into()),
+        RowChange::Requested {
+            setting: Setting::Effort,
+            value: "high".into(),
+            at: "2026-11-16T09:00:00Z".into(),
+        },
+        RowChange::ForkLinkCleared,
+    ]
+}
+
+fn wrote(state: &mut State, session: &str, change: RowChange) -> Outcome {
+    let session = session.into();
+    report(state, Report::RowWritten { session, change })
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn a_session_s_row_enters_the_state_when_it_is_stored_and_leaves_with_the_session() {
+    let mut state = world();
+    command(&mut state, create_session(W, "s1"));
+    assert_eq!(state.row("s1"), None);
+    // Only the row of the session that was admitted, in its workspace.
+    assert_eq!(
+        report(&mut state, stored_in(ROOT, "s1", false)),
+        Outcome::Stale
+    );
+    assert_eq!(report(&mut state, stored_in(W, "s1", true)), Outcome::Stale);
+    assert_eq!(state.row("s1"), None);
+    assert_eq!(report(&mut state, session_stored("s1")), Outcome::Noted);
+    assert_eq!(state.row("s1"), Some(&row("s1", W, false)));
+
+    // A second report never replaces it.
+    wrote(&mut state, "s1", RowChange::Archived(true));
+    assert_eq!(report(&mut state, session_stored("s1")), Outcome::Stale);
+    assert!(state.row("s1").is_some_and(|row| row.archived));
+
+    let gone = Report::SessionGone {
+        session: "s1".into(),
+    };
+    assert_eq!(report(&mut state, gone), Outcome::Noted);
+    assert_eq!(state.row("s1"), None);
+
+    // What the store held when Core started is there from the start, and
+    // goes with its workspace.
+    let mut stored = existing();
+    let mut found = row("s2", W, true);
+    found.archived = true;
+    stored.sessions.push(found.clone());
+    let mut state = State::restored(stored);
+    assert_eq!(state.row("s2"), Some(&found));
+    command(&mut state, remove_workspace(W));
+    report(
+        &mut state,
+        Report::WorkspaceRemoved {
+            workspace: W.into(),
+        },
+    );
+    assert_eq!(state.row("s2"), None);
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn each_write_changes_the_row_it_names_and_no_other() {
+    let mut state = world_with(&["s1", "s2"]);
+    let untouched = row("s2", W, false);
+    let mut expected = row("s1", W, false);
+
+    assert_eq!(
+        wrote(&mut state, "s1", RowChange::Archived(true)),
+        Outcome::Noted
+    );
+    expected.archived = true;
+    assert_eq!(state.row("s1"), Some(&expected));
+
+    // Arranging changes only what is given.
+    let pin = RowChange::Arranged {
+        pinned: Some(true),
+        section: None,
+    };
+    wrote(&mut state, "s1", pin);
+    expected.pinned = true;
+    assert_eq!(state.row("s1"), Some(&expected));
+    let into_section = RowChange::Arranged {
+        pinned: None,
+        section: Some(Some(SECTION.into())),
+    };
+    wrote(&mut state, "s1", into_section);
+    expected.section_id = Some(SECTION.into());
+    assert_eq!(state.row("s1"), Some(&expected));
+    let unpin = RowChange::Arranged {
+        pinned: Some(false),
+        section: None,
+    };
+    wrote(&mut state, "s1", unpin);
+    expected.pinned = false;
+    assert_eq!(state.row("s1"), Some(&expected));
+    let out_of_it = RowChange::Arranged {
+        pinned: Some(true),
+        section: Some(None),
+    };
+    wrote(&mut state, "s1", out_of_it);
+    (expected.pinned, expected.section_id) = (true, None);
+    assert_eq!(state.row("s1"), Some(&expected));
+
+    wrote(&mut state, "s1", RowChange::Deleting(Deleting::Running));
+    expected.deleting = Some(Deleting::Running);
+    assert_eq!(state.row("s1"), Some(&expected));
+    wrote(&mut state, "s1", RowChange::Deleting(Deleting::Failed));
+    expected.deleting = Some(Deleting::Failed);
+    assert_eq!(state.row("s1"), Some(&expected));
+
+    wrote(&mut state, "s1", RowChange::Mode("plan".into()));
+    expected.mode = Some("plan".into());
+    wrote(&mut state, "s1", RowChange::BackendId("b-1".into()));
+    expected.backend_session_id = Some("b-1".into());
+    wrote(&mut state, "s1", RowChange::LastActivity("t1".into()));
+    expected.last_activity_at = Some("t1".into());
+    assert_eq!(state.row("s1"), Some(&expected));
+
+    // Each value Core gave the backend, with its own time.
+    for (setting, value, at) in [
+        (Setting::Model, "opus", "t2"),
+        (Setting::Effort, "high", "t3"),
+        (Setting::PermissionMode, "plan", "t4"),
+    ] {
+        let (value, at) = (value.to_string(), at.to_string());
+        wrote(
+            &mut state,
+            "s1",
+            RowChange::Requested { setting, value, at },
+        );
+    }
+    (expected.model, expected.model_at) = (Some("opus".into()), Some("t2".into()));
+    (expected.effort, expected.effort_at) = (Some("high".into()), Some("t3".into()));
+    expected.permission_mode = Some("plan".into());
+    expected.permission_mode_at = Some("t4".into());
+    assert_eq!(state.row("s1"), Some(&expected));
+
+    // A fork's link to what it was copied from.
+    let mut stored = existing();
+    let mut fork = row("s3", W, false);
+    fork.forked_from = Some("b-0".into());
+    fork.forked_through = Some("m-9".into());
+    stored.sessions.push(fork);
+    let mut forked = State::restored(stored);
+    wrote(&mut forked, "s3", RowChange::ForkLinkCleared);
+    assert_eq!(forked.row("s3"), Some(&row("s3", W, false)));
+
+    wrote(&mut state, "s1", RowChange::Archived(false));
+    expected.archived = false;
+    assert_eq!(state.row("s1"), Some(&expected));
+    assert_eq!(state.row("s2"), Some(&untouched));
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn a_write_for_a_session_that_is_gone_or_not_stored_yet_is_stale_and_keeps_nothing() {
+    let mut state = world_with(&["s1"]);
+    command(&mut state, create_session(W, "s2"));
+    let before = state.clone();
+    for session in ["s2", "s9"] {
+        for change in writes(session) {
+            assert_eq!(wrote(&mut state, session, change), Outcome::Stale);
+        }
+    }
+    assert_eq!(state, before);
+
+    // Gone since: the row does not come back with a late write.
+    let gone = Report::SessionGone {
+        session: "s1".into(),
+    };
+    report(&mut state, gone);
+    let before = state.clone();
+    assert_eq!(
+        wrote(&mut state, "s1", RowChange::Archived(true)),
+        Outcome::Stale
+    );
+    assert_eq!(state, before);
+}
+
+// verifies: PROTO-CORE-API-R39
+#[test]
+fn a_section_that_is_removed_leaves_every_row_that_named_it_and_no_other() {
+    let mut stored = existing();
+    for (id, section) in [("s1", Some(SECTION)), ("s2", Some("sec2")), ("s3", None)] {
+        let mut row = row(id, W, false);
+        row.section_id = section.map(str::to_string);
+        row.pinned = true;
+        stored.sessions.push(row);
+    }
+    let mut also = row("s4", ROOT, true);
+    also.section_id = Some(SECTION.into());
+    stored.sessions.push(also);
+    let mut state = State::restored(stored);
+
+    let removed = Report::SectionRemoved {
+        section: SECTION.into(),
+    };
+    assert_eq!(report(&mut state, removed), Outcome::Noted);
+    let section = |state: &State, id: &str| state.row(id).and_then(|row| row.section_id.clone());
+    assert_eq!(section(&state, "s1"), None);
+    assert_eq!(section(&state, "s4"), None);
+    assert_eq!(section(&state, "s2"), Some("sec2".into()));
+    assert_eq!(section(&state, "s3"), None);
+    // Nothing else about a row changes.
+    assert!(state.row("s1").is_some_and(|row| row.pinned));
+}
+
 /// [`world`] with `sessions` Ersa started, stored, in the isolated
 /// workspace.
 fn world_with(sessions: &[&str]) -> State {
     let mut existing = existing();
     for session in sessions {
-        existing.sessions.push(((*session).into(), W.into(), false));
+        existing.sessions.push(row(session, W, false));
     }
     State::restored(existing)
 }
@@ -758,12 +1013,7 @@ fn what_was_admitted_before_a_delete_is_seen_by_it() {
     command(&mut state, create_session(W, "s2"));
     assert_eq!(command(&mut state, delete_session("s1")), Outcome::Held);
     assert!(!state.workspace_held(W));
-    let stored = step(
-        &mut state,
-        Input::Report(Report::SessionStored {
-            session: "s2".into(),
-        }),
-    );
+    let stored = step(&mut state, Input::Report(session_stored("s2")));
     assert_eq!(
         stored.released,
         [(0, admitted(Operation::DeleteSession("s1".into())))]
@@ -833,9 +1083,7 @@ fn a_delete_and_a_removal_of_its_workspace_or_project_in_both_orders() {
     // removal is not refused for sessions: it is busy while the delete
     // holds the workspace.
     let mut found_in_isolated = existing();
-    found_in_isolated
-        .sessions
-        .push(("s1".into(), W.into(), true));
+    found_in_isolated.sessions.push(row("s1", W, true));
     let mut state = State::restored(found_in_isolated.clone());
     command(&mut state, delete_session("s1"));
     assert_eq!(
@@ -853,9 +1101,7 @@ fn a_delete_and_a_removal_of_its_workspace_or_project_in_both_orders() {
     // The same in a project's own folder.
     let mut found_in_root = existing();
     found_in_root.workspaces.truncate(1);
-    found_in_root
-        .sessions
-        .push(("s1".into(), ROOT.into(), true));
+    found_in_root.sessions.push(row("s1", ROOT, true));
     let mut state = State::restored(found_in_root.clone());
     command(&mut state, delete_session("s1"));
     assert_eq!(
@@ -979,12 +1225,7 @@ fn an_operation_asked_of_a_session_still_being_stored_waits_for_its_row() {
     let mut state = world();
     command(&mut state, create_session(W, "s1"));
     assert_eq!(command(&mut state, begin_exclusive("s1")), Outcome::Held);
-    let stored = step(
-        &mut state,
-        Input::Report(Report::SessionStored {
-            session: "s1".into(),
-        }),
-    );
+    let stored = step(&mut state, Input::Report(session_stored("s1")));
     assert_eq!(
         stored.released,
         [(0, admitted(Operation::Exclusive("s1".into())))]
@@ -1284,7 +1525,7 @@ fn a_stop_waits_for_a_start_and_a_start_and_a_view_opening_wait_for_each_other()
 /// isolated workspace.
 fn world_with_found() -> State {
     let mut existing = existing();
-    existing.sessions.push(("s1".into(), W.into(), true));
+    existing.sessions.push(row("s1", W, true));
     State::restored(existing)
 }
 
@@ -1348,8 +1589,8 @@ fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
 
     // Any one of several found there holds it back.
     let mut two_found = existing();
-    two_found.sessions.push(("s1".into(), W.into(), true));
-    two_found.sessions.push(("s2".into(), W.into(), true));
+    two_found.sessions.push(row("s1", W, true));
+    two_found.sessions.push(row("s2", W, true));
     let mut state = State::restored(two_found);
     command(&mut state, launch("s2"));
     assert_eq!(
@@ -1360,9 +1601,7 @@ fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
     // The same for a project and a session found in its own folder.
     let mut found_in_root = existing();
     found_in_root.workspaces.truncate(1);
-    found_in_root
-        .sessions
-        .push(("s1".into(), ROOT.into(), true));
+    found_in_root.sessions.push(row("s1", ROOT, true));
     let mut state = State::restored(found_in_root.clone());
     command(&mut state, launch("s1"));
     assert_eq!(
@@ -1416,6 +1655,9 @@ fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
     }));
 
     let mut reports = vec![
+        Report::SectionRemoved {
+            section: SECTION.into(),
+        },
         Report::ProjectStored { project: P.into() },
         Report::ProjectRemoved { project: P.into() },
         Report::ProjectRemovalRefused { project: P.into() },
@@ -1457,10 +1699,21 @@ fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
     }
     for &session in sessions {
         let session = session.to_string();
+        // Its row, as any of the commands that admit it would store it.
+        for workspace in workspaces {
+            for found in [false, true] {
+                reports.push(stored_in(workspace, &session, found));
+            }
+        }
+        reports.extend(
+            writes(&session)
+                .into_iter()
+                .map(|change| Report::RowWritten {
+                    session: session.clone(),
+                    change,
+                }),
+        );
         reports.extend([
-            Report::SessionStored {
-                session: session.clone(),
-            },
             Report::SessionGone {
                 session: session.clone(),
             },
@@ -1502,6 +1755,12 @@ fn check_state(state: &State) {
             state.workspace(&session.workspace).is_some(),
             "session {id} is in no workspace: {state:#?}"
         );
+        // A row is the row of the session it is kept for.
+        if let Some(row) = &session.row {
+            let named = (&row.id, &row.workspace_id, row.started_elsewhere);
+            let kept = (id, &session.workspace, session.found);
+            assert_eq!(named, kept, "{state:#?}");
+        }
     }
     for (id, workspace) in state.workspaces() {
         let project = state.project(&workspace.project);
@@ -1587,7 +1846,7 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
         }
     }
     for (id, session) in state.sessions() {
-        if !session.stored {
+        if !session.stored() {
             reports.push(Report::Ended(Operation::CreateSession(id.clone())));
         }
         if session.removing {
@@ -1729,6 +1988,28 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
 /// and from [`world`], checking each state and each step, and returns the
 /// states. States with more than `held` commands held are not explored
 /// further.
+/// Whether `before` and `after` differ in nothing but the rows of the
+/// sessions `changed` names.
+fn same_but_rows(before: &State, after: &State, changed: impl Fn(&str) -> bool) -> bool {
+    let masked = |state: &State| {
+        let sessions = state.sessions().map(|(id, entry)| {
+            let mut entry = entry.clone();
+            if changed(id) {
+                entry.row = entry
+                    .row
+                    .map(|row| self::row(&row.id, &row.workspace_id, false));
+            }
+            (id.clone(), entry)
+        });
+        sessions.collect::<Vec<_>>()
+    };
+    masked(before) == masked(after)
+        && before.projects().eq(after.projects())
+        && before.workspaces().eq(after.workspaces())
+        && before.held() == after.held()
+        && before.closing() == after.closing()
+}
+
 fn explore(sessions: &[&str], held: usize, runs: bool) -> HashSet<State> {
     let inputs = every_input(sessions, runs);
     let mut seen: HashSet<State> = HashSet::new();
@@ -1754,6 +2035,27 @@ fn explore(sessions: &[&str], held: usize, runs: bool) -> HashSet<State> {
                     assert!(stepped.released.is_empty(), "{input:?}");
                 }
                 Outcome::Admitted(_) | Outcome::Noted => {}
+            }
+            // A write changes one session's row and nothing else, answers no
+            // held command, and no row of the table reads a row's contents:
+            // the state it leads to decides every input as this one does, so
+            // it is checked here and not explored again.
+            match input {
+                Input::Report(Report::RowWritten { session, .. }) => {
+                    assert!(stepped.released.is_empty(), "{input:?}");
+                    assert!(
+                        same_but_rows(&before, &after, |id| id == session),
+                        "{input:?}"
+                    );
+                    check_state(&after);
+                    continue;
+                }
+                Input::Report(Report::SectionRemoved { .. }) => {
+                    assert!(stepped.released.is_empty(), "{input:?}");
+                    assert!(same_but_rows(&before, &after, |_| true), "{input:?}");
+                    continue;
+                }
+                Input::Command(_) | Input::Report(_) => {}
             }
             if after.held().len() <= held && seen.insert(after.clone()) {
                 queue.push_back(after);
@@ -1819,7 +2121,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     assert!(
         pairs
             .iter()
-            .any(|s| s.sessions().filter(|(_, session)| session.stored).count() == 2)
+            .any(|s| s.sessions().filter(|(_, session)| session.stored()).count() == 2)
     );
 }
 
@@ -1864,10 +2166,13 @@ async fn an_operation_dropped_without_a_report_is_ended() {
 
     // One that reported its end is not ended again when dropped.
     let session = admit(&admission, create_session(ROOT, "s2")).await;
-    session.end(Report::SessionStored {
-        session: "s2".into(),
-    });
-    assert!(admission.snapshot().session("s2").is_some_and(|s| s.stored));
+    session.end(stored_in(ROOT, "s2", false));
+    assert!(
+        admission
+            .snapshot()
+            .session("s2")
+            .is_some_and(|s| s.stored())
+    );
 }
 
 // verifies: ARCH-CORE-R17
@@ -1900,7 +2205,7 @@ async fn a_held_command_is_answered_when_what_it_waits_for_reports() {
 async fn a_delete_whose_task_ends_without_a_report_releases_its_workspace() {
     let admission = Arc::new(Admission::default());
     let mut stored = existing();
-    stored.sessions.push(("s1".into(), W.into(), false));
+    stored.sessions.push(row("s1", W, false));
     admission.restore(stored);
 
     let deleting = admit(&admission, delete_session("s1")).await;
@@ -1923,7 +2228,7 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     use std::time::Duration;
     let admission = Arc::new(Admission::default());
     let mut stored = existing();
-    stored.sessions.push(("s1".into(), W.into(), false));
+    stored.sessions.push(row("s1", W, false));
     admission.restore(stored);
     // A run that was announced ended and that Core never lets go of.
     let _run = admission.launch("s1").expect("launched");

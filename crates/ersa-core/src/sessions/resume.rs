@@ -58,7 +58,7 @@ impl SessionManager {
     pub async fn resume(&self, id: &str, how: Resumption) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         self.start_again(&handle, how, FolderChecked::No).await?;
-        Ok(handle.describe())
+        handle.session()
     }
 
     /// Whether the session's backend is running, once a run that has ended
@@ -78,10 +78,7 @@ impl SessionManager {
         match self.admission.run_settled(&handle.id, STOP_TIMEOUT).await {
             Ok(()) => Ok(false),
             Err(Refusal::Running) => Ok(true),
-            Err(refusal) => {
-                let workspace_id = lock(&handle.row).workspace_id.clone();
-                Err(refused_session(refusal, &workspace_id, &handle.id))
-            }
+            Err(refusal) => Err(refused_session(refusal, &handle.workspace_id, &handle.id)),
         }
     }
 
@@ -102,7 +99,7 @@ impl SessionManager {
         // the stop limit and holding nothing itself. A session that runs
         // needs no start; nothing starts once Core is shutting down; one
         // that is gone answers `not_found`.
-        let workspace_id = lock(&handle.row).workspace_id.clone();
+        let workspace_id = handle.workspace_id.clone();
         let begun = self.admission.begin_start(&handle.id, STOP_TIMEOUT).await;
         let _exclusive = match begun {
             Ok(exclusive) => exclusive,
@@ -115,7 +112,7 @@ impl SessionManager {
             return Ok(());
         }
         self.refuse_if_deleting(handle)?;
-        let row = lock(&handle.row).clone();
+        let row = handle.row()?;
         self.refuse_if_claimed(&row.workspace_id)?;
         if folder == FolderChecked::No {
             check_folder(handle).await?;
@@ -131,7 +128,7 @@ impl SessionManager {
             self.store
                 .set_session_archived(handle.id.clone(), false)
                 .await?;
-            lock(&handle.row).archived = false;
+            self.wrote(handle, RowChange::Archived(false))?;
         }
 
         // The view clients are reading goes on, so they see the new run
@@ -243,7 +240,7 @@ impl SessionManager {
                 self.store
                     .set_backend_session_id(handle.id.clone(), id.clone())
                     .await?;
-                lock(&handle.row).backend_session_id = Some(id.clone());
+                self.wrote(handle, RowChange::BackendId(id.clone()))?;
             }
             return Ok(HowToStart {
                 backend_session_id: chosen,
@@ -307,7 +304,10 @@ impl SessionManager {
     fn session_with_backend_id(&self, backend_id: &str) -> Option<String> {
         lock(&self.sessions)
             .values()
-            .find(|handle| lock(&handle.row).backend_session_id.as_deref() == Some(backend_id))
+            .find(|handle| {
+                let row = handle.stored_row();
+                row.and_then(|row| row.backend_session_id).as_deref() == Some(backend_id)
+            })
             .map(|handle| handle.id.clone())
     }
 }
@@ -322,7 +322,7 @@ pub(super) type FolderLook = Result<bool, String>;
 /// session at a time: a look stuck on a drive that stopped answering is
 /// joined, never started again beside it ([`read_once`]).
 pub(super) async fn check_folder(handle: &Handle) -> Result<(), SessionError> {
-    let cwd = lock(&handle.row).cwd.clone();
+    let cwd = handle.row()?.cwd;
     let path = PathBuf::from(&cwd);
     let start = move || {
         tokio::task::spawn_blocking(move || match std::fs::metadata(&path) {
