@@ -23,11 +23,11 @@ use std::time::Duration;
 
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
-    ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision,
-    Process, ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent,
-    RecordSummary, RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules,
-    Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, ConversationEnd,
+    Direction, ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage,
+    PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, QuestionReply,
+    RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings, Removal, Requested,
+    SessionConfig, SessionControl, TitleRules, Transport, async_trait,
 };
 use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::PermissionBehavior;
@@ -672,13 +672,7 @@ impl Adapter for ClaudeAdapter {
         };
         let id = backend_session_id.to_string();
         let check = tokio::task::spawn_blocking(move || record::live_session(&home, &id)).await;
-        match check {
-            Ok(LiveCheck::NotOpen) => OpenElsewhere::No,
-            Ok(LiveCheck::Open(open)) => OpenElsewhere::Yes {
-                pids: open.iter().map(|live| live.pid).collect(),
-            },
-            Ok(LiveCheck::Unknown { .. }) | Err(_) => OpenElsewhere::Unknown,
-        }
+        check.map_or(OpenElsewhere::Unknown, open_elsewhere)
     }
 
     /// Deletes the session's record file and the folder of the same name
@@ -687,35 +681,52 @@ impl Adapter for ClaudeAdapter {
     /// (PROTO-CLAUDE-CODE-STREAM-R37). Core stops its own process for the
     /// session first, and a CLI removes its registry file as it exits, so any
     /// process still listed is another one. The registry is read and the
-    /// files deleted on one thread, one straight after the other.
+    /// files deleted on one thread, one straight after the other, asking
+    /// `call_off` before each deletion (PROTO-CLAUDE-CODE-STREAM-R55).
     async fn delete_record(
         &self,
         _transport: Arc<dyn Transport>,
         cwd: &str,
         backend_session_id: &str,
+        call_off: &CallOff,
     ) -> Result<RecordDeletion, AdapterError> {
         let home = self.claude_home()?;
         let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        let call_off = call_off.clone();
         let deletion = blocking(move || {
-            match record::live_session(&home, &id) {
-                LiveCheck::NotOpen => {}
-                LiveCheck::Open(open) => {
-                    return Ok(RecordDeletion::Refused(OpenElsewhere::Yes {
-                        pids: open.iter().map(|live| live.pid).collect(),
-                    }));
-                }
-                LiveCheck::Unknown { .. } => {
-                    return Ok(RecordDeletion::Refused(OpenElsewhere::Unknown));
-                }
+            match open_elsewhere(record::live_session(&home, &id)) {
+                OpenElsewhere::No => {}
+                refused => return Ok(RecordDeletion::Refused(refused)),
             }
-            record::delete_record(&home, &cwd, &id)?;
-            Ok(RecordDeletion::Deleted)
+            let stop = || call_off.is_called_off();
+            match record::delete_record(&home, &cwd, &id, &stop)? {
+                Removal::Removed => Ok(RecordDeletion::Deleted),
+                // Core has given up on the deletion and told the user the
+                // record is kept; nobody reads this answer.
+                Removal::CalledOff => Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "the deletion was called off",
+                )),
+            }
         })
         .await?;
         if deletion == RecordDeletion::Deleted {
             self.records.forget(backend_session_id);
         }
         Ok(deletion)
+    }
+}
+
+/// What the live-session registry's answer says about whether another
+/// process has the session open; an answer it cannot give is unknown,
+/// never "not open".
+fn open_elsewhere(check: LiveCheck) -> OpenElsewhere {
+    match check {
+        LiveCheck::NotOpen => OpenElsewhere::No,
+        LiveCheck::Open(open) => OpenElsewhere::Yes {
+            pids: open.iter().map(|live| live.pid).collect(),
+        },
+        LiveCheck::Unknown { .. } => OpenElsewhere::Unknown,
     }
 }
 
