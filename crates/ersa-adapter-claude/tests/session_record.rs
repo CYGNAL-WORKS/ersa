@@ -104,7 +104,7 @@ fn events_read_from_a_session_record_carry_no_turn_output_tokens() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
 // verifies: PROTO-CLAUDE-CODE-STREAM-R23
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn record_messages_project_to_the_same_events_as_the_stream_messages() {
     let records = record_fixtures();
@@ -173,22 +173,6 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             .filter_map(|e| e["uuid"].as_str().map(String::from))
             .collect();
         for (uuid, events) in live {
-            // A compaction that kept a preserved segment: the entries after
-            // it chain to the segment, not to the summary, so the record
-            // reader, which follows the chain, never reaches the summary
-            // (follow-up in #398's pull request).
-            if (stream.name.as_str(), uuid.as_str())
-                == (
-                    "2.1.316/44-context-usage",
-                    "d6ad44a0-b4d7-40d9-80fe-03e6b14a3198",
-                )
-            {
-                assert!(
-                    record_kinds.contains_key(&uuid) && !from_record.contains_key(&uuid),
-                    "fixture 44's compaction summary now projects from the record"
-                );
-                continue;
-            }
             let kind = record_kinds
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
@@ -257,7 +241,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             // output) is a passthrough on the stream, which carries no user
             // message of Ersa's (R43), and a `system` user message from the
             // record. Which one live should show is open (inbox, #311).
-            const LIVE_DIFFERS: [(&str, &str); 6] = [
+            const LIVE_DIFFERS: [(&str, &str); 7] = [
                 (
                     "2.1.316/24-interrupt-with-waiting",
                     "81ed5a84-2659-408a-8579-9fd3bd5e552a",
@@ -277,6 +261,10 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 (
                     "2.1.316/27-compact-between-turns",
                     "4a38e294-a743-40c9-88f3-5bb34f74eaae",
+                ),
+                (
+                    "2.1.316/44-context-usage",
+                    "d6ad44a0-b4d7-40d9-80fe-03e6b14a3198",
                 ),
                 (
                     "2.1.316/46-context-usage-during-compact",
@@ -402,7 +390,7 @@ fn texts(events: &[Event]) -> Vec<String> {
         .collect()
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn only_the_branch_that_ends_the_record_is_projected() {
     // A prompt, a reply, a rewind to the first prompt with an edited second
@@ -438,7 +426,7 @@ fn only_the_branch_that_ends_the_record_is_projected() {
     );
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_damaged_line_mid_record_loses_no_history_silently() {
     // The CLI crashed mid-write once; later entries chain through the entry
@@ -468,7 +456,7 @@ fn a_damaged_line_mid_record_loses_no_history_silently() {
     assert_eq!(errors, 2, "{events:?}");
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn entries_that_form_no_chain_are_shown_in_file_order_with_an_error() {
     // Two entries naming each other: a cycle, no leaf. A subagent's and a
@@ -502,7 +490,7 @@ fn an_entry_written_twice_is_projected_once() {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn parallel_tool_calls_all_stay_in_the_conversation() {
     // Two Read calls in one model message: 2.1.316 chains them one after the
@@ -541,7 +529,7 @@ fn parallel_tool_calls_all_stay_in_the_conversation() {
     assert_eq!(recorded, live);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_compaction_keeps_the_history_before_it() {
     let entries = [
@@ -571,6 +559,101 @@ fn a_compaction_keeps_the_history_before_it() {
             ..
         })
     ));
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
+#[test]
+fn a_compaction_that_keeps_a_segment_shows_its_summary_once() {
+    // As fixture 2.1.316/44 records it: the entries after the compaction
+    // chain to the kept segment's tail, not to the summary, and only the
+    // boundary's `preservedSegment` names the summary (its anchor).
+    let entries = [
+        prompt("u1", None, "Before"),
+        reply("a1", "u1", "msg_1", "Old"),
+        prompt("k1", Some("a1"), "Kept one"),
+        prompt("k2", Some("k1"), "Kept two"),
+        json!({"type": "system", "subtype": "compact_boundary", "uuid": "c1",
+            "parentUuid": null, "logicalParentUuid": "k2", "isSidechain": false,
+            "compactMetadata": {"preservedSegment":
+                {"headUuid": "k1", "anchorUuid": "s1", "tailUuid": "k2"}}}),
+        json!({"type": "user", "uuid": "s1", "parentUuid": "c1", "isSidechain": false,
+            "isCompactSummary": true, "message": {"role": "user", "content": "Summary"}}),
+        prompt("u2", Some("k2"), "After"),
+        reply("a2", "u2", "msg_2", "New"),
+    ];
+    let events = events_of(&entries);
+    assert_eq!(
+        texts(&events),
+        [
+            "user: Before",
+            "assistant: Old",
+            "user: Kept one",
+            "user: Kept two",
+            "user: Summary",
+            "user: After",
+            "assistant: New",
+        ]
+    );
+    assert!(matches!(
+        &events[4],
+        Event::UserMessage(UserMessage {
+            origin: MessageOrigin::System,
+            ..
+        })
+    ));
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
+#[test]
+fn an_edit_inside_a_kept_segment_leaves_the_old_entry_out() {
+    // After the compaction, the person rewound into the kept segment and
+    // edited its second entry: the old one is on an abandoned branch.
+    let entries = [
+        prompt("u1", None, "Before"),
+        prompt("k1", Some("u1"), "Kept one"),
+        prompt("k2", Some("k1"), "Kept two"),
+        json!({"type": "system", "subtype": "compact_boundary", "uuid": "c1",
+            "parentUuid": null, "logicalParentUuid": "k2", "isSidechain": false,
+            "compactMetadata": {"preservedSegment":
+                {"headUuid": "k1", "anchorUuid": "s1", "tailUuid": "k2"}}}),
+        json!({"type": "user", "uuid": "s1", "parentUuid": "c1", "isSidechain": false,
+            "isCompactSummary": true, "message": {"role": "user", "content": "Summary"}}),
+        prompt("u2", Some("k2"), "After"),
+        prompt("k2b", Some("k1"), "Kept two, edited"),
+    ];
+    assert_eq!(
+        texts(&events_of(&entries)),
+        [
+            "user: Before",
+            "user: Kept one",
+            "user: Summary",
+            "user: Kept two, edited"
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
+#[test]
+fn a_kept_segment_whose_summary_is_missing_still_keeps_its_history() {
+    let entries = [
+        prompt("u1", None, "Before"),
+        prompt("k1", Some("u1"), "Kept"),
+        json!({"type": "system", "subtype": "compact_boundary", "uuid": "c1",
+            "parentUuid": null, "logicalParentUuid": "k1", "isSidechain": false,
+            "compactMetadata": {"preservedSegment":
+                {"headUuid": "k1", "anchorUuid": "gone", "tailUuid": "k1"}}}),
+        prompt("u2", Some("k1"), "After"),
+    ];
+    let events = project_record(&record(&entries));
+    assert!(
+        !events.iter().any(|e| matches!(e.event, Event::Error(_))),
+        "{events:?}"
+    );
+    let events: Vec<Event> = events.into_iter().map(|e| e.event).collect();
+    assert_eq!(
+        texts(&events),
+        ["user: Before", "user: Kept", "user: After"]
+    );
 }
 
 #[test]
@@ -1014,7 +1097,7 @@ fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
 }
 
 /// Whether a stream line is a subagent's own message. Its entries are a
-/// sidechain, kept outside the conversation's record (R20), so the record has
+/// sidechain, kept outside the conversation's record (R78), so the record has
 /// no match for it.
 fn from_a_subagent(line: &Value) -> bool {
     line["parent_tool_use_id"].is_string()
@@ -1598,7 +1681,7 @@ fn a_message_taken_in_mid_turn_keeps_its_attachments_when_read_back() {
     assert_eq!(events[at].ts.as_deref(), Some("2026-11-15T22:01:40.121Z"));
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+// verifies: PROTO-CLAUDE-CODE-STREAM-R78
 #[test]
 fn a_message_taken_in_mid_turn_on_an_abandoned_branch_is_not_read_back() {
     // A message taken in part way through the first reply's turn, then a
