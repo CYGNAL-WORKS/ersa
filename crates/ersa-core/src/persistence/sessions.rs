@@ -65,7 +65,7 @@ pub struct SessionRow {
     /// Whether the session was started in the backend's own tools and found
     /// in its records rather than started in Ersa (FLOW-RESUME-SESSION-R12):
     /// such a session leaves the list once its record is gone (R06), and is
-    /// forgotten with its workspace (R09).
+    /// forgotten with its workspace (R13).
     pub started_elsewhere: bool,
 }
 
@@ -309,9 +309,7 @@ impl Store {
     pub async fn sessions_counted_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
         self.call(move |conn| {
             let mut statement = conn.prepare(
-                "SELECT id FROM sessions
-                 WHERE workspace_id = ?1 AND deleting IS NULL AND started_elsewhere = 0
-                 ORDER BY id",
+                "SELECT id FROM sessions WHERE workspace_id = ?1 AND deleting IS NULL ORDER BY id",
             )?;
             let ids = statement
                 .query_map([workspace_id], |row| row.get(0))?
@@ -393,9 +391,6 @@ impl Store {
             let tx = conn.transaction()?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", [&id])?;
             if let Some(workspace_id) = workspace_id {
-                // Sessions found in the backend's records go with the
-                // workspace, their records left (FLOW-RESUME-SESSION-R09).
-                forget_found_sessions_unless_others(&tx, &workspace_id)?;
                 tx.execute(
                     "DELETE FROM workspaces WHERE id = ?1
                      AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ?1)",
@@ -420,7 +415,7 @@ impl Store {
 
 /// Forgets the sessions found in the backend's records for workspace
 /// `workspace_id`'s folder, once no session Ersa started is left in it, so
-/// the workspace can go: they never hold it back (FLOW-RESUME-SESSION-R09),
+/// the workspace can go: they never hold it back (FLOW-RESUME-SESSION-R13),
 /// and their records are the backend's, left as they are.
 pub(super) fn forget_found_sessions_unless_others(
     conn: &Connection,

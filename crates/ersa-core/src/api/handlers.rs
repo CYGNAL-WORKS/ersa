@@ -369,7 +369,7 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
             }
             WorkspaceKind::Root => {
                 // Sessions started in the backend's own tools don't hold it
-                // back unless Core is running one (FLOW-RESUME-SESSION-R09).
+                // back unless Core is running one (FLOW-RESUME-SESSION-R13, R14).
                 if !core
                     .store
                     .sessions_in_workspace(workspace.id.clone())
@@ -452,16 +452,12 @@ pub(super) async fn changes_of(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
-    let mut sessions = core
+    // A session started in the backend's own tools that the list holds
+    // counts too: it uses the workspace like any other (FLOW-ARCHIVE-DELETE-SESSION).
+    let sessions = core
         .store
         .sessions_counted_in_workspace(workspace.id.clone())
         .await?;
-    // A session found in the backend's records counts only while Core runs
-    // it: otherwise it goes with the workspace (FLOW-RESUME-SESSION-R09).
-    if let Some(running) = core.sessions.running_found(&workspace.id) {
-        sessions.push(running);
-        sessions.sort();
-    }
     let found = workspace::git_worktree_changes(
         transport.as_ref(),
         &project.path,
@@ -668,7 +664,7 @@ pub(super) async fn workspace_remove(
     // only be created in a `ready` workspace: one created before the claim
     // is seen here, and none can be created after it.
     // Sessions started in the backend's own tools don't hold it back unless
-    // Core is running one (FLOW-RESUME-SESSION-R09).
+    // Core is running one (FLOW-RESUME-SESSION-R13, R14).
     if !core
         .store
         .sessions_in_workspace(workspace.id.clone())

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { expect, test } from "./harness";
@@ -21,6 +21,13 @@ test("a session started in the CLI in a project's folder shows in the rail and r
   }
   const run = spawnSync('claude -p "Reply with only the word outside."', { cwd: folder, env, shell: true, encoding: "utf8", timeout: 120_000 });
   expect(run.status, run.stderr).toBe(0);
+  // Print mode records itself as an SDK run, whatever the environment says, and the CLI's own list and Ersa's hide those
+  // (PROTO-CLAUDE-CODE-STREAM-R79). A run typed at the CLI's prompt would ask to trust the folder first, so this test's
+  // own record is given the entrypoint such a run records instead.
+  const records = path.join(homedir(), ".claude", "projects", folder.replace(/[^A-Za-z0-9]/g, "-"));
+  const [record] = readdirSync(records).filter((f) => f.endsWith(".jsonl"));
+  const recordPath = path.join(records, record!);
+  writeFileSync(recordPath, readFileSync(recordPath, "utf8").replaceAll('"entrypoint":"sdk-cli"', '"entrypoint":"cli"'));
 
   const page = ersa.page;
   await page.getByRole("button", { name: "Project: Choose a folder" }).click();
@@ -45,10 +52,9 @@ test("a session started in the CLI in a project's folder shows in the rail and r
   await ersa.shot("resumed");
 
   // One record holds both turns: the CLI's own session file for the folder.
-  const records = path.join(homedir(), ".claude", "projects", folder.replace(/[^A-Za-z0-9]/g, "-"));
   const files = readdirSync(records).filter((f) => f.endsWith(".jsonl"));
-  expect(files).toHaveLength(1);
-  const text = readFileSync(path.join(records, files[0]!), "utf8");
+  expect(files).toEqual([record]);
+  const text = readFileSync(recordPath, "utf8");
   expect(text).toContain("Reply with only the word outside.");
   expect(text).toContain("Reply with only the word inside.");
 });
