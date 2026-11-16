@@ -45,9 +45,9 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
-    PermissionDecision, ProcessExit, QuestionReply, RawLine, RecordDeletion, RecordEvent,
-    RecordSummary, SessionConfig, TitleRules, Transport,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, CallOffOnDrop,
+    Direction, OpenElsewhere, PermissionDecision, ProcessExit, QuestionReply, RawLine,
+    RecordDeletion, RecordEvent, RecordSummary, SessionConfig, TitleRules, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
@@ -1623,12 +1623,19 @@ impl SessionManager {
     }
 
     /// Deletes the session's record from its backend, on the host
-    /// `transport` reaches (PROTO-CORE-API-R36). A session its backend never
-    /// named has no record to delete.
+    /// `transport` reaches (PROTO-CORE-API-R36), giving up after `limit`. A
+    /// session its backend never named has no record to delete.
+    ///
+    /// However this returns, the deletion is called off on the way out
+    /// (PROTO-CORE-API-R91): when Core gives up on it, or this request is
+    /// dropped, the adapter begins no further deletion, so a record the user
+    /// was told is kept is not deleted later. Calling off one that finished
+    /// changes nothing.
     pub async fn delete_record(
         &self,
         id: &str,
         transport: Arc<dyn Transport>,
+        limit: Duration,
     ) -> Result<RecordDeletion, SessionError> {
         let row = self.row(id)?;
         let Some(backend_id) = row.backend_session_id else {
@@ -1636,15 +1643,14 @@ impl SessionManager {
         };
         let adapter = self.adapter_of(&row.backend)?;
         let cwd = row.cwd;
-        let call =
-            tokio::spawn(async move { adapter.delete_record(transport, &cwd, &backend_id).await });
-        match tokio::time::timeout(RECORD_READ, call).await {
-            Ok(Ok(deleted)) => deleted.map_err(SessionError::Adapter),
-            Ok(Err(e)) => Err(SessionError::Internal(format!("the adapter failed: {e}"))),
-            Err(_) => Err(SessionError::Internal(format!(
-                "deleting the session's record took longer than {RECORD_READ:?}"
-            ))),
-        }
+        let call_off = CallOff::default();
+        let _called_off_on_return = CallOffOnDrop(call_off.clone());
+        within(limit, "the session's record was not deleted", async move {
+            adapter
+                .delete_record(transport, &cwd, &backend_id, &call_off)
+                .await
+        })
+        .await
     }
 
     /// Removes a deleted session, and with it its workspace's row when
@@ -2236,19 +2242,31 @@ async fn notice_if_open_elsewhere(
 /// and with it every later request on the client's connection, until
 /// someone stopped the session from elsewhere.
 ///
-/// The call runs in a task of its own and is never cancelled: dropping a
-/// write halfway would leave half a line in the backend's stdin, which the
-/// next line would be glued onto. A call still stuck when the request gives
-/// up finishes, or fails, when the session is stopped.
+/// The call is never cancelled: dropping a write halfway would leave half a
+/// line in the backend's stdin, which the next line would be glued onto. A
+/// call still stuck when the request gives up finishes, or fails, when the
+/// session is stopped.
 async fn bounded(
     call: impl std::future::Future<Output = Result<(), AdapterError>> + Send + 'static,
 ) -> Result<(), SessionError> {
-    match tokio::time::timeout(ADAPTER_CALL, tokio::spawn(call)).await {
+    within(ADAPTER_CALL, "the backend did not take the line", call).await
+}
+
+/// Runs one adapter call in a task of its own, answering after at most
+/// `limit`; `timed_out` says what had not happened by then. The task goes on
+/// after the answer: a call that must stop then is told so by its caller
+/// (as [`SessionManager::delete_record`] calls its deletion off).
+async fn within<T: Send + 'static>(
+    limit: Duration,
+    timed_out: &str,
+    call: impl std::future::Future<Output = Result<T, AdapterError>> + Send + 'static,
+) -> Result<T, SessionError> {
+    match tokio::time::timeout(limit, tokio::spawn(call)).await {
         Ok(Ok(result)) => result.map_err(SessionError::Adapter),
         Ok(Err(e)) => Err(SessionError::Internal(format!("the adapter failed: {e}"))),
         Err(_) => Err(SessionError::Adapter(AdapterError::Io(io::Error::new(
             io::ErrorKind::TimedOut,
-            format!("the backend did not take the line within {ADAPTER_CALL:?}"),
+            format!("{timed_out} within {limit:?}"),
         )))),
     }
 }

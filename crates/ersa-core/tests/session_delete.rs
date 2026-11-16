@@ -650,6 +650,53 @@ async fn a_record_deletion_refused_with_nothing_open_fails_internal() {
     );
 }
 
+/// A record deletion that stalls past its limit fails the delete, and Core
+/// calls it off: when the stalled deletion goes on after the answer, it
+/// deletes nothing, so the record the user was told is kept stays. Trying
+/// again deletes it.
+// verifies: PROTO-CORE-API-R91
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_deletion_given_up_on_deletes_nothing_later() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let core = start_with_adapters(
+        tempdir(),
+        |config| config.record_deletion_limit = Duration::from_millis(200),
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let root = root(&mut client, &project).await;
+    let id = idle_session(&mut client, &root).await;
+
+    // The disk stops answering.
+    let stalled = fake.delete_gate.lock().await;
+    let error = client.error("session.delete", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "internal", "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("the session's record was not deleted within 200ms"),
+        "{error}"
+    );
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+
+    // It answers again, and the deletion Core gave up on goes on.
+    drop(stalled);
+    fake.stats.record_deletion_ended.notified().await;
+    assert_eq!(backend_ids(&fake.records).len(), 1, "the record is kept");
+    assert_eq!(fake.stats.record_deletes.load(Ordering::SeqCst), 0);
+
+    client.result("session.delete", json!({ "id": id })).await;
+    assert!(backend_ids(&fake.records).is_empty());
+    assert!(listed(&mut client, &id).await.is_none());
+}
+
 /// A record the registry shows newly open when it is deleted fails the
 /// delete after the files went; trying again with what is left finishes it.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
