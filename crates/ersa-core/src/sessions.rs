@@ -218,6 +218,9 @@ pub struct SessionManager {
     copy_pause: Duration,
     /// A pause before Core lets go of a run that has ended, for tests.
     wind_down_pause: Duration,
+    /// Where a list stops between storing a found session and holding it,
+    /// for tests ([`crate::CoreConfig::found_gate`]).
+    found_gate: Option<Arc<crate::state::Gate>>,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -837,6 +840,7 @@ impl SessionManager {
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
+            found_gate: None,
             closing: AtomicBool::new(false),
             claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
@@ -857,6 +861,13 @@ impl SessionManager {
     /// ([`crate::CoreConfig::wind_down_pause`]).
     pub fn with_wind_down_pause(mut self, pause: Duration) -> Self {
         self.wind_down_pause = pause;
+        self
+    }
+
+    /// The same manager, stopping a list between storing a found session
+    /// and holding it ([`crate::CoreConfig::found_gate`]).
+    pub fn with_found_gate(mut self, gate: Option<Arc<crate::state::Gate>>) -> Self {
+        self.found_gate = gate;
         self
     }
 
