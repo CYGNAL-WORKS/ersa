@@ -362,6 +362,36 @@ async fn a_found_session_uses_its_workspace_so_deleting_another_there_keeps_the_
 
 // verifies: FLOW-RESUME-SESSION-R14
 #[tokio::test(flavor = "multi_thread")]
+async fn a_found_session_core_is_running_holds_back_removing_its_project() {
+    let backend = Backend::default();
+    let core = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let root = workspaces(&mut client, &project["id"]).await.remove(0);
+    backend.record("rec-root", "found", path(&root), path(&root));
+    let found = sessions(&mut client).await.remove(0);
+    client
+        .result("session.resume", json!({ "id": found["id"] }))
+        .await;
+
+    // No backend is left running in a project Ersa has forgotten.
+    let refused = client
+        .error("project.remove", json!({ "id": project["id"] }))
+        .await;
+    assert_eq!(support::kind(&refused), "invalid_state", "{refused}");
+    assert_eq!(sessions(&mut client).await.len(), 1);
+    client
+        .result("session.stop", json!({ "id": found["id"] }))
+        .await;
+    client
+        .result("project.remove", json!({ "id": project["id"] }))
+        .await;
+    assert!(sessions(&mut client).await.is_empty());
+    assert!(backend.has_record("rec-root"));
+}
+
+// verifies: FLOW-RESUME-SESSION-R14
+#[tokio::test(flavor = "multi_thread")]
 async fn a_found_session_core_is_running_holds_back_removing_its_workspace() {
     let backend = Backend::default();
     let core = start(&backend, tempdir()).await;
@@ -587,15 +617,14 @@ async fn a_project_removed_while_a_list_records_a_found_session_does_not_leave_i
     // it, where it would otherwise load a session whose project is gone.
     let list = client.request("session.list", json!({})).await;
     gate.reached().await;
-    let removal = remover
-        .request("project.remove", json!({ "id": project["id"] }))
+    // The removal does not wait for the list: it is done, the row gone and
+    // nothing loaded to let go of, before the list goes on.
+    remover
+        .result("project.remove", json!({ "id": project["id"] }))
         .await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     gate.go();
     let listed = client.response(list).await;
     assert!(listed.get("error").is_none(), "{listed}");
-    let removed = remover.response(removal).await;
-    assert!(removed.get("error").is_none(), "{removed}");
 
     // The found session went with the project, its record left.
     let listed = sessions(&mut client).await;
