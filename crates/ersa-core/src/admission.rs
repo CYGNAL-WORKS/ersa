@@ -84,8 +84,15 @@ pub struct SessionEntry {
     pub found: bool,
     /// Whether its row is stored yet.
     pub stored: bool,
-    /// Whether a `session.remove` of it is under way.
+    /// Whether a `session.remove` of it is under way: asked for, and
+    /// perhaps still waiting for a run that is winding down, before it
+    /// takes the session's exclusive operation.
     pub removing: bool,
+    /// Whether its one exclusive operation is under way: a stop, a start,
+    /// a view being opened, an archive, an arrangement, a delete's mark, or
+    /// a removal once it goes on. A session has at most one, and another
+    /// asked for meanwhile waits.
+    pub exclusive: bool,
 }
 
 /// Everything admission decides from. Ordered maps and no counters, so two
@@ -143,6 +150,7 @@ impl State {
                     found,
                     stored,
                     removing: false,
+                    exclusive: false,
                 },
             );
         }
@@ -283,8 +291,14 @@ pub enum Command {
     DeleteSession {
         session: Id,
     },
-    /// `session.remove`.
+    /// `session.remove`. It takes the session's exclusive operation as a
+    /// second step, once any run that is winding down has finished.
     RemoveSession {
+        session: Id,
+    },
+    /// The session's exclusive operation: admitted when none is under way
+    /// on it, held until then.
+    BeginExclusive {
         session: Id,
     },
 }
@@ -299,6 +313,7 @@ pub enum Operation {
     CreateSession(Id),
     DeleteSession(Id),
     RemoveSession(Id),
+    Exclusive(Id),
 }
 
 /// What happened, said once it is stored. A report is never refused or
@@ -663,6 +678,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 found: *found,
                 stored: false,
                 removing: false,
+                exclusive: false,
             };
             state.sessions.insert(session.clone(), entry);
             Outcome::Admitted(Operation::CreateSession(session.clone()))
@@ -703,6 +719,18 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 entry.removing = true;
             }
             Outcome::Admitted(Operation::RemoveSession(session.clone()))
+        }
+        Command::BeginExclusive { session } => {
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            // One at a time: the next waits for the one under way to end.
+            // So does one asked of a session whose row is being stored.
+            if !entry.stored || entry.exclusive {
+                return Outcome::Held;
+            }
+            entry.exclusive = true;
+            Outcome::Admitted(Operation::Exclusive(session.clone()))
         }
     }
 }
@@ -875,6 +903,13 @@ fn note(state: &mut State, report: Report) -> Outcome {
             Operation::RemoveSession(session) => match state.sessions.get_mut(&session) {
                 Some(entry) if entry.removing => {
                     entry.removing = false;
+                    Outcome::Noted
+                }
+                Some(_) | None => Outcome::Stale,
+            },
+            Operation::Exclusive(session) => match state.sessions.get_mut(&session) {
+                Some(entry) if entry.exclusive => {
+                    entry.exclusive = false;
                     Outcome::Noted
                 }
                 Some(_) | None => Outcome::Stale,
