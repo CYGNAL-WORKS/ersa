@@ -33,6 +33,7 @@ mod adapter;
 mod local;
 mod raw;
 pub mod recording;
+mod remove;
 mod transport;
 
 // `#[cfg(feature = "...")]` compiles the module only when the feature is on.
@@ -42,13 +43,15 @@ pub mod fake;
 // Re-exported at the crate root so users write `ersa_adapter::Transport`
 // rather than reaching into private module paths.
 pub use adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, ForkOf,
-    ImageLimits, OpenElsewhere, OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected,
-    Projector, QuestionReply, RecordDeletion, RecordEvent, RecordSummary, Recorded,
-    RecordedSettings, RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, CallOffOnDrop,
+    ConversationEnd, ForkOf, ImageLimits, OpenElsewhere, OutgoingAttachment, OutgoingMessage,
+    PermissionDecision, Projected, Projector, QuestionReply, RecordDeletion, RecordEvent,
+    RecordSummary, Recorded, RecordedSettings, RelaunchSettings, Requested, SessionConfig,
+    SessionControl, TitleRules,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};
+pub use remove::{Removal, remove_tree};
 pub use transport::{LineReader, LineWriter, Process, ProcessExit, ProcessSpec, Transport};
 
 // Adapters implement `#[async_trait]` traits, so they need the attribute too;
