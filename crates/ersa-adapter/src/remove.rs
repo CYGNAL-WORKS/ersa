@@ -81,27 +81,14 @@ fn remove_entry(
     if stop() {
         return Ok(Removal::CalledOff);
     }
-    let removed = if is_dir_link(metadata) {
+    let removed = match fs::remove_file(path) {
         // A link to a folder is a folder entry on Windows, which only
-        // `remove_dir` takes; it removes the link, not what it leads to.
-        fs::remove_dir(path)
-    } else {
-        fs::remove_file(path)
+        // `remove_dir` takes; it removes the link, never what it leads to,
+        // and elsewhere refuses a link outright.
+        Err(e) if metadata.is_symlink() => fs::remove_dir(path).map_err(|_| e),
+        other => other,
     };
     ignore_gone(removed)
-}
-
-/// Whether `metadata` is a link to a folder: a directory symbolic link or a
-/// junction. Only Windows tells them apart from links to files.
-#[cfg(windows)]
-fn is_dir_link(metadata: &fs::Metadata) -> bool {
-    use std::os::windows::fs::FileTypeExt;
-    metadata.file_type().is_symlink_dir()
-}
-
-#[cfg(not(windows))]
-fn is_dir_link(_metadata: &fs::Metadata) -> bool {
-    false
 }
 
 /// A deletion whose entry was already gone succeeded.
