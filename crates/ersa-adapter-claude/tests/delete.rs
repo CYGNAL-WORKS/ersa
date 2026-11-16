@@ -9,9 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ersa_adapter::fake::FakeTransport;
-use ersa_adapter::{Adapter, OpenElsewhere, RecordDeletion};
+use ersa_adapter::{Adapter, AdapterError, CallOff, OpenElsewhere, RecordDeletion, Removal};
 use ersa_adapter_claude::ClaudeAdapter;
-use ersa_adapter_claude::record::encoded_cwd;
+use ersa_adapter_claude::record::{self, encoded_cwd};
 use serde_json::json;
 
 const CWD: &str = "C:/work";
@@ -84,7 +84,7 @@ async fn deleting_takes_the_record_file_and_its_folder_and_nothing_else() {
     let home = home();
     let before = files(home.path());
     let deleted = adapter(home.path())
-        .delete_record(no_transport(), CWD, SESSION)
+        .delete_record(no_transport(), CWD, SESSION, &CallOff::default())
         .await
         .expect("delete");
     assert_eq!(deleted, RecordDeletion::Deleted);
@@ -112,7 +112,7 @@ async fn a_record_filed_under_another_spelling_of_the_folder_is_found_and_delete
     write(&elsewhere.join(SESSION).join("subagents/a.jsonl"), "{}\n");
     write(&elsewhere.join("kept.txt"), "kept\n");
     let deleted = adapter(home.path())
-        .delete_record(no_transport(), CWD, SESSION)
+        .delete_record(no_transport(), CWD, SESSION, &CallOff::default())
         .await
         .expect("delete");
     assert_eq!(deleted, RecordDeletion::Deleted);
@@ -126,7 +126,7 @@ async fn a_record_already_gone_counts_as_deleted_and_its_folder_left_behind_goes
     let dir = project_dir(home.path());
     fs::remove_file(dir.join(format!("{SESSION}.jsonl"))).unwrap();
     let deleted = adapter(home.path())
-        .delete_record(no_transport(), CWD, SESSION)
+        .delete_record(no_transport(), CWD, SESSION, &CallOff::default())
         .await
         .expect("delete");
     assert_eq!(deleted, RecordDeletion::Deleted);
@@ -134,7 +134,7 @@ async fn a_record_already_gone_counts_as_deleted_and_its_folder_left_behind_goes
 
     // And with nothing of it left at all, once more.
     let again = adapter(home.path())
-        .delete_record(no_transport(), CWD, SESSION)
+        .delete_record(no_transport(), CWD, SESSION, &CallOff::default())
         .await
         .expect("delete again");
     assert_eq!(again, RecordDeletion::Deleted);
@@ -150,7 +150,7 @@ async fn a_session_another_process_has_open_is_refused_with_its_pid_and_nothing_
     register(home.path(), pid, SESSION);
     let before = files(home.path());
     let deleted = adapter(home.path())
-        .delete_record(no_transport(), CWD, SESSION)
+        .delete_record(no_transport(), CWD, SESSION, &CallOff::default())
         .await
         .expect("answered");
     assert_eq!(
@@ -175,9 +175,46 @@ async fn a_registry_that_cannot_say_refuses_and_deletes_nothing() {
     );
     let before = files(home.path());
     let deleted = adapter(home.path())
-        .delete_record(no_transport(), CWD, SESSION)
+        .delete_record(no_transport(), CWD, SESSION, &CallOff::default())
         .await
         .expect("answered");
     assert_eq!(deleted, RecordDeletion::Refused(OpenElsewhere::Unknown));
     assert_eq!(files(home.path()), before);
+}
+
+/// A deletion Core called off before it began deletes nothing: not the
+/// record file, not its folder.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R55
+#[tokio::test]
+async fn a_deletion_called_off_before_it_began_deletes_nothing() {
+    let home = home();
+    let before = files(home.path());
+    let call_off = CallOff::default();
+    call_off.call_off();
+    let deleted = adapter(home.path())
+        .delete_record(no_transport(), CWD, SESSION, &call_off)
+        .await;
+    assert!(
+        matches!(&deleted, Err(AdapterError::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted),
+        "{deleted:?}"
+    );
+    assert_eq!(files(home.path()), before);
+}
+
+/// A deletion called off once the folder has gone, before the record file's
+/// removal has begun, leaves the record file, so the session is still in the
+/// CLI's own tools.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R55
+#[test]
+fn a_deletion_called_off_before_the_record_file_leaves_the_record_file() {
+    let home = home();
+    let dir = project_dir(home.path());
+    let folder = dir.join(SESSION);
+    // Asked before each deletion: it says stop at the first one after the
+    // folder is gone, which is the record file's.
+    let stop = || !folder.exists();
+    let removal = record::delete_record(home.path(), CWD, SESSION, &stop).expect("delete");
+    assert_eq!(removal, Removal::CalledOff);
+    assert!(!folder.exists());
+    assert!(dir.join(format!("{SESSION}.jsonl")).exists());
 }

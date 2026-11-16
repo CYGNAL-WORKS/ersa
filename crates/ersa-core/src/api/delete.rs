@@ -136,7 +136,12 @@ async fn finish(
         .await;
         branch_kept = deleted?;
     }
-    match core.sessions.delete_record(id, session_transport).await {
+    let limit = core.config.record_deletion_limit;
+    match core
+        .sessions
+        .delete_record(id, session_transport, limit)
+        .await
+    {
         Ok(RecordDeletion::Deleted) => {}
         // Opened elsewhere since step 2.
         Ok(RecordDeletion::Refused(refused)) => return Err(open_elsewhere(id, refused)),
