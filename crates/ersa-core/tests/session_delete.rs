@@ -1042,8 +1042,9 @@ enum Land {
     WhileClaimed,
 }
 
-/// A Core whose `workspace.remove` stops before and after claiming the
-/// workspace until the test lets it go, and that gate.
+/// A Core whose `workspace.remove` stops at each of its test stops (before
+/// and after claiming the workspace, after its sessions check, after it
+/// holds the found sessions) until the test lets it go, and that gate.
 async fn start_with_remove_gate(fake: &Arc<FakeAdapter>) -> (TestCore, Arc<Gate>) {
     let gate = Arc::new(Gate::default());
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
@@ -1073,6 +1074,10 @@ fn let_removal_finish(gate: &Gate, land: Land) {
         // The stop after the claim; the removal waits there only for this.
         gate.go();
     }
+    // The stops after its check and after it holds the found sessions, for
+    // a removal its sessions don't hold back.
+    gate.go();
+    gate.go();
 }
 
 /// A delete marks the workspace `error` while a `workspace.remove` is

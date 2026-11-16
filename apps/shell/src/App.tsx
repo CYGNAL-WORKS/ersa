@@ -660,6 +660,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
       connection.current?.reload("projects");
+      // The folder's sessions started in the backend's own tools are listed now (FLOW-RESUME-SESSION-R12).
+      connection.current?.reload("sessions");
       return project;
     } catch (error) {
       setAdding({ state: "failed", message: describeError(error) });

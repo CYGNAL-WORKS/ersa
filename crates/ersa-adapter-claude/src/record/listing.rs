@@ -7,7 +7,7 @@
 //! are appended, so the newest are near the end.
 
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -111,6 +111,87 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
     list.unreadable.sort();
     list.unreadable.dedup();
     Ok(list)
+}
+
+/// The records the CLI filed under working directory `cwd`'s directory, each
+/// with the working directory the record itself names: the directory's name
+/// is lossy (`D:\a-b` and `D:\a\b` share one), so a caller tells the two
+/// apart by it (FLOW-RESUME-SESSION-R12). Only the head is read, up to the
+/// first entry that names one, which is the first prompt; a record that
+/// names none there is left out. A record of a run the CLI's own list hides
+/// (an SDK entrypoint) is left out. A directory with no records lists nothing; a
+/// directory that cannot be read is an error; a record that cannot be read
+/// is left out.
+pub fn list_records(claude_home: &Path, cwd: &str) -> io::Result<Vec<(String, String)>> {
+    let dir = project_dir(claude_home, cwd);
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut records = Vec::new();
+    // An entry or record that cannot be read is left out: a caller that
+    // misses a session it listed before asks for it by id, which tells a
+    // record gone (the CLI's retention) from one it could not read.
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".jsonl")) else {
+            continue;
+        };
+        // Other files and per-session folders share the directory; a
+        // record is a plain file named by its session id.
+        if !is_session_id(id) || !entry.file_type().is_ok_and(|t| t.is_file()) {
+            continue;
+        }
+        match head_of(&entry.path()) {
+            // A run the SDK made with no one at the keyboard: the CLI's own
+            // list hides it, and so does Ersa's (PROTO-CLAUDE-CODE-STREAM-R79).
+            Ok(head) if head.entrypoint.as_deref().is_some_and(is_sdk) => {}
+            // A record that names no folder yet cannot be placed in one.
+            Ok(Head { cwd: Some(cwd), .. }) => records.push((id.to_string(), cwd)),
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
+    records.sort();
+    Ok(records)
+}
+
+/// The entrypoints of runs the CLI's own session list hides.
+fn is_sdk(entrypoint: &str) -> bool {
+    matches!(entrypoint, "sdk-cli" | "sdk-ts" | "sdk-py")
+}
+
+/// What a record's first prompt says of where and how it ran.
+struct Head {
+    cwd: Option<String>,
+    entrypoint: Option<String>,
+}
+
+/// The `cwd` and `entrypoint` of the first entry of the record at `path`
+/// that names a `cwd` (the first prompt, which carries both), read line by
+/// line from the head, at most [`CHUNK`] bytes.
+fn head_of(path: &Path) -> io::Result<Head> {
+    let head = BufReader::new(File::open(path)?.take(CHUNK));
+    for line in head.split(b'\n') {
+        let line = line?;
+        let Ok(entry) = serde_json::from_slice::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if let Some(cwd) = entry.get("cwd").and_then(|cwd| cwd.as_str()) {
+            return Ok(Head {
+                cwd: Some(cwd.to_string()),
+                entrypoint: entry
+                    .get("entrypoint")
+                    .and_then(|e| e.as_str())
+                    .map(String::from),
+            });
+        }
+    }
+    Ok(Head {
+        cwd: None,
+        entrypoint: None,
+    })
 }
 
 /// The summary of one session, read from the head and tail of its record

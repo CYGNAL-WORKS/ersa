@@ -218,6 +218,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         model_at: None,
         effort_at: None,
         permission_mode_at: None,
+        started_elsewhere: false,
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)
