@@ -48,6 +48,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Interface**: the TypeScript application in the Shell's webview. *Not: frontend.*
 - **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence. Interface copy never names it (CONTENT.md); where a message has to refer to it, it is "Ersa's background process". *Not: daemon.*
 - **Core API**: the request/response protocol between Interface and Core.
+- **Admission**: the one place in Core that decides every change to which projects, workspaces, sessions and sections exist and to what is under way on each. It holds that state, and one table says, for each state and each input, whether the input is done, refused or held (ADR 0037).
+- **Operation**: work on a session or workspace that takes time: a start, a stop, an archive, a delete, a removal, a send, a fork. Admission records it from when it is admitted until its end is reported.
 - **App log**: Core's log of its own operational records (process started, exited, failed to start, Core restarted). Not part of any session record; Core reads it back at startup for each session's first and last facts.
 - **Harness tools server**: the MCP tools Core exposes to every session's backend: cross-session messaging, session metadata, user-defined tools, and interface-driving tools. Never permission prompting.
 
