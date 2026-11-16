@@ -658,6 +658,7 @@ pub(super) async fn workspace_remove(
             workspace.id
         )));
     }
+    pause_for_tests(core).await;
 
     let force = params.force.unwrap_or(false);
     let removed = workspace::git_worktree_remove(
@@ -690,9 +691,10 @@ pub(super) async fn workspace_remove(
     Ok(workspace)
 }
 
-/// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go,
-/// once before `workspace.remove`'s claim and once after it, so a test can
-/// land another request on either side. Nothing outside tests.
+/// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go:
+/// before `workspace.remove`'s claim, after it, and once its sessions no
+/// longer hold it back, so a test can land another request at each.
+/// Nothing outside tests.
 async fn pause_for_tests(core: &Core) {
     if let Some(gate) = &core.config.remove_gate {
         gate.stop().await;
