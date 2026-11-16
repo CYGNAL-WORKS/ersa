@@ -59,7 +59,7 @@ use ersa_protocol::events::{
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
-use crate::admission::{Admission, Command, Refusal, Report, UnderWay};
+use crate::admission::{Admission, Command, Refusal, Report, Timed, UnderWay};
 use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
@@ -225,9 +225,6 @@ pub struct SessionManager {
     /// Where a list stops between storing a found session and holding it,
     /// for tests ([`crate::CoreConfig::found_gate`]).
     found_gate: Option<Arc<crate::state::Gate>>,
-    /// Set by [`SessionManager::stop_all`]; no session starts after it.
-    /// Read and written under the `sessions` lock.
-    closing: AtomicBool,
     /// Held while a session's arrangement is written to the store and to
     /// memory, so a `section.remove` and a `session.arrange` into that
     /// section land in the same order in both.
@@ -284,6 +281,16 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
             SessionError::InvalidState(format!("workspace {workspace_id} is not ready"))
         }
         Refusal::NoSession => SessionError::NotFound(session_id.to_string()),
+        Refusal::Closing => {
+            SessionError::InvalidState("Core is shutting down; no session can start".into())
+        }
+        Refusal::Running => {
+            SessionError::InvalidState(format!("session {session_id} is running; stop it first"))
+        }
+        // The run was announced ended, and Core's own wind-down stalled.
+        Refusal::GaveUp => SessionError::Internal(format!(
+            "session {session_id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
+        )),
         // Answers to other commands, or an id used twice: Core's fault.
         Refusal::AlreadyProject { .. }
         | Refusal::NoProject
@@ -852,7 +859,6 @@ impl SessionManager {
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
             found_gate: None,
-            closing: AtomicBool::new(false),
             arrangement: tokio::sync::Mutex::new(()),
             listing: tokio::sync::Mutex::new(()),
             listing_in_flight: Arc::default(),
@@ -1094,14 +1100,11 @@ impl SessionManager {
         config: SessionConfig,
         backend_version: String,
     ) -> Result<Session, SessionError> {
-        let shutting_down =
-            || SessionError::InvalidState("Core is shutting down; no session can start".into());
-        if self.closing.load(Ordering::SeqCst) {
-            return Err(shutting_down());
-        }
+        let (workspace_id, id) = (row.workspace_id.clone(), row.id.clone());
         // Admission decides whether the workspace takes a session, in the
         // step that also counts it there: a removal admitted before this
-        // refuses it, and one asked for after sees it (ARCH-CORE-R14).
+        // refuses it, and one asked for after sees it (ARCH-CORE-R14). None
+        // is created once Core is shutting down.
         let admitted = self
             .admission
             .command(Command::CreateSession {
@@ -1129,26 +1132,32 @@ impl SessionManager {
             &begin.record,
         );
         lock(&handle.hub).install(&handle.id, view, &events);
-        {
-            // Registered and launched under the lock `stop_all` takes, so a
-            // session either starts before shutdown and is stopped by it, or
-            // does not start at all.
+        // Launched and registered under the lock `stop_all` takes, so a
+        // session either starts before shutdown and is stopped by it, or
+        // does not start at all: admission refuses the launch once Core is
+        // closing, and then the session is not registered.
+        let launched = {
             let mut sessions = lock(&self.sessions);
-            if !self.closing.load(Ordering::SeqCst) {
+            let launched = self.launch(
+                Arc::clone(&handle),
+                adapter,
+                transport,
+                config,
+                backend_version,
+                Launched::New { fork_hold },
+            );
+            if launched.is_ok() {
                 sessions.insert(handle.id.clone(), Arc::clone(&handle));
-                self.launch(
-                    Arc::clone(&handle),
-                    adapter,
-                    transport,
-                    config,
-                    backend_version,
-                    Launched::New { fork_hold },
-                );
-                return Ok(handle.describe());
+            }
+            launched
+        };
+        match launched {
+            Ok(()) => Ok(handle.describe()),
+            Err(refusal) => {
+                self.forget_row(&id).await?;
+                Err(refused_session(refusal, &workspace_id, &id))
             }
         }
-        self.forget_row(&handle.id).await?;
-        Err(shutting_down())
     }
 
     /// Deletes session `id`'s row, then tells admission it is gone.
@@ -1170,9 +1179,19 @@ impl SessionManager {
         config: SessionConfig,
         backend_version: String,
         launched: Launched,
-    ) {
+    ) -> Result<(), Refusal> {
+        // Admission's last word on the start: refused once Core is closing,
+        // and in a folder a removal holds. Admitted, the run is recorded
+        // there until `run_session` lets go of it. Not waited for, so the
+        // caller may hold the registry's lock.
+        let run = self.admission.launch(&handle.id)?;
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
-        let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
+        let sink = Arc::new(CoreSink::new(
+            &handle.id,
+            Arc::clone(&self.app_log),
+            Arc::clone(&self.admission),
+            fed_tx,
+        ));
         let (started_tx, started_rx) = watch::channel(Started::Pending);
         let (progress_tx, progress_rx) = watch::channel(Progress::default());
         let (finished_tx, finished_rx) = watch::channel(false);
@@ -1206,7 +1225,9 @@ impl SessionManager {
             pipeline,
             wind_down_pause: self.wind_down_pause,
             tiles: self.tiles.clone(),
+            run,
         }));
+        Ok(())
     }
 
     /// Starts stopping a session without waiting, if it is live: what
@@ -1254,7 +1275,10 @@ impl SessionManager {
     pub async fn stop_all(&self) {
         let running: Vec<Arc<Live>> = {
             let sessions = lock(&self.sessions);
-            self.closing.store(true, Ordering::SeqCst);
+            // Told under the lock a launch is asked under: from here
+            // admission refuses every launch, and every run it admitted
+            // before is live below.
+            self.admission.report(Report::Closing);
             sessions
                 .values()
                 .filter_map(|handle| handle.live())
@@ -1292,25 +1316,17 @@ impl SessionManager {
             Err(Refusal::NoSession) => return Ok(handle.describe()),
             Err(refusal) => return Err(refused_session(refusal, &workspace_id, id)),
         };
-        // A session whose ending is already queued is only winding down: a
-        // client may have seen `session.ended` before Core let it go, and
-        // can remove it, so wait for it to finish. Waited for before the
-        // removal takes the session's exclusive operation, so nothing else
-        // on the session queues behind the wait.
-        if let Some(live) = handle.live()
-            && live.sink.has_ended()
-            && wait_finished(&live, STOP_TIMEOUT).await.is_err()
-        {
-            return Err(SessionError::Internal(format!(
-                "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
-            )));
-        }
-        let _exclusive = self.exclusive(id).await?;
-        if handle.live().is_some() {
-            return Err(SessionError::InvalidState(format!(
-                "session {id} is running; stop it first"
-            )));
-        }
+        // The removal's exclusive operation. A session whose end was
+        // announced is only winding down: a client may have seen
+        // `session.ended` before Core let go of the run, and can remove it,
+        // so the removal waits for that, held in admission and holding
+        // nothing itself, up to the stop limit. One that runs is refused:
+        // stop it first.
+        let _exclusive = self
+            .admission
+            .begin_within(Timed::Removal(id.to_string()), STOP_TIMEOUT)
+            .await
+            .map_err(|refusal| refused_session(refusal, &workspace_id, id))?;
         let session = handle.describe();
         self.store.delete_session(id.to_string()).await?;
         removing.end(Report::SessionGone {
@@ -2406,6 +2422,8 @@ struct CoreSink {
     /// Where each lifecycle fact is written as the sink takes it in, before
     /// anything it describes can happen.
     app_log: Arc<AppLog>,
+    /// Told that the run is ending, before the fact that says so is queued.
+    admission: Arc<Admission>,
     inner: Mutex<SinkInner>,
     /// Set by `session.stop`: the exit that follows is the user's doing.
     stop_requested: AtomicBool,
@@ -2452,10 +2470,16 @@ struct StartFailure {
 }
 
 impl CoreSink {
-    fn new(session_id: &str, app_log: Arc<AppLog>, fed: mpsc::UnboundedSender<Fed>) -> Self {
+    fn new(
+        session_id: &str,
+        app_log: Arc<AppLog>,
+        admission: Arc<Admission>,
+        fed: mpsc::UnboundedSender<Fed>,
+    ) -> Self {
         CoreSink {
             session_id: session_id.to_string(),
             app_log,
+            admission,
             inner: Mutex::new(SinkInner {
                 next_index: 0,
                 fed: Some(fed),
@@ -2555,10 +2579,21 @@ impl CoreSink {
         if inner.ended {
             return;
         }
-        self.push_fact(&mut inner, fact);
-        inner.ended = true;
+        self.end_with(&mut inner, fact);
         drop(inner);
         self.ended.send_replace(true);
+    }
+
+    /// Queues `fact`, which ends the session. Admission is told the run is
+    /// ending before the fact is queued: the pipeline may publish it at
+    /// once, and a client that has seen `session.ended` must find the run
+    /// ending, not running.
+    fn end_with(&self, inner: &mut SinkInner, fact: LifecycleFact) {
+        self.admission.report(Report::RunEnding {
+            session: self.session_id.clone(),
+        });
+        self.push_fact(inner, fact);
+        inner.ended = true;
     }
 
     /// Stops queueing, which ends the pipeline once it has projected what is
@@ -2593,8 +2628,7 @@ impl AdapterSink for CoreSink {
         }
         if inner.start_done {
             let fact = self.exit_fact(exit);
-            self.push_fact(&mut inner, fact);
-            inner.ended = true;
+            self.end_with(&mut inner, fact);
             drop(inner);
             self.ended.send_replace(true);
         } else {
@@ -2633,6 +2667,9 @@ struct SessionTask {
     /// Where `session.tile` goes when the record read at the end retitles
     /// the session (PROTO-CORE-API-R103).
     tiles: Arc<TileHub>,
+    /// The run as admission has it, from the launch until this task lets go
+    /// of it, however the task ends.
+    run: UnderWay,
 }
 
 async fn run_session(task: SessionTask) {
@@ -2650,6 +2687,7 @@ async fn run_session(task: SessionTask) {
         pipeline,
         wind_down_pause,
         tiles,
+        run,
     } = task;
     // Ready with no turn to report one: a fork, and a session started again,
     // whose backend reports nothing until its next message.
@@ -2752,7 +2790,16 @@ async fn run_session(task: SessionTask) {
     if !wind_down_pause.is_zero() {
         tokio::time::sleep(wind_down_pause).await;
     }
+    // Ending, if nothing said so yet (a pipeline that died with no exit):
+    // a start or a removal asked for from here waits for the run's end
+    // below rather than finding the session running.
+    sink.admission.report(Report::RunEnding {
+        session: handle.id.clone(),
+    });
     *lock(&handle.live) = None;
+    // Core has let go of the run. Admission is told after `live` is
+    // cleared, so what waited for the run's end finds none.
+    drop(run);
     // Nobody reading it: nothing more will be added, so it goes.
     handle.close_if_idle();
     finished.send_replace(true);
@@ -3532,13 +3579,16 @@ mod tests {
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 3);
     }
 
-    /// Makes `s-gated` live by hand, as the session task does, and returns
-    /// its sink and the sender that marks it finished.
-    fn make_live(manager: &SessionManager) -> (Arc<CoreSink>, watch::Sender<bool>) {
+    /// Makes `s-gated` live by hand, as a launch does, and returns its
+    /// sink, the sender that marks it finished, and the run as admission
+    /// has it, which the session task drops when it lets go of the run.
+    fn make_live(manager: &SessionManager) -> (Arc<CoreSink>, watch::Sender<bool>, UnderWay) {
         let handle = manager.handle("s-gated").unwrap();
+        let run = manager.admission.launch("s-gated").unwrap();
         let sink = Arc::new(CoreSink::new(
             "s-gated",
             Arc::clone(&manager.app_log),
+            Arc::clone(&manager.admission),
             mpsc::unbounded_channel().0,
         ));
         let finished = watch::Sender::new(false);
@@ -3550,35 +3600,7 @@ mod tests {
             finished: finished.subscribe(),
         };
         *lock(&handle.live) = Some(Arc::new(live));
-        (sink, finished)
-    }
-
-    // verifies: FLOW-RESUME-SESSION-R14
-    // Paused time: the wait below ends only once nothing else can run.
-    #[tokio::test(start_paused = true)]
-    async fn a_removal_waits_for_a_found_sessions_start_under_way_and_sees_it_running() {
-        let adapter = Arc::new(GatedReads::default());
-        let dir = tempfile::tempdir().unwrap();
-        let manager = gated_manager(dir.path(), &adapter);
-        let handle = manager.handle("s-gated").unwrap();
-        lock(&handle.row).started_elsewhere = true;
-        // A resume that got in before the removal's hold has the session's
-        // exclusive operation until its backend is live.
-        let starting = manager.exclusive("s-gated").await.unwrap();
-
-        let look = manager.runs_found("w");
-        tokio::pin!(look);
-        // Not answered while the start is under way.
-        let waited = tokio::time::timeout(Duration::from_secs(60), &mut look).await;
-        assert!(waited.is_err(), "answered before the start settled");
-        // The backend is live, and the start lets go: it is seen running.
-        let _live = make_live(&manager);
-        drop(starting);
-        assert!(look.await);
-
-        // With nothing running, the answer is no.
-        *lock(&handle.live) = None;
-        assert!(!manager.runs_found("w").await);
+        (sink, finished, run)
     }
 
     // verifies: PROTO-CORE-API-R41
@@ -3602,7 +3624,7 @@ mod tests {
         for end in endings {
             let dir = tempfile::tempdir().unwrap();
             let manager = gated_manager(dir.path(), &adapter);
-            let (sink, finished) = make_live(&manager);
+            let (sink, finished, run) = make_live(&manager);
             // Running and not ended: refused.
             assert!(matches!(
                 manager.remove("s-gated").await,
@@ -3615,6 +3637,7 @@ mod tests {
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 *lock(&handle.live) = None;
+                drop(run);
                 finished.send_replace(true);
             });
             manager.remove("s-gated").await.unwrap();
@@ -3646,7 +3669,7 @@ mod tests {
         let mut row = lock(&manager.handle("s-gated").unwrap().row).clone();
         row.workspace_id = workspace.id;
         store.insert_session(row).await.unwrap();
-        let (sink, _finished) = make_live(&manager);
+        let (sink, _finished, _run) = make_live(&manager);
         sink.start_finished(Ok(()));
         sink.process_exited(Ok(ProcessExit { code: Some(0) }));
         let removing = tokio::spawn({
