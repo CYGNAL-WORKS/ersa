@@ -1435,6 +1435,87 @@ fn a_send_hears_in_admission_that_it_was_cancelled() {
     assert_eq!(state.held().len(), 1);
 }
 
+// -- Why a start failed (ARCH-CORE-R14) --------------------------------------
+
+fn start_ended(state: &mut State, session: &str, failure: Option<&str>) -> Outcome {
+    let (session, failure) = (session.into(), failure.map(str::to_string));
+    report(state, Report::StartEnded { session, failure })
+}
+
+fn start_failure(state: &State, session: &str) -> Option<String> {
+    state.session(session)?.start_failure.clone()
+}
+
+// verifies: FLOW-NEW-SESSION-R08
+#[test]
+fn a_start_s_failure_is_kept_until_a_later_start_succeeds() {
+    let mut state = world_with(&["s1", "s2"]);
+    assert_eq!(start_failure(&state, "s1"), None);
+
+    // The backend did not start: this is why, in its own words.
+    let run = admitted(Operation::Run("s1".into()));
+    assert_eq!(command(&mut state, launch("s1")), run);
+    assert_eq!(
+        start_ended(&mut state, "s1", Some("not signed in")),
+        Outcome::Noted
+    );
+    ended(&mut state, Operation::Run("s1".into()));
+    assert_eq!(start_failure(&state, "s1"), Some("not signed in".into()));
+    assert_eq!(start_failure(&state, "s2"), None);
+
+    // A start that is stopped before it ends says nothing: the reason
+    // stays, through the launch and the run's end.
+    assert_eq!(command(&mut state, launch("s1")), run);
+    ended(&mut state, Operation::Run("s1".into()));
+    assert_eq!(start_failure(&state, "s1"), Some("not signed in".into()));
+
+    // A newer failure replaces it; a start that succeeds forgets it.
+    command(&mut state, launch("s1"));
+    start_ended(&mut state, "s1", Some("no such model"));
+    assert_eq!(start_failure(&state, "s1"), Some("no such model".into()));
+    ended(&mut state, Operation::Run("s1".into()));
+    command(&mut state, launch("s1"));
+    assert_eq!(start_ended(&mut state, "s1", None), Outcome::Noted);
+    assert_eq!(start_failure(&state, "s1"), None);
+
+    // None is kept for a session that is gone.
+    let before = state.clone();
+    assert_eq!(start_ended(&mut state, "s9", Some("late")), Outcome::Stale);
+    assert_eq!(state, before);
+}
+
+// verifies: FLOW-RESUME-SESSION-R13
+#[test]
+fn a_removal_waits_for_a_found_session_being_recorded_and_then_takes_it() {
+    // A list is recording a session it found in the project's own folder:
+    // admitted, its row not stored yet. A removal of the project asked for
+    // now waits, so the list has the session stored and loaded before the
+    // removal goes on, and the removal lets go of it: it is never left
+    // listed in what was removed.
+    let mut only_root = existing();
+    only_root.workspaces.retain(|workspace| workspace.root);
+    let mut state = State::restored(only_root);
+    command(&mut state, find_session(ROOT, "s1"));
+    assert_eq!(command(&mut state, remove_project()), Outcome::Held);
+    let stored = step(&mut state, Input::Report(stored_in(ROOT, "s1", true)));
+    let removing = admitted(Operation::RemoveProject(P.into()));
+    assert_eq!(stored.released, [(0, removing)]);
+    assert!(state.row("s1").is_some());
+    report(&mut state, Report::ProjectRemoved { project: P.into() });
+    assert!(state.session("s1").is_none());
+    assert!(state.project(P).is_none());
+
+    // The same for its workspace.
+    let mut state = world();
+    command(&mut state, find_session(W, "s1"));
+    assert_eq!(command(&mut state, remove_workspace(W)), Outcome::Held);
+    let stored = step(&mut state, Input::Report(stored_in(W, "s1", true)));
+    assert_eq!(
+        stored.released,
+        [(0, admitted(Operation::RemoveWorkspace(W.into())))]
+    );
+}
+
 // -- A fork's mark on its original (ARCH-CORE-R14) --------------------------
 
 // verifies: FLOW-FORK-SESSION-R03
@@ -2567,6 +2648,10 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool, sends: bool) -> Ve
                     }),
             );
         }
+        reports.push(Report::StartEnded {
+            session: session.clone(),
+            failure: Some("it did not start".into()),
+        });
         reports.extend([
             Report::SessionGone {
                 session: session.clone(),
@@ -3084,6 +3169,19 @@ fn explore(
             // the state it leads to decides every input as this one does, so
             // it is checked here and not explored again.
             match input {
+                // So is how a start ended: it changes why the session's
+                // last start failed, which no row of the table reads.
+                Input::Report(Report::StartEnded { session, .. }) => {
+                    assert!(stepped.released.is_empty(), "{input:?}");
+                    let mut same = after.clone();
+                    let forgotten = Input::Report(Report::StartEnded {
+                        session: session.clone(),
+                        failure: None,
+                    });
+                    step(&mut same, forgotten);
+                    assert_eq!(&same, &before, "{input:?}");
+                    continue;
+                }
                 Input::Report(Report::RowWritten { session, .. }) if !sends => {
                     assert!(stepped.released.is_empty(), "{input:?}");
                     assert!(
@@ -3340,7 +3438,7 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     stored.sessions.push(row("s1", W, false));
     admission.restore(stored);
     // A run that was announced ended and that Core never lets go of.
-    let _run = admission.launch("s1").expect("launched");
+    let _run = admission.launch("s1", Arc::new(())).expect("launched");
     admission.report(run_ending("s1"));
 
     let began = tokio::time::Instant::now();
@@ -3386,6 +3484,177 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     // The first to come was not answered by the others' limits.
     assert_eq!(patient, (Err(Refusal::GaveUp), 60));
     assert!(admission.snapshot().held().is_empty());
+}
+
+/// Something of Core's to attach: a label, and a count of how many hold it.
+fn mine(label: &str) -> Arc<String> {
+    Arc::new(label.to_string())
+}
+
+fn label(attached: Option<ersa_core::admission::Attached>) -> Option<String> {
+    let attached = attached?.downcast::<String>().ok()?;
+    Some(attached.as_ref().clone())
+}
+
+// verifies: ARCH-CORE-R14
+#[tokio::test]
+async fn what_core_attaches_to_a_session_is_found_there_and_goes_with_it() {
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(row("s1", W, false));
+    stored.sessions.push(row("s2", W, true));
+    admission.restore(stored);
+
+    // Attached to a session admission has, and found again; nothing is
+    // attached to one it does not have.
+    let (first, second) = (mine("first"), mine("second"));
+    assert!(admission.attach("s1", first.clone()));
+    assert!(admission.attach("s2", second.clone()));
+    assert!(!admission.attach("s9", mine("nobody's")));
+    assert_eq!(label(admission.attached("s1")), Some("first".into()));
+    assert_eq!(label(admission.attached("s9")), None);
+    assert_eq!(admission.all_attached().len(), 2);
+
+    // A session admitted and not stored yet takes one too: it is found
+    // from the step that admits it.
+    let creating = admit(&admission, create_session(W, "s3")).await;
+    assert!(admission.attach("s3", mine("third")));
+    // The store fails: the session is not, and what was attached goes.
+    drop(creating);
+    assert_eq!(label(admission.attached("s3")), None);
+
+    // It goes in the step that reports the session gone, and admission
+    // lets go of it: only the test still holds it.
+    admission.report(Report::SessionGone {
+        session: "s1".into(),
+    });
+    assert_eq!(label(admission.attached("s1")), None);
+    assert_eq!(Arc::strong_count(&first), 1);
+    assert_eq!(label(admission.attached("s2")), Some("second".into()));
+
+    // And with its workspace: a found session goes with a removal.
+    let removing = admit(&admission, remove_workspace(W)).await;
+    assert_eq!(label(admission.attached("s2")), Some("second".into()));
+    removing.end(Report::WorkspaceRemoved {
+        workspace: W.into(),
+    });
+    assert_eq!(label(admission.attached("s2")), None);
+    assert_eq!(Arc::strong_count(&second), 1);
+    assert!(admission.all_attached().is_empty());
+}
+
+// verifies: ARCH-CORE-R14
+#[tokio::test]
+async fn a_new_session_is_found_from_the_step_that_admits_its_launch() {
+    let admission = Arc::new(Admission::default());
+    admission.restore(existing());
+    for session in ["s1", "s2"] {
+        let creating = admit(&admission, create_session(W, session)).await;
+        creating.end(stored_in(W, session, false));
+    }
+    // Stored, and not launched: nothing is attached, so it is not found.
+    assert_eq!(label(admission.attached("s1")), None);
+
+    // One step admits the launch and attaches both.
+    let launched = admission.launch_new("s1", mine("session"), mine("backend"));
+    let run = launched.expect("launched");
+    assert_eq!(label(admission.attached("s1")), Some("session".into()));
+    assert_eq!(label(admission.live("s1")), Some("backend".into()));
+
+    // A refused launch attaches neither, and replaces neither.
+    let (other, spare) = (mine("other"), mine("spare"));
+    assert!(matches!(
+        admission.launch_new("s1", other.clone(), spare.clone()),
+        Err(Refusal::Running)
+    ));
+    assert_eq!(label(admission.attached("s1")), Some("session".into()));
+    assert_eq!(label(admission.live("s1")), Some("backend".into()));
+    assert_eq!(Arc::strong_count(&other), 1);
+    assert_eq!(Arc::strong_count(&spare), 1);
+
+    // The session's stays when the run ends.
+    drop(run);
+    assert_eq!(label(admission.attached("s1")), Some("session".into()));
+    assert_eq!(label(admission.live("s1")), None);
+
+    // One whose launch is refused, Core closing, is never found.
+    admission.report(Report::Closing);
+    assert!(matches!(
+        admission.launch_new("s2", other.clone(), spare.clone()),
+        Err(Refusal::Closing)
+    ));
+    assert_eq!(label(admission.attached("s2")), None);
+    assert_eq!(Arc::strong_count(&other), 1);
+}
+
+// verifies: ARCH-CORE-R14
+// verifies: ARCH-CORE-R16
+#[tokio::test]
+async fn what_core_attaches_to_a_run_is_there_from_its_launch_to_its_end() {
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    for session in ["s1", "s2", "s3"] {
+        stored.sessions.push(row(session, W, false));
+    }
+    admission.restore(stored);
+    assert_eq!(label(admission.live("s1")), None);
+
+    // From the step that admits the launch.
+    let backend = mine("backend one");
+    let run = admission.launch("s1", backend.clone()).expect("launched");
+    assert_eq!(label(admission.live("s1")), Some("backend one".into()));
+    // A second launch of a running session is refused, and keeps nothing.
+    let spare = mine("spare");
+    assert!(admission.launch("s1", spare.clone()).is_err());
+    assert_eq!(Arc::strong_count(&spare), 1);
+    assert_eq!(label(admission.live("s1")), Some("backend one".into()));
+
+    // Still there while the run is winding down; gone in the step that
+    // ends it, however its task ends.
+    admission.report(run_ending("s1"));
+    assert_eq!(label(admission.live("s1")), Some("backend one".into()));
+    drop(run);
+    assert_eq!(label(admission.live("s1")), None);
+    assert_eq!(Arc::strong_count(&backend), 1);
+
+    // A session that goes takes its run's with it.
+    let _gone_with_it = admission
+        .launch("s2", mine("backend two"))
+        .expect("launched");
+    admission.report(Report::SessionGone {
+        session: "s2".into(),
+    });
+    assert_eq!(label(admission.live("s2")), None);
+
+    // Shutdown, told after, finds every run launched before it, and none
+    // is launched after.
+    let _first = admission.launch("s1", mine("again")).expect("launched");
+    let _third = admission
+        .launch("s3", mine("backend three"))
+        .expect("launched");
+    admission.report(Report::Closing);
+    let mut running: Vec<_> = admission
+        .all_live()
+        .into_iter()
+        .map(|live| label(Some(live)))
+        .collect();
+    running.sort();
+    assert_eq!(
+        running,
+        [Some("again".into()), Some("backend three".into())]
+    );
+    let late = mine("late");
+    assert!(matches!(
+        admission.launch("s2", late.clone()),
+        Err(Refusal::NoSession)
+    ));
+    drop(_third);
+    assert!(matches!(
+        admission.launch("s3", late.clone()),
+        Err(Refusal::Closing)
+    ));
+    assert_eq!(Arc::strong_count(&late), 1);
+    assert_eq!(admission.all_live().len(), 1);
 }
 
 // verifies: ARCH-CORE-R16
