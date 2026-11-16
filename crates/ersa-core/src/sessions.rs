@@ -235,6 +235,9 @@ pub struct SessionManager {
     listing: tokio::sync::Mutex<()>,
     /// The folders whose listing is still under way (`found`).
     listing_in_flight: found::InFlight,
+    /// How many deletes have removed a session's row, counted under the
+    /// listing turn (`found`).
+    deletes: AtomicU64,
 }
 
 /// Claimed workspaces, by id, with the session each delete is for.
@@ -836,6 +839,7 @@ impl SessionManager {
             arrangement: tokio::sync::Mutex::new(()),
             listing: tokio::sync::Mutex::new(()),
             listing_in_flight: Arc::default(),
+            deletes: AtomicU64::new(0),
         }
     }
 
@@ -1670,6 +1674,7 @@ impl SessionManager {
         self.store
             .finish_session_delete(id.to_string(), workspace_id)
             .await?;
+        self.deletes.fetch_add(1, Ordering::SeqCst);
         self.let_go(&handle).await;
         Ok(())
     }

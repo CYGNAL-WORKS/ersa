@@ -1764,16 +1764,15 @@ fn listing_a_directory_names_each_records_own_working_directory() {
     // Neither a file that is not a record nor a folder named like one is listed.
     fs::write(dir.join("notes.txt"), "x").unwrap();
     fs::create_dir(dir.join("2d6ce9f0-3b80-4c5b-9f74-7b3e2e5c9d33.jsonl")).unwrap();
-    // A record that names no directory yet is listed with none.
+    // A record that names no directory yet is left out.
     let empty = "3e7df0a1-4c91-4d6c-8a85-8c4f3f6dae44";
     fs::write(dir.join(format!("{empty}.jsonl")), queued + "\n").unwrap();
 
     assert_eq!(
         list_records(home.path(), CWD).unwrap(),
         vec![
-            (SESSION_A.to_string(), Some(CWD.to_string())),
-            (SESSION_B.to_string(), Some(other.to_string())),
-            (empty.to_string(), None),
+            (SESSION_A.to_string(), CWD.to_string()),
+            (SESSION_B.to_string(), other.to_string()),
         ]
     );
     // A directory the CLI never wrote lists nothing.

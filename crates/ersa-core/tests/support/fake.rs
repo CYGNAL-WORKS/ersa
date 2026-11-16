@@ -97,6 +97,8 @@ pub struct Stats {
     pub live_renames: AtomicUsize,
     /// Renames written to a record.
     pub record_renames: AtomicUsize,
+    /// How many times Core asked the backend for a folder's records.
+    pub listings: AtomicUsize,
     /// For every time Core asked whether another process has a session
     /// open: the backend's id for it, and how many record renames had
     /// been written by then.
@@ -312,6 +314,9 @@ pub struct FakeAdapter {
     /// folder it lists the record under, and the working folder the record
     /// itself names. A record filed nowhere is listed under no folder.
     pub filed: Filed,
+    /// Held by a test to hold every folder listing, once read, until it
+    /// lets go.
+    pub list_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Where the fake files its records, shared like [`Records`].
@@ -358,6 +363,7 @@ impl FakeAdapter {
             },
             recorded_settings: Arc::default(),
             filed: Arc::default(),
+            list_gate: Arc::default(),
         }
     }
 
@@ -698,20 +704,25 @@ impl Adapter for FakeAdapter {
         _transport: Arc<dyn Transport>,
         cwd: &str,
     ) -> Result<Vec<ersa_adapter::ListedRecord>, AdapterError> {
-        let records = self.records.lock().unwrap();
-        let mut listed: Vec<ersa_adapter::ListedRecord> = self
-            .filed
-            .lock()
-            .unwrap()
-            .iter()
-            // A record the backend no longer keeps is not listed.
-            .filter(|(id, filed)| filed.under == cwd && records.contains_key(*id))
-            .map(|(id, filed)| ersa_adapter::ListedRecord {
-                backend_session_id: id.clone(),
-                cwd: filed.cwd.clone(),
-            })
-            .collect();
+        self.stats.listings.fetch_add(1, Ordering::SeqCst);
+        let mut listed: Vec<ersa_adapter::ListedRecord> = {
+            let records = self.records.lock().unwrap();
+            self.filed
+                .lock()
+                .unwrap()
+                .iter()
+                // A record the backend no longer keeps is not listed.
+                .filter(|(id, filed)| filed.under == cwd && records.contains_key(*id))
+                .map(|(id, filed)| ersa_adapter::ListedRecord {
+                    backend_session_id: id.clone(),
+                    cwd: filed.cwd.clone(),
+                })
+                .collect()
+        };
         listed.sort_by(|a, b| a.backend_session_id.cmp(&b.backend_session_id));
+        // Read, then held: what was listed may be gone by the time it is
+        // answered, as on a slow file system.
+        let _held = self.list_gate.lock().await;
         Ok(listed)
     }
 
