@@ -195,6 +195,18 @@ async function addFromChip() {
 }
 
 describe("adding a project from the new-session screen", () => {
+  // verifies: FLOW-RESUME-SESSION-R04
+  it("lists sessions again once the project is added, so those the backend recorded in its folder join the rail", async () => {
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
+    await addFromChip();
+    const before = methods(core).filter((m) => m === "session.list").length;
+    fireEvent.click(within(screen.getByRole("region", { name: "Trust stranger?" })).getByRole("button", { name: "Trust" }));
+    await settle();
+    const after = methods(core);
+    expect(after.filter((m) => m === "session.list").length).toBe(before + 1);
+    expect(after.lastIndexOf("session.list")).toBeGreaterThan(after.indexOf("project.add"));
+  });
+
   // verifies: FLOW-NEW-SESSION-R27
   it("opens the folder dialog from Add project…, asks about trust for a new folder, then adds it trusted and chooses it", async () => {
     const shell = fakeShell("D:/clones/stranger");
