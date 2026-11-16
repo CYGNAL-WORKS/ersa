@@ -476,6 +476,51 @@ async fn the_claim_holds_off_other_requests_until_the_delete_ends() {
         .await;
 }
 
+/// While a delete of a session is under way, archiving or arranging that
+/// session is refused `busy` too, though neither touches its workspace:
+/// nothing has marked the session yet, so only the delete's hold says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_is_not_archived_or_arranged_while_its_delete_is_under_way() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, _folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    let shown = token(&mut client, &workspace).await;
+
+    // The registry check, after the hold and the stop and before the mark,
+    // waits on the gate.
+    let gate = Arc::clone(&fake.open_check_gate);
+    let held = gate.lock().await;
+    let pending = client
+        .request("session.delete", json!({ "id": id, "token": shown }))
+        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.stats.stops.load(Ordering::SeqCst) == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "never stopped");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let mut second = core.client().await;
+    for (method, params) in [
+        (
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        ),
+        ("session.arrange", json!({ "id": id, "pinned": true })),
+    ] {
+        let response = second.call(method, params).await;
+        support::assert_valid(method, &response);
+        let error = &response["error"];
+        assert_eq!(kind(error), "invalid_state", "{method}: {response}");
+        assert_eq!(error["data"]["detail"], "busy", "{method}: {response}");
+    }
+
+    drop(held);
+    let response = client.response(pending).await;
+    assert_eq!(response["result"]["workspace_deleted"], true, "{response}");
+}
+
 /// Another process with the session open, or a registry that cannot say,
 /// refuses the delete with nothing deleted or marked, and releases the
 /// claim.

@@ -5,8 +5,8 @@
 //!
 //! The steps, in the brief's order:
 //!
-//! 1. Claim the workspace, in memory only: requests that would change the
-//!    session or its workspace are refused `busy` until the claim goes.
+//! 1. Hold the workspace, in admission: requests that would change the
+//!    session or its workspace are refused `busy` until the delete ends.
 //! 2. Stop the session, then ask the backend's registry whether another
 //!    process has it open. Core cannot tell its own process in the registry
 //!    from another one, so its own is stopped first; a CLI takes itself out
@@ -59,11 +59,12 @@ pub(super) async fn delete(
         .session_transport_for(&row.host_id)
         .ok_or_else(|| handlers::unreachable_host(&row.host_id))?;
 
-    // (1) Held to the end of this function: every way out releases it.
-    let _claim = core.sessions.claim_workspace(&workspace.id, &id)?;
-    // Refused while it starts or works. Checked once the claim is held, so
-    // a send that arrives after it is refused `busy` and one that arrived
-    // before is seen here; the refusal releases the claim, having changed
+    // (1) Held to the end of this function: every way out lets go of it,
+    // which ends the delete in admission and releases the workspace.
+    let _deleting = core.sessions.hold_for_delete(&id).await?;
+    // Refused while it starts or works. Checked once the workspace is held,
+    // so a send that arrives after it is refused `busy` and one that
+    // arrived before is seen here; the refusal lets go, having changed
     // nothing.
     core.sessions.check_deletable(&id)?;
 

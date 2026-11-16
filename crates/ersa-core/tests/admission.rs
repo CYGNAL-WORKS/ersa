@@ -167,6 +167,9 @@ fn a_found_session_and_its_workspaces_removal_in_both_orders() {
     );
     assert!(state.workspace(W).is_none());
     assert!(state.session("s1").is_none(), "left listed: {state:#?}");
+    // What is left of a workspace that went stays held: until Core has let
+    // go of the sessions it had loaded there, none of them may start.
+    assert!(state.workspace_held(W));
 
     // Still being stored when the removal is asked for: the removal waits
     // for its row, so the row is there to go with the workspace's.
@@ -681,19 +684,215 @@ fn a_finished_delete_takes_its_workspace_only_once_no_session_is_in_it() {
     assert!(state.workspace(W).is_none());
 }
 
+// -- A delete's hold on its workspace, and a session's removal --------------
+
+fn delete_session(session: &str) -> Command {
+    Command::DeleteSession {
+        session: session.into(),
+    }
+}
+
+fn remove_session(session: &str) -> Command {
+    Command::RemoveSession {
+        session: session.into(),
+    }
+}
+
+/// [`world`] with `sessions` Ersa started, stored, in the isolated
+/// workspace.
+fn world_with(sessions: &[&str]) -> State {
+    let mut existing = existing();
+    for session in sessions {
+        existing.sessions.push(((*session).into(), W.into(), false));
+    }
+    State::restored(existing)
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn a_delete_admitted_first_refuses_what_would_change_its_workspace() {
+    let mut state = world_with(&["s1", "s2"]);
+    assert_eq!(
+        command(&mut state, delete_session("s1")),
+        admitted(Operation::DeleteSession("s1".into()))
+    );
+    assert!(state.workspace_held(W));
+    let held = state.clone();
+
+    // `session.create` and a fork's session; a session found in the
+    // backend's records is not recorded there either.
+    for new in [create_session(W, "s3"), find_session(W, "s3")] {
+        assert_eq!(
+            command(&mut state, new),
+            Outcome::Refused(Refusal::WorkspaceHeld)
+        );
+    }
+    // `session.remove` of another session there, a second `session.delete`
+    // of another, and the same delete asked again.
+    for other in [
+        remove_session("s2"),
+        delete_session("s2"),
+        delete_session("s1"),
+    ] {
+        assert_eq!(
+            command(&mut state, other),
+            Outcome::Refused(Refusal::WorkspaceHeld)
+        );
+    }
+    // Refused, each changed nothing.
+    assert_eq!(state, held);
+
+    // Another workspace is not held.
+    assert_eq!(
+        command(&mut state, create_session(ROOT, "s3")),
+        admitted(Operation::CreateSession("s3".into()))
+    );
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn what_was_admitted_before_a_delete_is_seen_by_it() {
+    // A session created first and still being stored: the delete waits for
+    // its row, so what the delete counts in the workspace includes it.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, create_session(W, "s2"));
+    assert_eq!(command(&mut state, delete_session("s1")), Outcome::Held);
+    assert!(!state.workspace_held(W));
+    let stored = step(
+        &mut state,
+        Input::Report(Report::SessionStored {
+            session: "s2".into(),
+        }),
+    );
+    assert_eq!(
+        stored.released,
+        [(0, admitted(Operation::DeleteSession("s1".into())))]
+    );
+    assert!(state.workspace_held(W));
+
+    // A removal of another session first: it goes on, and so does the
+    // delete.
+    let mut state = world_with(&["s1", "s2"]);
+    assert_eq!(
+        command(&mut state, remove_session("s2")),
+        admitted(Operation::RemoveSession("s2".into()))
+    );
+    assert_eq!(
+        command(&mut state, delete_session("s1")),
+        admitted(Operation::DeleteSession("s1".into()))
+    );
+
+    // Another delete in the workspace first: the second is busy.
+    let mut state = world_with(&["s1", "s2"]);
+    command(&mut state, delete_session("s2"));
+    assert_eq!(
+        command(&mut state, delete_session("s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+}
+
+#[test]
+fn a_delete_of_a_session_being_removed_waits_and_then_finds_no_session() {
+    let mut state = world_with(&["s1"]);
+    command(&mut state, remove_session("s1"));
+    // A second removal of it, and a delete of it, wait for the first.
+    assert_eq!(command(&mut state, remove_session("s1")), Outcome::Held);
+    assert_eq!(command(&mut state, delete_session("s1")), Outcome::Held);
+    let gone = step(
+        &mut state,
+        Input::Report(Report::SessionGone {
+            session: "s1".into(),
+        }),
+    );
+    assert_eq!(
+        gone.released,
+        [
+            (0, Outcome::Refused(Refusal::NoSession)),
+            (1, Outcome::Refused(Refusal::NoSession)),
+        ]
+    );
+
+    // A removal that ends without removing it lets the delete go on.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, remove_session("s1"));
+    command(&mut state, delete_session("s1"));
+    let ended = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::RemoveSession("s1".into()))),
+    );
+    assert_eq!(
+        ended.released,
+        [(0, admitted(Operation::DeleteSession("s1".into())))]
+    );
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn a_delete_and_a_removal_of_its_workspace_or_project_in_both_orders() {
+    // Only a session found in the backend's records is there, so the
+    // removal is not refused for sessions: it is busy while the delete
+    // holds the workspace.
+    let mut found_in_isolated = existing();
+    found_in_isolated
+        .sessions
+        .push(("s1".into(), W.into(), true));
+    let mut state = State::restored(found_in_isolated.clone());
+    command(&mut state, delete_session("s1"));
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+    // The removal first: the delete is busy.
+    let mut state = State::restored(found_in_isolated);
+    command(&mut state, remove_workspace(W));
+    assert_eq!(
+        command(&mut state, delete_session("s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+
+    // The same in a project's own folder.
+    let mut found_in_root = existing();
+    found_in_root.workspaces.truncate(1);
+    found_in_root
+        .sessions
+        .push(("s1".into(), ROOT.into(), true));
+    let mut state = State::restored(found_in_root.clone());
+    command(&mut state, delete_session("s1"));
+    assert_eq!(
+        command(&mut state, remove_project()),
+        Outcome::Refused(Refusal::ProjectBusy {
+            root: Some(ROOT.into())
+        })
+    );
+    let mut state = State::restored(found_in_root);
+    command(&mut state, remove_project());
+    assert_eq!(
+        command(&mut state, delete_session("s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+
+    // A session Ersa started there refuses the removal for sessions first,
+    // as before the delete was asked for.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, delete_session("s1"));
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        Outcome::Refused(Refusal::WorkspaceHasSessions)
+    );
+}
+
 // -- Every input in every state (ARCH-CORE-R18) -----------------------------
 
 /// Every command and report over a world of one project in one folder, its
-/// root and one isolated workspace, and three sessions.
-fn every_input() -> Vec<Input> {
+/// root and one isolated workspace, and `sessions`.
+fn every_input(sessions: &[&str]) -> Vec<Input> {
     let mut inputs = Vec::new();
     let workspaces = [ROOT, W];
-    let sessions = ["s1", "s2", "s3"];
     inputs.push(Input::Command(add_project(P)));
     inputs.push(Input::Command(remove_project()));
     for workspace in workspaces {
         inputs.push(Input::Command(remove_workspace(workspace)));
-        for session in sessions {
+        for &session in sessions {
             for found in [false, true] {
                 inputs.push(Input::Command(Command::CreateSession {
                     workspace: workspace.into(),
@@ -702,6 +901,10 @@ fn every_input() -> Vec<Input> {
                 }));
             }
         }
+    }
+    for &session in sessions {
+        inputs.push(Input::Command(delete_session(session)));
+        inputs.push(Input::Command(remove_session(session)));
     }
     inputs.push(Input::Command(Command::CreateWorkspace {
         project: P.into(),
@@ -748,7 +951,7 @@ fn every_input() -> Vec<Input> {
             Report::Ended(Operation::RemoveWorkspace(workspace)),
         ]);
     }
-    for session in sessions {
+    for &session in sessions {
         let session = session.to_string();
         reports.extend([
             Report::SessionStored {
@@ -757,7 +960,9 @@ fn every_input() -> Vec<Input> {
             Report::SessionGone {
                 session: session.clone(),
             },
-            Report::Ended(Operation::CreateSession(session)),
+            Report::Ended(Operation::CreateSession(session.clone())),
+            Report::Ended(Operation::DeleteSession(session.clone())),
+            Report::Ended(Operation::RemoveSession(session)),
         ]);
     }
     inputs.extend(reports.into_iter().map(Input::Report));
@@ -786,7 +991,7 @@ fn check_state(state: &State) {
             project.is_some(),
             "workspace {id} has no project: {state:#?}"
         );
-        let held = match workspace.phase {
+        let removal = match workspace.phase {
             WorkspacePhase::Removing { .. } => true,
             WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => {
                 workspace.root && project.map(|p| p.phase) == Some(ProjectPhase::Removing)
@@ -794,8 +999,13 @@ fn check_state(state: &State) {
         };
         // No workspace is held for removal with a session Ersa started in it.
         assert!(
-            !held || started_in(state, id) == 0,
+            !removal || started_in(state, id) == 0,
             "workspace {id} is held with a session Ersa started: {state:#?}"
+        );
+        // A workspace has one holder at most: a removal or a delete.
+        assert!(
+            !(removal && workspace.deleting.is_some()),
+            "workspace {id} is held twice: {state:#?}"
         );
     }
     for (id, project) in state.projects() {
@@ -854,13 +1064,14 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
         );
     }
     // No session, found ones included, is admitted into a workspace that is
-    // not ready or is held: one being removed, or the own folder of a
-    // project being removed.
+    // not ready or is held: by its removal, by its project's, or by a
+    // delete.
     if let (Input::Command(Command::CreateSession { workspace, .. }), Outcome::Admitted(_)) =
         (input, outcome)
     {
         let entry = before.workspace(workspace).expect("an admitted workspace");
         assert_eq!(entry.phase, WorkspacePhase::Ready, "{}", context());
+        assert!(!before.workspace_held(workspace), "{}", context());
         assert_eq!(
             before.project(&entry.project).map(|p| p.phase),
             Some(ProjectPhase::Present),
@@ -868,16 +1079,35 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             context()
         );
     }
+    // A delete, a removal of a session, and a removal of a workspace are
+    // admitted only where nothing holds the workspace.
+    let about = match (input, outcome) {
+        (
+            Input::Command(Command::DeleteSession { session } | Command::RemoveSession { session }),
+            Outcome::Admitted(_),
+        ) => before.session(session).map(|s| s.workspace.clone()),
+        (Input::Command(Command::RemoveWorkspace { workspace }), Outcome::Admitted(_)) => {
+            Some(workspace.clone())
+        }
+        _ => None,
+    };
+    if let Some(workspace) = about {
+        assert!(!before.workspace_held(&workspace), "{}", context());
+    }
 }
 
 // verifies: ARCH-CORE-R18
 // verifies: ARCH-CORE-R15
 #[test]
 fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
-    // More commands held at once than two add no new decision, only longer
-    // queues, so states with more are not explored further.
+    // Two sessions meet every pair of things a workspace's sessions can be
+    // at once (started by Ersa or found, stored or not, being removed or
+    // deleted); a third multiplies the states past a minute's run and adds
+    // no pair. More than two commands held at once add no new decision,
+    // only longer queues, so states with more are not explored further.
+    let sessions = ["s1", "s2"];
     const HELD: usize = 2;
-    let inputs = every_input();
+    let inputs = every_input(&sessions);
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
     for start in [State::default(), world()] {
@@ -925,6 +1155,15 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
             "{wanted:?} was never reached"
         );
     }
+    // And so is each hold a delete or a removal of a session takes.
+    assert!(
+        seen.iter()
+            .any(|s| s.workspace(W).is_some_and(|w| w.deleting.is_some()))
+    );
+    assert!(
+        seen.iter()
+            .any(|s| s.sessions().any(|(_, session)| session.removing))
+    );
 }
 
 // -- Operations under way and waiters (the wrapper around the function) -----
@@ -997,6 +1236,27 @@ async fn a_held_command_is_answered_when_what_it_waits_for_reports() {
             existing: "p1".into()
         })
     );
+}
+
+// verifies: ARCH-CORE-R16
+#[tokio::test]
+async fn a_delete_whose_task_ends_without_a_report_releases_its_workspace() {
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(("s1".into(), W.into(), false));
+    admission.restore(stored);
+
+    let deleting = admit(&admission, delete_session("s1")).await;
+    assert!(admission.workspace_held(W));
+    assert!(admission.deleting(W, "s1"));
+    // The delete's task ends, by a refusal, a failure or a panic: its
+    // handle is dropped, and nothing more is said.
+    drop(deleting);
+    assert!(!admission.workspace_held(W));
+    assert!(!admission.deleting(W, "s1"));
+    // The workspace takes a session again.
+    let created = admit(&admission, create_session(W, "s2")).await;
+    drop(created);
 }
 
 // verifies: ARCH-CORE-R16
