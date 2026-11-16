@@ -65,7 +65,24 @@ impl SessionManager {
     /// has wound down.
     pub async fn is_running(&self, id: &str) -> Result<bool, SessionError> {
         let handle = self.handle(id)?;
-        Ok(current_run(&handle).await?.is_some())
+        self.runs_once_settled(&handle).await
+    }
+
+    /// Whether Core runs the session, once a run that has ended and is only
+    /// winding down has been let go of. That is waited for first, held in
+    /// admission, up to the stop limit: a client may have seen
+    /// `session.ended` before Core let go of the run, and a resume or a
+    /// send then starts the session again rather than finding it still
+    /// running.
+    pub(super) async fn runs_once_settled(&self, handle: &Handle) -> Result<bool, SessionError> {
+        match self.admission.run_settled(&handle.id, STOP_TIMEOUT).await {
+            Ok(()) => Ok(false),
+            Err(Refusal::Running) => Ok(true),
+            Err(refusal) => {
+                let workspace_id = lock(&handle.row).workspace_id.clone();
+                Err(refused_session(refusal, &workspace_id, &handle.id))
+            }
+        }
     }
 
     /// Starts the backend of `handle` again unless it is running. Returns
@@ -86,10 +103,7 @@ impl SessionManager {
         // needs no start; nothing starts once Core is shutting down; one
         // that is gone answers `not_found`.
         let workspace_id = lock(&handle.row).workspace_id.clone();
-        let begun = self
-            .admission
-            .begin_within(Timed::Start(handle.id.clone()), STOP_TIMEOUT)
-            .await;
+        let begun = self.admission.begin_start(&handle.id, STOP_TIMEOUT).await;
         let _exclusive = match begun {
             Ok(exclusive) => exclusive,
             Err(Refusal::Running) => return Ok(()),
@@ -331,24 +345,5 @@ pub(super) async fn check_folder(handle: &Handle) -> Result<(), SessionError> {
         None => Err(SessionError::InvalidState(format!(
             "the session's folder {cwd} did not answer within {FOLDER_CHECK:?}"
         ))),
-    }
-}
-
-/// The session's run, unless it has ended and is only winding down, which
-/// is waited for first, as `session.remove` waits: a client may have seen
-/// `session.ended` before Core let go of the run, and a resume or a send
-/// then starts the session again rather than finding it still running.
-pub(super) async fn current_run(handle: &Handle) -> Result<Option<Arc<Live>>, SessionError> {
-    match handle.live() {
-        Some(live) if live.sink.has_ended() => {
-            if wait_finished(&live, STOP_TIMEOUT).await.is_err() {
-                return Err(SessionError::Internal(format!(
-                    "session {} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}",
-                    handle.id
-                )));
-            }
-            Ok(handle.live())
-        }
-        run => Ok(run),
     }
 }
