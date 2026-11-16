@@ -33,6 +33,8 @@ time.workspace = true
 ersa-adapter = { path = ".", features = ["test-support"] }
 # The contract test checks that projected events pass the schema.
 ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
+# Scratch folders for the folder-deletion tests.
+tempfile.workspace = true
 
 [lints]
 workspace = true
