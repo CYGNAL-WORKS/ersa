@@ -118,11 +118,11 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
 /// is lossy (`D:\a-b` and `D:\a\b` share one), so a caller tells the two
 /// apart by it (FLOW-RESUME-SESSION-R12). Only the head is read, up to the
 /// first entry that names one, which is the first prompt; a record that
-/// names none there has `None`. A record of a run the CLI's own list hides
+/// names none there is left out. A record of a run the CLI's own list hides
 /// (an SDK entrypoint) is left out. A directory with no records lists nothing; a
 /// directory that cannot be read is an error; a record that cannot be read
 /// is left out.
-pub fn list_records(claude_home: &Path, cwd: &str) -> io::Result<Vec<(String, Option<String>)>> {
+pub fn list_records(claude_home: &Path, cwd: &str) -> io::Result<Vec<(String, String)>> {
     let dir = project_dir(claude_home, cwd);
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
@@ -147,7 +147,9 @@ pub fn list_records(claude_home: &Path, cwd: &str) -> io::Result<Vec<(String, Op
             // A run the SDK made with no one at the keyboard: the CLI's own
             // list hides it, and so does Ersa's (PROTO-CLAUDE-CODE-STREAM-R79).
             Ok(head) if head.entrypoint.as_deref().is_some_and(is_sdk) => {}
-            Ok(head) => records.push((id.to_string(), head.cwd)),
+            // A record that names no folder yet cannot be placed in one.
+            Ok(Head { cwd: Some(cwd), .. }) => records.push((id.to_string(), cwd)),
+            Ok(_) => {}
             Err(_) => {}
         }
     }
