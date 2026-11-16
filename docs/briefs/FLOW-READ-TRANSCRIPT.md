@@ -75,7 +75,7 @@ Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R
 - Whether code blocks and diffs take syntax colors, and from which library (ADR 0015), once the owner has lived with them plain.
 - Whether consecutive tool cards group into one row, as Claude Desktop groups a run of calls.
 - Whether the permission card of a call that changes files shows the change itself, as Claude Desktop's prompt does, rather than its input fields beneath the diff card.
-- Whether a session opened from its record shows a subagent's calls inside its card: the recorded session's record holds none of them (fixture 2.1.316/34-tool-agent) and the record's projection leaves sidechain entries out (PROTO-CLAUDE-CODE-STREAM-R20), so a reopened session's card shows none.
+- Whether a session opened from its record shows a subagent's calls inside its card: the recorded session's record holds none of them (fixture 2.1.316/34-tool-agent) and the record's projection leaves sidechain entries out (PROTO-CLAUDE-CODE-STREAM-R78), so a reopened session's card shows none.
 
 ## Changes
 
