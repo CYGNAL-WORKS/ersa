@@ -290,6 +290,28 @@ async fn section_names_are_trimmed_and_blank_long_or_taken_ones_refused() {
 /// session, and that outlives Core.
 // verifies: PROTO-CORE-API-R39
 #[tokio::test(flavor = "multi_thread")]
+async fn a_section_made_before_core_restarted_takes_a_session_and_is_removed() {
+    let (core, mut client) = start().await;
+    let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
+    let id = new_session(&mut client, &workspace_id).await;
+    let work = create_section(&mut client, "Work").await;
+    drop(client);
+
+    // The new Core knows the section from its store.
+    let (_core, mut client) = restarted(core).await;
+    arrange(&mut client, json!({ "id": id, "section_id": work["id"] })).await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["section_id"], work["id"]);
+    let removed = client
+        .result("section.remove", json!({ "id": work["id"] }))
+        .await;
+    assert_eq!(removed, work);
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row.get("section_id"), None);
+}
+
+// verifies: PROTO-CORE-API-R39
+#[tokio::test(flavor = "multi_thread")]
 async fn removing_a_section_leaves_its_sessions_in_no_section() {
     let (core, mut client) = start().await;
     let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
