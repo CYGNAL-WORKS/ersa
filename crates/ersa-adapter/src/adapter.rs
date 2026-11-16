@@ -3,6 +3,7 @@
 use std::fmt;
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_trait::async_trait;
 use ersa_protocol::core_api::{Choice, ModelChoice};
@@ -240,11 +241,18 @@ pub trait Adapter: Send + Sync {
     /// since that process would go on writing the record. A record already
     /// gone counts as deleted. The default: the backend cannot delete a
     /// session.
+    ///
+    /// Core calls the deletion off through `call_off` when it gives up on it
+    /// (PROTO-CORE-API-R91): from then on the adapter begins no further
+    /// deletion, so a record the user was told is kept is not deleted later
+    /// (PROTO-CLAUDE-CODE-STREAM-R55). [`remove_tree`](crate::remove_tree)
+    /// deletes a folder that way.
     async fn delete_record(
         &self,
         _transport: Arc<dyn Transport>,
         _cwd: &str,
         _backend_session_id: &str,
+        _call_off: &CallOff,
     ) -> Result<RecordDeletion, AdapterError> {
         Err(AdapterError::Protocol(format!(
             "the {} backend cannot delete a session",
@@ -279,6 +287,37 @@ pub enum ConversationEnd {
     /// Part way through a turn: one still being written, or one the process
     /// that was writing it never finished.
     Unfinished,
+}
+
+/// How Core calls off work it gave an adapter and has stopped waiting for
+/// (PROTO-CORE-API-R91). Clones share one flag: Core keeps one and calls it
+/// off, the work holds another and asks before each step it cannot undo.
+/// Work on a blocking thread can ask too, since asking never waits.
+#[derive(Debug, Clone, Default)]
+pub struct CallOff(Arc<AtomicBool>);
+
+impl CallOff {
+    /// Calls the work off. It cannot be taken back.
+    pub fn call_off(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the work has been called off.
+    pub fn is_called_off(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// Calls its [`CallOff`] off when dropped, so that every way out of the
+/// function holding it calls the work off, a dropped request's included.
+/// Calling off work that has finished changes nothing.
+#[derive(Debug)]
+pub struct CallOffOnDrop(pub CallOff);
+
+impl Drop for CallOffOnDrop {
+    fn drop(&mut self) {
+        self.0.call_off();
+    }
 }
 
 /// What [`Adapter::delete_record`] did.

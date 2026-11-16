@@ -61,10 +61,10 @@ use std::sync::{Arc, Mutex};
 
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
-    ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, ProcessSpec,
-    Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings,
-    Requested, SessionConfig, SessionControl, TitleRules, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, ConversationEnd,
+    Direction, ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit,
+    ProcessSpec, Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary,
+    RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -105,6 +105,9 @@ pub struct Stats {
     pub messages: Mutex<Vec<OutgoingMessage>>,
     /// Records deleted.
     pub record_deletes: AtomicUsize,
+    /// Told each time a record deletion ends, deleted, refused or called
+    /// off, so a test can wait for one Core gave up on.
+    pub record_deletion_ended: tokio::sync::Notify,
     /// Permission requests answered.
     pub decisions: AtomicUsize,
     /// Every change of a live session's controls the backend took, in order.
@@ -273,6 +276,9 @@ pub struct FakeAdapter {
     /// When set, what deleting a record answers instead of deleting it: the
     /// registry saying so at the moment of deletion.
     pub delete_refusal: Arc<Mutex<Option<OpenElsewhere>>>,
+    /// Held by a test to stall every record deletion, as a disk that stopped
+    /// answering does, until it lets go.
+    pub delete_gate: Arc<tokio::sync::Mutex<()>>,
     /// How the fake says every session's conversation ends; `None` is a
     /// backend that cannot fork.
     pub conversation_end: Arc<Mutex<Option<ConversationEnd>>>,
@@ -320,6 +326,7 @@ impl FakeAdapter {
             open_elsewhere: Arc::new(Mutex::new(OpenElsewhere::No)),
             open_check_gate: Arc::default(),
             delete_refusal: Arc::default(),
+            delete_gate: Arc::default(),
             conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
             models: Arc::new(Mutex::new(ModelsAnswer::Listed(fake_models()))),
             conversation_end_fails: Arc::default(),
@@ -619,19 +626,30 @@ impl Adapter for FakeAdapter {
     }
 
     /// Deletes the record, as Claude Code's adapter deletes its file; one
-    /// already gone counts as deleted.
+    /// already gone counts as deleted. Called off before it deletes, it
+    /// deletes nothing, as the adapter contract says.
     async fn delete_record(
         &self,
         _transport: Arc<dyn Transport>,
         _cwd: &str,
         backend_session_id: &str,
+        call_off: &CallOff,
     ) -> Result<RecordDeletion, AdapterError> {
-        if let Some(refused) = self.delete_refusal.lock().unwrap().clone() {
-            return Ok(RecordDeletion::Refused(refused));
-        }
-        self.records.lock().unwrap().remove(backend_session_id);
-        self.stats.record_deletes.fetch_add(1, Ordering::SeqCst);
-        Ok(RecordDeletion::Deleted)
+        drop(self.delete_gate.lock().await);
+        let deletion = if let Some(refused) = self.delete_refusal.lock().unwrap().clone() {
+            Ok(RecordDeletion::Refused(refused))
+        } else if call_off.is_called_off() {
+            Err(AdapterError::Io(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "the deletion was called off",
+            )))
+        } else {
+            self.records.lock().unwrap().remove(backend_session_id);
+            self.stats.record_deletes.fetch_add(1, Ordering::SeqCst);
+            Ok(RecordDeletion::Deleted)
+        };
+        self.stats.record_deletion_ended.notify_one();
+        deletion
     }
 
     async fn conversation_end(
