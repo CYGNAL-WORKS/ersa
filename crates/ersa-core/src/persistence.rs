@@ -22,6 +22,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
+use crate::admission::{Existing, ExistingWorkspace, Folder, WorkspacePhase};
 use crate::settings;
 
 mod sections;
@@ -208,13 +209,18 @@ impl Store {
     }
 
     /// Adds a project and its root workspace, the project's own folder, in
-    /// one transaction, and returns that workspace. `path_key` is its path as
-    /// the host compares paths. Fails with [`Error::Conflict`] when that path
-    /// was added meanwhile.
-    pub async fn insert_project(&self, project: Project, path_key: String) -> Result<Workspace> {
+    /// one transaction, and returns that workspace, whose id is `root_id`.
+    /// `path_key` is its path as the host compares paths. Fails with
+    /// [`Error::Conflict`] when that path is already a project's.
+    pub async fn insert_project(
+        &self,
+        project: Project,
+        root_id: String,
+        path_key: String,
+    ) -> Result<Workspace> {
         self.call(move |conn| {
             let root = Workspace {
-                id: new_id("w"),
+                id: root_id,
                 project_id: project.id.clone(),
                 kind: WorkspaceKind::Root,
                 path: project.path.clone(),
@@ -238,7 +244,7 @@ impl Store {
                     created_at
                 ],
             )
-            .map_err(|e| conflict(e, "that folder was added as a project meanwhile"))?;
+            .map_err(|e| conflict(e, "that folder is already a project"))?;
             insert_workspace(&tx, &root, &created_at)?;
             tx.commit()?;
             Ok(root)
@@ -340,32 +346,46 @@ impl Store {
         .await
     }
 
-    /// Moves a workspace from `from` to `to` only if it is currently in one of
-    /// the `from` states, in one transaction, so two removals racing on
-    /// different connections cannot both start. Returns the state it
-    /// replaced, or `None` when it was in none of `from` and stayed as it was.
-    pub async fn transition_workspace(
-        &self,
-        id: String,
-        from: &'static [WorkspaceState],
-        to: WorkspaceState,
-    ) -> Result<Option<WorkspaceState>> {
-        self.call(move |conn| {
-            let tx = conn.transaction()?;
-            let current: Option<WorkspaceState> = tx
-                .query_row("SELECT state FROM workspaces WHERE id = ?1", [&id], |row| {
-                    from_sql_enum(row, 0)
+    /// Every project, workspace and session stored, for admission to start
+    /// from (ARCH-CORE, Admission). Read at startup, once
+    /// [`Store::reconcile_workspaces`] has run, so no workspace is still
+    /// `creating` or `removing`; one that were would count as `error`, as
+    /// that marks it.
+    pub async fn existing(&self) -> Result<Existing> {
+        self.call(|conn| {
+            let mut existing = Existing::default();
+            let mut projects = conn.prepare("SELECT id, host_id, path_key FROM projects")?;
+            let rows = projects.query_map([], |row| {
+                let folder = Folder {
+                    host: row.get(1)?,
+                    key: row.get(2)?,
+                };
+                Ok((row.get(0)?, folder))
+            })?;
+            existing.projects = collect(rows)?;
+            let mut workspaces =
+                conn.prepare("SELECT id, project_id, kind, state FROM workspaces")?;
+            let rows = workspaces.query_map([], |row| {
+                let kind: WorkspaceKind = from_sql_enum(row, 2)?;
+                let phase = match from_sql_enum(row, 3)? {
+                    WorkspaceState::Ready => WorkspacePhase::Ready,
+                    WorkspaceState::Creating | WorkspaceState::Removing | WorkspaceState::Error => {
+                        WorkspacePhase::Error
+                    }
+                };
+                Ok(ExistingWorkspace {
+                    id: row.get(0)?,
+                    project: row.get(1)?,
+                    root: kind == WorkspaceKind::Root,
+                    phase,
                 })
-                .optional()?;
-            let Some(current) = current.filter(|state| from.contains(state)) else {
-                return Ok(None);
-            };
-            tx.execute(
-                "UPDATE workspaces SET state = ?2 WHERE id = ?1",
-                params![id, to_sql_enum(&to)],
-            )?;
-            tx.commit()?;
-            Ok(Some(current))
+            })?;
+            existing.workspaces = collect(rows)?;
+            let mut sessions =
+                conn.prepare("SELECT id, workspace_id, started_elsewhere FROM sessions")?;
+            let rows = sessions.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            existing.sessions = collect(rows)?;
+            Ok(existing)
         })
         .await
     }
@@ -821,7 +841,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn workspace_transitions_only_from_the_given_states() {
+    async fn constraints_refuse_as_conflicts_and_startup_marks_an_interrupted_workspace() {
         let (_dir, store) = temp_store();
         store.ensure_local_host("pc".into()).await.expect("host");
         let project = Project {
@@ -833,7 +853,7 @@ mod tests {
             trusted: false,
         };
         store
-            .insert_project(project.clone(), "/r".into())
+            .insert_project(project.clone(), new_id("w"), "/r".into())
             .await
             .expect("project");
         // The same key again is a conflict, not an internal error.
@@ -842,7 +862,7 @@ mod tests {
             ..project
         };
         assert!(matches!(
-            store.insert_project(again, "/r".into()).await,
+            store.insert_project(again, new_id("w"), "/r".into()).await,
             Err(Error::Conflict(_))
         ));
         store
@@ -857,49 +877,10 @@ mod tests {
             .await
             .expect("workspace");
 
-        let ready: &[WorkspaceState] = &[WorkspaceState::Ready];
-        // The first claim says the state it replaced; the second is refused.
-        assert_eq!(
-            store
-                .transition_workspace("w".into(), ready, WorkspaceState::Removing)
-                .await
-                .expect("first"),
-            Some(WorkspaceState::Ready)
-        );
-        assert_eq!(
-            store
-                .transition_workspace("w".into(), ready, WorkspaceState::Removing)
-                .await
-                .expect("second"),
-            None
-        );
-        // Put back only while still claimed: a state another request set
-        // since (here `error`) stays.
-        store
-            .set_workspace_state("w".into(), WorkspaceState::Error)
-            .await
-            .expect("mark");
-        let claimed: &[WorkspaceState] = &[WorkspaceState::Removing];
-        assert_eq!(
-            store
-                .transition_workspace("w".into(), claimed, WorkspaceState::Ready)
-                .await
-                .expect("put back"),
-            None
-        );
-        assert_eq!(
-            store
-                .workspace("w".into())
-                .await
-                .expect("get")
-                .expect("row")
-                .state,
-            WorkspaceState::Error
-        );
         store
             .set_workspace_state("w".into(), WorkspaceState::Removing)
             .await
-            .expect("claim again");
+            .expect("removing");
 
         // A project with a workspace cannot be deleted: a conflict.
         assert!(matches!(
@@ -998,7 +979,7 @@ mod tests {
             trusted: false,
         };
         let root = store
-            .insert_project(project, "/r".into())
+            .insert_project(project, new_id("w"), "/r".into())
             .await
             .expect("insert");
         assert_eq!(
@@ -1026,7 +1007,7 @@ mod tests {
             trusted: true,
         };
         store
-            .insert_project(project.clone(), "/r".into())
+            .insert_project(project.clone(), new_id("w"), "/r".into())
             .await
             .expect("insert");
         assert_eq!(
