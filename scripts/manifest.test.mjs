@@ -1,5 +1,5 @@
 // Tests for manifest.mjs's inbox switch, the CI step that passes it, and its
-// repeated-label check, run on a copy of docs/ so the repository's own generated files are never rewritten.
+// repeated-label, repeated-section and fixture-citation checks, run on a copy of docs/ so the repository's own generated files are never rewritten.
 // Run: node --test scripts/manifest.test.mjs
 
 import assert from "node:assert/strict";
@@ -112,3 +112,32 @@ test("a requirement defined inside fenced code still counts", () => {
   assert.equal(status, 1);
   assert.match(problems, /FLOW-APPROVE-PERMISSION: requirement FLOW-APPROVE-PERMISSION-R01 is defined 2 times/);
 });
+
+test("a section that appears twice fails the check", () => {
+  // What a union merge leaves when both sides rewrote a section: both, each under its own heading.
+  const { status, problems } = withSection("## Development\n\nA second copy.");
+  assert.equal(status, 1);
+  assert.match(problems, /LAY-SHELL: the section "Development" appears twice/);
+});
+
+test("a brief that cites a fixture nobody recorded fails the check", () => {
+  // Each form a brief uses: after the word, under a version folder, and as code spans in a list,
+  // where every name counts, not only the first.
+  const cited = withSection(
+    "## Spare\n\nShown by fixture 99-never-recorded and by 2.1.316/98-nor-this.\n\n" +
+      "The fixtures `22-message-during-turn`, `97-nor-that` and `100-nor-this-one` show it.\n\n```\nfixture 96-in-a-fence\n```",
+  );
+  assert.equal(cited.status, 1);
+  for (const name of ["99-never-recorded", "98-nor-this", "97-nor-that", "100-nor-this-one"]) {
+    assert.match(cited.problems, new RegExp(`LAY-SHELL cites fixture ${name}, which is not under`));
+  }
+  assert.doesNotMatch(cited.problems, /96-in-a-fence|22-message-during-turn/);
+  // A recorded one passes in each form, and a hyphenated number is no citation: in prose anywhere,
+  // and in a code span on a line that speaks of no fixture or recording.
+  const real = withSection(
+    "## Spare\n\nShown by fixture 22-message-during-turn, by 2.1.316/22-message-during-turn and by the recordings `22-message-during-turn` and `23-mode-change-while-waiting`, within a 30-second limit.\n\n" +
+      "A `30-second-time-out` limit on a `64-bit` host.",
+  );
+  assert.equal(real.status, 0, real.problems);
+});
+

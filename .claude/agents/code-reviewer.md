@@ -11,7 +11,7 @@ Per hunk, ask the questions that fit what it touches.
 **Logic.**
 
 - Is each condition right at its edges: empty, one, the last item, the boundary value, `None` or a missing field?
-- Does a state transition keep its invariants when it runs twice or out of order, and does an async path give the same result under any interleaving the code allows?
+- Does a state transition keep its invariants when it runs twice or out of order, and does an async path give the same result under any interleaving the code allows? Order between two of Core's operations belongs in admission, as an input and its rows; a new lock, flag or guard for it is a defect (ADR 0037).
 - Does each caller still get what it relied on: return values, errors, ordering, units, the right id from the right source?
 
 **Peers Ersa does not control**: child processes, pipes, sockets, the database, the file system, vendor CLIs, git, the process table. Assume each can be wedged, slow, hostile, newer, localized or gone, that a pid or a file can be replaced between two steps, and that Core can crash at any line.

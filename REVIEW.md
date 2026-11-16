@@ -16,6 +16,7 @@ Tests:
 
 - A test that passes without the change is medium when it cites a requirement or covers the fix of a high or medium finding, and low otherwise.
 - A test rewritten to expect whatever the code outputs is always medium.
+- A new test that waits a fixed pause for something it could wait on is medium: it fails by chance on a busy machine, and the review loop meets that as a clean head put out of the merge queue.
 - Mutation targets requirement values and fix hunks, not arbitrary lines.
 
 A known defect stays at its severity when it needs a repeat or a slow peer to show: a leak or a stall that needs a repeat still happens in use. A shape already fixed elsewhere in the code is not low here.
