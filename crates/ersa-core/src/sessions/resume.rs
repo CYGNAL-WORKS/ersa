@@ -76,15 +76,14 @@ impl SessionManager {
         how: Resumption,
         folder: FolderChecked,
     ) -> Result<(), SessionError> {
-        // Waited for before taking `op`, so nothing else on the session
-        // queues behind the wait.
+        // Waited for before the start is admitted, so nothing else on the
+        // session queues behind the wait.
         current_run(handle).await?;
-        // Held throughout, so a stop, a removal or a view opened meanwhile
-        // waits for the session to be live, and two resumes start it once.
-        let _op = handle.op.lock().await;
-        if handle.removed.load(Ordering::SeqCst) {
-            return Err(SessionError::NotFound(handle.id.clone()));
-        }
+        // The start is the session's exclusive operation throughout, so a
+        // stop, a removal or a view opened meanwhile waits for the session
+        // to be live, and two resumes start it once. A session that is gone
+        // answers `not_found`.
+        let _exclusive = self.exclusive(&handle.id).await?;
         if handle.live().is_some() {
             return Ok(());
         }

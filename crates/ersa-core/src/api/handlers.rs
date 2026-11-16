@@ -434,8 +434,14 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
         removing.end(not_removed);
         return Err(refused(Refusal::ProjectHasSessions, &project.id));
     }
-    // One transaction: on a failure nothing of the project went. The rows
-    // of the sessions found in its folder go with it, their records left.
+    // The rows of the sessions found in its folder go with it, their
+    // records left: whatever is under way on one finishes first, and
+    // nothing begins on them until Core has let go of them.
+    let quiet = match &root {
+        Some(root) => Some(core.sessions.quiet_found(root).await),
+        None => None,
+    };
+    // One transaction: on a failure nothing of the project went.
     if let Err(e) = core.store.delete_project(project.id.clone()).await {
         removing.end(not_removed);
         return Err(e.into());
@@ -443,8 +449,8 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     removing.end(Report::ProjectRemoved {
         project: project.id.clone(),
     });
-    if let Some(root) = &root {
-        core.sessions.forget_found(root).await;
+    if let (Some(root), Some(quiet)) = (&root, quiet) {
+        core.sessions.forget_found(root, quiet).await;
     }
     Ok(project)
 }
@@ -783,11 +789,14 @@ pub(super) async fn workspace_remove(
     // The rows of the sessions found in its folder go with it, their
     // records left. A failure leaves the row `removing` for the next start
     // to mark `error`, which is how admission then holds it.
+    // Whatever is under way on one of those sessions finishes first, and
+    // nothing begins on them until Core has let go of them.
+    let quiet = core.sessions.quiet_found(&id).await;
     core.store.delete_workspace(id.clone()).await?;
     removing.end(Report::WorkspaceRemoved {
         workspace: id.clone(),
     });
-    core.sessions.forget_found(&id).await;
+    core.sessions.forget_found(&id, quiet).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }
