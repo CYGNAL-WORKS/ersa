@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ersa_core::admission::{
     Admission, Command, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, State, WorkspacePhase, step,
+    ProjectPhase, Refusal, Replaced, Report, Run, State, WorkspacePhase, step,
 };
 
 const P: &str = "p1";
@@ -991,11 +991,398 @@ fn an_operation_asked_of_a_session_still_being_stored_waits_for_its_row() {
     );
 }
 
+// -- A session's run, and shutdown -------------------------------------------
+
+fn begin_start(session: &str) -> Command {
+    Command::BeginStart {
+        session: session.into(),
+    }
+}
+
+fn begin_removal(session: &str) -> Command {
+    Command::BeginRemoval {
+        session: session.into(),
+    }
+}
+
+fn launch(session: &str) -> Command {
+    Command::Launch {
+        session: session.into(),
+    }
+}
+
+fn await_run_end(session: &str) -> Command {
+    Command::AwaitRunEnd {
+        session: session.into(),
+    }
+}
+
+fn run_of(state: &State, session: &str) -> Option<Run> {
+    state.session(session).map(|s| s.run)
+}
+
+/// The end of `session`'s run: Core has let go of it.
+fn run_ended(session: &str) -> Input {
+    Input::Report(Report::Ended(Operation::Run(session.into())))
+}
+
+fn run_ending(session: &str) -> Report {
+    Report::RunEnding {
+        session: session.into(),
+    }
+}
+
+// verifies: ARCH-CORE-R14
+#[test]
+fn nothing_starts_once_core_is_closing() {
+    let mut state = world_with(&["s1"]);
+    // A start admitted before shutdown, about to launch.
+    command(&mut state, begin_start("s1"));
+    assert_eq!(report(&mut state, Report::Closing), Outcome::Noted);
+    assert!(state.closing());
+
+    // Its launch, reported after shutdown, is refused: no backend starts.
+    assert_eq!(
+        command(&mut state, launch("s1")),
+        Outcome::Refused(Refusal::Closing)
+    );
+    assert_eq!(run_of(&state, "s1"), Some(Run::Stopped));
+    // So are a new session and, once the first start has ended, another.
+    assert_eq!(
+        command(&mut state, create_session(W, "s2")),
+        Outcome::Refused(Refusal::Closing)
+    );
+    assert_eq!(command(&mut state, begin_start("s1")), Outcome::Held);
+    let ended = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    assert_eq!(ended.released, [(0, Outcome::Refused(Refusal::Closing))]);
+
+    // Before shutdown, the launch begins the run.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, begin_start("s1"));
+    assert_eq!(
+        command(&mut state, launch("s1")),
+        admitted(Operation::Run("s1".into()))
+    );
+    assert_eq!(run_of(&state, "s1"), Some(Run::Running));
+}
+
+/// `s1`, stored in the isolated workspace, with a run that was announced
+/// ended and that Core has not let go of.
+fn winding_down() -> State {
+    let mut state = world_with(&["s1"]);
+    command(&mut state, launch("s1"));
+    assert_eq!(report(&mut state, run_ending("s1")), Outcome::Noted);
+    assert_eq!(run_of(&state, "s1"), Some(Run::Ending));
+    state
+}
+
+// verifies: PROTO-CORE-API-R41
+#[test]
+fn a_removal_behind_a_run_that_is_ending_waits_for_it_or_gives_up() {
+    // A client saw the session end and removes it before Core has let go
+    // of the run: the removal waits, and goes on when the run has ended.
+    let mut state = winding_down();
+    command(&mut state, remove_session("s1"));
+    assert_eq!(command(&mut state, begin_removal("s1")), Outcome::Held);
+    // While it waits, another operation on the session is not held up.
+    assert_eq!(
+        command(&mut state, begin_exclusive("s1")),
+        admitted(Operation::Exclusive("s1".into()))
+    );
+    step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    let ended = step(&mut state, run_ended("s1"));
+    assert_eq!(
+        ended.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+
+    // Its time limit passes first: it is answered "gave up", and nothing
+    // else changes.
+    let mut state = winding_down();
+    command(&mut state, remove_session("s1"));
+    command(&mut state, begin_removal("s1"));
+    let before = state.clone();
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 0 }));
+    assert_eq!(gave_up.outcome, Outcome::Noted);
+    assert_eq!(gave_up.released, [(0, Outcome::Refused(Refusal::GaveUp))]);
+    assert!(state.held().is_empty());
+    assert_eq!(
+        state.sessions().collect::<Vec<_>>(),
+        before.sessions().collect::<Vec<_>>()
+    );
+    // A limit reported for nothing that waits changes nothing.
+    assert_eq!(
+        report(&mut state, Report::GaveUp { place: 0 }),
+        Outcome::Stale
+    );
+
+    // A session that runs is not removed: it is stopped first.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, launch("s1"));
+    command(&mut state, remove_session("s1"));
+    assert_eq!(
+        command(&mut state, begin_removal("s1")),
+        Outcome::Refused(Refusal::Running)
+    );
+}
+
+// verifies: FLOW-RESUME-SESSION-R02
+#[test]
+fn a_start_behind_a_run_that_is_ending_waits_for_it_or_gives_up() {
+    // A message sent just after the backend exited resumes the session
+    // rather than finding it still running.
+    let mut state = winding_down();
+    assert_eq!(command(&mut state, begin_start("s1")), Outcome::Held);
+    let ended = step(&mut state, run_ended("s1"));
+    assert_eq!(
+        ended.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+    assert_eq!(
+        command(&mut state, launch("s1")),
+        admitted(Operation::Run("s1".into()))
+    );
+
+    let mut state = winding_down();
+    command(&mut state, begin_start("s1"));
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 0 }));
+    assert_eq!(gave_up.released, [(0, Outcome::Refused(Refusal::GaveUp))]);
+
+    // A session that runs needs no start.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, launch("s1"));
+    assert_eq!(
+        command(&mut state, begin_start("s1")),
+        Outcome::Refused(Refusal::Running)
+    );
+}
+
+// verifies: PROTO-CORE-API-R90
+#[test]
+fn a_send_asks_whether_the_session_runs_and_waits_for_a_run_that_is_ending() {
+    // A message sent just after the session ended waits for Core to let go
+    // of the run, to know that it resumes; it begins nothing by asking.
+    let mut state = winding_down();
+    let before = state.clone();
+    assert_eq!(command(&mut state, await_run_end("s1")), Outcome::Held);
+    let ended = step(&mut state, run_ended("s1"));
+    assert_eq!(ended.released, [(0, Outcome::Done)]);
+    assert!(!exclusive(&state, "s1"));
+
+    // Its time limit passes first.
+    let mut state = before;
+    command(&mut state, await_run_end("s1"));
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 0 }));
+    assert_eq!(gave_up.released, [(0, Outcome::Refused(Refusal::GaveUp))]);
+
+    // Running: so it says. Stopped: done, and nothing changed.
+    let mut state = world_with(&["s1"]);
+    assert_eq!(command(&mut state, await_run_end("s1")), Outcome::Done);
+    command(&mut state, launch("s1"));
+    let running = state.clone();
+    assert_eq!(
+        command(&mut state, await_run_end("s1")),
+        Outcome::Refused(Refusal::Running)
+    );
+    assert_eq!(state, running);
+    assert_eq!(
+        command(&mut state, await_run_end("s9")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+}
+
+// verifies: ARCH-CORE-R17
+#[test]
+fn a_time_limit_answers_the_command_at_its_place_and_no_other_like_it() {
+    // Two resumes of one session wait behind its run that is ending: the
+    // same command twice. The second's limit passes: it alone is answered,
+    // and the first still waits, and is admitted when the run ends.
+    let mut state = winding_down();
+    command(&mut state, begin_start("s1"));
+    command(&mut state, begin_start("s1"));
+    let gave_up = step(&mut state, Input::Report(Report::GaveUp { place: 1 }));
+    assert_eq!(gave_up.released, [(1, Outcome::Refused(Refusal::GaveUp))]);
+    assert_eq!(state.held().len(), 1);
+    let ended = step(&mut state, run_ended("s1"));
+    assert_eq!(
+        ended.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+    // A place nothing waits at: nothing changes.
+    assert_eq!(
+        report(&mut state, Report::GaveUp { place: 0 }),
+        Outcome::Stale
+    );
+}
+
+// verifies: ARCH-CORE-R17
+#[test]
+fn a_stop_waits_for_a_start_and_a_start_and_a_view_opening_wait_for_each_other() {
+    // A stop asked for while a resume is under way waits until the session
+    // is live, then has something to stop.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, begin_start("s1"));
+    assert_eq!(command(&mut state, begin_exclusive("s1")), Outcome::Held);
+    command(&mut state, launch("s1"));
+    let started = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    assert_eq!(
+        started.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+    assert_eq!(run_of(&state, "s1"), Some(Run::Running));
+
+    // A resume asked for while a view is being opened waits for it.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, begin_exclusive("s1"));
+    assert_eq!(command(&mut state, begin_start("s1")), Outcome::Held);
+    let opened = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    assert_eq!(
+        opened.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+
+    // And a view asked for while a resume is under way waits for the start.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, begin_start("s1"));
+    assert_eq!(command(&mut state, begin_exclusive("s1")), Outcome::Held);
+
+    // A resume and a removal asked for while a stop is under way on a
+    // running session wait for the stop, and are decided against what it
+    // leaves: the session stopped. The first to have come starts it.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, launch("s1"));
+    command(&mut state, begin_exclusive("s1"));
+    assert_eq!(command(&mut state, begin_start("s1")), Outcome::Held);
+    command(&mut state, remove_session("s1"));
+    assert_eq!(command(&mut state, begin_removal("s1")), Outcome::Held);
+    report(&mut state, run_ending("s1"));
+    step(&mut state, run_ended("s1"));
+    let stopped = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    assert_eq!(
+        stopped.released,
+        [(0, admitted(Operation::Exclusive("s1".into())))]
+    );
+    assert_eq!(state.held().len(), 1);
+}
+
+/// [`world`] with `s1` found in the backend's records, stored, in the
+/// isolated workspace.
+fn world_with_found() -> State {
+    let mut existing = existing();
+    existing.sessions.push(("s1".into(), W.into(), true));
+    State::restored(existing)
+}
+
+// verifies: FLOW-RESUME-SESSION-R14
+#[test]
+fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
+    // Running, and while its run winds down: refused. Once Core has let go
+    // of the run: admitted.
+    let mut state = world_with_found();
+    command(&mut state, launch("s1"));
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        Outcome::Refused(Refusal::WorkspaceHasSessions)
+    );
+    report(&mut state, run_ending("s1"));
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        Outcome::Refused(Refusal::WorkspaceHasSessions)
+    );
+    step(&mut state, run_ended("s1"));
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        admitted(Operation::RemoveWorkspace(W.into()))
+    );
+
+    // A start under way when the removal is asked for: the removal waits
+    // to see what it comes to. It launches: refused.
+    let mut state = world_with_found();
+    command(&mut state, begin_start("s1"));
+    assert_eq!(command(&mut state, remove_workspace(W)), Outcome::Held);
+    command(&mut state, launch("s1"));
+    let started = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    assert_eq!(
+        started.released,
+        [(0, Outcome::Refused(Refusal::WorkspaceHasSessions))]
+    );
+    // It ends without launching: admitted.
+    let mut state = world_with_found();
+    command(&mut state, begin_start("s1"));
+    command(&mut state, remove_workspace(W));
+    let failed = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::Exclusive("s1".into()))),
+    );
+    assert_eq!(
+        failed.released,
+        [(0, admitted(Operation::RemoveWorkspace(W.into())))]
+    );
+
+    // The removal first: no backend starts in the folder on its way out.
+    let mut state = world_with_found();
+    command(&mut state, remove_workspace(W));
+    command(&mut state, begin_start("s1"));
+    assert_eq!(
+        command(&mut state, launch("s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+
+    // Any one of several found there holds it back.
+    let mut two_found = existing();
+    two_found.sessions.push(("s1".into(), W.into(), true));
+    two_found.sessions.push(("s2".into(), W.into(), true));
+    let mut state = State::restored(two_found);
+    command(&mut state, launch("s2"));
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        Outcome::Refused(Refusal::WorkspaceHasSessions)
+    );
+
+    // The same for a project and a session found in its own folder.
+    let mut found_in_root = existing();
+    found_in_root.workspaces.truncate(1);
+    found_in_root
+        .sessions
+        .push(("s1".into(), ROOT.into(), true));
+    let mut state = State::restored(found_in_root.clone());
+    command(&mut state, launch("s1"));
+    assert_eq!(
+        command(&mut state, remove_project()),
+        Outcome::Refused(Refusal::ProjectHasSessions)
+    );
+    let mut state = State::restored(found_in_root);
+    command(&mut state, remove_project());
+    assert_eq!(
+        command(&mut state, launch("s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+}
+
 // -- Every input in every state (ARCH-CORE-R18) -----------------------------
 
 /// Every command and report over a world of one project in one folder, its
-/// root and one isolated workspace, and `sessions`.
-fn every_input(sessions: &[&str]) -> Vec<Input> {
+/// root and one isolated workspace, and `sessions`. Without `runs`, those
+/// that begin or end a run, wait for one, or close Core are left out.
+fn every_input(sessions: &[&str], runs: bool) -> Vec<Input> {
     let mut inputs = Vec::new();
     let workspaces = [ROOT, W];
     inputs.push(Input::Command(add_project(P)));
@@ -1016,6 +1403,12 @@ fn every_input(sessions: &[&str]) -> Vec<Input> {
         inputs.push(Input::Command(delete_session(session)));
         inputs.push(Input::Command(remove_session(session)));
         inputs.push(Input::Command(begin_exclusive(session)));
+        if runs {
+            inputs.push(Input::Command(begin_start(session)));
+            inputs.push(Input::Command(begin_removal(session)));
+            inputs.push(Input::Command(launch(session)));
+            inputs.push(Input::Command(await_run_end(session)));
+        }
     }
     inputs.push(Input::Command(Command::CreateWorkspace {
         project: P.into(),
@@ -1074,8 +1467,21 @@ fn every_input(sessions: &[&str]) -> Vec<Input> {
             Report::Ended(Operation::CreateSession(session.clone())),
             Report::Ended(Operation::DeleteSession(session.clone())),
             Report::Ended(Operation::RemoveSession(session.clone())),
-            Report::Ended(Operation::Exclusive(session)),
+            Report::Ended(Operation::Exclusive(session.clone())),
         ]);
+        if runs {
+            reports.extend([
+                Report::Ended(Operation::Run(session.clone())),
+                run_ending(&session),
+            ]);
+        }
+    }
+    if runs {
+        reports.push(Report::Closing);
+    }
+    // Whoever waits at any place of the queue may stop waiting.
+    for place in 0..3 {
+        reports.push(Report::GaveUp { place });
     }
     inputs.extend(reports.into_iter().map(Input::Report));
     inputs
@@ -1113,6 +1519,15 @@ fn check_state(state: &State) {
         assert!(
             !removal || started_in(state, id) == 0,
             "workspace {id} is held with a session Ersa started: {state:#?}"
+        );
+        // No backend runs in a folder on its way out: every session found
+        // there is stopped.
+        let runs = state
+            .sessions()
+            .any(|(_, s)| &s.workspace == id && s.run != Run::Stopped);
+        assert!(
+            !(removal && runs),
+            "workspace {id} is held for removal with a session running: {state:#?}"
         );
         // A workspace has one holder at most: a removal or a delete.
         assert!(
@@ -1181,6 +1596,12 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
         if session.exclusive {
             reports.push(Report::Ended(Operation::Exclusive(id.clone())));
         }
+        match session.run {
+            Run::Running | Run::Ending => {
+                reports.push(Report::Ended(Operation::Run(id.clone())));
+            }
+            Run::Stopped => {}
+        }
     }
     reports
 }
@@ -1215,7 +1636,9 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     // A refusal, a hold's own state aside, and a report that does not fit
     // change nothing.
     match outcome {
-        Outcome::Refused(_) | Outcome::Stale => assert_eq!(before, after, "{}", context()),
+        Outcome::Refused(_) | Outcome::Done | Outcome::Stale => {
+            assert_eq!(before, after, "{}", context());
+        }
         Outcome::Admitted(_) | Outcome::Held | Outcome::Noted => {}
     }
     // No input takes a workspace from `error` to `ready`.
@@ -1271,21 +1694,43 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     if let Some(workspace) = about {
         assert!(!before.workspace_held(&workspace), "{}", context());
     }
+    // A run begins only on a stopped session, and never once Core is
+    // closing; nor is a session created then.
+    for (id, session) in after.sessions() {
+        let was = before.session(id).map(|s| s.run);
+        let began = session.run == Run::Running && was != Some(Run::Running);
+        if began {
+            assert_eq!(was, Some(Run::Stopped), "{}", context());
+            assert!(!before.closing(), "{}", context());
+        }
+        assert!(
+            was.is_some() || !before.closing(),
+            "a session was created while closing: {}",
+            context()
+        );
+    }
     // A session has one exclusive operation at most: one is admitted only
     // on a session with none.
-    if let (Input::Command(Command::BeginExclusive { session }), Outcome::Admitted(_)) =
-        (input, outcome)
+    if let (
+        Input::Command(
+            Command::BeginExclusive { session }
+            | Command::BeginStart { session }
+            | Command::BeginRemoval { session },
+        ),
+        Outcome::Admitted(_),
+    ) = (input, outcome)
     {
         assert!(!exclusive(before, session), "{}", context());
     }
 }
 
-/// Applies every command and report over `sessions` (and the one project
-/// and its two workspaces) to every state reachable from nothing and from
-/// [`world`], checking each state and each step, and returns the states.
-/// States with more than `held` commands held are not explored further.
-fn explore(sessions: &[&str], held: usize) -> HashSet<State> {
-    let inputs = every_input(sessions);
+/// Applies the inputs of [`every_input`] over `sessions` (and the one
+/// project and its two workspaces) to every state reachable from nothing
+/// and from [`world`], checking each state and each step, and returns the
+/// states. States with more than `held` commands held are not explored
+/// further.
+fn explore(sessions: &[&str], held: usize, runs: bool) -> HashSet<State> {
+    let inputs = every_input(sessions, runs);
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
     for start in [State::default(), world()] {
@@ -1305,7 +1750,7 @@ fn explore(sessions: &[&str], held: usize) -> HashSet<State> {
             check_step(&before, input, &stepped.outcome, &after);
             // Only a step that changed the state answers a held command.
             match stepped.outcome {
-                Outcome::Refused(_) | Outcome::Held | Outcome::Stale => {
+                Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale => {
                     assert!(stepped.released.is_empty(), "{input:?}");
                 }
                 Outcome::Admitted(_) | Outcome::Noted => {}
@@ -1324,15 +1769,13 @@ fn explore(sessions: &[&str], held: usize) -> HashSet<State> {
 // verifies: ARCH-CORE-R17
 #[test]
 fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
-    // Two small worlds, each given every input. In the first, two sessions
-    // meet every pair of things a workspace's sessions can be at once
-    // (started by Ersa or found, stored or not, with an exclusive operation
-    // or none, being removed or deleted), with one command held at a time;
-    // a third session, or a second held command, multiplies its states past
-    // a minute's run.
-    let pairs = explore(&["s1", "s2"], 1);
-    // The world is not trivially small: every phase is reached.
-    assert!(pairs.len() > 1_000, "only {} states", pairs.len());
+    // The small world: one project, its two workspaces and one session,
+    // given every input there is, with up to two commands held at once.
+    // Every phase of a project, a workspace, a session and its run, every
+    // operation, shutdown, and every way one command waits behind another
+    // is reached.
+    let whole = explore(&["s1"], 2, true);
+    assert!(whole.len() > 10_000, "only {} states", whole.len());
     for wanted in [
         WorkspacePhase::Creating,
         WorkspacePhase::Ready,
@@ -1345,29 +1788,38 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
         },
     ] {
         assert!(
-            pairs.iter().any(|s| phase(s, W) == Some(wanted)),
+            whole.iter().any(|s| phase(s, W) == Some(wanted)),
             "{wanted:?} was never reached"
         );
     }
-    // And so is each hold a delete or a removal of a session takes.
+    for wanted in [Run::Stopped, Run::Running, Run::Ending] {
+        assert!(
+            whole.iter().any(|s| run_of(s, "s1") == Some(wanted)),
+            "{wanted:?} was never reached"
+        );
+    }
+    assert!(whole.iter().any(|s| s.closing()));
+    assert!(whole.iter().any(|s| s.held().len() == 2));
     assert!(
-        pairs
+        whole
             .iter()
             .any(|s| s.workspace(W).is_some_and(|w| w.deleting.is_some()))
     );
+    assert!(whole.iter().any(|s| exclusive(s, "s1")));
+
+    // Two sessions with every input is over a million states, minutes of
+    // run. What two sessions add is what one does to the other through
+    // the workspace they share: a delete's hold, a row still being stored,
+    // a removal that waits or is refused. Those are explored with two
+    // sessions and one command held at a time, without the inputs of a
+    // run, which act on one session alone (a removal's "does any found
+    // session run" over several is a fed sequence).
+    let pairs = explore(&["s1", "s2"], 1, false);
+    assert!(pairs.len() > 1_000, "only {} states", pairs.len());
     assert!(
         pairs
             .iter()
-            .any(|s| s.sessions().any(|(_, session)| session.exclusive))
-    );
-
-    // In the second, one session and up to three commands held at once:
-    // every way commands queue behind one another on a session, a
-    // workspace or a project, and are answered in the order they came.
-    let queues = explore(&["s1"], 3);
-    assert!(
-        queues.iter().any(|s| s.held().len() == 3),
-        "no state held three commands"
+            .any(|s| s.sessions().filter(|(_, session)| session.stored).count() == 2)
     );
 }
 
@@ -1462,6 +1914,64 @@ async fn a_delete_whose_task_ends_without_a_report_releases_its_workspace() {
     // The workspace takes a session again.
     let created = admit(&admission, create_session(W, "s2")).await;
     drop(created);
+}
+
+// verifies: ARCH-CORE-R17
+// Paused time: each limit passes when the test's clock says so.
+#[tokio::test(start_paused = true)]
+async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_command() {
+    use std::time::Duration;
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(("s1".into(), W.into(), false));
+    admission.restore(stored);
+    // A run that was announced ended and that Core never lets go of.
+    let _run = admission.launch("s1").expect("launched");
+    admission.report(run_ending("s1"));
+
+    let began = tokio::time::Instant::now();
+    let start = |limit: u64| {
+        let admission = Arc::clone(&admission);
+        async move {
+            let answer = admission
+                .begin_start("s1", Duration::from_secs(limit))
+                .await
+                .map(|_| ());
+            (answer, began.elapsed().as_secs())
+        }
+    };
+    // Two resumes: the same command, held twice. The one that came first
+    // waits longer, so the one behind it in the queue gives up first.
+    let patient = tokio::spawn(start(60));
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let second = tokio::spawn(start(30));
+    // And a send asking whether the session runs, five seconds later.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let asking = tokio::spawn({
+        let admission = Arc::clone(&admission);
+        async move {
+            let answer = admission.run_settled("s1", Duration::from_secs(30)).await;
+            (answer, began.elapsed().as_secs())
+        }
+    });
+
+    // Never left waiting past every limit: a waiter that withdrew another's
+    // command would wait for ever on its own.
+    let all = async {
+        (
+            second.await.expect("joined"),
+            asking.await.expect("joined"),
+            patient.await.expect("joined"),
+        )
+    };
+    let (second, asking, patient) = tokio::time::timeout(Duration::from_secs(600), all)
+        .await
+        .expect("every waiter was answered");
+    assert_eq!(second, (Err(Refusal::GaveUp), 40));
+    assert_eq!(asking, (Err(Refusal::GaveUp), 45));
+    // The first to come was not answered by the others' limits.
+    assert_eq!(patient, (Err(Refusal::GaveUp), 60));
+    assert!(admission.snapshot().held().is_empty());
 }
 
 // verifies: ARCH-CORE-R16

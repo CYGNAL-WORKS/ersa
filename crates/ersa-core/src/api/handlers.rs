@@ -231,9 +231,10 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
         Refusal::WorkspaceNotReady
         | Refusal::WorkspaceExists
         | Refusal::SessionExists
-        | Refusal::NoSession => {
-            ApiError::internal(format!("admission refused {named}: {refusal:?}"))
-        }
+        | Refusal::NoSession
+        | Refusal::Closing
+        | Refusal::Running
+        | Refusal::GaveUp => ApiError::internal(format!("admission refused {named}: {refusal:?}")),
     }
 }
 
@@ -412,7 +413,10 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
         .map(|workspace| workspace.id);
     // Admission decides it against whatever else is asked of the project:
     // a workspace or session admitted before refuses it, and one asked for
-    // after waits or is refused (ARCH-CORE-R14).
+    // after waits or is refused (ARCH-CORE-R14). A session found in its own
+    // folder that Core runs refuses it too (FLOW-RESUME-SESSION-R14), and
+    // one whose start is under way has the removal wait to see. Admitted,
+    // the removal holds the folder: no backend starts there.
     let removing = core
         .admission
         .command(Command::RemoveProject {
@@ -423,17 +427,6 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     let not_removed = Report::ProjectRemovalRefused {
         project: project.id.clone(),
     };
-    // Admitted, the removal holds the project's own folder: none of the
-    // sessions found there is sent to or resumed meanwhile. One Core runs
-    // holds the removal back (FLOW-RESUME-SESSION-R14): looked for under
-    // the hold, once any start under way has settled, so none is missed
-    // and none starts after.
-    if let Some(root) = &root
-        && core.sessions.runs_found(root).await
-    {
-        removing.end(not_removed);
-        return Err(refused(Refusal::ProjectHasSessions, &project.id));
-    }
     // The rows of the sessions found in its folder go with it, their
     // records left: whatever is under way on one finishes first, and
     // nothing begins on them until Core has let go of them.
@@ -716,8 +709,10 @@ pub(super) async fn workspace_remove(
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
     // Admission decides the removal in one step: refused while the
-    // workspace is being made or removed, or has a session Ersa started,
-    // as a project with workspaces is, since removal never cascades.
+    // workspace is being made or removed, or has a session Ersa started or
+    // one Core runs (FLOW-RESUME-SESSION-R14), as a project with workspaces
+    // is, since removal never cascades and no backend may be left running
+    // in a deleted directory.
     // Once admitted it holds the workspace: no session is created in it,
     // none of its found sessions is sent to or resumed, no delete marks it
     // and no second removal starts (ARCH-CORE-R14). So from here to the
@@ -734,14 +729,6 @@ pub(super) async fn workspace_remove(
     let not_removed = Report::WorkspaceRemovalRefused {
         workspace: id.clone(),
     };
-    // A found session Core runs holds the removal back
-    // (FLOW-RESUME-SESSION-R14), so no backend is left running in a deleted
-    // directory: looked for under the hold, once any start under way has
-    // settled, so none is missed and none starts after.
-    if core.sessions.runs_found(&id).await {
-        removing.end(not_removed);
-        return Err(refused(Refusal::WorkspaceHasSessions, &id));
-    }
     // What a refusal puts back: the state the removal took the workspace
     // from, `error` if a delete had marked it (PROTO-CORE-API-R94).
     let replaced = match core.admission.replaced(&id) {

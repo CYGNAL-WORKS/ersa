@@ -206,7 +206,7 @@ impl SessionManager {
         if handle.archiving.load(Ordering::SeqCst) > 0 {
             return Err(being_archived());
         }
-        let resuming = resume::current_run(&handle).await?.is_none();
+        let resuming = !self.runs_once_settled(&handle).await?;
         let (cancel, mut canceled) = watch::channel(false);
         let changed = Arc::new(Notify::new());
         {
