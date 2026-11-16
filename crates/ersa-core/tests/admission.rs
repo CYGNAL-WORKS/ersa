@@ -1000,6 +1000,16 @@ fn send_to_running(session: &str) -> Command {
     }
 }
 
+fn fork(session: &str) -> Command {
+    Command::Fork {
+        session: session.into(),
+    }
+}
+
+fn forking(state: &State, session: &str) -> bool {
+    state.session(session).is_some_and(|entry| entry.forking)
+}
+
 fn interrupt(session: &str) -> Command {
     Command::Interrupt {
         session: session.into(),
@@ -1423,6 +1433,147 @@ fn a_send_hears_in_admission_that_it_was_cancelled() {
     assert_eq!(late.outcome, no_send);
     assert!(late.released.is_empty());
     assert_eq!(state.held().len(), 1);
+}
+
+// -- A fork's mark on its original (ARCH-CORE-R14) --------------------------
+
+// verifies: FLOW-FORK-SESSION-R03
+#[test]
+fn a_fork_starting_refuses_a_send_a_delete_and_a_second_fork_and_nothing_else() {
+    let mut state = world_with(&["s1", "s2"]);
+    command(&mut state, launch("s1"));
+    let marked = admitted(Operation::Fork("s1".into()));
+    assert_eq!(command(&mut state, fork("s1")), marked);
+    assert!(forking(&state, "s1"));
+
+    // No message, no delete, no second fork, and none of them changes
+    // anything: a delete refused for the fork holds no workspace.
+    let before = state.clone();
+    let being_forked = Outcome::Refused(Refusal::BeingForked);
+    assert_eq!(command(&mut state, send("s1")), being_forked);
+    assert_eq!(command(&mut state, send_to_running("s1")), being_forked);
+    assert_eq!(command(&mut state, delete_session("s1")), being_forked);
+    assert_eq!(
+        command(&mut state, fork("s1")),
+        Outcome::Refused(Refusal::Forking)
+    );
+    assert_eq!(state, before);
+    assert!(!state.workspace_held(W));
+
+    // Another session is not marked: it takes a message and is forked.
+    assert_eq!(
+        command(&mut state, send("s2")),
+        admitted(Operation::Send("s2".into()))
+    );
+    ended(&mut state, Operation::Send("s2".into()));
+    assert_eq!(
+        command(&mut state, fork("s2")),
+        admitted(Operation::Fork("s2".into()))
+    );
+    ended(&mut state, Operation::Fork("s2".into()));
+
+    // The original is stopped, archived and arranged meanwhile: the mark is
+    // not its exclusive operation.
+    for begun in [begin_exclusive("s1"), archive("s1"), arrange("s1", None)] {
+        let operation = match command(&mut state, begun) {
+            Outcome::Admitted(operation) => operation,
+            other => panic!("not admitted: {other:?}"),
+        };
+        assert_eq!(ended(&mut state, operation).outcome, Outcome::Noted);
+    }
+    assert!(forking(&state, "s1"));
+
+    // The fork has started, or never will: the mark goes, and only once.
+    assert_eq!(
+        ended(&mut state, Operation::Fork("s1".into())).outcome,
+        Outcome::Noted
+    );
+    assert!(!forking(&state, "s1"));
+    assert_eq!(
+        ended(&mut state, Operation::Fork("s1".into())).outcome,
+        Outcome::Stale
+    );
+    assert_eq!(
+        command(&mut state, send_to_running("s1")),
+        admitted(Operation::Send("s1".into()))
+    );
+}
+
+// verifies: FLOW-FORK-SESSION-R03
+#[test]
+fn a_fork_is_told_why_it_may_not_begin_in_one_order() {
+    let refused = |state: &mut State| match command(state, fork("s1")) {
+        Outcome::Refused(refusal) => refusal,
+        other => panic!("not refused: {other:?}"),
+    };
+    // Every reason at once, taken away one at a time.
+    let mut state = world_with(&["s1", "s2"]);
+    command(&mut state, fork("s1"));
+    ended(&mut state, Operation::Fork("s1".into()));
+    command(&mut state, send("s1"));
+    wrote(&mut state, "s1", RowChange::Deleting(Deleting::Failed));
+    command(&mut state, delete_session("s2"));
+    let before = state.clone();
+
+    // Its workspace is held, here by another session's delete.
+    assert_eq!(refused(&mut state), Refusal::WorkspaceHeld);
+    ended(&mut state, Operation::DeleteSession("s2".into()));
+    // It is marked deleting.
+    assert_eq!(refused(&mut state), Refusal::SessionDeleting);
+    assert_eq!(state.sessions().count(), before.sessions().count());
+
+    // A message is on its way: the turn it starts would be copied part way.
+    let mut state = world_with(&["s1"]);
+    command(&mut state, send("s1"));
+    assert_eq!(refused(&mut state), Refusal::SendInProgress);
+    assert!(!forking(&state, "s1"));
+    ended(&mut state, Operation::Send("s1".into()));
+    assert_eq!(
+        command(&mut state, fork("s1")),
+        admitted(Operation::Fork("s1".into()))
+    );
+
+    // A session that is gone, or whose row is not stored yet.
+    assert_eq!(
+        command(&mut state, fork("s9")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+    command(&mut state, create_session(W, "s2"));
+    assert_eq!(
+        command(&mut state, fork("s2")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+}
+
+// verifies: PROTO-CORE-API-R41
+#[test]
+fn an_original_is_removed_while_a_fork_of_it_is_starting() {
+    let mut state = world_with(&["s1"]);
+    command(&mut state, fork("s1"));
+    assert_eq!(
+        command(&mut state, remove_session("s1")),
+        admitted(Operation::RemoveSession("s1".into()))
+    );
+    assert_eq!(
+        command(&mut state, begin_removal("s1")),
+        admitted(Operation::Exclusive("s1".into()))
+    );
+    let gone = Report::SessionGone {
+        session: "s1".into(),
+    };
+    assert_eq!(report(&mut state, gone), Outcome::Noted);
+    // The fork's holders let go later, of nothing; and a fork that asks
+    // again finds no session.
+    let before = state.clone();
+    assert_eq!(
+        ended(&mut state, Operation::Fork("s1".into())).outcome,
+        Outcome::Stale
+    );
+    assert_eq!(
+        command(&mut state, fork("s1")),
+        Outcome::Refused(Refusal::NoSession)
+    );
+    assert_eq!(state, before);
 }
 
 // verifies: PROTO-CORE-API-R41
@@ -2290,6 +2441,9 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool, sends: bool) -> Ve
             inputs.push(Input::Command(send(session)));
             inputs.push(Input::Command(send_to_running(session)));
             inputs.push(Input::Command(interrupt(session)));
+            inputs.push(Input::Command(fork(session)));
+            let ended = Report::Ended(Operation::Fork(session.to_string()));
+            inputs.push(Input::Report(ended));
             for until in [SendIs::Taken, SendIs::Free, SendIs::Cancelled] {
                 inputs.push(Input::Command(await_send(session, until)));
             }
@@ -2625,6 +2779,9 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
         if session.send.is_some() {
             reports.push(Report::Ended(Operation::Send(id.clone())));
         }
+        if session.forking {
+            reports.push(Report::Ended(Operation::Fork(id.clone())));
+        }
         match session.run {
             Run::Running | Run::Ending => {
                 reports.push(Report::Ended(Operation::Run(id.clone())));
@@ -2719,6 +2876,7 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
         let was = before.session(session).expect("an admitted session");
         let row = was.row.as_ref().expect("a stored row");
         assert_eq!(was.send, None, "{}", context());
+        assert!(!was.forking, "{}", context());
         assert!(!before.being_archived(session), "{}", context());
         assert!(!row.archived && row.deleting.is_none(), "{}", context());
         let own_delete = before
@@ -2726,6 +2884,25 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             .and_then(|w| w.deleting.clone());
         assert_ne!(own_delete.as_ref(), Some(session), "{}", context());
         assert!(*resumes || was.run != Run::Stopped, "{}", context());
+    }
+    // No session is deleted while a fork of it is starting, and a fork
+    // begins only when no message is on its way to its original, no other
+    // fork of it is starting, and its workspace is not held.
+    if let (Input::Command(Command::DeleteSession { session }), Outcome::Admitted(_)) =
+        (input, outcome)
+    {
+        let was = before.session(session).expect("an admitted session");
+        assert!(!was.forking, "{}", context());
+    }
+    if let (Input::Command(Command::Fork { session }), Outcome::Admitted(_)) = (input, outcome) {
+        let was = before.session(session).expect("an admitted session");
+        assert!(was.send.is_none() && !was.forking, "{}", context());
+        assert!(!before.workspace_held(&was.workspace), "{}", context());
+        assert!(
+            was.row.as_ref().is_some_and(|row| row.deleting.is_none()),
+            "{}",
+            context()
+        );
     }
     // A send is handed over only when it was not cancelled.
     if let (Input::Report(Report::SendStage { session, stage }), Outcome::Noted) = (input, outcome)
@@ -3033,6 +3210,19 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
         .row("s1")
         .is_some_and(|row| row.deleting.is_some())));
     assert!(with_send(|s| run_of(s, "s1") == Some(Run::Ending)));
+    // A fork starting, on its own, beside the original's exclusive
+    // operation, and in a session that has since been marked deleting.
+    let with_fork = |wanted: fn(&State) -> bool| sent.iter().any(|s| forking(s, "s1") && wanted(s));
+    assert!(with_fork(|s| !exclusive(s, "s1")));
+    assert!(with_fork(|s| exclusive(s, "s1")));
+    assert!(with_fork(|s| s
+        .row("s1")
+        .is_some_and(|row| row.deleting.is_some())));
+    assert!(
+        !sent
+            .iter()
+            .any(|s| forking(s, "s1") && sending(s, "s1").is_some())
+    );
 }
 
 // -- Operations under way and waiters (the wrapper around the function) -----
@@ -3187,6 +3377,40 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     // The first to come was not answered by the others' limits.
     assert_eq!(patient, (Err(Refusal::GaveUp), 60));
     assert!(admission.snapshot().held().is_empty());
+}
+
+// verifies: ARCH-CORE-R16
+#[tokio::test]
+async fn an_operation_with_several_holders_ends_when_the_last_lets_go() {
+    let admission = Arc::new(Admission::default());
+    let mut stored = existing();
+    stored.sessions.push(row("s1", W, false));
+    admission.restore(stored);
+    let marked = |admission: &Admission| {
+        let state = admission.snapshot();
+        state.session("s1").is_some_and(|entry| entry.forking)
+    };
+
+    // A fork's reads, its registry check and its start share the
+    // operation.
+    let reads = Arc::new(admit(&admission, fork("s1")).await);
+    let registry_check = Arc::clone(&reads);
+    let start = Arc::clone(&reads);
+    assert!(marked(&admission));
+    // The reads end, in a task of their own: the check and the start still
+    // hold it.
+    tokio::spawn(async move { drop(reads) }).await.unwrap();
+    assert!(marked(&admission));
+    drop(registry_check);
+    assert!(marked(&admission));
+    assert!(matches!(
+        admission.begin_send("s1", true),
+        Err(Refusal::BeingForked)
+    ));
+    // The last lets go: the mark goes with it.
+    drop(start);
+    assert!(!marked(&admission));
+    assert!(admission.begin_send("s1", true).is_ok());
 }
 
 // verifies: ARCH-CORE-R17

@@ -240,6 +240,8 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
         | Refusal::NotRunning
         | Refusal::SendInProgress
         | Refusal::NoSendToCancel
+        | Refusal::BeingForked
+        | Refusal::Forking
         | Refusal::NoSection
         | Refusal::GaveUp => ApiError::internal(format!("admission refused {named}: {refusal:?}")),
     }
