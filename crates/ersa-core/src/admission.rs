@@ -374,13 +374,12 @@ pub enum Command {
     Launch {
         session: Id,
     },
-}
-
-/// A held command that has a time limit, named by what it waits to do.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Timed {
-    Start(Id),
-    Removal(Id),
+    /// Asks whether Core runs the session, once a run that is winding down
+    /// has been let go of: held until then, done when it is stopped,
+    /// refused, as running, when it runs. It begins nothing.
+    AwaitRunEnd {
+        session: Id,
+    },
 }
 
 /// An operation admission has let begin, named by what it is on.
@@ -456,9 +455,11 @@ pub enum Report {
     },
     /// Core is shutting down.
     Closing,
-    /// The time limit of a held start or removal passed: whoever waited
-    /// has stopped waiting.
-    GaveUp(Timed),
+    /// Whoever waited for the held command at `place` in the queue has
+    /// stopped waiting: its time limit passed.
+    GaveUp {
+        place: usize,
+    },
     /// The operation's task ended without saying how (ARCH-CORE-R16).
     Ended(Operation),
 }
@@ -513,6 +514,8 @@ pub enum Refusal {
 pub enum Outcome {
     /// A command: the operation may begin, and is recorded.
     Admitted(Operation),
+    /// A command that only asks: answered, with nothing begun or changed.
+    Done,
     /// A command: nothing changed.
     Refused(Refusal),
     /// A command: kept, and decided again after each report.
@@ -548,29 +551,24 @@ pub fn step(state: &mut State, input: Input) -> Step {
                     state.held.push(command);
                     Vec::new()
                 }
-                Outcome::Refused(_) | Outcome::Noted | Outcome::Stale => Vec::new(),
+                Outcome::Refused(_) | Outcome::Done | Outcome::Noted | Outcome::Stale => Vec::new(),
             };
             Step { outcome, released }
         }
         // A held command's time limit: it is answered and leaves the queue,
         // and nothing else changes.
-        Input::Report(Report::GaveUp(waiting)) => {
-            let given_up = match waiting {
-                Timed::Start(session) => Command::BeginStart { session },
-                Timed::Removal(session) => Command::BeginRemoval { session },
-            };
-            match state.held.iter().position(|held| held == &given_up) {
-                Some(place) => {
-                    state.held.remove(place);
-                    Step {
-                        outcome: Outcome::Noted,
-                        released: vec![(place, Outcome::Refused(Refusal::GaveUp))],
-                    }
+        Input::Report(Report::GaveUp { place }) => {
+            if place < state.held.len() {
+                state.held.remove(place);
+                Step {
+                    outcome: Outcome::Noted,
+                    released: vec![(place, Outcome::Refused(Refusal::GaveUp))],
                 }
-                None => Step {
+            } else {
+                Step {
                     outcome: Outcome::Stale,
                     released: Vec::new(),
-                },
+                }
             }
         }
         Input::Report(report) => {
@@ -579,9 +577,11 @@ pub fn step(state: &mut State, input: Input) -> Step {
             // waits for.
             let released = match outcome {
                 Outcome::Noted => release(state),
-                Outcome::Stale | Outcome::Admitted(_) | Outcome::Refused(_) | Outcome::Held => {
-                    Vec::new()
-                }
+                Outcome::Stale
+                | Outcome::Admitted(_)
+                | Outcome::Done
+                | Outcome::Refused(_)
+                | Outcome::Held => Vec::new(),
             };
             Step { outcome, released }
         }
@@ -605,6 +605,7 @@ fn release(state: &mut State) -> Vec<(usize, Outcome)> {
                 Outcome::Held => still.push((place, command)),
                 answer @ (Outcome::Admitted(_)
                 | Outcome::Refused(_)
+                | Outcome::Done
                 | Outcome::Noted
                 | Outcome::Stale) => released.push((place, answer)),
             }
@@ -870,47 +871,15 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             entry.exclusive = true;
             Outcome::Admitted(Operation::Exclusive(session.clone()))
         }
-        Command::BeginStart { session } => {
-            let closing = state.closing;
-            let Some(entry) = state.sessions.get_mut(session) else {
-                return Outcome::Refused(Refusal::NoSession);
-            };
-            // First its turn: what the operation under way leaves is what
-            // the start is decided against. A stop under way on a running
-            // session leaves it stopped, and the start then starts it.
-            if !entry.stored || entry.exclusive {
-                return Outcome::Held;
+        Command::BeginStart { session } => begin_after_run(state, session, true),
+        Command::BeginRemoval { session } => begin_after_run(state, session, false),
+        Command::AwaitRunEnd { session } => {
+            match state.sessions.get(session).map(|entry| entry.run) {
+                None => Outcome::Refused(Refusal::NoSession),
+                Some(Run::Ending) => Outcome::Held,
+                Some(Run::Running) => Outcome::Refused(Refusal::Running),
+                Some(Run::Stopped) => Outcome::Done,
             }
-            match entry.run {
-                // Core has not let go of the last run yet.
-                Run::Ending => return Outcome::Held,
-                Run::Running => return Outcome::Refused(Refusal::Running),
-                Run::Stopped => {}
-            }
-            if closing {
-                return Outcome::Refused(Refusal::Closing);
-            }
-            entry.exclusive = true;
-            Outcome::Admitted(Operation::Exclusive(session.clone()))
-        }
-        Command::BeginRemoval { session } => {
-            let Some(entry) = state.sessions.get_mut(session) else {
-                return Outcome::Refused(Refusal::NoSession);
-            };
-            // First its turn, as a start: a stop under way on a running
-            // session leaves it stopped, and the removal then removes it.
-            if !entry.stored || entry.exclusive {
-                return Outcome::Held;
-            }
-            match entry.run {
-                // A client may have seen the session end and ask to remove
-                // it before Core has let go of the run.
-                Run::Ending => return Outcome::Held,
-                Run::Running => return Outcome::Refused(Refusal::Running),
-                Run::Stopped => {}
-            }
-            entry.exclusive = true;
-            Outcome::Admitted(Operation::Exclusive(session.clone()))
         }
         Command::Launch { session } => {
             let closing = state.closing;
@@ -937,6 +906,33 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             Outcome::Admitted(Operation::Run(session.clone()))
         }
     }
+}
+
+/// The exclusive operation of a start (`starts`) or of a removal under way.
+/// First its turn: what the operation under way leaves is what it is
+/// decided against, so a stop under way on a running session leaves it
+/// stopped, and the start then starts it, the removal removes it. Then the
+/// run: held while it is ending (a client may have seen the session end
+/// before Core has let go of the run), refused while it runs. A start is
+/// refused once Core is closing.
+fn begin_after_run(state: &mut State, session: &Id, starts: bool) -> Outcome {
+    let closing = state.closing;
+    let Some(entry) = state.sessions.get_mut(session) else {
+        return Outcome::Refused(Refusal::NoSession);
+    };
+    if !entry.stored || entry.exclusive {
+        return Outcome::Held;
+    }
+    match entry.run {
+        Run::Ending => return Outcome::Held,
+        Run::Running => return Outcome::Refused(Refusal::Running),
+        Run::Stopped => {}
+    }
+    if starts && closing {
+        return Outcome::Refused(Refusal::Closing);
+    }
+    entry.exclusive = true;
+    Outcome::Admitted(Operation::Exclusive(session.clone()))
 }
 
 /// The table for reports: `Noted` when the report changed `state`, `Stale`
@@ -1148,8 +1144,8 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 Outcome::Noted
             }
         }
-        // Answered in `step`, which has the queue's places.
-        Report::GaveUp(_) => Outcome::Stale,
+        // Answered in `step`, which has the queue.
+        Report::GaveUp { .. } => Outcome::Stale,
     }
 }
 
@@ -1208,8 +1204,12 @@ pub struct Admission {
 #[derive(Default)]
 struct Inner {
     state: State,
-    /// Who waits for each held command, in the order of [`State::held`].
-    waiting: Vec<oneshot::Sender<Outcome>>,
+    /// Who waits for each held command, in the order of [`State::held`],
+    /// each with a number of its own, so a waiter that gives up withdraws
+    /// its own command and no other like it.
+    waiting: Vec<(u64, oneshot::Sender<Outcome>)>,
+    /// The next waiter's number.
+    next_waiter: u64,
 }
 
 impl Admission {
@@ -1229,58 +1229,102 @@ impl Admission {
         let outcome = match waiter {
             // Waited for outside the lock. The sender lives in `self`,
             // which this call keeps alive, so it is never dropped unsent.
-            Some(waiter) => waiter.await.expect("a held command is always answered"),
+            Some((_, waiter)) => waiter.await.expect("a held command is always answered"),
             None => outcome,
         };
         self.answered(outcome)
     }
 
-    /// Asks to begin a start or a removal, which wait for a run of the
-    /// session that is winding down, with `limit` on that wait. When it
-    /// passes and the run is still ending, the command gives up
-    /// ([`Report::GaveUp`]) and is refused so. A wait for anything else,
-    /// another operation under way on the session, has no limit.
-    pub async fn begin_within(
+    /// Asks for the exclusive operation of a start of `session`
+    /// ([`Command::BeginStart`]), with `limit` on its wait for a run that is
+    /// winding down.
+    pub async fn begin_start(
         self: &Arc<Self>,
-        waiting: Timed,
+        session: &str,
         limit: Duration,
     ) -> Result<UnderWay, Refusal> {
-        let (session, command) = match &waiting {
-            Timed::Start(session) => (
-                session.clone(),
-                Command::BeginStart {
-                    session: session.clone(),
-                },
-            ),
-            Timed::Removal(session) => (
-                session.clone(),
-                Command::BeginRemoval {
-                    session: session.clone(),
-                },
-            ),
+        let command = Command::BeginStart {
+            session: session.to_string(),
         };
+        let outcome = self.within(session, command, limit).await;
+        self.answered(outcome)
+    }
+
+    /// Asks for the exclusive operation of a removal of `session` that is
+    /// under way ([`Command::BeginRemoval`]), with `limit` on its wait for a
+    /// run that is winding down.
+    pub async fn begin_removal(
+        self: &Arc<Self>,
+        session: &str,
+        limit: Duration,
+    ) -> Result<UnderWay, Refusal> {
+        let command = Command::BeginRemoval {
+            session: session.to_string(),
+        };
+        let outcome = self.within(session, command, limit).await;
+        self.answered(outcome)
+    }
+
+    /// Asks whether Core runs `session` ([`Command::AwaitRunEnd`]), waiting
+    /// up to `limit` for a run that is winding down: `Ok` when it is
+    /// stopped, [`Refusal::Running`] when it runs.
+    pub async fn run_settled(&self, session: &str, limit: Duration) -> Result<(), Refusal> {
+        let command = Command::AwaitRunEnd {
+            session: session.to_string(),
+        };
+        match self.within(session, command, limit).await {
+            Outcome::Done => Ok(()),
+            Outcome::Refused(refusal) => Err(refusal),
+            Outcome::Admitted(_) | Outcome::Held | Outcome::Noted | Outcome::Stale => {
+                unreachable!("a question no longer held is answered or refused")
+            }
+        }
+    }
+
+    /// Applies `command`, which may be held behind a run of `session` that
+    /// is winding down, and waits for its answer with `limit` on that wait:
+    /// when the run has been ending for a whole `limit`, the command gives
+    /// up ([`Report::GaveUp`]) and is refused so. A wait for anything else,
+    /// another operation under way on the session, has no limit.
+    async fn within(&self, session: &str, command: Command, limit: Duration) -> Outcome {
         let (outcome, waiter) = self.apply(Input::Command(command));
-        let Some(mut waiter) = waiter else {
-            return self.answered(outcome);
+        let Some((number, mut waiter)) = waiter else {
+            return outcome;
         };
-        let outcome = loop {
+        let ending =
+            || self.lock().state.session(session).map(|entry| entry.run) == Some(Run::Ending);
+        // Ending at two looks a `limit` apart: at least that long.
+        let mut was_ending = ending();
+        loop {
             match tokio::time::timeout(limit, &mut waiter).await {
-                Ok(answer) => break answer.expect("a held command is always answered"),
+                Ok(answer) => return answer.expect("a held command is always answered"),
                 Err(_) => {
-                    let ending = match self.lock().state.session(&session).map(|entry| entry.run) {
-                        Some(Run::Ending) => true,
-                        Some(Run::Running | Run::Stopped) | None => false,
-                    };
-                    if ending {
-                        self.report(Report::GaveUp(waiting));
+                    let still = ending();
+                    if still && was_ending {
+                        self.give_up(number);
                         // Answered now: "gave up", or what a step just
-                        // before the report decided.
-                        break waiter.await.expect("a held command is always answered");
+                        // before decided.
+                        return waiter.await.expect("a held command is always answered");
                     }
+                    was_ending = still;
                 }
             }
-        };
-        self.answered(outcome)
+        }
+    }
+
+    /// The waiter numbered `number` stops waiting: its held command is
+    /// answered "gave up" and leaves the queue, and no other command does.
+    /// Nothing happens when it was answered already.
+    fn give_up(&self, number: u64) {
+        let mut inner = self.lock();
+        let place = inner
+            .waiting
+            .iter()
+            .position(|(waiter, _)| *waiter == number);
+        if let Some(place) = place {
+            let gave_up = step(&mut inner.state, Input::Report(Report::GaveUp { place }));
+            answer_released(&mut inner, gave_up.released);
+        }
     }
 
     /// Asks to launch `session`'s backend, without waiting: a launch is
@@ -1301,7 +1345,7 @@ impl Admission {
                 operation: Some(operation),
             }),
             Outcome::Refused(refusal) => Err(refusal),
-            Outcome::Held | Outcome::Noted | Outcome::Stale => {
+            Outcome::Done | Outcome::Held | Outcome::Noted | Outcome::Stale => {
                 unreachable!("a command no longer held is admitted or refused")
             }
         }
@@ -1346,18 +1390,24 @@ impl Admission {
         self.lock().state.clone()
     }
 
-    /// One step under the lock. For a command that is held, also the
-    /// channel its answer arrives on.
-    fn apply(&self, input: Input) -> (Outcome, Option<oneshot::Receiver<Outcome>>) {
+    /// One step under the lock. For a command that is held, also its
+    /// waiter's number and the channel its answer arrives on.
+    fn apply(&self, input: Input) -> (Outcome, Option<(u64, oneshot::Receiver<Outcome>)>) {
         let mut inner = self.lock();
         let Step { outcome, released } = step(&mut inner.state, input);
         let waiter = match outcome {
             Outcome::Held => {
                 let (answer, waiter) = oneshot::channel();
-                inner.waiting.push(answer);
-                Some(waiter)
+                let number = inner.next_waiter;
+                inner.next_waiter += 1;
+                inner.waiting.push((number, answer));
+                Some((number, waiter))
             }
-            Outcome::Admitted(_) | Outcome::Refused(_) | Outcome::Noted | Outcome::Stale => None,
+            Outcome::Admitted(_)
+            | Outcome::Done
+            | Outcome::Refused(_)
+            | Outcome::Noted
+            | Outcome::Stale => None,
         };
         answer_released(&mut inner, released);
         (outcome, waiter)
@@ -1380,7 +1430,7 @@ fn answer_released(inner: &mut Inner, released: Vec<(usize, Outcome)>) {
     let mut abandoned = Vec::new();
     // From the last place down, so the places before it stay where they are.
     for (place, answer) in released.into_iter().rev() {
-        let waiter = inner.waiting.remove(place);
+        let (_, waiter) = inner.waiting.remove(place);
         if let Err(Outcome::Admitted(operation)) = waiter.send(answer) {
             abandoned.push(operation);
         }

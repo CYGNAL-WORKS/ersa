@@ -59,7 +59,7 @@ use ersa_protocol::events::{
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
-use crate::admission::{Admission, Command, Refusal, Report, Timed, UnderWay};
+use crate::admission::{Admission, Command, Refusal, Report, UnderWay};
 use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
@@ -1324,7 +1324,7 @@ impl SessionManager {
         // stop it first.
         let _exclusive = self
             .admission
-            .begin_within(Timed::Removal(id.to_string()), STOP_TIMEOUT)
+            .begin_removal(id, STOP_TIMEOUT)
             .await
             .map_err(|refusal| refused_session(refusal, &workspace_id, id))?;
         let session = handle.describe();
@@ -2532,10 +2532,18 @@ impl CoreSink {
         self.push_fact(&mut lock(&self.inner), fact);
     }
 
-    /// Whether the fact that ends the session is queued. Read under the lock
-    /// it is queued under, so it holds for anyone who has seen that fact.
-    fn has_ended(&self) -> bool {
-        lock(&self.inner).ended
+    /// The session's task is letting go of the run: nothing ends it from
+    /// here. Admission is told the run is ending if nothing said so yet (a
+    /// pipeline that died with no exit), and an exit reported after this is
+    /// ignored, so it is never taken for the end of a later run.
+    fn let_go(&self) {
+        let mut inner = lock(&self.inner);
+        if !inner.ended {
+            inner.ended = true;
+            self.admission.report(Report::RunEnding {
+                session: self.session_id.clone(),
+            });
+        }
     }
 
     /// The index the next line will get.
@@ -2790,12 +2798,10 @@ async fn run_session(task: SessionTask) {
     if !wind_down_pause.is_zero() {
         tokio::time::sleep(wind_down_pause).await;
     }
-    // Ending, if nothing said so yet (a pipeline that died with no exit):
-    // a start or a removal asked for from here waits for the run's end
-    // below rather than finding the session running.
-    sink.admission.report(Report::RunEnding {
-        session: handle.id.clone(),
-    });
+    // Ending, if nothing said so yet: a start or a removal asked for from
+    // here waits for the run's end below rather than finding the session
+    // running.
+    sink.let_go();
     *lock(&handle.live) = None;
     // Core has let go of the run. Admission is told after `live` is
     // cleared, so what waited for the run's end finds none.
@@ -3601,6 +3607,32 @@ mod tests {
         };
         *lock(&handle.live) = Some(Arc::new(live));
         (sink, finished, run)
+    }
+
+    #[tokio::test]
+    async fn an_exit_reported_after_its_run_was_let_go_of_does_not_end_a_later_run() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        // A run whose backend never reported its exit: its pipeline died,
+        // the stop was not answered in time, and the task let go of it.
+        let (old_sink, _finished, old_run) = make_live(&manager);
+        old_sink.start_finished(Ok(()));
+        old_sink.let_go();
+        drop(old_run);
+        // The session is started again.
+        let (_sink, _finished, _run) = make_live(&manager);
+        let run = |manager: &SessionManager| {
+            manager
+                .admission
+                .snapshot()
+                .session("s-gated")
+                .map(|session| session.run)
+        };
+        assert_eq!(run(&manager), Some(crate::admission::Run::Running));
+        // The old backend exits at last: that is not the new run's end.
+        old_sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+        assert_eq!(run(&manager), Some(crate::admission::Run::Running));
     }
 
     #[tokio::test]
