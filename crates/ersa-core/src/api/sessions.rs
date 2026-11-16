@@ -20,6 +20,7 @@ use ersa_protocol::core_api::{
 use serde_json::Value;
 
 use super::{ApiError, Peer, handlers};
+use crate::admission::{Command, Report};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::sessions::{Forkable, Resumption};
@@ -399,6 +400,14 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     let Some(git) = core.transport_for(&project.host_id) else {
         return;
     };
+    // Through admission, as any removal: one refused, for a session that got
+    // into the workspace meanwhile, leaves it as it is.
+    let removal = Command::RemoveWorkspace {
+        workspace: workspace.id.clone(),
+    };
+    let Ok(removing) = core.admission.command(removal).await else {
+        return;
+    };
     let deleted = workspace::git_worktree_delete(
         git.as_ref(),
         &project.path,
@@ -406,14 +415,21 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         &workspace.vcs_ref,
     )
     .await;
-    match deleted {
-        Ok(_) => {
-            if let Err(e) = core.store.delete_workspace(workspace.id.clone()).await {
-                tracing::warn!(workspace = %workspace.id, error = %e, "could not forget a fork's workspace");
-            }
-        }
+    let removed = match deleted {
+        Ok(_) => core
+            .store
+            .delete_workspace(workspace.id.clone())
+            .await
+            .map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    let id = workspace.id.clone();
+    match removed {
+        Ok(()) => removing.end(Report::WorkspaceRemoved { workspace: id }),
+        // Its row is as it was, `ready` and listed.
         Err(e) => {
-            tracing::warn!(workspace = %workspace.id, error = %e, "could not remove a fork's workspace");
+            tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
+            removing.end(Report::WorkspaceRemovalRefused { workspace: id });
         }
     }
 }

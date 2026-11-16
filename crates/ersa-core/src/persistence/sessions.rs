@@ -9,7 +9,7 @@
 use ersa_protocol::core_api::Deleting;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use super::{Error, Result, Store, conflict};
+use super::{Result, Store, conflict};
 
 /// One session's row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,45 +74,37 @@ const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.bac
      s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at, s.started_elsewhere";
 
 impl Store {
-    /// Records a new session, but only while its workspace is `ready`, in
-    /// one statement: a workspace being removed cannot gain a session.
-    /// Fails with [`Error::Conflict`] otherwise. `cwd` is not written; it is
+    /// Records a new session. Whether its workspace takes one is admission's
+    /// to decide before this is called; a workspace whose row is gone all
+    /// the same fails with [`Error::Conflict`]. `cwd` is not written; it is
     /// the workspace's.
     pub async fn insert_session(&self, session: SessionRow) -> Result<()> {
         self.call(move |conn| {
-            let inserted = conn
-                .execute(
-                    "INSERT INTO sessions
+            conn.execute(
+                "INSERT INTO sessions
                      (id, workspace_id, host_id, backend, backend_session_id, mode,
                       model, effort, permission_mode, section_id, forked_from, forked_through,
                       model_at, effort_at, permission_mode_at)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
-                 WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
-                    params![
-                        session.id,
-                        session.workspace_id,
-                        session.host_id,
-                        session.backend,
-                        session.backend_session_id,
-                        session.mode,
-                        session.model,
-                        session.effort,
-                        session.permission_mode,
-                        session.section_id,
-                        session.forked_from,
-                        session.forked_through,
-                        session.model_at,
-                        session.effort_at,
-                        session.permission_mode_at,
-                    ],
-                )
-                .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
-            if inserted == 0 {
-                return Err(Error::Conflict(format!(
-                    "workspace {} is not ready",
-                    session.workspace_id
-                )));
-            }
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                params![
+                    session.id,
+                    session.workspace_id,
+                    session.host_id,
+                    session.backend,
+                    session.backend_session_id,
+                    session.mode,
+                    session.model,
+                    session.effort,
+                    session.permission_mode,
+                    session.section_id,
+                    session.forked_from,
+                    session.forked_through,
+                    session.model_at,
+                    session.effort_at,
+                    session.permission_mode_at,
+                ],
+            )
+            .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
             Ok(())
         })
         .await
@@ -121,18 +113,18 @@ impl Store {
     /// Records a session found in its backend's records for workspace
     /// `session.workspace_id`'s folder (FLOW-RESUME-SESSION-R12), marked
     /// started elsewhere, with none of the user's arrangement and no request
-    /// of Core's (ADR 0033). In one statement, and only while the workspace
-    /// is `ready` and no session of that backend has that backend id: a
-    /// record is one session, whether Ersa started it or found it before.
-    /// Answers whether it was recorded.
+    /// of Core's (ADR 0033). In one statement, and only while no session of
+    /// that backend has that backend id: a record is one session, whether
+    /// Ersa started it or found it before. Whether its workspace takes one
+    /// is admission's to decide before this is called. Answers whether it
+    /// was recorded.
     pub async fn insert_found_session(&self, session: SessionRow) -> Result<bool> {
         self.call(move |conn| {
             let inserted = conn.execute(
                 "INSERT INTO sessions
                  (id, workspace_id, host_id, backend, backend_session_id, started_elsewhere)
                  SELECT ?1, ?2, ?3, ?4, ?5, 1
-                 WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')
-                   AND NOT EXISTS (SELECT 1 FROM sessions
+                 WHERE NOT EXISTS (SELECT 1 FROM sessions
                                    WHERE backend = ?4 AND backend_session_id = ?5)",
                 params![
                     session.id,
@@ -160,19 +152,6 @@ impl Store {
 
     pub async fn session(&self, id: String) -> Result<Option<SessionRow>> {
         self.call(move |conn| read_session(conn, &id)).await
-    }
-
-    /// The ids of a workspace's sessions, running or not, sorted.
-    pub async fn sessions_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
-        self.call(move |conn| {
-            let mut statement =
-                conn.prepare("SELECT id FROM sessions WHERE workspace_id = ?1 AND started_elsewhere = 0 ORDER BY id")?;
-            let ids = statement
-                .query_map([workspace_id], |row| row.get(0))?
-                .collect::<rusqlite::Result<Vec<String>>>()?;
-            Ok(ids)
-        })
-        .await
     }
 
     /// Records the backend's own id for the session, once it announced it.
@@ -381,24 +360,26 @@ impl Store {
     /// Removes a deleted session, and its workspace with it when
     /// `workspace_id` names one and no other session refers to it (one
     /// marked deleting, whose own delete keeps the files, may), in one
-    /// transaction.
+    /// transaction. Answers whether the workspace's row went.
     pub async fn finish_session_delete(
         &self,
         id: String,
         workspace_id: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
             tx.execute("DELETE FROM sessions WHERE id = ?1", [&id])?;
+            let mut workspace_went = false;
             if let Some(workspace_id) = workspace_id {
-                tx.execute(
+                let rows = tx.execute(
                     "DELETE FROM workspaces WHERE id = ?1
                      AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ?1)",
                     [workspace_id],
                 )?;
+                workspace_went = rows > 0;
             }
             tx.commit()?;
-            Ok(())
+            Ok(workspace_went)
         })
         .await
     }

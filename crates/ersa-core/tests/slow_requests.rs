@@ -7,50 +7,18 @@
 
 mod support;
 
-use std::io;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ersa_adapter::{Process, ProcessSpec, Transport};
 use ersa_core::state::FOLDER_INSPECTIONS;
 use ersa_core::transport::LocalTreeTransport;
 use ersa_core::{Adapter, CommandTransport, CoreConfig, Gate};
 use serde_json::{Value, json};
 use support::fake::FakeAdapter;
-use support::{Client, TestCore, git_repo, kind, start_with_adapters, tempdir};
-
-/// Holds the next process Core starts, once armed, at its [`Gate`] until
-/// the test lets it go: a git call or a backend's version command that does
-/// not answer.
-struct Stall {
-    armed: AtomicBool,
-    gate: Gate,
-}
-
-impl Stall {
-    fn new() -> Arc<Stall> {
-        Arc::new(Stall {
-            armed: AtomicBool::new(false),
-            gate: Gate::default(),
-        })
-    }
-
-    /// The next process started waits until [`Stall::go`].
-    fn arm(&self) {
-        self.armed.store(true, Ordering::SeqCst);
-    }
-
-    /// Waits until a process is held.
-    async fn reached(&self) {
-        reached(&self.gate).await;
-    }
-
-    fn go(&self) {
-        self.gate.go();
-    }
-}
+use support::{
+    Client, Stall, StallingTransport, TestCore, git_repo, kind, start_with_adapters, tempdir,
+};
 
 /// How long a test waits for Core to reach a stop before failing instead
 /// of hanging: a deadline, never a pause.
@@ -87,22 +55,6 @@ fn stops() -> (Arc<Stall>, Arc<Gate>, LetGo) {
     let (stall, gate) = (Stall::new(), Arc::new(Gate::default()));
     let let_go = LetGo(Arc::clone(&stall), Arc::clone(&gate));
     (stall, gate, let_go)
-}
-
-/// Core's command transport for the test: the local one, behind a [`Stall`].
-struct StallingTransport {
-    stall: Arc<Stall>,
-    inner: LocalTreeTransport,
-}
-
-#[ersa_adapter::async_trait]
-impl Transport for StallingTransport {
-    async fn spawn(&self, spec: ProcessSpec) -> io::Result<Box<dyn Process>> {
-        if self.stall.armed.swap(false, Ordering::SeqCst) {
-            self.stall.gate.stop().await;
-        }
-        self.inner.spawn(spec).await
-    }
 }
 
 /// A Core with the fake backend registered (so detection runs a version

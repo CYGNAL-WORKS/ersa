@@ -17,6 +17,7 @@
 
 // `pub mod name;` tells the compiler to load the module from `src/name.rs`.
 pub mod adapters;
+pub mod admission;
 pub mod api;
 pub mod app_log;
 pub mod attachments;
