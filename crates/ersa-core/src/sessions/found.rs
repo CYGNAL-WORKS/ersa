@@ -313,24 +313,6 @@ impl SessionManager {
             .collect()
     }
 
-    /// Whether Core runs a session found in workspace `workspace_id`'s
-    /// folder (FLOW-RESUME-SESSION-R14), once any start under way has
-    /// settled. For a workspace a removal holds in admission: a send or
-    /// resume has its session's exclusive operation from before it asks
-    /// whether the workspace is held until its backend is live, so one that
-    /// got in before the hold is waited for and seen here, and none starts
-    /// after. An answer of no stays no while the workspace is held.
-    pub async fn runs_found(&self, workspace_id: &str) -> bool {
-        for handle in self.found_in(workspace_id) {
-            // Taken to wait for a start under way, and let go at once.
-            let _exclusive = self.exclusive(&handle.id).await;
-            if handle.live().is_some() {
-                return true;
-            }
-        }
-        false
-    }
-
     /// Takes the exclusive operation of each found session loaded in
     /// workspace `workspace_id`, waiting for any under way, before a removal
     /// deletes their rows: an archive or an arrangement still writing one
@@ -354,7 +336,7 @@ impl SessionManager {
     /// (FLOW-RESUME-SESSION-R13). Called once admission was told the
     /// workspace is gone: a list that stored a found session there loads it
     /// before this reads the registry, or finds admission without it and
-    /// loads nothing. None is running ([`SessionManager::runs_found`]), and
+    /// loads nothing. None is running, or admission had refused the removal, and
     /// none has an operation under way: `quiet` holds each one's, taken
     /// before the rows went, and lets go last. A request that waited there
     /// finds the session gone.
