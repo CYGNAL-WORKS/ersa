@@ -204,11 +204,13 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
             ApiError::invalid_state(format!("{named} is already a project")).with_detail(existing)
         }
         Refusal::NoProject => ApiError::not_found(format!("no project {named}")),
-        // As while a delete holds the workspace: the removal under way
-        // holds the project's own folder.
+        // The project's own folder is held, by another removal of the
+        // project or by a delete of a session found there.
         Refusal::ProjectBusy { root } => {
             crate::sessions::busy(root.as_deref().unwrap_or(named)).into()
         }
+        // A delete of a session found there holds the workspace.
+        Refusal::WorkspaceHeld => crate::sessions::busy(named).into(),
         Refusal::ProjectHasSessions => ApiError::invalid_state(format!(
             "project {named} has sessions in its own folder; stop and remove them first"
         )),
@@ -227,9 +229,9 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
         )),
         // Answers to a session's admission, or an id used twice: Core's fault.
         Refusal::WorkspaceNotReady
-        | Refusal::WorkspaceHeld
         | Refusal::WorkspaceExists
-        | Refusal::SessionExists => {
+        | Refusal::SessionExists
+        | Refusal::NoSession => {
             ApiError::internal(format!("admission refused {named}: {refusal:?}"))
         }
     }
@@ -421,23 +423,13 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     let not_removed = Report::ProjectRemovalRefused {
         project: project.id.clone(),
     };
-    // Its own folder is claimed as a delete claims a workspace, so none of
-    // the sessions found there is sent to or resumed meanwhile. One Core
-    // runs holds the removal back (FLOW-RESUME-SESSION-R14): looked for
-    // under the claim, once any start under way has settled, so none is
-    // missed and none starts after.
-    let held = match &root {
-        Some(root) => match core.sessions.claim_found(root) {
-            Ok(held) => Some(held),
-            Err(e) => {
-                removing.end(not_removed);
-                return Err(e.into());
-            }
-        },
-        None => None,
-    };
-    if let Some(held) = &held
-        && core.sessions.runs_found(held).await
+    // Admitted, the removal holds the project's own folder: none of the
+    // sessions found there is sent to or resumed meanwhile. One Core runs
+    // holds the removal back (FLOW-RESUME-SESSION-R14): looked for under
+    // the hold, once any start under way has settled, so none is missed
+    // and none starts after.
+    if let Some(root) = &root
+        && core.sessions.runs_found(root).await
     {
         removing.end(not_removed);
         return Err(refused(Refusal::ProjectHasSessions, &project.id));
@@ -451,8 +443,8 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     removing.end(Report::ProjectRemoved {
         project: project.id.clone(),
     });
-    if let Some(held) = held {
-        core.sessions.forget_found(held).await;
+    if let Some(root) = &root {
+        core.sessions.forget_found(root).await;
     }
     Ok(project)
 }
@@ -720,9 +712,11 @@ pub(super) async fn workspace_remove(
     // Admission decides the removal in one step: refused while the
     // workspace is being made or removed, or has a session Ersa started,
     // as a project with workspaces is, since removal never cascades.
-    // Once admitted it holds the workspace, so no session is created in it
-    // and no second removal starts (ARCH-CORE-R14). A workspace in `error`
-    // from a failed removal may be retried.
+    // Once admitted it holds the workspace: no session is created in it,
+    // none of its found sessions is sent to or resumed, no delete marks it
+    // and no second removal starts (ARCH-CORE-R14). So from here to the
+    // end, only this removal writes the workspace's state. A workspace in
+    // `error` from a failed removal may be retried.
     let id = workspace.id.clone();
     let removing = core
         .admission
@@ -734,29 +728,16 @@ pub(super) async fn workspace_remove(
     let not_removed = Report::WorkspaceRemovalRefused {
         workspace: id.clone(),
     };
-    // Claimed as a delete claims it, at once: none of its found sessions is
-    // sent to or resumed meanwhile, and no delete can mark the workspace.
-    // So from here to the end, only this removal writes the workspace's
-    // state. Refused before that, nothing was written.
-    let held = match core.sessions.claim_found(&id) {
-        Ok(held) => held,
-        Err(e) => {
-            removing.end(not_removed);
-            return Err(e.into());
-        }
-    };
     // A found session Core runs holds the removal back
     // (FLOW-RESUME-SESSION-R14), so no backend is left running in a deleted
-    // directory: looked for under the claim, once any start under way has
+    // directory: looked for under the hold, once any start under way has
     // settled, so none is missed and none starts after.
-    if core.sessions.runs_found(&held).await {
+    if core.sessions.runs_found(&id).await {
         removing.end(not_removed);
         return Err(refused(Refusal::WorkspaceHasSessions, &id));
     }
     // What a refusal puts back: the state the removal took the workspace
-    // from, `error` if a delete marked it before the claim
-    // (PROTO-CORE-API-R94). A workspace whose row a delete took meanwhile
-    // has none; git then refuses it as not listed.
+    // from, `error` if a delete had marked it (PROTO-CORE-API-R94).
     let replaced = match core.admission.replaced(&id) {
         Some(Replaced::Error) => WorkspaceState::Error,
         Some(Replaced::Ready) | None => WorkspaceState::Ready,
@@ -786,8 +767,8 @@ pub(super) async fn workspace_remove(
         // A refusal (locked, local changes without `force`, or a folder git
         // does not list) leaves the worktree as it was, so it goes back to
         // the state it had; any other failure leaves it in an unknown state.
-        // Stored under the claim, then said; the claim goes last, and with
-        // it the found sessions are theirs again.
+        // Stored, then said: with the report the hold goes, and the found
+        // sessions are theirs again.
         if e.is_refusal() {
             core.store.set_workspace_state(id, replaced).await?;
             removing.end(not_removed);
@@ -803,8 +784,10 @@ pub(super) async fn workspace_remove(
     // records left. A failure leaves the row `removing` for the next start
     // to mark `error`, which is how admission then holds it.
     core.store.delete_workspace(id.clone()).await?;
-    removing.end(Report::WorkspaceRemoved { workspace: id });
-    core.sessions.forget_found(held).await;
+    removing.end(Report::WorkspaceRemoved {
+        workspace: id.clone(),
+    });
+    core.sessions.forget_found(&id).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }
