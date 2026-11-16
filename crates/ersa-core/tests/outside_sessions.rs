@@ -28,7 +28,12 @@ struct Backend {
 
 impl Backend {
     fn adapter(&self) -> Arc<dyn Adapter> {
-        let mut adapter = FakeAdapter::with_records(Arc::clone(&self.records));
+        self.adapter_from(FakeAdapter::with_records(Arc::clone(&self.records)))
+    }
+
+    /// The fake `adapter` keeping this backend's records.
+    fn adapter_from(&self, mut adapter: FakeAdapter) -> Arc<dyn Adapter> {
+        adapter.records = Arc::clone(&self.records);
         adapter.filed = Arc::clone(&self.filed);
         adapter.list_gate = Arc::clone(&self.list_gate);
         adapter.stats = Arc::clone(&self.stats);
@@ -490,7 +495,11 @@ async fn a_found_session_resumed_while_its_workspace_is_removed_is_stopped_not_l
     client
         .result("session.resume", json!({ "id": found["id"] }))
         .await;
+    listed_in(&mut client, &found["id"], "running").await;
     let stops = backend.stats.stops.load(Ordering::SeqCst);
+    gate.go();
+    // Past the stop once the found sessions are held.
+    gate.reached().await;
     gate.go();
     remover.response(removal).await;
 
@@ -498,4 +507,135 @@ async fn a_found_session_resumed_while_its_workspace_is_removed_is_stopped_not_l
     assert_eq!(backend.stats.stops.load(Ordering::SeqCst), stops + 1);
     assert!(sessions(&mut client).await.is_empty());
     assert!(backend.has_record("rec-isolated"));
+}
+
+/// A Core over `adapter` whose `workspace.remove` stops at each of its test
+/// stops until the test lets it go, and that gate.
+async fn start_with_remove_gate(adapter: Arc<dyn Adapter>) -> (TestCore, Arc<ersa_core::Gate>) {
+    let gate = Arc::new(ersa_core::Gate::default());
+    let config_gate = Arc::clone(&gate);
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| config.remove_gate = Some(config_gate),
+        vec![adapter],
+    )
+    .await;
+    (core, gate)
+}
+
+/// Lets a `workspace.remove` stopped at its first stop go on past `n` of
+/// them, and waits at the next.
+async fn removal_past(gate: &ersa_core::Gate, n: usize) {
+    gate.reached().await;
+    for _ in 0..n {
+        gate.go();
+        gate.reached().await;
+    }
+}
+
+// verifies: FLOW-RESUME-SESSION-R13
+#[tokio::test(flavor = "multi_thread")]
+async fn a_found_session_written_to_once_its_workspace_holds_it_is_refused_and_not_started() {
+    let backend = Backend::default();
+    let (core, gate) = start_with_remove_gate(backend.adapter()).await;
+    let mut client = core.client().await;
+    let mut remover = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let isolated = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
+    let found = sessions(&mut client).await.remove(0);
+
+    // Stopped once the removal holds the found sessions: before claiming,
+    // after, after its check, and here.
+    let removal = remover
+        .request("workspace.remove", json!({ "id": isolated["id"] }))
+        .await;
+    removal_past(&gate, 3).await;
+    let starts = backend.stats.starts.load(Ordering::SeqCst);
+    let refused = client
+        .error("session.resume", json!({ "id": found["id"] }))
+        .await;
+    assert_eq!(support::kind(&refused), "not_found", "{refused}");
+    let refused = client
+        .error(
+            "session.send",
+            json!({ "id": found["id"], "text": "hello" }),
+        )
+        .await;
+    assert_eq!(support::kind(&refused), "not_found", "{refused}");
+    // No backend started in the folder about to go.
+    assert_eq!(backend.stats.starts.load(Ordering::SeqCst), starts);
+
+    gate.go();
+    let removed = remover.response(removal).await;
+    assert!(removed.get("error").is_none(), "{removed}");
+    assert!(sessions(&mut client).await.is_empty());
+    assert_eq!(backend.stats.starts.load(Ordering::SeqCst), starts);
+}
+
+/// Takes Core's 30-second stop limit.
+// verifies: FLOW-RESUME-SESSION-R14
+#[tokio::test(flavor = "multi_thread")]
+async fn a_found_session_that_will_not_stop_refuses_the_removal_and_stays_reachable() {
+    let backend = Backend::default();
+    let (core, gate) =
+        start_with_remove_gate(backend.adapter_from(FakeAdapter::unstoppable())).await;
+    let mut client = core.client().await;
+    let mut remover = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let isolated = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
+    let found = sessions(&mut client).await.remove(0);
+
+    // Resumed once the removal has checked, and its backend never exits.
+    let removal = remover
+        .request("workspace.remove", json!({ "id": isolated["id"] }))
+        .await;
+    removal_past(&gate, 2).await;
+    client
+        .result("session.resume", json!({ "id": found["id"] }))
+        .await;
+    listed_in(&mut client, &found["id"], "running").await;
+    gate.go();
+
+    let refused = remover.response(removal).await;
+    assert_eq!(
+        support::kind(&refused["error"]),
+        "invalid_state",
+        "{refused}"
+    );
+    assert!(std::path::Path::new(path(&isolated)).is_dir());
+    assert_eq!(workspaces(&mut client, &project["id"]).await.len(), 2);
+    // Still listed, and still the user's to reach: not marked removed, so
+    // changing it is not refused as for a session that is gone.
+    let listed = sessions(&mut client).await;
+    assert_eq!(listed.len(), 1, "{listed:#?}");
+    assert_eq!(listed[0]["id"], found["id"]);
+    let pinned = client
+        .result(
+            "session.arrange",
+            json!({ "id": found["id"], "pinned": true }),
+        )
+        .await;
+    assert_eq!(pinned["pinned"], true);
+}
+
+/// Waits until session `id` is listed in `state`.
+async fn listed_in(client: &mut Client, id: &Value, state: &str) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let listed = sessions(client).await;
+        if listed.iter().any(|s| &s["id"] == id && s["state"] == state) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{id} never {state}: {listed:#?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
 }
