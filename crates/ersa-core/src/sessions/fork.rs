@@ -73,8 +73,7 @@ impl SessionManager {
     pub fn refuse_fork_if_busy(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
-        let workspace_id = lock(&handle.row).workspace_id.clone();
-        self.refuse_if_claimed(&workspace_id)
+        self.refuse_if_claimed(&handle.workspace_id)
     }
 
     /// Refuses a fork of session `id` unless its conversation, as its record
@@ -95,7 +94,7 @@ impl SessionManager {
     ) -> Result<Forkable, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
-        let row = lock(&handle.row).clone();
+        let row = handle.row()?;
         self.refuse_if_claimed(&row.workspace_id)?;
         // A session is forked only from a ready workspace (PROTO-CORE-API,
         // Workspaces).
@@ -156,7 +155,7 @@ impl SessionManager {
             backend_id,
             adapter,
             name: handle
-                .describe()
+                .session()?
                 .title
                 .as_deref()
                 .map(|title| fork_title(title, max_chars)),
@@ -170,7 +169,7 @@ impl SessionManager {
 }
 
 fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
-    let session = handle.describe();
+    let session = handle.session()?;
     let turn_running = matches!(
         session.state,
         LifecycleState::Running | LifecycleState::WaitingUser
