@@ -56,6 +56,11 @@ pub struct CoreConfig {
     /// stops, on its own thread before it touches the folder, until a test
     /// lets it go: a folder that does not answer. `None`, except in tests.
     pub inspect_gate: Option<Arc<Gate>>,
+    /// Where a `session.list` stops once it has stored a session it found
+    /// in a backend's records and before it holds it in memory, until a
+    /// test lets it go. `None`, except in tests that need a removal to
+    /// land there.
+    pub found_gate: Option<Arc<Gate>>,
     /// How long the folder inspection of `project.add` and `project.find`
     /// may take before they answer `permission` (PROTO-CORE-API-R93).
     /// [`FOLDER_INSPECTION_LIMIT`], except in tests that let it run out.
@@ -86,7 +91,8 @@ impl std::fmt::Debug for CommandTransport {
 }
 
 /// A point a request stops at in tests until the test lets it go
-/// ([`CoreConfig::remove_gate`], [`CoreConfig::inspect_gate`]). Each stop
+/// ([`CoreConfig::remove_gate`], [`CoreConfig::inspect_gate`],
+/// [`CoreConfig::found_gate`]). Each stop
 /// is one [`Gate::reached`]
 /// for the test and one [`Gate::go`] from it, in order.
 #[derive(Debug)]
@@ -169,6 +175,7 @@ impl CoreConfig {
             wind_down_pause: Duration::ZERO,
             remove_gate: None,
             inspect_gate: None,
+            found_gate: None,
             folder_inspection_limit: FOLDER_INSPECTION_LIMIT,
             record_deletion_limit: RECORD_DELETION_LIMIT,
             command_transport: None,
@@ -233,7 +240,8 @@ impl Core {
             .unwrap_or_else(|| Arc::new(LocalTreeTransport::for_commands()));
         let sessions = SessionManager::new(store.clone(), adapters, app_log)
             .with_copy_pause(config.copy_pause)
-            .with_wind_down_pause(config.wind_down_pause);
+            .with_wind_down_pause(config.wind_down_pause)
+            .with_found_gate(config.found_gate.clone());
         Core {
             config,
             sessions,
