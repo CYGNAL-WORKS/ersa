@@ -76,15 +76,11 @@ fn find_session(workspace: &str, session: &str) -> Command {
 fn remove_workspace(workspace: &str) -> Command {
     Command::RemoveWorkspace {
         workspace: workspace.into(),
-        runs_found: false,
     }
 }
 
 fn remove_project() -> Command {
-    Command::RemoveProject {
-        project: P.into(),
-        root_runs_found: false,
-    }
+    Command::RemoveProject { project: P.into() }
 }
 
 /// An add of the one folder as `project`, whose root workspace is [`ROOT`]
@@ -263,19 +259,6 @@ fn a_found_session_and_its_projects_removal_in_both_orders() {
     assert_eq!(
         command(&mut state, find_session(ROOT, "s1")),
         admitted(Operation::CreateSession("s1".into()))
-    );
-}
-
-#[test]
-fn a_found_session_core_is_running_holds_its_workspace_back() {
-    let mut state = world();
-    let removal = Command::RemoveWorkspace {
-        workspace: W.into(),
-        runs_found: true,
-    };
-    assert_eq!(
-        command(&mut state, removal),
-        Outcome::Refused(Refusal::WorkspaceHasSessions)
     );
 }
 
@@ -584,20 +567,6 @@ fn a_project_removal_is_refused_for_sessions_in_its_folder_before_its_workspaces
         command(&mut state, remove_project()),
         Outcome::Refused(Refusal::ProjectHasSessions)
     );
-    let running = Command::RemoveProject {
-        project: P.into(),
-        root_runs_found: true,
-    };
-    report(
-        &mut state,
-        Report::SessionGone {
-            session: "s1".into(),
-        },
-    );
-    assert_eq!(
-        command(&mut state, running),
-        Outcome::Refused(Refusal::ProjectHasSessions)
-    );
 }
 
 /// The world without its isolated workspace: a project that can be removed.
@@ -721,21 +690,15 @@ fn every_input() -> Vec<Input> {
     let workspaces = [ROOT, W];
     let sessions = ["s1", "s2", "s3"];
     inputs.push(Input::Command(add_project(P)));
-    for flag in [false, true] {
-        inputs.push(Input::Command(Command::RemoveProject {
-            project: P.into(),
-            root_runs_found: flag,
-        }));
-        for workspace in workspaces {
-            inputs.push(Input::Command(Command::RemoveWorkspace {
-                workspace: workspace.into(),
-                runs_found: flag,
-            }));
-            for session in sessions {
+    inputs.push(Input::Command(remove_project()));
+    for workspace in workspaces {
+        inputs.push(Input::Command(remove_workspace(workspace)));
+        for session in sessions {
+            for found in [false, true] {
                 inputs.push(Input::Command(Command::CreateSession {
                     workspace: workspace.into(),
                     session: session.into(),
-                    found: flag,
+                    found,
                 }));
             }
         }
