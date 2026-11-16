@@ -19,7 +19,7 @@ use ersa_adapter::OutgoingMessage;
 use ersa_protocol::core_api::{Attachment, SendPhase, SendProgressParams};
 
 use super::*;
-use crate::admission::SendStage;
+use crate::admission::{Outcome, SendIs, SendStage};
 use crate::attachments::{self, Prepared, Refused, Target, Work};
 
 /// The most time one file system step of a send may take.
@@ -31,12 +31,11 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(5);
 /// and at most this often.
 const PROGRESS_GAP: Duration = Duration::from_secs(1);
 
-/// What a send under way keeps for its own waits and reports, on its
-/// session's handle. Admission has the slot and the send's stage
-/// (ARCH-CORE-R14); nothing is decided from this.
-pub(super) struct Sending {
-    /// Raised once `session.interrupt` has cancelled the send, to wake it.
-    cancel: watch::Sender<bool>,
+/// What a send under way reports its progress from, kept on its
+/// session's handle for as long as it reports. Admission has the slot, the
+/// send's stage and whether it was cancelled (ARCH-CORE-R14); nothing is
+/// decided from this.
+pub(super) struct Reporting {
     /// The file system job, once one runs.
     work: Option<Arc<Work>>,
     /// Woken when the phase changes, so progress goes out promptly.
@@ -61,14 +60,14 @@ impl Handle {
     /// that raised its flag and then asks sees the send, or the send saw
     /// the flag.
     pub(super) fn send_phase(&self) -> Option<SendPhase> {
-        let sending = lock(&self.sending);
+        let reporting = lock(&self.reporting);
         let stage = self.admission.send_stage(&self.id)?;
-        let work = sending.as_ref().and_then(|sending| sending.work.as_ref());
+        let work = reporting.as_ref().and_then(|send| send.work.as_ref());
         Some(phase_of(stage, work))
     }
 }
 
-impl Sending {
+impl Reporting {
     fn progress(&self, session_id: &str, stage: SendStage) -> SendProgressParams {
         let phase = phase_of(stage, self.work.as_ref());
         let copied = match (phase, &self.work) {
@@ -87,19 +86,10 @@ impl Sending {
 /// Cancels the session's send when one is under way and not yet handed
 /// over; says whether it did. Admission decides, in one step: the send's
 /// hand-over is another, so an interrupt cancels a send or finds it handed
-/// over, never both.
+/// over, never both. The send hears of it from admission, where it waits
+/// to.
 pub(super) fn cancel(handle: &Handle) -> bool {
-    // Under the lock a send takes its slot and stores its signal under,
-    // and lets go of both under: the send admission marks cancelled is the
-    // one woken here, never one that took the slot after it.
-    let sending = lock(&handle.sending);
-    if !handle.admission.interrupt_send(&handle.id) {
-        return false;
-    }
-    if let Some(sending) = sending.as_ref() {
-        sending.cancel.send_replace(true);
-    }
-    true
+    handle.admission.interrupt_send(&handle.id)
 }
 
 /// The refusal of a message to an archived session.
@@ -131,6 +121,8 @@ struct Finish {
     handle: Arc<Handle>,
     tiles: Arc<TileHub>,
     ticker: AbortHandle,
+    /// The task that waits in admission to hear the send was cancelled.
+    waker: AbortHandle,
     /// The send's slot in admission, freed here.
     slot: Option<UnderWay>,
 }
@@ -138,21 +130,18 @@ struct Finish {
 impl Drop for Finish {
     fn drop(&mut self) {
         self.ticker.abort();
-        {
-            // Under the lock its progress is published under, and a
-            // waiting send's reporter looks under: nothing of this send is
-            // published after, and the reporter woken below finds the slot
-            // free.
-            let mut sending = lock(&self.handle.sending);
-            sending.take();
-            drop(self.slot.take());
-            // A progress line not yet delivered would arrive after the
-            // answer. Forgotten under the lock too, so the first line of a
-            // send that takes the slot next is never the one forgotten.
-            self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
-        }
-        // A send waiting its turn behind this one reports in its place.
-        self.handle.send_ended.notify_waiters();
+        self.waker.abort();
+        // Under the lock progress is published under: nothing of this send
+        // is published after.
+        let mut reporting = lock(&self.handle.reporting);
+        reporting.take();
+        // A progress line not yet delivered would arrive after the answer.
+        // Forgotten before the slot is free, so the first line of whoever
+        // reports for the session next is never the one forgotten.
+        self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
+        // The slot is free: a send waiting its turn behind this one, held
+        // in admission until now, reports in its place.
+        drop(self.slot.take());
     }
 }
 
@@ -197,7 +186,8 @@ pub(super) fn being_archived() -> SessionError {
 /// only toward a send still waiting on that session.
 pub struct Waiting {
     handle: Arc<Handle>,
-    /// Raised, under the `sending` lock, when the reports must stop.
+    /// Raised, under the lock reports are published under, when the
+    /// reports must stop.
     done: Arc<AtomicBool>,
     ticker: AbortHandle,
 }
@@ -206,7 +196,7 @@ impl Drop for Waiting {
     fn drop(&mut self) {
         self.ticker.abort();
         // Under the lock the reports are published under, so none follows.
-        let _sending = lock(&self.handle.sending);
+        let _reporting = lock(&self.handle.reporting);
         self.done.store(true, Ordering::SeqCst);
     }
 }
@@ -255,7 +245,7 @@ impl SessionManager {
         let (cancel, mut canceled) = watch::channel(false);
         let changed = Arc::new(Notify::new());
         let slot = {
-            let mut sending = lock(&handle.sending);
+            let mut reporting = lock(&handle.reporting);
             // One step in admission takes the session's send slot, or says
             // why not: its own delete has its workspace or marked it; it
             // is being archived (PROTO-CORE-API-R85) or is archived
@@ -281,10 +271,9 @@ impl SessionManager {
                     "this session is being forked; send the message again in a moment".into(),
                 ));
             }
-            // What the send's waits and reports need, stored with the slot
-            // taken: an interrupt that cancels it from here finds it.
-            *sending = Some(Sending {
-                cancel,
+            // What the send reports its progress from, stored with the slot
+            // taken.
+            *reporting = Some(Reporting {
                 work: None,
                 changed: Arc::clone(&changed),
             });
@@ -296,10 +285,24 @@ impl SessionManager {
             Arc::clone(&changed),
         ))
         .abort_handle();
+        // Waits in admission to hear that an interrupt cancelled this send,
+        // and wakes it then. One cancelled before this asks is told at once.
+        let waker = tokio::spawn({
+            let (admission, session) = (Arc::clone(&self.admission), id.to_string());
+            async move {
+                let until = SendIs::Cancelled;
+                let heard = admission.ask(Command::AwaitSend { session, until }).await;
+                if heard == Outcome::Done {
+                    cancel.send_replace(true);
+                }
+            }
+        })
+        .abort_handle();
         let _finish = Finish {
             handle: Arc::clone(&handle),
             tiles: Arc::clone(&self.tiles),
             ticker,
+            waker,
             slot: Some(slot),
         };
         admitted();
@@ -426,8 +429,8 @@ impl SessionManager {
         canceled: &mut watch::Receiver<bool>,
     ) -> Result<Prepared, SessionError> {
         let work = Arc::new(Work::pausing(self.copy_pause));
-        if let Some(sending) = lock(&handle.sending).as_mut() {
-            sending.work = Some(Arc::clone(&work));
+        if let Some(reporting) = lock(&handle.reporting).as_mut() {
+            reporting.work = Some(Arc::clone(&work));
         }
         let row = handle.row()?;
         let images = self.adapter_of(&row.backend)?.image_limits();
@@ -512,8 +515,8 @@ fn abandon(job: tokio::task::JoinHandle<Result<Prepared, Refused>>, work: &Work)
 /// progress go out.
 fn set_stage(handle: &Handle, stage: SendStage) {
     handle.admission.send_reached(&handle.id, stage);
-    if let Some(sending) = lock(&handle.sending).as_ref() {
-        sending.changed.notify_one();
+    if let Some(reporting) = lock(&handle.reporting).as_ref() {
+        reporting.changed.notify_one();
     }
 }
 
@@ -528,14 +531,14 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
             };
             // Published under the lock the send's end takes, so no line is
             // left to arrive after its answer.
-            let sending = lock(&handle.sending);
-            let Some(sending) = sending.as_ref() else {
+            let reporting = lock(&handle.reporting);
+            let Some(reporting) = reporting.as_ref() else {
                 return;
             };
             let Some(stage) = handle.admission.send_stage(&handle.id) else {
                 return;
             };
-            let progress = sending.progress(&handle.id, stage);
+            let progress = reporting.progress(&handle.id, stage);
             publish_if_due(&mut pacer, &tiles, &progress);
         }
         pacer.wait(&changed).await;
@@ -567,56 +570,57 @@ async fn report_waiting(
     let mut pacer = Pacer::default();
     // Nothing changes a waiting send's phase; the pacer waits on its clock.
     let unchanged = Notify::new();
+    let Some(handle_now) = handle.upgrade() else {
+        return;
+    };
+    let (admission, session) = (Arc::clone(&handle_now.admission), handle_now.id.clone());
+    drop(handle_now);
+    // Waits in admission until the session's send slot is as `until` says.
+    let until = |until: SendIs| {
+        let session = session.clone();
+        admission.ask(Command::AwaitSend { session, until })
+    };
+    // Asked once, and again only when it was answered: a send that takes
+    // the slot from here on is heard of, however short it is.
+    let mut taken = Box::pin(until(SendIs::Taken));
     loop {
-        let Some(ended) = handle
-            .upgrade()
-            .map(|handle| Arc::clone(&handle.send_ended))
-        else {
-            return;
-        };
-        // Registered before `sending` is read, so an end in between still
-        // wakes it.
-        let mut send_ended = std::pin::pin!(ended.notified());
-        send_ended.as_mut().enable();
-        let other_send = {
+        {
             let Some(handle) = handle.upgrade() else {
                 return;
             };
             // Published under the lock a send takes its slot under, so a
             // send that has its slot is seen here and reports for itself.
-            let _sending = lock(&handle.sending);
+            let _reporting = lock(&handle.reporting);
             if done.load(Ordering::SeqCst) || *admitted.borrow() {
                 return;
             }
-            match handle.admission.send_stage(&handle.id) {
-                Some(_) => true,
-                None => {
-                    let waiting = SendProgressParams {
-                        session_id: handle.id.clone(),
-                        phase: SendPhase::Checking,
-                        copied_bytes: None,
-                        total_bytes: None,
-                    };
-                    publish_if_due(&mut pacer, &tiles, &waiting);
-                    false
+            if handle.admission.send_stage(&handle.id).is_none() {
+                let waiting = SendProgressParams {
+                    session_id: handle.id.clone(),
+                    phase: SendPhase::Checking,
+                    copied_bytes: None,
+                    total_bytes: None,
+                };
+                publish_if_due(&mut pacer, &tiles, &waiting);
+            }
+        }
+        tokio::select! {
+            // First, so a send that has the slot is waited for, never
+            // polled.
+            biased;
+            heard = &mut taken => {
+                // While another send reports for the session, this one
+                // waits, held in admission, for it to end. That send's end
+                // forgets its last report, and has this one report at once,
+                // so the session's reports keep their pace. A session that
+                // is gone has nothing to report for.
+                if heard != Outcome::Done || until(SendIs::Free).await != Outcome::Done {
+                    return;
                 }
+                pacer = Pacer::default();
+                taken = Box::pin(until(SendIs::Taken));
             }
-        };
-        // While another send reports for the session, this one waits for it
-        // to end. Either way, a send ending, which forgets its last report,
-        // has this one report at once, so the session's reports keep their
-        // pace.
-        let ended_first = if other_send {
-            send_ended.await;
-            true
-        } else {
-            tokio::select! {
-                () = pacer.wait(&unchanged) => false,
-                () = send_ended.as_mut() => true,
-            }
-        };
-        if ended_first {
-            pacer = Pacer::default();
+            () = pacer.wait(&unchanged) => {}
         }
     }
 }

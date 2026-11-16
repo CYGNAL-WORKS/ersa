@@ -273,7 +273,6 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         Refusal::BeingArchived => send::being_archived(),
         Refusal::SessionDeleting => being_deleted(session_id),
         Refusal::Archived => send::archived(),
-        Refusal::NotRunning => not_running(),
         Refusal::SendInProgress => send::in_progress(),
         // The run was announced ended, and Core's own wind-down stalled.
         Refusal::GaveUp => SessionError::Internal(format!(
@@ -291,6 +290,9 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         | Refusal::WorkspaceHasSessions
         | Refusal::NoSection
         | Refusal::NoSendToCancel
+        // A send's "not running" is worded where the send is refused, with
+        // the backend's own reason when its last start failed.
+        | Refusal::NotRunning
         | Refusal::SessionExists => SessionError::Internal(format!(
             "admission refused session {session_id} in workspace {workspace_id}: {refusal:?}"
         )),
@@ -370,11 +372,12 @@ struct Handle {
     /// The same for looking at the session's folder before a resume: on a
     /// network drive that stops answering, one stuck look per session.
     folder_check: ReadSlot<resume::FolderLook>,
-    /// The send under way, if any: one at a time per session.
-    sending: Mutex<Option<send::Sending>>,
-    /// Woken when a send ends, so a send waiting its turn behind it reports
-    /// at once (PROTO-CORE-API-R90).
-    send_ended: Arc<Notify>,
+    /// What the send under way reports its progress from, while it
+    /// reports. Its lock is the one progress lines are published under, so
+    /// none follows a send's answer; and, until the fork's mark is
+    /// admission's, the one a send looks at the fork's flag under. Which
+    /// send has the session's slot, and how far it is, is admission's.
+    reporting: Mutex<Option<send::Reporting>>,
     /// Held by whatever works in the session's scratch folder: a send's
     /// copying, and removing the folder with the session.
     scratch: Arc<tokio::sync::Mutex<()>>,
@@ -750,8 +753,7 @@ impl Handle {
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
             folder_check: tokio::sync::Mutex::new(None),
-            sending: Mutex::default(),
-            send_ended: Arc::default(),
+            reporting: Mutex::default(),
             scratch: Arc::default(),
         }
     }
@@ -1607,11 +1609,11 @@ impl SessionManager {
         // for the mark.
         let _exclusive = if archived {
             // An archive is known to admission from when it is asked for,
-            // waiting its turn or under way, and `session.send` asks
-            // admission under the lock it sets `sending` with, while the
-            // busy check below reads `sending` through that lock: either
-            // the check sees the send, or the send sees this archive and
-            // refuses (PROTO-CORE-API-R85).
+            // waiting its turn or under way, before the busy check below
+            // asks admission whether a message is being sent, and
+            // `session.send` takes its slot in the step that looks for an
+            // archive: either the check sees the send, or the send sees
+            // this archive and refuses (PROTO-CORE-API-R85).
             let command = Command::Archive {
                 session: id.to_string(),
             };

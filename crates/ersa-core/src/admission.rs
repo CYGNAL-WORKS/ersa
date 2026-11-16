@@ -125,6 +125,18 @@ pub enum SendStage {
     HandingOver,
 }
 
+/// What someone waits for about a session's send slot
+/// ([`Command::AwaitSend`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SendIs {
+    /// A send has the slot.
+    Taken,
+    /// No send has the slot.
+    Free,
+    /// The send in the slot was cancelled.
+    Cancelled,
+}
+
 /// Which exclusive operation is under way on a session.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Exclusive {
@@ -483,6 +495,15 @@ pub enum Command {
         session: Id,
         resumes: bool,
     },
+    /// Waits until the session's send slot is as `until` says, and begins
+    /// nothing: the reporter of a send that waits its turn waits for a
+    /// send to take the slot and then to free it, and a send waits to hear
+    /// it was cancelled. Done at once when it is so already; refused when
+    /// the session is gone, or for `Cancelled` when no send has the slot.
+    AwaitSend {
+        session: Id,
+        until: SendIs,
+    },
     /// A `session.interrupt`, asking to cancel the message being sent:
     /// done while the send is not yet handed over, refused when there is
     /// none or it is handed over.
@@ -758,6 +779,9 @@ pub fn step(state: &mut State, input: Input) -> Step {
             // removal waiting there.
             let released = match outcome {
                 Outcome::Admitted(_) => release(state),
+                // An interrupt that is done cancelled a send, which may be
+                // what a held command waits to hear.
+                Outcome::Done if matches!(command, Command::Interrupt { .. }) => release(state),
                 Outcome::Held => {
                     state.held.push(command);
                     Vec::new()
@@ -1174,6 +1198,19 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 entry.send = Some(sending);
             }
             Outcome::Admitted(Operation::Send(session.clone()))
+        }
+        Command::AwaitSend { session, until } => {
+            let Some(entry) = state.sessions.get(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            match (until, entry.send) {
+                (SendIs::Taken, Some(_)) | (SendIs::Free, None) => Outcome::Done,
+                (SendIs::Taken, None) | (SendIs::Free, Some(_)) => Outcome::Held,
+                (SendIs::Cancelled, Some(sending)) if sending.canceled => Outcome::Done,
+                (SendIs::Cancelled, Some(_)) => Outcome::Held,
+                // The send ended without being cancelled.
+                (SendIs::Cancelled, None) => Outcome::Refused(Refusal::NoSendToCancel),
+            }
         }
         Command::Interrupt { session } => {
             let Some(entry) = state.sessions.get_mut(session) else {
@@ -1704,6 +1741,28 @@ impl Admission {
         self.answered(outcome)
     }
 
+    /// Asks a question that may wait ([`Command::AwaitSend`]). It is asked
+    /// in this call, so what happens from here on is heard of; what this
+    /// returns waits for admission's answer. Dropped before then, the
+    /// question is withdrawn: its held command leaves the queue, so
+    /// nothing waits on behalf of someone who has gone.
+    pub fn ask(
+        self: &Arc<Self>,
+        command: Command,
+    ) -> impl Future<Output = Outcome> + Send + 'static {
+        let (outcome, waiter) = self.apply(Input::Command(command));
+        let admission = Arc::clone(self);
+        let waiter = waiter.map(|(number, answer)| (Withdraw { admission, number }, answer));
+        async move {
+            match waiter {
+                Some((_withdrawn_unless_answered, answer)) => {
+                    answer.await.expect("a held command is always answered")
+                }
+                None => outcome,
+            }
+        }
+    }
+
     /// Asks for the exclusive operation of a start of `session`
     /// ([`Command::BeginStart`]), with `limit` on its wait for a run that is
     /// winding down.
@@ -1959,6 +2018,19 @@ impl Admission {
         self.inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// Withdraws a held command whose asker stopped waiting
+/// ([`Admission::ask`]). Does nothing once it was answered.
+struct Withdraw {
+    admission: Arc<Admission>,
+    number: u64,
+}
+
+impl Drop for Withdraw {
+    fn drop(&mut self) {
+        self.admission.give_up(self.number);
     }
 }
 
