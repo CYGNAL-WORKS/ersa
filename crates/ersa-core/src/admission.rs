@@ -19,6 +19,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use tokio::sync::oneshot;
 
@@ -93,6 +94,19 @@ pub struct SessionEntry {
     /// a removal once it goes on. A session has at most one, and another
     /// asked for meanwhile waits.
     pub exclusive: bool,
+    /// Whether Core runs its backend.
+    pub run: Run,
+}
+
+/// Whether Core runs a session's backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Run {
+    Stopped,
+    /// Launched, starting or ready.
+    Running,
+    /// Its end was announced, and Core has not let go of the run yet: a
+    /// start or a removal asked for now waits for that.
+    Ending,
 }
 
 /// Everything admission decides from. Ordered maps and no counters, so two
@@ -102,6 +116,8 @@ pub struct State {
     projects: BTreeMap<Id, ProjectEntry>,
     workspaces: BTreeMap<Id, WorkspaceEntry>,
     sessions: BTreeMap<Id, SessionEntry>,
+    /// Whether Core is shutting down: from then nothing starts.
+    closing: bool,
     /// Commands waiting for a report, in the order they arrived.
     held: Vec<Command>,
 }
@@ -151,6 +167,7 @@ impl State {
                     stored,
                     removing: false,
                     exclusive: false,
+                    run: Run::Stopped,
                 },
             );
         }
@@ -186,6 +203,34 @@ impl State {
         &self.held
     }
 
+    /// Whether Core is shutting down.
+    pub fn closing(&self) -> bool {
+        self.closing
+    }
+
+    /// Whether a session found in the backend's records in `workspace` has
+    /// an exclusive operation under way, which may be a start: a removal
+    /// waits to see what it comes to.
+    fn has_busy_found_session(&self, workspace: &str) -> bool {
+        self.sessions
+            .values()
+            .any(|session| session.workspace == workspace && session.found && session.exclusive)
+    }
+
+    /// Whether Core runs a session found in the backend's records in
+    /// `workspace`, its run winding down included, which holds back
+    /// removing the workspace as a session Ersa started does.
+    fn runs_found_session(&self, workspace: &str) -> bool {
+        self.sessions.values().any(|session| {
+            session.workspace == workspace
+                && session.found
+                && match session.run {
+                    Run::Running | Run::Ending => true,
+                    Run::Stopped => false,
+                }
+        })
+    }
+
     /// Whether a session Ersa started is in `workspace`, stored or not.
     fn has_started_session(&self, workspace: &str) -> bool {
         self.sessions
@@ -202,12 +247,9 @@ impl State {
             .any(|session| session.workspace == workspace && !session.stored)
     }
 
-    /// Whether something holds `workspace`: its own removal, its project's
-    /// removal when it is the project's own folder, or a session's delete.
-    /// A held workspace takes no session, and no other removal or delete.
-    /// One admission does not have counts as held: it went with a removal
-    /// or a delete, and nothing may start in what is left of it.
-    pub fn workspace_held(&self, workspace: &str) -> bool {
+    /// Whether a removal holds `workspace`: its own, or its project's when
+    /// it is the project's own folder.
+    fn held_for_removal(&self, workspace: &str) -> bool {
         let Some(entry) = self.workspaces.get(workspace) else {
             return true;
         };
@@ -220,7 +262,20 @@ impl State {
                 Some(ProjectPhase::Removing) => true,
                 Some(ProjectPhase::Adding | ProjectPhase::Present) | None => false,
             };
-        removing || project_going || entry.deleting.is_some()
+        removing || project_going
+    }
+
+    /// Whether something holds `workspace`: its own removal, its project's
+    /// removal when it is the project's own folder, or a session's delete.
+    /// A held workspace takes no session, and no other removal or delete.
+    /// One admission does not have counts as held: it went with a removal
+    /// or a delete, and nothing may start in what is left of it.
+    pub fn workspace_held(&self, workspace: &str) -> bool {
+        self.held_for_removal(workspace)
+            || self
+                .workspaces
+                .get(workspace)
+                .is_some_and(|entry| entry.deleting.is_some())
     }
 
     fn has_session(&self, workspace: &str) -> bool {
@@ -301,6 +356,31 @@ pub enum Command {
     BeginExclusive {
         session: Id,
     },
+    /// The exclusive operation of a start (a resume, or a send to a stopped
+    /// session): as [`Command::BeginExclusive`], and held while a run of
+    /// the session is winding down, refused while one runs or Core is
+    /// closing.
+    BeginStart {
+        session: Id,
+    },
+    /// The exclusive operation of a `session.remove` under way: as
+    /// [`Command::BeginExclusive`], and held while a run of the session is
+    /// winding down, refused while one runs.
+    BeginRemoval {
+        session: Id,
+    },
+    /// The backend is about to be started: the last moment a start can be
+    /// refused for shutdown. Admitted, the run is the operation.
+    Launch {
+        session: Id,
+    },
+}
+
+/// A held command that has a time limit, named by what it waits to do.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Timed {
+    Start(Id),
+    Removal(Id),
 }
 
 /// An operation admission has let begin, named by what it is on.
@@ -314,6 +394,8 @@ pub enum Operation {
     DeleteSession(Id),
     RemoveSession(Id),
     Exclusive(Id),
+    /// A session's run, from its launch until Core has let go of it.
+    Run(Id),
 }
 
 /// What happened, said once it is stored. A report is never refused or
@@ -368,6 +450,15 @@ pub enum Report {
     SessionGone {
         session: Id,
     },
+    /// The end of the session's run was announced: it is winding down.
+    RunEnding {
+        session: Id,
+    },
+    /// Core is shutting down.
+    Closing,
+    /// The time limit of a held start or removal passed: whoever waited
+    /// has stopped waiting.
+    GaveUp(Timed),
     /// The operation's task ended without saying how (ARCH-CORE-R16).
     Ended(Operation),
 }
@@ -391,9 +482,8 @@ pub enum Refusal {
     ProjectBusy {
         root: Option<Id>,
     },
-    /// A session Ersa started is in its folder. (One found in the backend's
-    /// records that Core runs refuses a removal too, after admission: the
-    /// run phase is not admission's yet.)
+    /// A session Ersa started is in its folder, or one found in the
+    /// backend's records that Core runs.
     ProjectHasSessions,
     ProjectHasWorkspaces,
     NoWorkspace,
@@ -410,6 +500,12 @@ pub enum Refusal {
     /// The id is taken.
     SessionExists,
     NoSession,
+    /// Core is shutting down; nothing starts.
+    Closing,
+    /// Core runs the session's backend.
+    Running,
+    /// What the command waited for did not come within its time limit.
+    GaveUp,
 }
 
 /// Admission's answer to one input.
@@ -455,6 +551,27 @@ pub fn step(state: &mut State, input: Input) -> Step {
                 Outcome::Refused(_) | Outcome::Noted | Outcome::Stale => Vec::new(),
             };
             Step { outcome, released }
+        }
+        // A held command's time limit: it is answered and leaves the queue,
+        // and nothing else changes.
+        Input::Report(Report::GaveUp(waiting)) => {
+            let given_up = match waiting {
+                Timed::Start(session) => Command::BeginStart { session },
+                Timed::Removal(session) => Command::BeginRemoval { session },
+            };
+            match state.held.iter().position(|held| held == &given_up) {
+                Some(place) => {
+                    state.held.remove(place);
+                    Step {
+                        outcome: Outcome::Noted,
+                        released: vec![(place, Outcome::Refused(Refusal::GaveUp))],
+                    }
+                }
+                None => Step {
+                    outcome: Outcome::Stale,
+                    released: Vec::new(),
+                },
+            }
         }
         Input::Report(report) => {
             let outcome = note(state, report);
@@ -570,6 +687,12 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         .as_ref()
                         .and_then(|root| state.workspaces.get(root))
                         .is_some_and(|root| root.deleting.is_some());
+                    let busy_found = root
+                        .as_ref()
+                        .is_some_and(|root| state.has_busy_found_session(root));
+                    let runs_found = root
+                        .as_ref()
+                        .is_some_and(|root| state.runs_found_session(root));
                     if sessions {
                         Outcome::Refused(Refusal::ProjectHasSessions)
                     } else if isolated {
@@ -577,8 +700,11 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                     } else if deleting {
                         // A delete of a session found there holds the folder.
                         Outcome::Refused(Refusal::ProjectBusy { root })
-                    } else if arriving {
+                    } else if arriving || busy_found {
                         Outcome::Held
+                    } else if runs_found {
+                        // One found there that Core runs holds it back too.
+                        Outcome::Refused(Refusal::ProjectHasSessions)
                     } else {
                         if let Some(entry) = state.projects.get_mut(project) {
                             entry.phase = ProjectPhase::Removing;
@@ -630,8 +756,16 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             if entry.deleting.is_some() {
                 return Outcome::Refused(Refusal::WorkspaceHeld);
             }
-            if state.has_arriving_session(workspace) {
+            // What a session found there is about to be is not known yet:
+            // one still being stored, or one with an operation under way,
+            // which may be a start.
+            if state.has_arriving_session(workspace) || state.has_busy_found_session(workspace) {
                 return Outcome::Held;
+            }
+            // One found there that Core runs holds it back, as one Ersa
+            // started does: no backend is left running in a removed folder.
+            if state.runs_found_session(workspace) {
+                return Outcome::Refused(Refusal::WorkspaceHasSessions);
             }
             if let Some(entry) = state.workspaces.get_mut(workspace) {
                 entry.phase = WorkspacePhase::Removing { replaced };
@@ -643,6 +777,9 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             session,
             found,
         } => {
+            if state.closing {
+                return Outcome::Refused(Refusal::Closing);
+            }
             if state.sessions.contains_key(session) {
                 return Outcome::Refused(Refusal::SessionExists);
             }
@@ -679,6 +816,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 stored: false,
                 removing: false,
                 exclusive: false,
+                run: Run::Stopped,
             };
             state.sessions.insert(session.clone(), entry);
             Outcome::Admitted(Operation::CreateSession(session.clone()))
@@ -731,6 +869,72 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             }
             entry.exclusive = true;
             Outcome::Admitted(Operation::Exclusive(session.clone()))
+        }
+        Command::BeginStart { session } => {
+            let closing = state.closing;
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            // First its turn: what the operation under way leaves is what
+            // the start is decided against. A stop under way on a running
+            // session leaves it stopped, and the start then starts it.
+            if !entry.stored || entry.exclusive {
+                return Outcome::Held;
+            }
+            match entry.run {
+                // Core has not let go of the last run yet.
+                Run::Ending => return Outcome::Held,
+                Run::Running => return Outcome::Refused(Refusal::Running),
+                Run::Stopped => {}
+            }
+            if closing {
+                return Outcome::Refused(Refusal::Closing);
+            }
+            entry.exclusive = true;
+            Outcome::Admitted(Operation::Exclusive(session.clone()))
+        }
+        Command::BeginRemoval { session } => {
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            // First its turn, as a start: a stop under way on a running
+            // session leaves it stopped, and the removal then removes it.
+            if !entry.stored || entry.exclusive {
+                return Outcome::Held;
+            }
+            match entry.run {
+                // A client may have seen the session end and ask to remove
+                // it before Core has let go of the run.
+                Run::Ending => return Outcome::Held,
+                Run::Running => return Outcome::Refused(Refusal::Running),
+                Run::Stopped => {}
+            }
+            entry.exclusive = true;
+            Outcome::Admitted(Operation::Exclusive(session.clone()))
+        }
+        Command::Launch { session } => {
+            let closing = state.closing;
+            let going = state
+                .sessions
+                .get(session)
+                .is_some_and(|entry| state.held_for_removal(&entry.workspace));
+            let Some(entry) = state.sessions.get_mut(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            if closing {
+                return Outcome::Refused(Refusal::Closing);
+            }
+            // No backend starts in a folder on its way out. (A delete's
+            // hold does not stop one: the delete counted the session.)
+            if going {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            match entry.run {
+                Run::Running | Run::Ending => return Outcome::Refused(Refusal::Running),
+                Run::Stopped => {}
+            }
+            entry.run = Run::Running;
+            Outcome::Admitted(Operation::Run(session.clone()))
         }
     }
 }
@@ -914,7 +1118,38 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 }
                 Some(_) | None => Outcome::Stale,
             },
+            // Core has let go of the run, however its task ended.
+            Operation::Run(session) => match state.sessions.get_mut(&session) {
+                Some(entry) => match entry.run {
+                    Run::Running | Run::Ending => {
+                        entry.run = Run::Stopped;
+                        Outcome::Noted
+                    }
+                    Run::Stopped => Outcome::Stale,
+                },
+                None => Outcome::Stale,
+            },
         },
+        Report::RunEnding { session } => match state.sessions.get_mut(&session) {
+            Some(entry) => match entry.run {
+                Run::Running => {
+                    entry.run = Run::Ending;
+                    Outcome::Noted
+                }
+                Run::Stopped | Run::Ending => Outcome::Stale,
+            },
+            None => Outcome::Stale,
+        },
+        Report::Closing => {
+            if state.closing {
+                Outcome::Stale
+            } else {
+                state.closing = true;
+                Outcome::Noted
+            }
+        }
+        // Answered in `step`, which has the queue's places.
+        Report::GaveUp(_) => Outcome::Stale,
     }
 }
 
@@ -997,6 +1232,69 @@ impl Admission {
             Some(waiter) => waiter.await.expect("a held command is always answered"),
             None => outcome,
         };
+        self.answered(outcome)
+    }
+
+    /// Asks to begin a start or a removal, which wait for a run of the
+    /// session that is winding down, with `limit` on that wait. When it
+    /// passes and the run is still ending, the command gives up
+    /// ([`Report::GaveUp`]) and is refused so. A wait for anything else,
+    /// another operation under way on the session, has no limit.
+    pub async fn begin_within(
+        self: &Arc<Self>,
+        waiting: Timed,
+        limit: Duration,
+    ) -> Result<UnderWay, Refusal> {
+        let (session, command) = match &waiting {
+            Timed::Start(session) => (
+                session.clone(),
+                Command::BeginStart {
+                    session: session.clone(),
+                },
+            ),
+            Timed::Removal(session) => (
+                session.clone(),
+                Command::BeginRemoval {
+                    session: session.clone(),
+                },
+            ),
+        };
+        let (outcome, waiter) = self.apply(Input::Command(command));
+        let Some(mut waiter) = waiter else {
+            return self.answered(outcome);
+        };
+        let outcome = loop {
+            match tokio::time::timeout(limit, &mut waiter).await {
+                Ok(answer) => break answer.expect("a held command is always answered"),
+                Err(_) => {
+                    let ending = match self.lock().state.session(&session).map(|entry| entry.run) {
+                        Some(Run::Ending) => true,
+                        Some(Run::Running | Run::Stopped) | None => false,
+                    };
+                    if ending {
+                        self.report(Report::GaveUp(waiting));
+                        // Answered now: "gave up", or what a step just
+                        // before the report decided.
+                        break waiter.await.expect("a held command is always answered");
+                    }
+                }
+            }
+        };
+        self.answered(outcome)
+    }
+
+    /// Asks to launch `session`'s backend, without waiting: a launch is
+    /// admitted or refused in the step, so its caller may hold a lock.
+    pub fn launch(self: &Arc<Self>, session: &str) -> Result<UnderWay, Refusal> {
+        let command = Command::Launch {
+            session: session.to_string(),
+        };
+        let (outcome, _) = self.apply(Input::Command(command));
+        self.answered(outcome)
+    }
+
+    /// The handle of an admitted operation, or the refusal.
+    fn answered(self: &Arc<Self>, outcome: Outcome) -> Result<UnderWay, Refusal> {
         match outcome {
             Outcome::Admitted(operation) => Ok(UnderWay {
                 admission: Arc::clone(self),

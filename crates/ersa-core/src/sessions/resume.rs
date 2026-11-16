@@ -76,25 +76,33 @@ impl SessionManager {
         how: Resumption,
         folder: FolderChecked,
     ) -> Result<(), SessionError> {
-        // Waited for before the start is admitted, so nothing else on the
-        // session queues behind the wait.
-        current_run(handle).await?;
         // The start is the session's exclusive operation throughout, so a
         // stop, a removal or a view opened meanwhile waits for the session
-        // to be live, and two resumes start it once. A session that is gone
-        // answers `not_found`.
-        let _exclusive = self.exclusive(&handle.id).await?;
+        // to be live, and two resumes start it once. Admission holds it
+        // behind whatever is under way on the session, and behind a run
+        // that has ended and is winding down (a client may have seen
+        // `session.ended` before Core let go of the run), that wait up to
+        // the stop limit and holding nothing itself. A session that runs
+        // needs no start; nothing starts once Core is shutting down; one
+        // that is gone answers `not_found`.
+        let workspace_id = lock(&handle.row).workspace_id.clone();
+        let begun = self
+            .admission
+            .begin_within(Timed::Start(handle.id.clone()), STOP_TIMEOUT)
+            .await;
+        let _exclusive = match begun {
+            Ok(exclusive) => exclusive,
+            Err(Refusal::Running) => return Ok(()),
+            Err(refusal) => return Err(refused_session(refusal, &workspace_id, &handle.id)),
+        };
+        // A run whose task failed before it cleared `live`: left as it is,
+        // never started over.
         if handle.live().is_some() {
             return Ok(());
         }
         self.refuse_if_deleting(handle)?;
         let row = lock(&handle.row).clone();
         self.refuse_if_claimed(&row.workspace_id)?;
-        if self.closing.load(Ordering::SeqCst) {
-            return Err(SessionError::InvalidState(
-                "Core is shutting down; no session can start".into(),
-            ));
-        }
         if folder == FolderChecked::No {
             check_folder(handle).await?;
         }
@@ -151,14 +159,10 @@ impl SessionManager {
             resume: start.resume,
             extra: Value::Null,
         };
-        // Launched under the lock `stop_all` takes, as a new session is.
+        // Launched under the lock `stop_all` takes, as a new session is:
+        // admission refuses the launch once Core is closing.
         let sessions = lock(&self.sessions);
-        if self.closing.load(Ordering::SeqCst) {
-            return Err(SessionError::InvalidState(
-                "Core is shutting down; no session can start".into(),
-            ));
-        }
-        self.launch(
+        let launched = self.launch(
             Arc::clone(handle),
             adapter,
             how.transport,
@@ -169,7 +173,7 @@ impl SessionManager {
             },
         );
         drop(sessions);
-        Ok(())
+        launched.map_err(|refusal| refused_session(refusal, &row.workspace_id, &handle.id))
     }
 
     /// The model, effort and permission mode a relaunch passes the backend
