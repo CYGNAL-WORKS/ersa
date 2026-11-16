@@ -59,6 +59,7 @@ use ersa_protocol::events::{
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
+use crate::admission::{Admission, Command, Refusal, Report};
 use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
@@ -71,6 +72,7 @@ mod send;
 mod settings;
 
 pub use fork::{Beginning, ForkHold, Forkable};
+pub use found::HeldFound;
 pub use resume::Resumption;
 pub use send::{Pacer, Waiting};
 
@@ -209,6 +211,9 @@ pub struct SessionManager {
     adapters: Vec<Arc<dyn Adapter>>,
     /// Where Core writes each backend process's lifecycle facts.
     app_log: Arc<AppLog>,
+    /// Decides whether a workspace takes a session, and is told which
+    /// sessions exist (ARCH-CORE, Admission).
+    admission: Arc<Admission>,
     /// Every session in the database, by id. A std mutex: only held to look
     /// up, insert, or remove, never across an await.
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
@@ -293,8 +298,32 @@ fn in_turn(handle: &Handle) -> bool {
     (handle.live().is_some() && (working || waiting)) || session.sending.is_some()
 }
 
+/// The answer for a session admission did not take into workspace
+/// `workspace_id`, worded as before admission decided it.
+fn refused_session(refusal: Refusal, workspace_id: &str) -> SessionError {
+    match refusal {
+        Refusal::WorkspaceHeld => busy(workspace_id),
+        Refusal::NoWorkspace | Refusal::WorkspaceNotReady => {
+            SessionError::InvalidState(format!("workspace {workspace_id} is not ready"))
+        }
+        // Answers to other commands, or an id used twice: Core's fault.
+        Refusal::AlreadyProject { .. }
+        | Refusal::NoProject
+        | Refusal::ProjectBusy { .. }
+        | Refusal::ProjectHasSessions
+        | Refusal::ProjectHasWorkspaces
+        | Refusal::WorkspaceExists
+        | Refusal::RootWorkspace
+        | Refusal::WorkspaceBusy
+        | Refusal::WorkspaceHasSessions
+        | Refusal::SessionExists => SessionError::Internal(format!(
+            "admission refused a session in workspace {workspace_id}: {refusal:?}"
+        )),
+    }
+}
+
 /// The refusal for a request a delete under way holds back.
-fn busy(workspace_id: &str) -> SessionError {
+pub(crate) fn busy(workspace_id: &str) -> SessionError {
     SessionError::Busy(format!(
         "workspace {workspace_id} is busy: a session in it is being deleted, or the workspace removed; try again once it is done"
     ))
@@ -818,7 +847,15 @@ impl Handle {
 }
 
 impl SessionManager {
-    pub fn new(store: Store, adapters: Vec<Arc<dyn Adapter>>, app_log: Arc<AppLog>) -> Self {
+    /// A manager over `store`, starting sessions with `adapters`, asking
+    /// `admission` whether a workspace takes a session and telling it which
+    /// sessions exist.
+    pub fn new(
+        store: Store,
+        adapters: Vec<Arc<dyn Adapter>>,
+        app_log: Arc<AppLog>,
+        admission: Arc<Admission>,
+    ) -> Self {
         // One adapter per backend: a second registration of a name is a
         // mistake in the build, and the first one stands.
         let mut registered: Vec<Arc<dyn Adapter>> = Vec::new();
@@ -836,6 +873,7 @@ impl SessionManager {
             store,
             adapters: registered,
             app_log,
+            admission,
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
@@ -1089,13 +1127,28 @@ impl SessionManager {
         if self.closing.load(Ordering::SeqCst) {
             return Err(shutting_down());
         }
+        // Admission decides whether the workspace takes a session, in the
+        // step that also counts it there: a removal admitted before this
+        // refuses it, and one asked for after sees it (ARCH-CORE-R14).
+        let admitted = self
+            .admission
+            .command(Command::CreateSession {
+                workspace: row.workspace_id.clone(),
+                session: row.id.clone(),
+                found: false,
+            })
+            .await
+            .map_err(|refusal| refused_session(refusal, &row.workspace_id))?;
         // Only what was given the backend is stored, with when (PROTO-CORE-API-R71).
         self.store.insert_session(row.clone()).await?;
+        admitted.end(Report::SessionStored {
+            session: row.id.clone(),
+        });
         // Checked once the row exists, so a delete that claims the workspace
         // after this check counts the new session, and one that claimed it
         // before is seen here.
         if let Err(busy) = self.refuse_if_claimed(&row.workspace_id) {
-            self.store.delete_session(row.id.clone()).await?;
+            self.forget_row(&row.id).await?;
             return Err(busy);
         }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
@@ -1129,8 +1182,17 @@ impl SessionManager {
                 return Ok(handle.describe());
             }
         }
-        self.store.delete_session(handle.id.clone()).await?;
+        self.forget_row(&handle.id).await?;
         Err(shutting_down())
+    }
+
+    /// Deletes session `id`'s row, then tells admission it is gone.
+    async fn forget_row(&self, id: &str) -> Result<(), SessionError> {
+        self.store.delete_session(id.to_string()).await?;
+        self.admission.report(Report::SessionGone {
+            session: id.to_string(),
+        });
+        Ok(())
     }
 
     /// Starts the session's tasks; its view must be open. The handle is live
@@ -1253,7 +1315,7 @@ impl SessionManager {
             )));
         }
         let session = handle.describe();
-        self.store.delete_session(id.to_string()).await?;
+        self.forget_row(id).await?;
         self.let_go(&handle).await;
         Ok(session)
     }
@@ -1632,7 +1694,16 @@ impl SessionManager {
             .store
             .mark_session_deleting(id.to_string(), files)
             .await?;
-        lock(&handle.row).deleting = Some(Deleting::Running);
+        let workspace = {
+            let mut row = lock(&handle.row);
+            row.deleting = Some(Deleting::Running);
+            row.workspace_id.clone()
+        };
+        // The store set the workspace to `error` with the mark.
+        if recorded {
+            self.admission
+                .report(Report::WorkspaceErrored { workspace });
+        }
         Ok(recorded)
     }
 
@@ -1686,9 +1757,17 @@ impl SessionManager {
         let handle = self.handle(id)?;
         let _listing = self.listing.lock().await;
         let _op = handle.op.lock().await;
-        self.store
-            .finish_session_delete(id.to_string(), workspace_id)
+        let workspace_went = self
+            .store
+            .finish_session_delete(id.to_string(), workspace_id.clone())
             .await?;
+        self.admission.report(Report::SessionGone {
+            session: id.to_string(),
+        });
+        if let (true, Some(workspace)) = (workspace_went, workspace_id) {
+            self.admission
+                .report(Report::WorkspaceDeleted { workspace });
+        }
         self.deletes.fetch_add(1, Ordering::SeqCst);
         self.let_go(&handle).await;
         Ok(())
@@ -3349,6 +3428,7 @@ mod tests {
             store,
             vec![Arc::clone(adapter) as Arc<dyn Adapter>],
             Arc::new(app_log),
+            Arc::default(),
         );
         let row = SessionRow {
             id: "s-gated".into(),
@@ -3463,6 +3543,35 @@ mod tests {
         (sink, finished)
     }
 
+    // verifies: FLOW-RESUME-SESSION-R14
+    // Paused time: the wait below ends only once nothing else can run.
+    #[tokio::test(start_paused = true)]
+    async fn a_removal_waits_for_a_found_sessions_start_under_way_and_sees_it_running() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let handle = manager.handle("s-gated").unwrap();
+        lock(&handle.row).started_elsewhere = true;
+        // A resume that got in before the claim holds the session's `op`
+        // until its backend is live.
+        let starting = handle.op.lock().await;
+        let held = manager.claim_found("w").unwrap();
+
+        let look = manager.runs_found(&held);
+        tokio::pin!(look);
+        // Not answered while the start is under way.
+        let waited = tokio::time::timeout(Duration::from_secs(60), &mut look).await;
+        assert!(waited.is_err(), "answered before the start settled");
+        // The backend is live, and the start lets go: it is seen running.
+        let _live = make_live(&manager);
+        drop(starting);
+        assert!(look.await);
+
+        // With nothing running, the answer is no.
+        *lock(&handle.live) = None;
+        assert!(!manager.runs_found(&held).await);
+    }
+
     // verifies: PROTO-CORE-API-R41
     // Paused time: the wind-down below takes as long as the test says.
     #[tokio::test(start_paused = true)]
@@ -3522,7 +3631,7 @@ mod tests {
             trusted: false,
         };
         let workspace = store
-            .insert_project(project, "c:/work".into())
+            .insert_project(project, persistence::new_id("w"), "c:/work".into())
             .await
             .unwrap();
         let mut row = lock(&manager.handle("s-gated").unwrap().row).clone();
@@ -3644,7 +3753,7 @@ mod tests {
             trusted: false,
         };
         let workspace = store
-            .insert_project(project, "c:/work".into())
+            .insert_project(project, persistence::new_id("w"), "c:/work".into())
             .await
             .unwrap();
         store
@@ -3686,7 +3795,7 @@ mod tests {
         // This Core has no adapter for it.
         let (log, facts) = AppLog::open(dir.path()).unwrap();
         let log = Arc::new(log);
-        let manager = SessionManager::new(store, Vec::new(), Arc::clone(&log));
+        let manager = SessionManager::new(store, Vec::new(), Arc::clone(&log), Arc::default());
         manager.recover(&facts, |_| None).await.unwrap();
         assert!(manager.list().is_empty());
         // Enough facts about another session to rotate the log twice over.

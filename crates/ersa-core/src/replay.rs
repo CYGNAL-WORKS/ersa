@@ -31,6 +31,7 @@ use ersa_protocol::core_api::{Method, Project, Vcs};
 use serde_json::Value;
 use tokio::sync::watch;
 
+use crate::admission::{Command, Folder, Report};
 use crate::api::ApiError;
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::sessions::{Beginning, SessionError};
@@ -189,7 +190,30 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     let key = workspace::location_key(&path);
 
     // The recording plays in the project's root workspace, its own folder.
-    let workspace = core.store.insert_project(project.clone(), key).await?;
+    // Through admission, as `project.add` adds one, so the session below is
+    // admitted into a workspace admission knows.
+    let root = persistence::new_id("w");
+    let adding = core
+        .admission
+        .command(Command::AddProject {
+            project: project.id.clone(),
+            root: root.clone(),
+            folder: Folder {
+                host: project.host_id.clone(),
+                key: key.clone(),
+            },
+        })
+        .await
+        .map_err(|refusal| {
+            SessionError::InvalidState(format!("the replay's project was not added: {refusal:?}"))
+        })?;
+    let workspace = core
+        .store
+        .insert_project(project.clone(), root, key)
+        .await?;
+    adding.end(Report::ProjectStored {
+        project: project.id.clone(),
+    });
 
     let session = SessionRow {
         id: persistence::new_id("s"),

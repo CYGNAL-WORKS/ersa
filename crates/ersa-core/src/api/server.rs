@@ -129,6 +129,8 @@ impl Server {
         if interrupted > 0 {
             tracing::warn!(interrupted, "marked interrupted session deletes as failed");
         }
+        // Admission starts from what is stored, with nothing under way.
+        core.admission.restore(core.store.existing().await?);
         // Sessions the previous Core left running are ended before any
         // client can see them.
         core.sessions
