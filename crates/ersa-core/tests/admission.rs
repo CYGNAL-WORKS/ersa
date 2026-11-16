@@ -87,9 +87,17 @@ fn remove_project() -> Command {
     }
 }
 
+/// An add of the one folder as `project`, whose root workspace is [`ROOT`]
+/// for [`P`].
 fn add_project(project: &str) -> Command {
+    let root = if project == P {
+        ROOT.to_string()
+    } else {
+        format!("{project}-root")
+    };
     Command::AddProject {
         project: project.into(),
+        root,
         folder: folder(),
     }
 }
@@ -375,7 +383,6 @@ fn a_second_add_of_a_folder_is_held_then_refused_with_the_first_ones_project() {
         &mut state,
         Input::Report(Report::ProjectStored {
             project: "p1".into(),
-            root: ROOT.into(),
         }),
     );
     assert_eq!(stored.outcome, Outcome::Noted);
@@ -411,6 +418,57 @@ fn a_held_add_is_admitted_when_the_first_ends_without_storing_its_project() {
         state.project("p2").map(|p| p.phase),
         Some(ProjectPhase::Adding)
     );
+}
+
+// verifies: ARCH-CORE-R17
+#[test]
+fn a_request_about_a_project_whose_add_has_not_reported_waits_for_it() {
+    // The project's rows may be stored, and listed, before its add reports.
+    let mut state = State::default();
+    command(&mut state, add_project(P));
+    let made = Command::CreateWorkspace {
+        project: P.into(),
+        workspace: W.into(),
+    };
+    assert_eq!(command(&mut state, made), Outcome::Held);
+    assert_eq!(
+        command(&mut state, create_session(ROOT, "s1")),
+        Outcome::Held
+    );
+    assert_eq!(command(&mut state, remove_project()), Outcome::Held);
+
+    // Answered in the order they arrived: the workspace and the session
+    // are admitted, so the removal is refused for the session.
+    let stored = step(
+        &mut state,
+        Input::Report(Report::ProjectStored { project: P.into() }),
+    );
+    assert_eq!(
+        stored.released,
+        [
+            (0, admitted(Operation::CreateWorkspace(W.into()))),
+            (1, admitted(Operation::CreateSession("s1".into()))),
+            (2, Outcome::Refused(Refusal::ProjectHasSessions)),
+        ]
+    );
+
+    // An add that ends with nothing stored answers them as for no project.
+    let mut state = State::default();
+    command(&mut state, add_project(P));
+    command(&mut state, create_session(ROOT, "s1"));
+    command(&mut state, remove_project());
+    let ended = step(
+        &mut state,
+        Input::Report(Report::Ended(Operation::AddProject(P.into()))),
+    );
+    assert_eq!(
+        ended.released,
+        [
+            (0, Outcome::Refused(Refusal::NoWorkspace)),
+            (1, Outcome::Refused(Refusal::NoProject)),
+        ]
+    );
+    assert!(state.workspace(ROOT).is_none());
 }
 
 #[test]
@@ -595,10 +653,7 @@ fn every_input() -> Vec<Input> {
     }));
 
     let mut reports = vec![
-        Report::ProjectStored {
-            project: P.into(),
-            root: ROOT.into(),
-        },
+        Report::ProjectStored { project: P.into() },
         Report::ProjectRemoved { project: P.into() },
         Report::ProjectRemovalRefused { project: P.into() },
         Report::Ended(Operation::AddProject(P.into())),
@@ -813,9 +868,9 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     }
 }
 
-// -- Tickets and waiters (the wrapper around the function) ------------------
+// -- Operations under way and waiters (the wrapper around the function) -----
 
-async fn admit(admission: &Arc<Admission>, command: Command) -> ersa_core::admission::Ticket {
+async fn admit(admission: &Arc<Admission>, command: Command) -> ersa_core::admission::UnderWay {
     let waited = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         admission.command(command),
@@ -825,7 +880,7 @@ async fn admit(admission: &Arc<Admission>, command: Command) -> ersa_core::admis
 
 // verifies: ARCH-CORE-R16
 #[tokio::test]
-async fn a_ticket_dropped_without_a_report_ends_its_operation() {
+async fn an_operation_dropped_without_a_report_is_ended() {
     let admission = Arc::new(Admission::default());
     admission.restore(existing());
 
@@ -863,7 +918,6 @@ async fn a_held_command_is_answered_when_what_it_waits_for_reports() {
     }
     first.end(Report::ProjectStored {
         project: "p1".into(),
-        root: ROOT.into(),
     });
     let answered = tokio::time::timeout(std::time::Duration::from_secs(5), second)
         .await
@@ -893,7 +947,7 @@ async fn a_held_command_admitted_after_its_caller_left_is_ended_at_once() {
     second.abort();
     let _ = second.await;
     drop(first);
-    // The second add was admitted with nobody to take its ticket, so it is
+    // The second add was admitted with nobody to take it, so it is
     // ended too: the folder is free again.
     let state = admission.snapshot();
     assert!(state.project("p1").is_none() && state.project("p2").is_none());
