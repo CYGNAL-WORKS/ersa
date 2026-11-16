@@ -1429,8 +1429,6 @@ fn note(state: &mut State, report: Report) -> Outcome {
     }
 }
 
-/// Moves `workspace` to the phase `next` gives for the one it is in;
-/// `Stale` when there is no such workspace or `next` gives none.
 /// Ends `session`'s exclusive operation, when the one under way is `ours`.
 fn end_exclusive(state: &mut State, session: &str, ours: impl Fn(&Exclusive) -> bool) -> Outcome {
     match state.sessions.get_mut(session) {
@@ -1474,6 +1472,8 @@ fn write(row: &mut SessionRow, change: RowChange) {
     }
 }
 
+/// Moves `workspace` to the phase `next` gives for the one it is in;
+/// `Stale` when there is no such workspace or `next` gives none.
 fn set_workspace(
     state: &mut State,
     workspace: &str,
