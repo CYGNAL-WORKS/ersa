@@ -121,17 +121,23 @@ test("a section that appears twice fails the check", () => {
 });
 
 test("a brief that cites a fixture nobody recorded fails the check", () => {
+  // Each form a brief uses: after the word, under a version folder, and as code spans in a list,
+  // where every name counts, not only the first.
   const cited = withSection(
-    "## Spare\n\nShown by fixture 99-never-recorded, by 2.1.316/98-nor-this and by `97-nor-this-one`.\n\n```\nfixture 96-in-a-fence\n```",
+    "## Spare\n\nShown by fixture 99-never-recorded and by 2.1.316/98-nor-this.\n\n" +
+      "The fixtures `22-message-during-turn`, `97-nor-that` and `100-nor-this-one` show it.\n\n```\nfixture 96-in-a-fence\n```",
   );
   assert.equal(cited.status, 1);
-  for (const name of ["99-never-recorded", "98-nor-this", "97-nor-this-one"]) {
+  for (const name of ["99-never-recorded", "98-nor-this", "97-nor-that", "100-nor-this-one"]) {
     assert.match(cited.problems, new RegExp(`LAY-SHELL cites fixture ${name}, which is not under`));
   }
-  assert.doesNotMatch(cited.problems, /96-in-a-fence/);
-  // A recorded one passes in each form, and a hyphenated number in prose or code is no citation.
+  assert.doesNotMatch(cited.problems, /96-in-a-fence|22-message-during-turn/);
+  // A recorded one passes in each form, and a hyphenated number is no citation: in prose anywhere,
+  // and in a code span on a line that speaks of no fixture or recording.
   const real = withSection(
-    "## Spare\n\nShown by fixture 22-message-during-turn, by 2.1.316/22-message-during-turn and by `22-message-during-turn`, on a `64-bit` host with a 30-second limit.",
+    "## Spare\n\nShown by fixture 22-message-during-turn, by 2.1.316/22-message-during-turn and by the recordings `22-message-during-turn` and `23-mode-change-while-waiting`, within a 30-second limit.\n\n" +
+      "A `30-second-time-out` limit on a `64-bit` host.",
   );
   assert.equal(real.status, 0, real.problems);
 });
+
