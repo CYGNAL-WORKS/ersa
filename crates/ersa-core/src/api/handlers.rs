@@ -235,6 +235,11 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
         | Refusal::Closing
         | Refusal::Running
         | Refusal::BeingArchived
+        | Refusal::SessionDeleting
+        | Refusal::Archived
+        | Refusal::NotRunning
+        | Refusal::SendInProgress
+        | Refusal::NoSendToCancel
         | Refusal::NoSection
         | Refusal::GaveUp => ApiError::internal(format!("admission refused {named}: {refusal:?}")),
     }
