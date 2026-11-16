@@ -16,9 +16,7 @@ use std::time::Duration;
 use ersa_adapter::{Adapter, BackendChoices, Transport};
 use ersa_protocol::core_api::{Workspace, WorkspaceState};
 
-use super::{
-    Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, WorkspaceClaim, lock,
-};
+use super::{Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, lock};
 use super::{SessionError, read_summary};
 use crate::admission::{Command, Report};
 use crate::persistence::{self, SessionRow};
@@ -34,11 +32,6 @@ const FOLDER_LISTING: Duration = Duration::from_secs(5);
 /// a folder still being listed is not listed again: a file system that
 /// stopped answering holds one thread per folder, however often Core lists.
 pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
-
-/// A workspace held for its removal ([`SessionManager::claim_found`]);
-/// dropping it lets the workspace's sessions be sent to and resumed again.
-#[must_use]
-pub struct HeldFound(WorkspaceClaim);
 
 /// One folder to list: a `ready` workspace, for one backend.
 struct Folder {
@@ -309,22 +302,15 @@ impl SessionManager {
             .collect()
     }
 
-    /// Claims workspace `workspace_id` for its removal, as a delete claims
-    /// it and without waiting: a send or resume in it meanwhile is refused
-    /// as busy, and no delete can mark it (FLOW-RESUME-SESSION-R13).
-    pub fn claim_found(&self, workspace_id: &str) -> Result<HeldFound, SessionError> {
-        // Claimed for no session of its own: every session in it is refused.
-        Ok(HeldFound(self.claim_workspace(workspace_id, "")?))
-    }
-
-    /// Whether Core runs a session found in the `held` workspace's folder
-    /// (FLOW-RESUME-SESSION-R14), once any start under way has settled. A
-    /// send or resume holds its session's `op` from before it looks for the
-    /// claim until its backend is live, so one that got in before the claim
-    /// is waited for and seen here, and none starts after: an answer of no
-    /// stays no while the workspace is held.
-    pub async fn runs_found(&self, held: &HeldFound) -> bool {
-        for handle in self.found_in(&held.0.workspace_id) {
+    /// Whether Core runs a session found in workspace `workspace_id`'s
+    /// folder (FLOW-RESUME-SESSION-R14), once any start under way has
+    /// settled. For a workspace a removal holds in admission: a send or
+    /// resume holds its session's `op` from before it asks whether the
+    /// workspace is held until its backend is live, so one that got in
+    /// before the hold is waited for and seen here, and none starts after.
+    /// An answer of no stays no while the workspace is held.
+    pub async fn runs_found(&self, workspace_id: &str) -> bool {
+        for handle in self.found_in(workspace_id) {
             let _op = handle.op.lock().await;
             if handle.live().is_some() {
                 return true;
@@ -333,15 +319,16 @@ impl SessionManager {
         false
     }
 
-    /// Lets go of the found sessions loaded in the `held` workspace, whose
-    /// rows went with it, their records left (FLOW-RESUME-SESSION-R13); then
-    /// the hold goes. Called once admission was told the workspace is gone:
+    /// Lets go of the found sessions loaded in workspace `workspace_id`,
+    /// whose rows went with it, their records left
+    /// (FLOW-RESUME-SESSION-R13). Called once admission was told the
+    /// workspace is gone:
     /// a list that stored a found session there loads it before this reads
     /// the registry, or finds admission without it and loads nothing. None
     /// is running ([`SessionManager::runs_found`]). Each is marked removed
     /// under `op`, so a request waiting there finds it gone.
-    pub async fn forget_found(&self, held: HeldFound) {
-        for handle in self.found_in(&held.0.workspace_id) {
+    pub async fn forget_found(&self, workspace_id: &str) {
+        for handle in self.found_in(workspace_id) {
             {
                 let _op = handle.op.lock().await;
                 handle.removed.store(true, Ordering::SeqCst);
