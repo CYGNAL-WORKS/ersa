@@ -154,19 +154,6 @@ impl Store {
         self.call(move |conn| read_session(conn, &id)).await
     }
 
-    /// The ids of a workspace's sessions, running or not, sorted.
-    pub async fn sessions_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
-        self.call(move |conn| {
-            let mut statement =
-                conn.prepare("SELECT id FROM sessions WHERE workspace_id = ?1 AND started_elsewhere = 0 ORDER BY id")?;
-            let ids = statement
-                .query_map([workspace_id], |row| row.get(0))?
-                .collect::<rusqlite::Result<Vec<String>>>()?;
-            Ok(ids)
-        })
-        .await
-    }
-
     /// Records the backend's own id for the session, once it announced it.
     pub async fn set_backend_session_id(
         &self,

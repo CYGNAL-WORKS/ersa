@@ -10,10 +10,11 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use ersa_core::Adapter;
+use ersa_core::transport::LocalTreeTransport;
+use ersa_core::{Adapter, CommandTransport};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Filed, FiledRecord, Records};
-use support::{Client, TestCore, project, start_with_adapters, tempdir};
+use support::{Client, Stall, StallingTransport, TestCore, project, start_with_adapters, tempdir};
 
 /// The fake backend's records and where it files them, shared by every Core
 /// of a test.
@@ -461,73 +462,26 @@ async fn a_folder_still_being_listed_is_not_listed_again() {
     assert!(backend.stats.listings.load(Ordering::SeqCst) >= 2);
 }
 
-// verifies: FLOW-RESUME-SESSION-R13
-#[tokio::test(flavor = "multi_thread")]
-async fn a_found_session_resumed_while_its_workspace_is_removed_is_stopped_not_left_running() {
-    let backend = Backend::default();
-    let (core, gate) = start_with_remove_gate(backend.adapter()).await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
-    let project = project(&mut client, core.dir.path()).await;
-    let isolated = client
-        .result("workspace.create", json!({ "project_id": project["id"] }))
-        .await;
-    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
-    let found = sessions(&mut client).await.remove(0);
-
-    // The removal looks with nothing running and stops before it is
-    // admitted, then the user writes to the found session before the
-    // folder goes.
-    let removal = remover
-        .request("workspace.remove", json!({ "id": isolated["id"] }))
-        .await;
-    removal_past(&gate, 0).await;
-    client
-        .result("session.resume", json!({ "id": found["id"] }))
-        .await;
-    listed_in(&mut client, &found["id"], "running").await;
-    let stops = backend.stats.stops.load(Ordering::SeqCst);
-    gate.go();
-    // Past the stop once the found sessions are held.
-    gate.reached().await;
-    gate.go();
-    remover.response(removal).await;
-
-    // Core stopped the backend it started rather than lose it.
-    assert_eq!(backend.stats.stops.load(Ordering::SeqCst), stops + 1);
-    assert!(sessions(&mut client).await.is_empty());
-    assert!(backend.has_record("rec-isolated"));
-}
-
-/// A Core over `adapter` whose `workspace.remove` stops at each of its test
-/// stops until the test lets it go, and that gate.
-async fn start_with_remove_gate(adapter: Arc<dyn Adapter>) -> (TestCore, Arc<ersa_core::Gate>) {
-    let gate = Arc::new(ersa_core::Gate::default());
-    let config_gate = Arc::clone(&gate);
-    let core = start_with_adapters(
+/// A Core over `adapter` whose git commands run behind `stall`.
+async fn start_stalling(adapter: Arc<dyn Adapter>, stall: &Arc<Stall>) -> TestCore {
+    let transport = Arc::new(StallingTransport {
+        stall: Arc::clone(stall),
+        inner: LocalTreeTransport::for_commands(),
+    });
+    start_with_adapters(
         tempdir(),
-        move |config| config.remove_gate = Some(config_gate),
+        move |config| config.command_transport = Some(CommandTransport(transport)),
         vec![adapter],
     )
-    .await;
-    (core, gate)
-}
-
-/// Lets a `workspace.remove` stopped at its first stop go on past `n` of
-/// them, and waits at the next.
-async fn removal_past(gate: &ersa_core::Gate, n: usize) {
-    gate.reached().await;
-    for _ in 0..n {
-        gate.go();
-        gate.reached().await;
-    }
+    .await
 }
 
 // verifies: FLOW-RESUME-SESSION-R13
 #[tokio::test(flavor = "multi_thread")]
-async fn a_found_session_written_to_once_its_workspace_holds_it_is_refused_and_not_started() {
+async fn a_found_session_written_to_while_its_workspace_is_removed_is_refused_and_not_started() {
     let backend = Backend::default();
-    let (core, gate) = start_with_remove_gate(backend.adapter()).await;
+    let stall = Stall::new();
+    let core = start_stalling(backend.adapter(), &stall).await;
     let mut client = core.client().await;
     let mut remover = core.client().await;
     let project = project(&mut client, core.dir.path()).await;
@@ -537,12 +491,13 @@ async fn a_found_session_written_to_once_its_workspace_holds_it_is_refused_and_n
     backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
     let found = sessions(&mut client).await.remove(0);
 
-    // Stopped once the removal holds the found sessions: before it is
-    // admitted, and here.
+    // The removal holds the workspace and is at git, which does not answer
+    // yet, as in a slow repository.
+    stall.arm();
     let removal = remover
         .request("workspace.remove", json!({ "id": isolated["id"] }))
         .await;
-    removal_past(&gate, 1).await;
+    stall.reached().await;
     let starts = backend.stats.starts.load(Ordering::SeqCst);
     // Refused as busy, as while a delete holds the workspace.
     for (method, params) in [
@@ -563,76 +518,11 @@ async fn a_found_session_written_to_once_its_workspace_holds_it_is_refused_and_n
     // No backend started in the folder about to go.
     assert_eq!(backend.stats.starts.load(Ordering::SeqCst), starts);
 
-    gate.go();
+    stall.go();
     let removed = remover.response(removal).await;
     assert!(removed.get("error").is_none(), "{removed}");
     assert!(sessions(&mut client).await.is_empty());
     assert_eq!(backend.stats.starts.load(Ordering::SeqCst), starts);
-}
-
-/// Takes Core's 30-second stop limit.
-// verifies: FLOW-RESUME-SESSION-R14
-#[tokio::test(flavor = "multi_thread")]
-async fn a_found_session_that_will_not_stop_refuses_the_removal_and_stays_reachable() {
-    let backend = Backend::default();
-    let (core, gate) =
-        start_with_remove_gate(backend.adapter_from(FakeAdapter::unstoppable())).await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
-    let project = project(&mut client, core.dir.path()).await;
-    let isolated = client
-        .result("workspace.create", json!({ "project_id": project["id"] }))
-        .await;
-    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
-    let found = sessions(&mut client).await.remove(0);
-
-    // Resumed once the removal has looked, and its backend never exits.
-    let removal = remover
-        .request("workspace.remove", json!({ "id": isolated["id"] }))
-        .await;
-    removal_past(&gate, 0).await;
-    client
-        .result("session.resume", json!({ "id": found["id"] }))
-        .await;
-    listed_in(&mut client, &found["id"], "running").await;
-    gate.go();
-
-    let refused = remover.response(removal).await;
-    assert_eq!(
-        support::kind(&refused["error"]),
-        "invalid_state",
-        "{refused}"
-    );
-    assert!(std::path::Path::new(path(&isolated)).is_dir());
-    assert_eq!(workspaces(&mut client, &project["id"]).await.len(), 2);
-    // Still listed, and still the user's to reach: not marked removed, so
-    // changing it is not refused as for a session that is gone.
-    let listed = sessions(&mut client).await;
-    assert_eq!(listed.len(), 1, "{listed:#?}");
-    assert_eq!(listed[0]["id"], found["id"]);
-    let pinned = client
-        .result(
-            "session.arrange",
-            json!({ "id": found["id"], "pinned": true }),
-        )
-        .await;
-    assert_eq!(pinned["pinned"], true);
-}
-
-/// Waits until session `id` is listed in `state`.
-async fn listed_in(client: &mut Client, id: &Value, state: &str) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let listed = sessions(client).await;
-        if listed.iter().any(|s| &s["id"] == id && s["state"] == state) {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "{id} never {state}: {listed:#?}"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 // verifies: FLOW-RESUME-SESSION-R13
@@ -675,37 +565,7 @@ async fn a_removal_git_refuses_leaves_its_found_sessions_as_they_were() {
 
 // verifies: FLOW-RESUME-SESSION-R13
 #[tokio::test(flavor = "multi_thread")]
-async fn a_session_found_while_a_project_is_removed_goes_with_it() {
-    let backend = Backend::default();
-    let (core, gate) = start_with_remove_gate(backend.adapter()).await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
-    let project = project(&mut client, core.dir.path()).await;
-    let root = workspaces(&mut client, &project["id"]).await.remove(0);
-    backend.record("rec-a", "first", path(&root), path(&root));
-    assert_eq!(sessions(&mut client).await.len(), 1);
-
-    // Held, and before its folder's rows go, a list finds a second session
-    // the CLI just recorded there.
-    let removal = remover
-        .request("project.remove", json!({ "id": project["id"] }))
-        .await;
-    gate.reached().await;
-    backend.record("rec-b", "second", path(&root), path(&root));
-    assert_eq!(sessions(&mut client).await.len(), 2);
-    gate.go();
-    let removed = remover.response(removal).await;
-    assert!(removed.get("error").is_none(), "{removed}");
-
-    // Both went with the project, their records left.
-    let listed = sessions(&mut client).await;
-    assert!(listed.is_empty(), "{listed:#?}");
-    assert!(backend.has_record("rec-a") && backend.has_record("rec-b"));
-}
-
-// verifies: FLOW-RESUME-SESSION-R13
-#[tokio::test(flavor = "multi_thread")]
-async fn a_project_removed_while_a_list_records_a_found_session_waits_and_takes_it_along() {
+async fn a_project_removed_while_a_list_records_a_found_session_does_not_leave_it_listed() {
     let backend = Backend::default();
     let gate = Arc::new(ersa_core::Gate::default());
     let config_gate = Arc::clone(&gate);
@@ -722,9 +582,9 @@ async fn a_project_removed_while_a_list_records_a_found_session_waits_and_takes_
     backend.record("rec-a", "first", path(&root), path(&root));
 
     // A list has stored the session it found and not yet loaded it when the
-    // project is removed. The removal waits for the list's turn; without
-    // that, it would delete the row now and the list would then load a
-    // session whose project is gone.
+    // project is removed. The removal takes the row and tells admission;
+    // the list then finds admission without the session and does not load
+    // it, where it would otherwise load a session whose project is gone.
     let list = client.request("session.list", json!({})).await;
     gate.reached().await;
     let removal = remover

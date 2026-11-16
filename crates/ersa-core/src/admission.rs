@@ -179,6 +179,16 @@ impl State {
             .any(|session| session.workspace == workspace && !session.found)
     }
 
+    /// Whether a session found in the backend's records was admitted into
+    /// `workspace` and its row is not stored yet. A removal waits for it:
+    /// whether there is a row to take with the workspace is not known until
+    /// that reports.
+    fn has_arriving_found_session(&self, workspace: &str) -> bool {
+        self.sessions
+            .values()
+            .any(|session| session.workspace == workspace && session.found && !session.stored)
+    }
+
     fn has_session(&self, workspace: &str) -> bool {
         self.sessions
             .values()
@@ -385,13 +395,18 @@ pub fn step(state: &mut State, input: Input) -> Step {
     match input {
         Input::Command(command) => {
             let outcome = decide(state, &command);
-            if outcome == Outcome::Held {
-                state.held.push(command);
-            }
-            Step {
-                outcome,
-                released: Vec::new(),
-            }
+            // An admitted command changed the state, which may answer a
+            // held one: a session admitted into a workspace refuses the
+            // removal waiting there.
+            let released = match outcome {
+                Outcome::Admitted(_) => release(state),
+                Outcome::Held => {
+                    state.held.push(command);
+                    Vec::new()
+                }
+                Outcome::Refused(_) | Outcome::Noted | Outcome::Stale => Vec::new(),
+            };
+            Step { outcome, released }
         }
         Input::Report(report) => {
             let outcome = note(state, report);
@@ -408,21 +423,34 @@ pub fn step(state: &mut State, input: Input) -> Step {
     }
 }
 
-/// Decides every held command again, in the order they arrived. One pass is
-/// enough: admitting a command never frees what another waits for, only a
-/// report does.
+/// Decides every held command again, in the order they arrived, and again
+/// until a pass answers none: admitting one may answer another that came
+/// before it. Each answered command leaves `held`, so this ends.
 fn release(state: &mut State) -> Vec<(usize, Outcome)> {
-    let waiting = std::mem::take(&mut state.held);
+    let mut waiting: Vec<(usize, Command)> = std::mem::take(&mut state.held)
+        .into_iter()
+        .enumerate()
+        .collect();
     let mut released = Vec::new();
-    for (place, command) in waiting.into_iter().enumerate() {
-        match decide(state, &command) {
-            Outcome::Held => state.held.push(command),
-            answer @ (Outcome::Admitted(_)
-            | Outcome::Refused(_)
-            | Outcome::Noted
-            | Outcome::Stale) => released.push((place, answer)),
+    loop {
+        let mut still = Vec::new();
+        let before = released.len();
+        for (place, command) in waiting {
+            match decide(state, &command) {
+                Outcome::Held => still.push((place, command)),
+                answer @ (Outcome::Admitted(_)
+                | Outcome::Refused(_)
+                | Outcome::Noted
+                | Outcome::Stale) => released.push((place, answer)),
+            }
+        }
+        waiting = still;
+        if released.len() == before {
+            break;
         }
     }
+    state.held = waiting.into_iter().map(|(_, command)| command).collect();
+    released.sort_by_key(|(place, _)| *place);
     released
 }
 
@@ -490,10 +518,15 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         .workspaces
                         .values()
                         .any(|workspace| &workspace.project == project && !workspace.root);
+                    let arriving = root
+                        .as_ref()
+                        .is_some_and(|root| state.has_arriving_found_session(root));
                     if sessions {
                         Outcome::Refused(Refusal::ProjectHasSessions)
                     } else if isolated {
                         Outcome::Refused(Refusal::ProjectHasWorkspaces)
+                    } else if arriving {
+                        Outcome::Held
                     } else {
                         if let Some(entry) = state.projects.get_mut(project) {
                             entry.phase = ProjectPhase::Removing;
@@ -543,6 +576,9 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             if *runs_found || state.has_started_session(workspace) {
                 return Outcome::Refused(Refusal::WorkspaceHasSessions);
             }
+            if state.has_arriving_found_session(workspace) {
+                return Outcome::Held;
+            }
             if let Some(entry) = state.workspaces.get_mut(workspace) {
                 entry.phase = WorkspacePhase::Removing { replaced };
             }
@@ -569,12 +605,10 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             }
             match state.projects.get(&entry.project).map(|entry| entry.phase) {
                 Some(ProjectPhase::Present) => {}
-                // The folder is on its way out. A session found there is
-                // recorded all the same, and goes with the project.
+                // The folder is on its way out: nothing joins it, a session
+                // found in the backend's records no more than one Ersa starts.
                 Some(ProjectPhase::Removing) => {
-                    if !found {
-                        return Outcome::Refused(Refusal::WorkspaceHeld);
-                    }
+                    return Outcome::Refused(Refusal::WorkspaceHeld);
                 }
                 // Its project's add is yet to report.
                 Some(ProjectPhase::Adding) => return Outcome::Held,
@@ -850,6 +884,11 @@ impl Admission {
             WorkspacePhase::Removing { replaced } => Some(replaced),
             WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => None,
         }
+    }
+
+    /// Whether admission has session `id`: admitted, and its row not gone.
+    pub fn has_session(&self, id: &str) -> bool {
+        self.lock().state.session(id).is_some()
     }
 
     /// A copy of the state, for tests and diagnostics.
