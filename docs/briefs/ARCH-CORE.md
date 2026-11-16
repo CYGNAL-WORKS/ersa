@@ -5,7 +5,7 @@ title: Ersa system architecture
 status: ready
 verified-by: review
 references: [PROTO-CORE-API, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031, 0033]
+adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031, 0033, 0037]
 ---
 
 # Ersa system architecture
@@ -62,6 +62,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 
 - **Core API**: the request/response surface the Interface uses. Schema-defined; TypeScript types are generated from it.
 - **Session manager**: the lifecycle of every session (created, starting, running, waiting on user, idle, disconnected, ended). Routes user input and permission decisions to adapters and backend output to the projection. Emits each session's lifecycle events itself and writes Core's operational records (process started, exited, failed to start, Core restarted) to the app log.
+- **Admission**: the one place that decides every change to which projects, workspaces, sessions and sections exist and to what is under way on each (ADR 0037; Concurrency, below). The session manager and the workspace layer do the work; admission says whether it may begin and records it until it ends.
 - **Projection**: a session's history is the backend's own session record (ADR 0017). When a session is opened (`PROTO-AGENT-EVENTS`, Opening a session), Core projects the record through the adapter into Ersa events, then appends events projected from the live stream, merged on the backend's message ids. Details only the live stream carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored. Nothing projected is stored. The raw log, the lines exchanged with a live backend since Core opened it, is held in memory for the developer pane.
 - **Adapter registry**: the adapters this build includes, which are the only backends Core knows (ADR 0031), and for each one the hosts it is installed on and its version and capabilities there.
 - **Transport layer**: starts processes and carries their stdio on a host, and reads files there: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honors both. Adapters and the VCS layer run through it without knowing which one they got, so a remote host's session record and live-session registry are read on that host, as M4's remote sessions need.
@@ -92,6 +93,7 @@ One per backend, behind one interface: say how the backend is detected and what 
 ## Cross-cutting concerns
 
 - **Persistence**: SQLite in the user's application data directory. A session's history is never copied into it; retention is the backend's, and when the backend deletes a session Ersa no longer shows it. One line from a backend is capped at 64 MiB; a process that writes past it is killed with its tree and the session ends with a `backend_exited` error. Bytes that are not valid UTF-8 are read with replacement characters. Schema migrations run at startup.
+- **Concurrency**: every request runs on its own, and admission keeps them in order (ADR 0037). Admission holds one state: what exists, each workspace's state and what holds it, each session's stored row, run phase, exclusive operation and send slot and whether a fork of it is starting, the commands being held, and whether Core is closing. The state changes only through one function, which takes one input, decides it from one table and returns without waiting. An input is a command to begin something or a report from an operation already admitted, and the table answers each in every state: done, refused, or held until a later report. An operation is recorded in the state from the step that admits it until its end is reported, whichever way its task ends, and does its slow work outside admission; a change it stores is stored first and reported after. What is left to other devices is the outside world: time limits, calling off abandoned work, and one read at a time on a disk that may hang. The data path (a backend's lines through the pipeline and view to subscribers) is not admission's: each part of it has one writer.
 - **Errors**: every failure the user could act on appears as an event in the session's projection and, where relevant, as a rail state. Internal errors use structured tracing and are never swallowed.
 - **Security**: no model credentials. Remote connections use the user's own SSH client and configuration. The harness tools server listens on a local per-launch socket; the per-session token identifies the caller and is advisory, since all local sessions share the OS user.
 - **Configuration**: user settings in the database; project-level configuration in the project's own files where the backend expects it (packs render there).
@@ -138,6 +140,11 @@ Verified by review at this level; testable requirements live in the protocol bri
 - **ARCH-CORE-R11**: The Interface can run against the replay server with no live backend.
 - **ARCH-CORE-R12**: A session's transcript, apart from details only the live stream carries, is reconstructible from the backend's own session record alone.
 - **ARCH-CORE-R13**: Core builds and its own tests pass with no adapter present, and adding or removing a backend changes only that backend's adapter, its tests and its registration.
+- **ARCH-CORE-R14**: Every change to which projects, workspaces, sessions and sections exist, to a workspace's state, to a session's stored row, run phase, operation or send slot, and to whether Core is closing shall be made by admission's one transition function, which shall not wait or perform I/O.
+- **ARCH-CORE-R15**: Admission's table shall answer every input in every state explicitly, as done, refused or held, with no default case.
+- **ARCH-CORE-R16**: An operation shall be recorded in admission's state from the step that admits it until its end is reported, and its end shall be reported however its task ends.
+- **ARCH-CORE-R17**: Admission shall hold only commands, never an operation's reports.
+- **ARCH-CORE-R18**: Core's tests shall apply every input to every reachable state of a small world of projects, workspaces and sessions, directly to admission, and check in each that a session has at most one exclusive operation, that no session is admitted into a workspace that is not ready or is held, that no workspace is removed with a session Ersa started in it, that no workspace goes from `error` to `ready`, that nothing starts once Core is closing, and that a refusal changes nothing.
 
 ## Out of scope
 
@@ -153,6 +160,7 @@ Verified by review at this level; testable requirements live in the protocol bri
 
 ## Changes
 
+- 2026-11-15: Core's concurrency model stated (ADR 0037): admission decides every lifecycle change from one table. ARCH-CORE-R14 to R18 added; no requirement retired.
 - 2026-11-13: owner's decision: M1 splits into the switch and the week; the developer pane and the SSH transport tested against WSL are built after the dogfood week starts, and the switch needs the daily build. No requirement IDs changed.
 - 2026-11-08: from #272 inbox: the store keeps a fork's original and the last message it copied. No requirement IDs changed.
 - 2026-11-09: adapters are compile-time crates behind one registry, the registered adapters are the only backends Core knows, and each adapter renders packs for its backend (ADR 0031). ARCH-CORE-R13 added.
