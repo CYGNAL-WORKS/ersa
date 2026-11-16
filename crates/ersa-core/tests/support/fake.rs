@@ -97,6 +97,8 @@ pub struct Stats {
     pub live_renames: AtomicUsize,
     /// Renames written to a record.
     pub record_renames: AtomicUsize,
+    /// How many times Core asked the backend for a folder's records.
+    pub listings: AtomicUsize,
     /// For every time Core asked whether another process has a session
     /// open: the backend's id for it, and how many record renames had
     /// been written by then.
@@ -308,6 +310,25 @@ pub struct FakeAdapter {
     /// What each session's record says of its model, effort and permission
     /// mode, by the backend's id for it; none for a session not in it.
     pub recorded_settings: RecordedSettingsMap,
+    /// Where the backend files each record, by its id for the session: the
+    /// folder it lists the record under, and the working folder the record
+    /// itself names. A record filed nowhere is listed under no folder.
+    pub filed: Filed,
+    /// Held by a test to hold every folder listing, once read, until it
+    /// lets go.
+    pub list_gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// Where the fake files its records, shared like [`Records`].
+pub type Filed = Arc<Mutex<HashMap<String, FiledRecord>>>;
+
+/// Where one record is filed.
+#[derive(Debug, Clone)]
+pub struct FiledRecord {
+    /// The folder the backend lists it under.
+    pub under: String,
+    /// The working folder the record names.
+    pub cwd: String,
 }
 
 /// The fake records' settings, by backend session id, shared like
@@ -341,6 +362,8 @@ impl FakeAdapter {
                 one_line: true,
             },
             recorded_settings: Arc::default(),
+            filed: Arc::default(),
+            list_gate: Arc::default(),
         }
     }
 
@@ -674,6 +697,33 @@ impl Adapter for FakeAdapter {
     ) -> Result<Option<String>, AdapterError> {
         let records = self.records.lock().unwrap();
         Ok(records.get(backend_session_id).map(|r| r.len().to_string()))
+    }
+
+    async fn list_records(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+    ) -> Result<Vec<ersa_adapter::ListedRecord>, AdapterError> {
+        self.stats.listings.fetch_add(1, Ordering::SeqCst);
+        let mut listed: Vec<ersa_adapter::ListedRecord> = {
+            let records = self.records.lock().unwrap();
+            self.filed
+                .lock()
+                .unwrap()
+                .iter()
+                // A record the backend no longer keeps is not listed.
+                .filter(|(id, filed)| filed.under == cwd && records.contains_key(*id))
+                .map(|(id, filed)| ersa_adapter::ListedRecord {
+                    backend_session_id: id.clone(),
+                    cwd: filed.cwd.clone(),
+                })
+                .collect()
+        };
+        listed.sort_by(|a, b| a.backend_session_id.cmp(&b.backend_session_id));
+        // Read, then held: what was listed may be gone by the time it is
+        // answered, as on a slow file system.
+        let _held = self.list_gate.lock().await;
+        Ok(listed)
     }
 
     async fn summarize_record(

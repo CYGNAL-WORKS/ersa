@@ -359,6 +359,7 @@ pub(super) async fn project_set_trust(
 /// root workspace; it never cascades. Its root workspace goes with it.
 pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Project, ApiError> {
     let project = find_project(core, &params.id).await?;
+    let mut root = None;
     for workspace in core.store.workspaces(project.id.clone()).await? {
         match workspace.kind {
             WorkspaceKind::Isolated => {
@@ -368,22 +369,36 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
                 )));
             }
             WorkspaceKind::Root => {
-                if !core
-                    .store
-                    .sessions_in_workspace(workspace.id)
-                    .await?
-                    .is_empty()
-                {
+                if holds_back_removal(core, &workspace.id).await? {
                     return Err(ApiError::invalid_state(format!(
                         "project {} has sessions in its own folder; stop and remove them first",
                         project.id
                     )));
                 }
+                root = Some(workspace.id);
             }
         }
     }
+    // The sessions found in its folder are held before it goes: none is
+    // sent to or resumed meanwhile, and one that will not stop refuses it.
+    let held = match &root {
+        Some(root) => Some(core.sessions.hold_found(root).await?),
+        None => None,
+    };
+    pause_for_tests(core).await;
     // Anything created since the checks above makes the delete a conflict.
-    core.store.delete_project(project.id.clone()).await?;
+    // The sessions found in its folder go with it, their records left; a
+    // failure lets the hold go with it.
+    let delete = async {
+        core.store
+            .delete_project(project.id.clone())
+            .await
+            .map_err(ApiError::from)
+    };
+    match held {
+        Some(held) => core.sessions.remove_held(held, delete).await?,
+        None => delete.await?,
+    }
     Ok(project)
 }
 
@@ -439,6 +454,8 @@ pub(super) async fn changes_of(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
+    // A session started in the backend's own tools that the list holds
+    // counts too: it uses the workspace like any other (FLOW-ARCHIVE-DELETE-SESSION).
     let sessions = core
         .store
         .sessions_counted_in_workspace(workspace.id.clone())
@@ -648,18 +665,24 @@ pub(super) async fn workspace_remove(
     // deleted directory. Checked after the claim, because a session can
     // only be created in a `ready` workspace: one created before the claim
     // is seen here, and none can be created after it.
-    if !core
-        .store
-        .sessions_in_workspace(workspace.id.clone())
-        .await?
-        .is_empty()
-    {
+    if holds_back_removal(core, &workspace.id).await? {
         release_claim(core, &workspace.id, replaced).await?;
         return Err(ApiError::invalid_state(format!(
             "workspace {} has sessions; stop and remove them first",
             workspace.id
         )));
     }
+    pause_for_tests(core).await;
+    // The sessions found in its folder are held before it goes: none is
+    // sent to or resumed meanwhile, and one that will not stop refuses it.
+    let held = match core.sessions.hold_found(&workspace.id).await {
+        Ok(held) => held,
+        Err(e) => {
+            release_claim(core, &workspace.id, replaced).await?;
+            return Err(e.into());
+        }
+    };
+    pause_for_tests(core).await;
 
     let force = params.force.unwrap_or(false);
     let removed = workspace::git_worktree_remove(
@@ -673,6 +696,8 @@ pub(super) async fn workspace_remove(
     )
     .await;
     if let Err(e) = removed {
+        // The removal did not happen: its sessions are theirs again.
+        drop(held);
         // A refusal (locked, local changes without `force`, or a folder git
         // does not list) leaves the worktree as it was, so it goes back to
         // the state it had; any other failure leaves it in an unknown state.
@@ -685,14 +710,24 @@ pub(super) async fn workspace_remove(
         }
         return Err(e.into());
     }
-    core.store.delete_workspace(workspace.id.clone()).await?;
+    // The sessions found in its folder go with it, their records left; a
+    // failure lets the hold go with it.
+    let delete = async {
+        core.store
+            .delete_workspace(workspace.id.clone())
+            .await
+            .map_err(ApiError::from)
+    };
+    core.sessions.remove_held(held, delete).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }
 
-/// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go,
-/// once before `workspace.remove`'s claim and once after it, so a test can
-/// land another request on either side. Nothing outside tests.
+/// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go:
+/// before `workspace.remove`'s claim, after it, once its sessions no longer
+/// hold it back, and once the sessions found in its folder are held; and
+/// once `project.remove` holds those of its own folder. A test can land
+/// another request at each. Nothing outside tests.
 async fn pause_for_tests(core: &Core) {
     if let Some(gate) = &core.config.remove_gate {
         gate.stop().await;
@@ -741,4 +776,16 @@ pub(super) async fn settings_set(
     params: SettingsSetParams,
 ) -> Result<Map<String, Value>, ApiError> {
     Ok(core.store.patch_settings(params.patch).await?)
+}
+
+/// Whether workspace `workspace_id`'s sessions hold back removing it: any
+/// session Ersa started there, and one started in the backend's own tools
+/// only while Core runs it (FLOW-RESUME-SESSION-R13, R14).
+async fn holds_back_removal(core: &Core, workspace_id: &str) -> Result<bool, ApiError> {
+    Ok(!core
+        .store
+        .sessions_in_workspace(workspace_id.to_string())
+        .await?
+        .is_empty()
+        || core.sessions.runs_found_in(workspace_id))
 }
