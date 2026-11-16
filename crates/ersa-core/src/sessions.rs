@@ -59,7 +59,7 @@ use ersa_protocol::events::{
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
-use crate::admission::{Admission, Command, Refusal, Report, UnderWay};
+use crate::admission::{Admission, Command, Refusal, Report, RowChange, UnderWay};
 use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
@@ -260,7 +260,10 @@ impl Drop for ArchiveHold<'_> {
 /// on the user included), or a message is being sent to it: what Delete and
 /// Archive wait for (PROTO-CORE-API, `session_busy`).
 fn in_turn(handle: &Handle) -> bool {
-    let session = handle.describe();
+    // One that is gone has no turn.
+    let Some(session) = handle.describe() else {
+        return false;
+    };
     let working = matches!(
         session.state,
         LifecycleState::Starting | LifecycleState::Running | LifecycleState::WaitingUser
@@ -328,8 +331,14 @@ struct Handle {
     archiving: AtomicUsize,
     id: String,
     backend: String,
-    /// The session's row as last written.
-    row: Mutex<SessionRow>,
+    /// The workspace the session is in, which never changes.
+    workspace_id: String,
+    /// Keeps the session's row ([`Handle::row`]).
+    admission: Arc<Admission>,
+    /// The backend's default permission mode, for a session whose row has
+    /// none: one from before Core recorded it, or one found in the
+    /// backend's records, was started stating that default.
+    permission_default: Option<String>,
     /// What the session's record says of it, as last read.
     presented: Mutex<Presented>,
     hub: Mutex<Hub>,
@@ -360,9 +369,6 @@ struct Handle {
     /// The same for looking at the session's folder before a resume: on a
     /// network drive that stops answering, one stuck look per session.
     folder_check: ReadSlot<resume::FolderLook>,
-    /// Set when the session is removed, for reads of its record that
-    /// outlive it ([`read_unless_removed`]).
-    removed: Arc<AtomicBool>,
     /// The send under way, if any: one at a time per session.
     sending: Mutex<Option<send::Sending>>,
     /// Woken when a send ends, so a send waiting its turn behind it reports
@@ -392,15 +398,16 @@ fn still_holds(read: &RecordReadResult, now: Option<&str>) -> bool {
 /// removed while it ran, `forget` then lets go of what the adapter kept of
 /// the record. A read that outlived its caller can end after `remove` had
 /// the adapter forget the record, and would otherwise keep it again.
-/// `remove` marks the session before it forgets, so either its forget comes
-/// after anything this read kept, or this sees the mark.
+/// `remove` tells admission the session is gone before it forgets, so
+/// either its forget comes after anything this read kept, or this finds the
+/// session gone (`gone` says whether it is).
 async fn read_unless_removed<T>(
     read: impl Future<Output = T>,
-    removed: &AtomicBool,
+    gone: impl FnOnce() -> bool,
     forget: impl FnOnce(),
 ) -> T {
     let value = read.await;
-    if removed.load(Ordering::SeqCst) {
+    if gone() {
         forget();
     }
     value
@@ -712,15 +719,22 @@ pub(crate) fn not_running() -> SessionError {
 }
 
 impl Handle {
-    /// A session first known to have begun at `created_at`, until its
-    /// record says.
-    fn new(row: SessionRow, created_at: String) -> Self {
+    /// The session with row `row`, which `admission` keeps, first known to
+    /// have begun at `created_at`, until its record says.
+    fn new(
+        row: &SessionRow,
+        created_at: String,
+        admission: Arc<Admission>,
+        permission_default: Option<String>,
+    ) -> Self {
         Handle {
             forking: Arc::default(),
             archiving: AtomicUsize::new(0),
             id: row.id.clone(),
             backend: row.backend.clone(),
-            row: Mutex::new(row),
+            workspace_id: row.workspace_id.clone(),
+            admission,
+            permission_default,
             presented: Mutex::new(Presented {
                 title: None,
                 created_at,
@@ -736,7 +750,6 @@ impl Handle {
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
             folder_check: tokio::sync::Mutex::new(None),
-            removed: Arc::default(),
             sending: Mutex::default(),
             send_ended: Arc::default(),
             scratch: Arc::default(),
@@ -776,25 +789,72 @@ impl Handle {
         *lock(&self.raw) = RawLog::default();
     }
 
-    /// The session as `session.list` reports it. A session no view has
-    /// been opened for is not running in this Core, so it has ended.
-    fn describe(&self) -> Session {
-        let row = lock(&self.row).clone();
-        let presented = lock(&self.presented).clone();
+    /// The session's row as last stored, which admission keeps
+    /// (ARCH-CORE-R14); `None` once the session is gone.
+    fn stored_row(&self) -> Option<SessionRow> {
+        let mut row = self.admission.row(&self.id)?;
+        if row.permission_mode.is_none() {
+            row.permission_mode = self.permission_default.clone();
+        }
+        Some(row)
+    }
+
+    /// The session's row; `not_found` once the session is gone.
+    fn row(&self) -> Result<SessionRow, SessionError> {
+        self.stored_row()
+            .ok_or_else(|| SessionError::NotFound(self.id.clone()))
+    }
+
+    /// Asks, when called, whether the session is gone by then: admission
+    /// no longer has it. For a read of its record that may outlive it.
+    fn when_gone(&self) -> impl FnOnce() -> bool + Send + 'static {
+        let (admission, id) = (Arc::clone(&self.admission), self.id.clone());
+        move || !admission.has_session(&id)
+    }
+
+    /// The session's state and tile, as its view has them. A session no
+    /// view has been opened for is not running in this Core, so it has
+    /// ended: as its ending left it, which a view would end with too (an
+    /// exit with an error is `error`).
+    fn state_and_tile(&self) -> (LifecycleState, Tile) {
         let ending = lock(&self.ending).clone();
         let hub = lock(&self.hub);
-        let (state, tile) = match &hub.view {
+        self.state_and_tile_in(&hub, &ending)
+    }
+
+    fn state_and_tile_in(
+        &self,
+        hub: &Hub,
+        ending: &Option<(LifecycleFact, String)>,
+    ) -> (LifecycleState, Tile) {
+        match &hub.view {
             Some(view) => (view.state(), view.tile().clone()),
-            // Not opened yet in this Core: as its ending left it, which a
-            // view would end with too (an exit with an error is `error`).
             None => {
                 let (mut view, _) = View::open(&self.id, &self.backend, None, &[]);
-                if let Some((fact, ts)) = &ending {
+                if let Some((fact, ts)) = ending {
                     view.lifecycle(fact, ts);
                 }
                 (view.state(), view.tile().clone())
             }
-        };
+        }
+    }
+
+    /// The session as `session.list` reports it; `None` once it is gone.
+    fn describe(&self) -> Option<Session> {
+        self.stored_row().map(|row| self.describe_from(row))
+    }
+
+    /// The session as it is; `not_found` once it is gone.
+    fn session(&self) -> Result<Session, SessionError> {
+        self.row().map(|row| self.describe_from(row))
+    }
+
+    /// The session with row `row`, as `session.list` reports it.
+    fn describe_from(&self, row: SessionRow) -> Session {
+        let presented = lock(&self.presented).clone();
+        let ending = lock(&self.ending).clone();
+        let hub = lock(&self.hub);
+        let (state, tile) = self.state_and_tile_in(&hub, &ending);
         let listed = settings::listed(&row, &presented.recorded, &presented.reported);
         Session {
             id: row.id,
@@ -911,7 +971,7 @@ impl SessionManager {
         // facts are kept for when their adapter is back.
         self.app_log
             .retain_only(rows.iter().map(|row| row.id.clone()).collect());
-        for mut row in rows {
+        for row in rows {
             let known = facts.get(&row.id);
             // How the session last ended. One a previous Core left running
             // ended with that Core: said now, whether or not its adapter is
@@ -939,14 +999,16 @@ impl SessionManager {
             };
             // Sessions from before Core recorded the permission mode were
             // all started stating their backend's default.
-            if row.permission_mode.is_none() {
-                let default = BackendChoices::default_of(&adapter.choices().permission_modes);
-                row.permission_mode = (!default.is_empty()).then_some(default);
-            }
+            let default = BackendChoices::default_of(&adapter.choices().permission_modes);
+            let default = (!default.is_empty()).then_some(default);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
-            let handle = Arc::new(Handle::new(row, started));
+            let admission = Arc::clone(&self.admission);
+            let handle = Arc::new(Handle::new(&row, started, admission, default));
             *lock(&handle.ending) = ending;
-            let row = lock(&handle.row).clone();
+            // As admission keeps it, with that default.
+            let Some(row) = handle.stored_row() else {
+                continue;
+            };
             if let (true, Some(transport)) = (
                 row.backend_session_id.is_some(),
                 transport_for(&row.host_id),
@@ -1039,14 +1101,15 @@ impl SessionManager {
     /// Every session, oldest first.
     pub fn list(&self) -> Vec<Session> {
         let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
-        let mut sessions: Vec<Session> = handles.iter().map(|h| h.describe()).collect();
+        // One that is gone, and not let go of yet, is not listed.
+        let mut sessions: Vec<Session> = handles.iter().filter_map(|h| h.describe()).collect();
         sessions.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
         sessions
     }
 
     /// One session.
     pub fn get(&self, id: &str) -> Result<Session, SessionError> {
-        Ok(self.handle(id)?.describe())
+        self.handle(id)?.session()
     }
 
     /// How many sessions are running, and how many are waiting on the user.
@@ -1054,7 +1117,10 @@ impl SessionManager {
         let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
         let (mut running, mut waiting) = (0, 0);
         for handle in handles.iter().filter(|h| h.live().is_some()) {
-            match handle.describe().state {
+            let Some(session) = handle.describe() else {
+                continue;
+            };
+            match session.state {
                 LifecycleState::WaitingUser => waiting += 1,
                 LifecycleState::Starting | LifecycleState::Running | LifecycleState::Idle => {
                     running += 1
@@ -1117,9 +1183,10 @@ impl SessionManager {
         // Only what was given the backend is stored, with when (PROTO-CORE-API-R71).
         self.store.insert_session(row.clone()).await?;
         admitted.end(Report::SessionStored {
-            session: row.id.clone(),
+            row: Box::new(row.clone()),
         });
-        let handle = Arc::new(Handle::new(row, now_rfc3339()));
+        let admission = Arc::clone(&self.admission);
+        let handle = Arc::new(Handle::new(&row, now_rfc3339(), admission, None));
         lock(&handle.presented).title = begin.title;
         let fork_hold = begin.fork_hold;
         // A new session has no record yet: the backend has not been told
@@ -1152,7 +1219,7 @@ impl SessionManager {
             launched
         };
         match launched {
-            Ok(()) => Ok(handle.describe()),
+            Ok(()) => handle.session(),
             Err(refusal) => {
                 self.forget_row(&id).await?;
                 Err(refused_session(refusal, &workspace_id, &id))
@@ -1301,7 +1368,8 @@ impl SessionManager {
         let handle = self.handle(id)?;
         // One a delete marked is finished by deleting it again.
         self.refuse_if_deleting(&handle)?;
-        let workspace_id = lock(&handle.row).workspace_id.clone();
+        let workspace_id = handle.workspace_id.clone();
+        let asked_of = handle.row()?;
         // Admission refuses it while a delete or a removal holds its
         // workspace, and has a delete of this session wait for it. Every
         // way out below that does not remove the session lets go, which
@@ -1313,7 +1381,7 @@ impl SessionManager {
             Ok(removing) => removing,
             // Another removal of it was under way when this one was asked
             // for, and took it: the session is gone, as asked.
-            Err(Refusal::NoSession) => return Ok(handle.describe()),
+            Err(Refusal::NoSession) => return Ok(handle.describe_from(asked_of)),
             Err(refusal) => return Err(refused_session(refusal, &workspace_id, id)),
         };
         // The removal's exclusive operation. A session whose end was
@@ -1327,24 +1395,27 @@ impl SessionManager {
             .begin_removal(id, STOP_TIMEOUT)
             .await
             .map_err(|refusal| refused_session(refusal, &workspace_id, id))?;
-        let session = handle.describe();
+        // Read before the session is gone: admission keeps no row after.
+        let row = handle.row()?;
+        let session = handle.describe_from(row.clone());
         self.store.delete_session(id.to_string()).await?;
         removing.end(Report::SessionGone {
             session: id.to_string(),
         });
-        self.let_go(&handle).await;
+        self.let_go(&handle, &row).await;
         Ok(session)
     }
 
-    /// Lets go of a session whose row is gone: its scratch folder, what the
-    /// app log, the adapter and the tiles keep of it, and its subscribers.
-    async fn let_go(&self, handle: &Arc<Handle>) {
+    /// Lets go of a session whose row is gone, and was `row`: its scratch
+    /// folder, what the app log, the adapter and the tiles keep of it, and
+    /// its subscribers.
+    async fn let_go(&self, handle: &Arc<Handle>, row: &SessionRow) {
         let id = handle.id.as_str();
         // Its scratch folder goes with it (PROTO-CORE-API-R28), once no
         // copying holds it. Never past a bound: a file system that hangs
         // leaves the folder behind, logged, rather than hold up the
         // removal.
-        let cwd = lock(&handle.row).cwd.clone();
+        let cwd = row.cwd.clone();
         let scratch = Arc::clone(&handle.scratch);
         let session_id = id.to_string();
         // The scratch folder is waited for here, never on a thread.
@@ -1368,10 +1439,9 @@ impl SessionManager {
         }
         lock(&self.sessions).remove(id);
         self.app_log.forget(id);
-        // What the adapter kept of its record goes too, and what a read
-        // still running keeps once it ends.
-        handle.removed.store(true, Ordering::SeqCst);
-        let row = lock(&handle.row).clone();
+        // What the adapter kept of its record goes too. A read still
+        // running finds the session gone once it ends, and forgets what it
+        // kept ([`read_unless_removed`]).
         if let (Some(backend_id), Some(adapter)) =
             (&row.backend_session_id, self.adapter(&row.backend))
         {
@@ -1412,10 +1482,7 @@ impl SessionManager {
             let session = live.wait_ready().await?;
             // Read once ready: a backend without host-chosen ids names the
             // session as it starts.
-            let backend_id = lock(&handle.row)
-                .backend_session_id
-                .clone()
-                .ok_or_else(unnamed)?;
+            let backend_id = handle.row()?.backend_session_id.ok_or_else(unnamed)?;
             // The projector's count of the titles the stream announced, the
             // one tally of them, tells whether the backend's own word on the
             // new title came meanwhile.
@@ -1438,10 +1505,10 @@ impl SessionManager {
                 lock(&handle.presented).title = Some(title.to_string());
             }
             drop(hub);
-            return Ok(self.retitled(&handle));
+            return self.retitled(&handle);
         } else {
-            let row = lock(&handle.row).clone();
-            let backend_id = row.backend_session_id.ok_or_else(unnamed)?;
+            let row = handle.row()?;
+            let backend_id = row.backend_session_id.clone().ok_or_else(unnamed)?;
             let adapter = self.adapter_of(&row.backend)?;
             let transport = transport_for(&row.host_id).ok_or_else(|| {
                 SessionError::Adapter(AdapterError::Io(io::Error::new(
@@ -1460,7 +1527,7 @@ impl SessionManager {
                 "may show the old title, and write it again, until it next reads the session",
             )
             .await;
-            let (cwd, title) = (row.cwd, title.to_string());
+            let (cwd, title) = (row.cwd.clone(), title.to_string());
             let renamed = bounded(async move {
                 adapter
                     .rename_record(transport, &cwd, &backend_id, &title)
@@ -1487,16 +1554,17 @@ impl SessionManager {
             }
         }
         lock(&handle.presented).title = Some(title.to_string());
-        Ok(self.retitled(&handle))
+        self.retitled(&handle)
     }
 
     /// Tells every client of the session's title after `session.set_title`
     /// (PROTO-CORE-API-R83), whichever client renamed it, and returns the
-    /// session as it now is.
-    fn retitled(&self, handle: &Handle) -> Session {
-        let session = handle.describe();
+    /// session as it now is. One removed while its record was renamed is
+    /// `not_found`, and no tile is sent for it.
+    fn retitled(&self, handle: &Handle) -> Result<Session, SessionError> {
+        let session = handle.session()?;
         send_tile(&self.tiles, handle, &session.tile);
-        session
+        Ok(session)
     }
 
     /// Archives the session, or unarchives it (ADR 0026,
@@ -1535,8 +1603,8 @@ impl SessionManager {
         self.store
             .set_session_archived(id.to_string(), archived)
             .await?;
-        lock(&handle.row).archived = archived;
-        Ok(handle.describe())
+        self.wrote(&handle, RowChange::Archived(archived))?;
+        handle.session()
     }
 
     /// Pins or unpins the session and moves it between sections, changing
@@ -1566,16 +1634,9 @@ impl SessionManager {
             let missing = section_id.flatten().unwrap_or_default();
             return Err(SessionError::NoSection(missing));
         }
-        {
-            let mut row = lock(&handle.row);
-            if let Some(pinned) = pinned {
-                row.pinned = pinned;
-            }
-            if let Some(section_id) = section_id {
-                row.section_id = section_id;
-            }
-        }
-        Ok(handle.describe())
+        let section = section_id;
+        self.wrote(&handle, RowChange::Arranged { pinned, section })?;
+        handle.session()
     }
 
     /// Removes section `id`, putting its sessions in no section
@@ -1585,22 +1646,29 @@ impl SessionManager {
         let _arrangement = self.arrangement.lock().await;
         let removed = self.store.delete_section(id.to_string()).await?;
         if removed.is_some() {
-            let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
-            for handle in handles {
-                let mut row = lock(&handle.row);
-                if row.section_id.as_deref() == Some(id) {
-                    row.section_id = None;
-                }
-            }
+            // One step, while the arrangement is still held: no row is left
+            // naming the section.
+            let section = id.to_string();
+            self.admission.report(Report::SectionRemoved { section });
         }
         Ok(removed)
     }
 
     // -- Deleting (PROTO-CORE-API, `session.delete`) --------------------------
 
-    /// The session's row as last written.
+    /// The session's row as last stored.
     pub fn row(&self, id: &str) -> Result<SessionRow, SessionError> {
-        Ok(lock(&self.handle(id)?.row).clone())
+        self.handle(id)?.row()
+    }
+
+    /// Tells admission a change to the session's row is stored. A session
+    /// that is gone keeps nothing, and its request answers `not_found`.
+    fn wrote(&self, handle: &Handle, change: RowChange) -> Result<(), SessionError> {
+        if self.admission.wrote(&handle.id, change) {
+            Ok(())
+        } else {
+            Err(SessionError::NotFound(handle.id.clone()))
+        }
     }
 
     /// Refuses a delete while the session is starting, a turn is running
@@ -1652,12 +1720,11 @@ impl SessionManager {
     /// way for it, as admission says, or its workspace went with one or with
     /// a removal; or it is marked deleting.
     fn refuse_if_deleting(&self, handle: &Handle) -> Result<(), SessionError> {
-        let (workspace_id, deleting) = {
-            let row = lock(&handle.row);
-            (row.workspace_id.clone(), row.deleting)
-        };
-        if self.admission.deleting(&workspace_id, &handle.id) {
-            return Err(busy(&workspace_id));
+        // One that is gone is not marked: its workspace says the rest.
+        let deleting = handle.stored_row().and_then(|row| row.deleting);
+        let workspace_id = &handle.workspace_id;
+        if self.admission.deleting(workspace_id, &handle.id) {
+            return Err(busy(workspace_id));
         }
         if deleting.is_some() {
             return Err(SessionError::refused(
@@ -1700,11 +1767,8 @@ impl SessionManager {
             .store
             .mark_session_deleting(id.to_string(), files)
             .await?;
-        let workspace = {
-            let mut row = lock(&handle.row);
-            row.deleting = Some(Deleting::Running);
-            row.workspace_id.clone()
-        };
+        self.wrote(&handle, RowChange::Deleting(Deleting::Running))?;
+        let workspace = handle.workspace_id.clone();
         // The store set the workspace to `error` with the mark.
         if recorded {
             self.admission
@@ -1717,8 +1781,7 @@ impl SessionManager {
     pub async fn mark_delete_failed(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
         self.store.set_session_delete_failed(id.to_string()).await?;
-        lock(&handle.row).deleting = Some(Deleting::Failed);
-        Ok(())
+        self.wrote(&handle, RowChange::Deleting(Deleting::Failed))
     }
 
     /// Deletes the session's record from its backend, on the host
@@ -1763,6 +1826,8 @@ impl SessionManager {
         let handle = self.handle(id)?;
         let _listing = self.listing.lock().await;
         let _exclusive = self.exclusive(id).await?;
+        // Read before the session is gone: admission keeps no row after.
+        let row = handle.row()?;
         let workspace_went = self
             .store
             .finish_session_delete(id.to_string(), workspace_id.clone())
@@ -1775,7 +1840,7 @@ impl SessionManager {
                 .report(Report::WorkspaceDeleted { workspace });
         }
         self.deletes.fetch_add(1, Ordering::SeqCst);
-        self.let_go(&handle).await;
+        self.let_go(&handle, &row).await;
         Ok(())
     }
 
@@ -1785,8 +1850,8 @@ impl SessionManager {
         self.store
             .set_session_mode(id.to_string(), mode.clone())
             .await?;
-        lock(&handle.row).mode = Some(mode);
-        Ok(handle.describe())
+        self.wrote(&handle, RowChange::Mode(mode))?;
+        handle.session()
     }
 
     /// Interrupts the running turn, or cancels a message not yet handed to
@@ -1913,7 +1978,7 @@ impl SessionManager {
             opened = Some(self.open_view(&handle, &transport_for).await?);
         };
         if installed {
-            send_tile(&self.tiles, &handle, &handle.describe().tile);
+            send_current_tile(&self.tiles, &handle);
         }
         let first_seq = subscribed.first_seq.unwrap_or(0).max(from_seq);
         let (go_tx, go_rx) = oneshot::channel();
@@ -1941,7 +2006,7 @@ impl SessionManager {
         handle: &Arc<Handle>,
         transport_for: &impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> Result<(View, Vec<Envelope>), SessionError> {
-        let row = lock(&handle.row).clone();
+        let row = handle.row()?;
         let adapter = self.adapter_of(&row.backend)?;
         let source = match transport_for(&row.host_id) {
             Some(transport) => {
@@ -1958,7 +2023,7 @@ impl SessionManager {
                         let (reader, cwd, id) =
                             (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
                         let at = Arc::clone(&transport);
-                        let removed = Arc::clone(&handle.removed);
+                        let gone = handle.when_gone();
                         // The record's version is taken before it is read, so
                         // events read are never newer than the version they
                         // are kept under.
@@ -1976,10 +2041,8 @@ impl SessionManager {
                                         .map(|events| (version, events))
                                         .map_err(|e| e.to_string())
                                 };
-                                read_unless_removed(read, &removed, || {
-                                    reader.forget_record(&cwd, &id)
-                                })
-                                .await
+                                read_unless_removed(read, gone, || reader.forget_record(&cwd, &id))
+                                    .await
                             })
                         };
                         // A read this open joined still holds if the record's
@@ -2130,18 +2193,22 @@ async fn apply_summary(
     cwd: String,
     backend_id: String,
 ) {
-    let removed = Arc::clone(&handle.removed);
+    let gone = handle.when_gone();
     let live = handle.live().is_some();
+    // Nothing is read for a session that is gone.
+    let Some(row) = handle.stored_row() else {
+        return;
+    };
     // A fork with no record of its own was given its original's to read for
     // the conversation. What that record says of its title and first time is
     // the original's, and changes with it.
-    if lock(&handle.row).forked_from.as_deref() == Some(backend_id.as_str()) {
+    if row.forked_from.as_deref() == Some(backend_id.as_str()) {
         return;
     }
     let start = move || {
         tokio::spawn(async move {
             let read = adapter.summarize_record(transport, &cwd, &backend_id);
-            read_unless_removed(read, &removed, || adapter.forget_record(&cwd, &backend_id))
+            read_unless_removed(read, gone, || adapter.forget_record(&cwd, &backend_id))
                 .await
                 .map_err(|e| e.to_string())
         })
@@ -2152,7 +2219,7 @@ async fn apply_summary(
         Some(Ok(Some(summary))) => {
             let changed = lock(&handle.presented).take_summary(summary, live, &handle.id);
             if changed {
-                send_tile(tiles, handle, &handle.describe().tile);
+                send_current_tile(tiles, handle);
             }
         }
         Some(Ok(None)) => {}
@@ -2241,9 +2308,8 @@ async fn record_id(
         Ok(Ok(Some(_))) => {
             match store.clear_fork_link(handle.id.clone()).await {
                 Ok(()) => {
-                    let mut row = lock(&handle.row);
-                    row.forked_from = None;
-                    row.forked_through = None;
+                    let change = RowChange::ForkLinkCleared;
+                    handle.admission.wrote(&handle.id, change);
                 }
                 Err(e) => {
                     tracing::warn!(session = %handle.id, error = %e, "could not forget the session a fork was copied from");
@@ -2811,10 +2877,13 @@ async fn run_session(task: SessionTask) {
     finished.send_replace(true);
     // The record now holds the session's turns, and with them its title.
     // Read after the stop has its answer, never on its way.
-    let row = lock(&handle.row).clone();
-    tokio::spawn(async move {
-        read_summary(&store, &handle, &tiles, adapter, transport, row).await;
-    });
+    // A removal that waited for the run's end may have gone ahead since:
+    // then there is no record of Ersa's to read.
+    if let Some(row) = handle.stored_row() {
+        tokio::spawn(async move {
+            read_summary(&store, &handle, &tiles, adapter, transport, row).await;
+        });
+    }
 }
 
 /// Returns once the flag is raised; never if its sender is gone.
@@ -2842,7 +2911,7 @@ async fn run_pipeline(pipeline: Pipeline) {
         progress,
         tiles,
     } = pipeline;
-    let mut last_tile = handle.describe().tile;
+    let mut last_tile = handle.state_and_tile().1;
     let mut lines_done = 0;
     // Ends once the sink is closed and everything queued has been taken.
     while let Some(first) = fed.recv().await {
@@ -2920,13 +2989,16 @@ async fn run_pipeline(pipeline: Pipeline) {
         // anyone hears of the session's events, so a crash after a client
         // saw them cannot leave a session whose record is lost.
         if let Some(backend_id) = announced {
-            let known = lock(&handle.row).backend_session_id.clone();
+            let known = handle.stored_row().and_then(|row| row.backend_session_id);
             if known.as_deref() != Some(backend_id.as_str()) {
                 match store
                     .set_backend_session_id(handle.id.clone(), backend_id.clone())
                     .await
                 {
-                    Ok(()) => lock(&handle.row).backend_session_id = Some(backend_id),
+                    Ok(()) => {
+                        let change = RowChange::BackendId(backend_id);
+                        handle.admission.wrote(&handle.id, change);
+                    }
                     Err(e) => {
                         tracing::error!(session = %handle.id, error = %e, "could not record the backend's session id");
                     }
@@ -2951,7 +3023,8 @@ async fn run_pipeline(pipeline: Pipeline) {
                 .await
             {
                 Ok(()) => {
-                    lock(&handle.row).last_activity_at = Some(at);
+                    let change = RowChange::LastActivity(at);
+                    handle.admission.wrote(&handle.id, change);
                     activity_changed = true;
                 }
                 Err(e) => {
@@ -3019,10 +3092,19 @@ fn published(session_id: &str, event: &Envelope) -> Published {
     }
 }
 
+/// Sends the session's tile as it now is.
+fn send_current_tile(tiles: &TileHub, handle: &Handle) {
+    send_tile(tiles, handle, &handle.state_and_tile().1);
+}
+
 /// Sends a session's tile with its last activity, title and date created,
-/// which every tile carries as `session.list` has them.
+/// which every tile carries as `session.list` has them. None is sent for a
+/// session that is gone.
 fn send_tile(tiles: &TileHub, handle: &Handle, tile: &Tile) {
-    let last_activity_at = lock(&handle.row).last_activity_at.clone();
+    let Some(row) = handle.stored_row() else {
+        return;
+    };
+    let last_activity_at = row.last_activity_at;
     let presented = lock(&handle.presented).clone();
     // Every tile carries the title and the date created, so a coalesced
     // tile never loses a change to either (PROTO-CORE-API-R83, R105).
@@ -3468,31 +3550,6 @@ mod tests {
     fn gated_manager(dir: &std::path::Path, adapter: &Arc<GatedReads>) -> SessionManager {
         let store = Store::open(&dir.join("ersa.db")).unwrap();
         let (app_log, _) = AppLog::open(dir).unwrap();
-        // Admission has the session and its workspace, as once it is
-        // created: a removal is decided there.
-        let admission = Arc::new(Admission::default());
-        admission.restore(crate::admission::Existing {
-            projects: vec![(
-                "p".into(),
-                crate::admission::Folder {
-                    host: "local".into(),
-                    key: "c:/work".into(),
-                },
-            )],
-            workspaces: vec![crate::admission::ExistingWorkspace {
-                id: "w".into(),
-                project: "p".into(),
-                root: true,
-                phase: crate::admission::WorkspacePhase::Ready,
-            }],
-            sessions: vec![("s-gated".into(), "w".into(), false)],
-        });
-        let manager = SessionManager::new(
-            store,
-            vec![Arc::clone(adapter) as Arc<dyn Adapter>],
-            Arc::new(app_log),
-            admission,
-        );
         let row = SessionRow {
             id: "s-gated".into(),
             workspace_id: "w".into(),
@@ -3516,7 +3573,32 @@ mod tests {
             permission_mode_at: None,
             started_elsewhere: false,
         };
-        let handle = Arc::new(Handle::new(row, now_rfc3339()));
+        // Admission has the session and its workspace, as once it is
+        // created: a removal is decided there.
+        let admission = Arc::new(Admission::default());
+        admission.restore(crate::admission::Existing {
+            projects: vec![(
+                "p".into(),
+                crate::admission::Folder {
+                    host: "local".into(),
+                    key: "c:/work".into(),
+                },
+            )],
+            workspaces: vec![crate::admission::ExistingWorkspace {
+                id: "w".into(),
+                project: "p".into(),
+                root: true,
+                phase: crate::admission::WorkspacePhase::Ready,
+            }],
+            sessions: vec![row.clone()],
+        });
+        let manager = SessionManager::new(
+            store,
+            vec![Arc::clone(adapter) as Arc<dyn Adapter>],
+            Arc::new(app_log),
+            Arc::clone(&admission),
+        );
+        let handle = Arc::new(Handle::new(&row, now_rfc3339(), admission, None));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
         manager
     }
@@ -3635,6 +3717,180 @@ mod tests {
         assert_eq!(run(&manager), Some(crate::admission::Run::Running));
     }
 
+    // verifies: ARCH-CORE-R14
+    #[tokio::test]
+    async fn a_session_s_row_is_the_one_admission_keeps() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let handle = manager.handle("s-gated").unwrap();
+        assert_eq!(
+            manager.row("s-gated").ok(),
+            manager.admission.row("s-gated")
+        );
+
+        // A stored change is told to admission, and read from it.
+        let session = manager.set_mode("s-gated", "plan".into()).await.unwrap();
+        assert_eq!(session.mode.as_deref(), Some("plan"));
+        let kept = manager.admission.row("s-gated").unwrap();
+        assert_eq!(kept.mode.as_deref(), Some("plan"));
+        assert_eq!(
+            manager.get("s-gated").unwrap().mode.as_deref(),
+            Some("plan")
+        );
+
+        // The session goes: admission keeps no row, and Core has let go of
+        // nothing yet.
+        manager.admission.report(Report::SessionGone {
+            session: "s-gated".into(),
+        });
+        // A write for it keeps nothing, and its request is `not_found`.
+        let written = manager.set_mode("s-gated", "build".into()).await;
+        assert!(
+            matches!(written, Err(SessionError::NotFound(_))),
+            "{written:?}"
+        );
+        assert_eq!(manager.admission.row("s-gated"), None);
+        // It is not listed, and a request that asks for it finds none.
+        assert!(manager.list().is_empty());
+        assert!(matches!(
+            manager.get("s-gated"),
+            Err(SessionError::NotFound(_))
+        ));
+        assert!(matches!(
+            manager.row("s-gated"),
+            Err(SessionError::NotFound(_))
+        ));
+        assert!(handle.describe().is_none());
+    }
+
+    /// Stores `s-gated`'s row, with its project and workspace, so a write
+    /// to it finds a row.
+    async fn store_gated(manager: &SessionManager) {
+        let store = &manager.store;
+        store.ensure_local_host("pc".into()).await.unwrap();
+        let project = ersa_protocol::core_api::Project {
+            id: "p".into(),
+            host_id: persistence::LOCAL_HOST_ID.into(),
+            path: "C:/work".into(),
+            name: "work".into(),
+            vcs: ersa_protocol::core_api::Vcs::Git,
+            trusted: false,
+        };
+        let key = "c:/work".into();
+        store
+            .insert_project(project, "w".into(), key)
+            .await
+            .unwrap();
+        let row = manager.row("s-gated").unwrap();
+        store.insert_session(row).await.unwrap();
+    }
+
+    // verifies: ARCH-CORE-R14
+    #[tokio::test]
+    async fn a_delete_s_marks_are_told_to_admission_and_one_for_a_session_that_is_gone_is_not_found()
+     {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        store_gated(&manager).await;
+        let deleting = |manager: &SessionManager| manager.get("s-gated").unwrap().deleting;
+        assert_eq!(deleting(&manager), None);
+        manager.mark_deleting("s-gated", true).await.unwrap();
+        assert_eq!(deleting(&manager), Some(Deleting::Running));
+        manager.mark_delete_failed("s-gated").await.unwrap();
+        assert_eq!(deleting(&manager), Some(Deleting::Failed));
+        let kept = manager.admission.row("s-gated").unwrap();
+        let stored = manager.store.session("s-gated".into()).await.unwrap();
+        assert_eq!(Some(kept), stored);
+
+        // Gone: the mark is kept nowhere, and its request is `not_found`.
+        manager.admission.report(Report::SessionGone {
+            session: "s-gated".into(),
+        });
+        let marked = manager.mark_delete_failed("s-gated").await;
+        assert!(
+            matches!(marked, Err(SessionError::NotFound(_))),
+            "{marked:?}"
+        );
+    }
+
+    // verifies: FLOW-RESUME-SESSION-R13
+    #[tokio::test]
+    async fn found_sessions_whose_rows_went_with_their_workspace_are_let_go_of() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        // A session found in the same folder, stored and loaded.
+        let mut found = manager.row("s-gated").unwrap();
+        found.id = "s-found".into();
+        found.backend_session_id = Some("b-found".into());
+        found.started_elsewhere = true;
+        let command = Command::CreateSession {
+            workspace: "w".into(),
+            session: "s-found".into(),
+            found: true,
+        };
+        let admitted = manager.admission.command(command).await.unwrap();
+        admitted.end(Report::SessionStored {
+            row: Box::new(found.clone()),
+        });
+        let admission = Arc::clone(&manager.admission);
+        let handle = Arc::new(Handle::new(&found, now_rfc3339(), admission, None));
+        lock(&manager.sessions).insert(handle.id.clone(), handle);
+
+        // As a removal does: quiet them, take their rows, then let go.
+        let quiet = manager.quiet_found("w").await;
+        manager.admission.report(Report::SessionGone {
+            session: "s-found".into(),
+        });
+        manager.forget_found(quiet).await;
+        assert!(matches!(
+            manager.handle("s-found"),
+            Err(SessionError::NotFound(_))
+        ));
+        // What the adapter kept of its record went too, by the row as it was.
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 1);
+        // One Ersa started is not theirs to take.
+        assert!(manager.handle("s-gated").is_ok());
+    }
+
+    // verifies: PROTO-CORE-API-R71
+    #[tokio::test]
+    async fn a_row_with_no_permission_mode_reads_as_its_backend_s_default() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let row = manager.row("s-gated").unwrap();
+        assert_eq!(row.permission_mode, None);
+        // A session loaded from before Core recorded the mode, or found in
+        // the backend's records: its handle knows the default.
+        let admission = Arc::clone(&manager.admission);
+        let default = Some("default".to_string());
+        let handle = Handle::new(&row, now_rfc3339(), admission, default);
+        assert_eq!(
+            handle.row().unwrap().permission_mode.as_deref(),
+            Some("default")
+        );
+        let listed = handle.describe().unwrap().permission_mode;
+        assert_eq!(listed, "default");
+        // What admission keeps is the stored row, and a stored value wins.
+        assert_eq!(
+            manager.admission.row("s-gated").unwrap().permission_mode,
+            None
+        );
+        let change = RowChange::Requested {
+            setting: crate::admission::Setting::PermissionMode,
+            value: "plan".into(),
+            at: now_rfc3339(),
+        };
+        assert!(manager.admission.wrote("s-gated", change));
+        assert_eq!(
+            handle.row().unwrap().permission_mode.as_deref(),
+            Some("plan")
+        );
+    }
+
     #[tokio::test]
     async fn nothing_is_launched_once_core_is_shutting_down() {
         let adapter = Arc::new(GatedReads::default());
@@ -3713,7 +3969,7 @@ mod tests {
             .insert_project(project, persistence::new_id("w"), "c:/work".into())
             .await
             .unwrap();
-        let mut row = lock(&manager.handle("s-gated").unwrap().row).clone();
+        let mut row = manager.row("s-gated").unwrap();
         row.workspace_id = workspace.id;
         store.insert_session(row).await.unwrap();
         let (sink, _finished, _run) = make_live(&manager);
@@ -3757,14 +4013,15 @@ mod tests {
         let removed = AtomicBool::new(false);
         let forgot = AtomicBool::new(false);
         let forget = || forgot.store(true, Ordering::SeqCst);
-        assert_eq!(read_unless_removed(async { 1 }, &removed, forget).await, 1);
+        let gone = || removed.load(Ordering::SeqCst);
+        assert_eq!(read_unless_removed(async { 1 }, gone, forget).await, 1);
         assert!(!forgot.load(Ordering::SeqCst));
         // The session is removed while the read runs: what it kept goes.
         let read = async {
             removed.store(true, Ordering::SeqCst);
             2
         };
-        assert_eq!(read_unless_removed(read, &removed, forget).await, 2);
+        assert_eq!(read_unless_removed(read, gone, forget).await, 2);
         assert!(forgot.load(Ordering::SeqCst));
     }
 

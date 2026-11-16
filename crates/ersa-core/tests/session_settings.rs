@@ -642,6 +642,43 @@ async fn a_value_stored_without_its_time_yields_to_the_records_from_any_turn() {
     );
 }
 
+// verifies: PROTO-CORE-API-R71
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_stored_with_no_permission_mode_lists_its_backend_s_default() {
+    let backend = Backend::default();
+    let (core, _) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "permission_mode": "auto" })).await;
+    drop(client);
+
+    // As a Core from before it recorded the permission mode left the row:
+    // such a session was started stating its backend's default.
+    let db = core.data_dir().join("ersa.db");
+    let TestCore { dir, task, .. } = core;
+    task.abort();
+    let _ = task.await;
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let unrecorded = "UPDATE sessions SET permission_mode = NULL, permission_mode_at = NULL";
+    conn.execute(unrecorded, []).unwrap();
+    drop(conn);
+
+    let (core, _) = start(&backend, dir).await;
+    let mut client = core.client().await;
+    let (_, _, permission_mode) = values(&mut client, &id).await;
+    assert_eq!(permission_mode, "ask");
+    // The default is shown, never stored.
+    drop(client);
+    let db = core.data_dir().join("ersa.db");
+    let TestCore { task, .. } = core;
+    task.abort();
+    let _ = task.await;
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let stored: Option<String> = conn
+        .query_row("SELECT permission_mode FROM sessions", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(stored, None);
+}
+
 /// Stops the session, resumes it, and returns the values its backend was
 /// started with again: `(model, effort, permission_mode)`.
 async fn relaunched(

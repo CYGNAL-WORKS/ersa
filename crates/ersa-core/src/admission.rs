@@ -21,7 +21,10 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use ersa_protocol::core_api::Deleting;
 use tokio::sync::oneshot;
+
+use crate::persistence::SessionRow;
 
 /// The id of a project, workspace or session, as the store holds it.
 pub type Id = String;
@@ -83,8 +86,9 @@ pub struct SessionEntry {
     /// Found in the backend's records rather than started by Ersa: it never
     /// holds its workspace back, and goes with it.
     pub found: bool,
-    /// Whether its row is stored yet.
-    pub stored: bool,
+    /// Its row as last stored: the one copy Core keeps in memory. `None`
+    /// until the row is stored.
+    pub row: Option<SessionRow>,
     /// Whether a `session.remove` of it is under way: asked for, and
     /// perhaps still waiting for a run that is winding down, before it
     /// takes the session's exclusive operation.
@@ -96,6 +100,13 @@ pub struct SessionEntry {
     pub exclusive: bool,
     /// Whether Core runs its backend.
     pub run: Run,
+}
+
+impl SessionEntry {
+    /// Whether its row is stored yet.
+    pub fn stored(&self) -> bool {
+        self.row.is_some()
+    }
 }
 
 /// Whether Core runs a session's backend.
@@ -127,9 +138,8 @@ pub struct State {
 pub struct Existing {
     pub projects: Vec<(Id, Folder)>,
     pub workspaces: Vec<ExistingWorkspace>,
-    /// Each session's id, its workspace's id, and whether it was found in
-    /// the backend's records.
-    pub sessions: Vec<(Id, Id, bool)>,
+    /// Each session's row.
+    pub sessions: Vec<SessionRow>,
 }
 
 #[derive(Clone, Debug)]
@@ -157,14 +167,13 @@ impl State {
             };
             state.workspaces.insert(workspace.id, entry);
         }
-        for (id, workspace, found) in existing.sessions {
-            let stored = true;
+        for row in existing.sessions {
             state.sessions.insert(
-                id,
+                row.id.clone(),
                 SessionEntry {
-                    workspace,
-                    found,
-                    stored,
+                    workspace: row.workspace_id.clone(),
+                    found: row.started_elsewhere,
+                    row: Some(row),
                     removing: false,
                     exclusive: false,
                     run: Run::Stopped,
@@ -180,6 +189,12 @@ impl State {
 
     pub fn workspace(&self, id: &str) -> Option<&WorkspaceEntry> {
         self.workspaces.get(id)
+    }
+
+    /// Session `id`'s row as last stored; `None` for a session that is
+    /// gone, or whose row is not stored yet.
+    pub fn row(&self, id: &str) -> Option<&SessionRow> {
+        self.sessions.get(id)?.row.as_ref()
     }
 
     pub fn session(&self, id: &str) -> Option<&SessionEntry> {
@@ -244,7 +259,7 @@ impl State {
     fn has_arriving_session(&self, workspace: &str) -> bool {
         self.sessions
             .values()
-            .any(|session| session.workspace == workspace && !session.stored)
+            .any(|session| session.workspace == workspace && !session.stored())
     }
 
     /// Whether a removal holds `workspace`: its own, or its project's when
@@ -442,8 +457,19 @@ pub enum Report {
     WorkspaceDeleted {
         workspace: Id,
     },
+    /// The session's row is stored: this is it.
     SessionStored {
+        row: Box<SessionRow>,
+    },
+    /// A change to the session's row is stored.
+    RowWritten {
         session: Id,
+        change: RowChange,
+    },
+    /// The section is gone from the store, and with it from every session's
+    /// row there.
+    SectionRemoved {
+        section: Id,
     },
     /// The session's row is gone.
     SessionGone {
@@ -462,6 +488,42 @@ pub enum Report {
     },
     /// The operation's task ended without saying how (ARCH-CORE-R16).
     Ended(Operation),
+}
+
+/// One stored change to a session's row.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RowChange {
+    Archived(bool),
+    /// Pinned or not, and its section (`Some(None)`: no section), each
+    /// changed only when given.
+    Arranged {
+        pinned: Option<bool>,
+        section: Option<Option<Id>>,
+    },
+    /// Where the session's delete is.
+    Deleting(Deleting),
+    Mode(String),
+    /// The backend's own id for the session.
+    BackendId(String),
+    /// When the session's latest turn ended.
+    LastActivity(String),
+    /// A value Core gave the backend, and when.
+    Requested {
+        setting: Setting,
+        value: String,
+        at: String,
+    },
+    /// The fork has a record of its own: what it was copied from is
+    /// forgotten.
+    ForkLinkCleared,
+}
+
+/// Which of a session's values Core gave its backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Setting {
+    Model,
+    Effort,
+    PermissionMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -814,7 +876,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             let entry = SessionEntry {
                 workspace: workspace.clone(),
                 found: *found,
-                stored: false,
+                row: None,
                 removing: false,
                 exclusive: false,
                 run: Run::Stopped,
@@ -851,7 +913,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             // Its row is still being stored, or another removal of it is
             // under way: whether there is a session to remove is known once
             // that reports.
-            if !entry.stored || entry.removing {
+            if !entry.stored() || entry.removing {
                 return Outcome::Held;
             }
             if let Some(entry) = state.sessions.get_mut(session) {
@@ -865,7 +927,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             };
             // One at a time: the next waits for the one under way to end.
             // So does one asked of a session whose row is being stored.
-            if !entry.stored || entry.exclusive {
+            if !entry.stored() || entry.exclusive {
                 return Outcome::Held;
             }
             entry.exclusive = true;
@@ -920,7 +982,7 @@ fn begin_after_run(state: &mut State, session: &Id, starts: bool) -> Outcome {
     let Some(entry) = state.sessions.get_mut(session) else {
         return Outcome::Refused(Refusal::NoSession);
     };
-    if !entry.stored || entry.exclusive {
+    if !entry.stored() || entry.exclusive {
         return Outcome::Held;
     }
     match entry.run {
@@ -1043,13 +1105,47 @@ fn note(state: &mut State, report: Report) -> Outcome {
             state.drop_workspace(&workspace);
             Outcome::Noted
         }
-        Report::SessionStored { session } => match state.sessions.get_mut(&session) {
-            Some(entry) if !entry.stored => {
-                entry.stored = true;
+        // The row enters the state in the step that says it is stored: the
+        // row of the session that was admitted, in its workspace. A second
+        // report for one session never replaces its row.
+        Report::SessionStored { row } => match state.sessions.get_mut(&row.id) {
+            Some(entry)
+                if !entry.stored()
+                    && entry.workspace == row.workspace_id
+                    && entry.found == row.started_elsewhere =>
+            {
+                entry.row = Some(*row);
                 Outcome::Noted
             }
             Some(_) | None => Outcome::Stale,
         },
+        // A write for a session that is gone keeps nothing.
+        Report::RowWritten { session, change } => {
+            match state
+                .sessions
+                .get_mut(&session)
+                .and_then(|entry| entry.row.as_mut())
+            {
+                Some(row) => {
+                    write(row, change);
+                    Outcome::Noted
+                }
+                None => Outcome::Stale,
+            }
+        }
+        // One step, so no row is left naming a section that is gone.
+        Report::SectionRemoved { section } => {
+            for row in state
+                .sessions
+                .values_mut()
+                .filter_map(|entry| entry.row.as_mut())
+            {
+                if row.section_id.as_deref() == Some(section.as_str()) {
+                    row.section_id = None;
+                }
+            }
+            Outcome::Noted
+        }
         Report::SessionGone { session } => match state.sessions.remove(&session) {
             Some(_) => Outcome::Noted,
             None => Outcome::Stale,
@@ -1078,7 +1174,7 @@ fn note(state: &mut State, report: Report) -> Outcome {
             }
             Operation::RemoveWorkspace(workspace) => fail_removal(state, &workspace),
             Operation::CreateSession(session) => {
-                match state.sessions.get(&session).map(|entry| entry.stored) {
+                match state.sessions.get(&session).map(SessionEntry::stored) {
                     Some(false) => {
                         state.sessions.remove(&session);
                         Outcome::Noted
@@ -1151,6 +1247,38 @@ fn note(state: &mut State, report: Report) -> Outcome {
 
 /// Moves `workspace` to the phase `next` gives for the one it is in;
 /// `Stale` when there is no such workspace or `next` gives none.
+/// Applies one stored change to `row`.
+fn write(row: &mut SessionRow, change: RowChange) {
+    match change {
+        RowChange::Archived(archived) => row.archived = archived,
+        RowChange::Arranged { pinned, section } => {
+            if let Some(pinned) = pinned {
+                row.pinned = pinned;
+            }
+            if let Some(section) = section {
+                row.section_id = section;
+            }
+        }
+        RowChange::Deleting(deleting) => row.deleting = Some(deleting),
+        RowChange::Mode(mode) => row.mode = Some(mode),
+        RowChange::BackendId(id) => row.backend_session_id = Some(id),
+        RowChange::LastActivity(at) => row.last_activity_at = Some(at),
+        RowChange::Requested { setting, value, at } => {
+            let (stored, stored_at) = match setting {
+                Setting::Model => (&mut row.model, &mut row.model_at),
+                Setting::Effort => (&mut row.effort, &mut row.effort_at),
+                Setting::PermissionMode => (&mut row.permission_mode, &mut row.permission_mode_at),
+            };
+            *stored = Some(value);
+            *stored_at = Some(at);
+        }
+        RowChange::ForkLinkCleared => {
+            row.forked_from = None;
+            row.forked_through = None;
+        }
+    }
+}
+
 fn set_workspace(
     state: &mut State,
     workspace: &str,
@@ -1377,6 +1505,39 @@ impl Admission {
         match self.lock().state.workspace(workspace) {
             Some(entry) => entry.deleting.as_deref() == Some(session),
             None => true,
+        }
+    }
+
+    /// Session `id`'s row as last stored; `None` once the session is gone.
+    pub fn row(&self, id: &str) -> Option<SessionRow> {
+        self.lock().state.row(id).cloned()
+    }
+
+    /// The rows of the sessions found in workspace `workspace`'s folder
+    /// rather than started by Ersa.
+    pub fn found_in(&self, workspace: &str) -> Vec<SessionRow> {
+        let inner = self.lock();
+        let rows = inner
+            .state
+            .sessions()
+            .filter_map(|(_, entry)| entry.row.as_ref());
+        rows.filter(|row| row.started_elsewhere && row.workspace_id == workspace)
+            .cloned()
+            .collect()
+    }
+
+    /// Says a change to session `session`'s row is stored. False when the
+    /// session is gone: nothing is kept.
+    pub fn wrote(&self, session: &str, change: RowChange) -> bool {
+        let report = Report::RowWritten {
+            session: session.to_string(),
+            change,
+        };
+        match self.apply(Input::Report(report)).0 {
+            Outcome::Noted => true,
+            Outcome::Stale => false,
+            // A report is noted or stale, never the answer to a command.
+            Outcome::Admitted(_) | Outcome::Done | Outcome::Refused(_) | Outcome::Held => false,
         }
     }
 

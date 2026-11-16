@@ -12,7 +12,8 @@ use ersa_protocol::core_api::Session;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::{SEND_SETTLE, SessionError, SessionManager, bounded, lock};
+use super::{SEND_SETTLE, SessionError, SessionManager, bounded};
+use crate::admission::{RowChange, Setting};
 use crate::persistence::{SessionRow, now_rfc3339};
 
 impl SessionManager {
@@ -46,20 +47,12 @@ impl SessionManager {
         self.store
             .set_session_control(id.to_string(), name, value.clone(), at.clone())
             .await?;
-        {
-            let mut guard = lock(&handle.row);
-            // A plain reference, so two of its fields can be borrowed at once.
-            let row = &mut *guard;
-            let (stored, stored_at) = match control {
-                SessionControl::Model(_) => (&mut row.model, &mut row.model_at),
-                SessionControl::Effort(_) => (&mut row.effort, &mut row.effort_at),
-                SessionControl::PermissionMode(_) => {
-                    (&mut row.permission_mode, &mut row.permission_mode_at)
-                }
-            };
-            *stored = Some(value);
-            *stored_at = Some(at);
-        }
+        let setting = match control {
+            SessionControl::Model(_) => Setting::Model,
+            SessionControl::Effort(_) => Setting::Effort,
+            SessionControl::PermissionMode(_) => Setting::PermissionMode,
+        };
+        self.wrote(&handle, RowChange::Requested { setting, value, at })?;
         // The adapter recorded the backend's answer before it returned, and
         // the stream's report of the new model or mode comes with it: wait
         // until the pipeline has projected it, so the session is listed
@@ -69,7 +62,7 @@ impl SessionManager {
         let target = live.sink.next_index();
         let mut progress = live.progress.clone();
         let _ = tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await;
-        Ok(handle.describe())
+        handle.session()
     }
 }
 

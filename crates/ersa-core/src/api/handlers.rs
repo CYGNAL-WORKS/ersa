@@ -442,8 +442,8 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     removing.end(Report::ProjectRemoved {
         project: project.id.clone(),
     });
-    if let (Some(root), Some(quiet)) = (&root, quiet) {
-        core.sessions.forget_found(root, quiet).await;
+    if let Some(quiet) = quiet {
+        core.sessions.forget_found(quiet).await;
     }
     Ok(project)
 }
@@ -783,7 +783,7 @@ pub(super) async fn workspace_remove(
     removing.end(Report::WorkspaceRemoved {
         workspace: id.clone(),
     });
-    core.sessions.forget_found(&id, quiet).await;
+    core.sessions.forget_found(quiet).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }
