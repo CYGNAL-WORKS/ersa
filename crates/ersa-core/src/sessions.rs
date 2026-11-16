@@ -271,6 +271,10 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
             SessionError::InvalidState(format!("session {session_id} is running; stop it first"))
         }
         Refusal::BeingArchived => send::being_archived(),
+        Refusal::SessionDeleting => being_deleted(session_id),
+        Refusal::Archived => send::archived(),
+        Refusal::NotRunning => not_running(),
+        Refusal::SendInProgress => send::in_progress(),
         // The run was announced ended, and Core's own wind-down stalled.
         Refusal::GaveUp => SessionError::Internal(format!(
             "session {session_id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
@@ -286,6 +290,7 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         | Refusal::WorkspaceBusy
         | Refusal::WorkspaceHasSessions
         | Refusal::NoSection
+        | Refusal::NoSendToCancel
         | Refusal::SessionExists => SessionError::Internal(format!(
             "admission refused session {session_id} in workspace {workspace_id}: {refusal:?}"
         )),
@@ -301,6 +306,14 @@ async fn stop_held(handle: &Handle) -> Result<(), SessionError> {
     };
     begin_stop(&live);
     wait_finished(&live, STOP_TIMEOUT).await
+}
+
+/// The refusal for a request about a session that is marked deleting.
+fn being_deleted(session_id: &str) -> SessionError {
+    SessionError::refused(
+        ErrorReason::SessionDeleting,
+        format!("session {session_id} is being deleted; delete it again to finish"),
+    )
 }
 
 /// The refusal for a request a delete under way holds back.
@@ -861,7 +874,7 @@ impl Handle {
             state,
             created_at: presented.created_at,
             last_event_seq: hub.last_seq(),
-            sending: lock(&self.sending).as_ref().map(send::Sending::phase),
+            sending: self.send_phase(),
             archived: row.archived,
             pinned: row.pinned,
             section_id: row.section_id,
@@ -1319,12 +1332,14 @@ impl SessionManager {
         stop_held(&handle).await
     }
 
-    /// Refuses a message to a session that is being archived, as admission
-    /// says (PROTO-CORE-API-R85).
-    fn may_send(&self, handle: &Handle) -> Result<(), SessionError> {
-        self.admission
-            .may_send(&handle.id)
-            .map_err(|refusal| refused_session(refusal, &handle.workspace_id, &handle.id))
+    /// The answer for a `session.send` admission refused, worded as before
+    /// admission decided it.
+    fn refused_send(&self, handle: &Handle, refusal: Refusal) -> SessionError {
+        match refusal {
+            // With the backend's own reason, when its last start failed.
+            Refusal::NotRunning => handle.not_running(),
+            other => refused_session(other, &handle.workspace_id, &handle.id),
+        }
     }
 
     /// Stops every running session, for `core.shutdown`: all at once, then
@@ -1772,13 +1787,7 @@ impl SessionManager {
             return Err(busy(workspace_id));
         }
         if deleting.is_some() {
-            return Err(SessionError::refused(
-                ErrorReason::SessionDeleting,
-                format!(
-                    "session {} is being deleted; delete it again to finish",
-                    handle.id
-                ),
-            ));
+            return Err(being_deleted(&handle.id));
         }
         Ok(())
     }
@@ -4099,6 +4108,67 @@ mod tests {
             matches!(&deleting, Err(SessionError::Refused { reason: r, .. }) if *r == reason),
             "{deleting:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_send_to_a_session_being_forked_gives_way_and_frees_its_slot() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let handle = manager.handle("s-gated").unwrap();
+        // Running, so that admission gives the send its slot.
+        let (_sink, _finished, _run) = make_live(&manager);
+        let send = || manager.send("s-gated", "hi".into(), Vec::new(), || {}, None);
+        let slot = || {
+            manager
+                .admission
+                .snapshot()
+                .session("s-gated")
+                .unwrap()
+                .send
+        };
+
+        // A fork of it is reading its record.
+        handle.forking.store(true, Ordering::SeqCst);
+        let sent = send().await;
+        assert!(
+            matches!(&sent, Err(SessionError::InvalidState(m)) if m.contains("being forked")),
+            "{sent:?}"
+        );
+        // The slot it took is free again: the fork finds no message being
+        // sent.
+        assert_eq!(slot(), None);
+        assert_eq!(handle.send_phase(), None);
+
+        // Its own delete has its workspace too: that is said first, as
+        // while the claim is held a send answers `busy`.
+        let delete = Command::DeleteSession {
+            session: "s-gated".into(),
+        };
+        let deleting = manager.admission.command(delete).await.unwrap();
+        let sent = send().await;
+        assert!(matches!(&sent, Err(SessionError::Busy(_))), "{sent:?}");
+        assert_eq!(slot(), None);
+        drop(deleting);
+    }
+
+    #[tokio::test]
+    async fn a_send_to_a_stopped_session_with_no_way_to_start_it_is_not_running() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        // No resumption: the sender cannot start the session's backend.
+        let sent = manager
+            .send("s-gated", "hi".into(), Vec::new(), || {}, None)
+            .await;
+        let reason = ErrorReason::SessionNotRunning;
+        assert!(
+            matches!(&sent, Err(SessionError::Refused { reason: r, .. }) if *r == reason),
+            "{sent:?}"
+        );
+        // Nothing was begun: the slot is free.
+        let state = manager.admission.snapshot();
+        assert_eq!(state.session("s-gated").unwrap().send, None);
     }
 
     // verifies: PROTO-CORE-API-R71

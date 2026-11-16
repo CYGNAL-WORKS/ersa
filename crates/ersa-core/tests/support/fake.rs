@@ -112,6 +112,8 @@ pub struct Stats {
     pub record_deletion_ended: tokio::sync::Notify,
     /// Permission requests answered.
     pub decisions: AtomicUsize,
+    /// Interrupts the backend was sent.
+    pub interrupts: AtomicUsize,
     /// Every change of a live session's controls the backend took, in order.
     pub changes: Mutex<Vec<SessionControl>>,
     /// The backend refuses every change of a live session's controls.
@@ -848,6 +850,16 @@ impl AdapterSession for FakeSession {
                 "the backend stopped reading",
             )));
         }
+        // A backend slow to take the message: it does once it was sent an
+        // interrupt. Waits on state, bounded so a test still ends.
+        if message.text == "taken once interrupted" {
+            for _ in 0..500 {
+                if self.stats.interrupts.load(Ordering::SeqCst) > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
         // The backend exited before the write, while Core still holds its run.
         if message.text == "stopped before the write" {
             return Err(AdapterError::NotRunning);
@@ -959,6 +971,7 @@ impl AdapterSession for FakeSession {
         self.running()?;
         self.sink
             .record(Direction::Host, json!({ "t": "interrupt" }).to_string());
+        self.stats.interrupts.fetch_add(1, Ordering::SeqCst);
         // A working turn ends as interrupted; with none, the interrupt has no effect.
         let working = std::mem::take(&mut self.inner.lock().unwrap().working);
         if working {
