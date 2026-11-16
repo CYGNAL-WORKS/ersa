@@ -235,8 +235,13 @@ async fn a_found_session_whose_record_is_gone_leaves_the_list_and_one_ersa_start
         .result("session.stop", json!({ "id": ersa["id"] }))
         .await;
 
-    // The backend's retention removes the found session's record.
-    backend.records.lock().unwrap().remove("rec-a");
+    // The backend's retention removes the found session's record. Ersa's
+    // session has none either, as a new session has none until its first
+    // message, though the fake made an empty one when it started.
+    {
+        let mut records = backend.records.lock().unwrap();
+        records.clear();
+    }
     let listed = sessions(&mut client).await;
     assert!(listed.iter().all(|s| s["id"] != found), "{listed:#?}");
     assert!(listed.iter().any(|s| s["id"] == ersa["id"]));
