@@ -3603,6 +3603,21 @@ mod tests {
         (sink, finished, run)
     }
 
+    #[tokio::test]
+    async fn nothing_is_launched_once_core_is_shutting_down() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        manager.stop_all().await;
+        // Admission was told, so the launch of a start that was under way
+        // is refused, and the session is not live.
+        assert!(matches!(
+            manager.admission.launch("s-gated"),
+            Err(Refusal::Closing)
+        ));
+        assert!(manager.handle("s-gated").unwrap().live().is_none());
+    }
+
     // verifies: PROTO-CORE-API-R41
     // Paused time: the wind-down below takes as long as the test says.
     #[tokio::test(start_paused = true)]
