@@ -1920,7 +1920,7 @@ async fn a_delete_whose_task_ends_without_a_report_releases_its_workspace() {
 // Paused time: each limit passes when the test's clock says so.
 #[tokio::test(start_paused = true)]
 async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_command() {
-    let limit = std::time::Duration::from_secs(30);
+    use std::time::Duration;
     let admission = Arc::new(Admission::default());
     let mut stored = existing();
     stored.sessions.push(("s1".into(), W.into(), false));
@@ -1930,32 +1930,47 @@ async fn each_waiter_gives_up_at_its_own_limit_and_withdraws_only_its_own_comman
     admission.report(run_ending("s1"));
 
     let began = tokio::time::Instant::now();
-    let waiter = |admission: Arc<Admission>| async move {
-        let answer = admission.begin_start("s1", limit).await.map(|_| ());
-        (answer, began.elapsed())
+    let start = |limit: u64| {
+        let admission = Arc::clone(&admission);
+        async move {
+            let answer = admission
+                .begin_start("s1", Duration::from_secs(limit))
+                .await
+                .map(|_| ());
+            (answer, began.elapsed().as_secs())
+        }
     };
-    // Two resumes, ten seconds apart: the same command, held twice.
-    let first = tokio::spawn(waiter(Arc::clone(&admission)));
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-    let second = tokio::spawn(waiter(Arc::clone(&admission)));
+    // Two resumes: the same command, held twice. The one that came first
+    // waits longer, so the one behind it in the queue gives up first.
+    let patient = tokio::spawn(start(60));
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let second = tokio::spawn(start(30));
     // And a send asking whether the session runs, five seconds later.
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_secs(5)).await;
     let asking = tokio::spawn({
         let admission = Arc::clone(&admission);
-        async move { (admission.run_settled("s1", limit).await, began.elapsed()) }
+        async move {
+            let answer = admission.run_settled("s1", Duration::from_secs(30)).await;
+            (answer, began.elapsed().as_secs())
+        }
     });
 
-    let (answer, after) = first.await.expect("joined");
-    assert_eq!(answer, Err(Refusal::GaveUp));
-    assert_eq!(after.as_secs(), 30);
-    // The first gave up, and took only its own command from the queue.
-    assert_eq!(admission.snapshot().held().len(), 2);
-    let (answer, after) = second.await.expect("joined");
-    assert_eq!(answer, Err(Refusal::GaveUp));
-    assert_eq!(after.as_secs(), 40);
-    let (answer, after) = asking.await.expect("joined");
-    assert_eq!(answer, Err(Refusal::GaveUp));
-    assert_eq!(after.as_secs(), 45);
+    // Never left waiting past every limit: a waiter that withdrew another's
+    // command would wait for ever on its own.
+    let all = async {
+        (
+            second.await.expect("joined"),
+            asking.await.expect("joined"),
+            patient.await.expect("joined"),
+        )
+    };
+    let (second, asking, patient) = tokio::time::timeout(Duration::from_secs(600), all)
+        .await
+        .expect("every waiter was answered");
+    assert_eq!(second, (Err(Refusal::GaveUp), 40));
+    assert_eq!(asking, (Err(Refusal::GaveUp), 45));
+    // The first to come was not answered by the others' limits.
+    assert_eq!(patient, (Err(Refusal::GaveUp), 60));
     assert!(admission.snapshot().held().is_empty());
 }
 
