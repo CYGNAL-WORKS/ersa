@@ -1468,7 +1468,7 @@ impl SessionManager {
         // begins meanwhile, so the backend never starts on a record being
         // rewritten. A live session is renamed through its backend, which
         // needs no turn of Core's.
-        let (live, _exclusive) = loop {
+        let (live, exclusive) = loop {
             if let Some(live) = handle.live() {
                 break (Some(live), None);
             }
@@ -1534,6 +1534,11 @@ impl SessionManager {
             .await;
             let (cwd, title) = (row.cwd.clone(), title.to_string());
             let renamed = bounded(async move {
+                // Held until the rewrite itself ends, however long that is
+                // after this request gave up on it: the call is never
+                // cancelled, and no start begins on a record still being
+                // written.
+                let _exclusive = exclusive;
                 adapter
                     .rename_record(transport, &cwd, &backend_id, &title)
                     .await
@@ -3527,6 +3532,8 @@ mod tests {
     struct GatedReads {
         record: Notify,
         summary: Notify,
+        /// A rename of a record waits here until the test lets it go.
+        rename: Notify,
         forgets: std::sync::atomic::AtomicUsize,
         stats_hang: AtomicBool,
         hung_stats: std::sync::atomic::AtomicUsize,
@@ -3584,6 +3591,17 @@ mod tests {
             }
             Ok(None)
         }
+        async fn rename_record(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _cwd: &str,
+            _backend_session_id: &str,
+            _title: &str,
+        ) -> Result<(), AdapterError> {
+            self.rename.notified().await;
+            Ok(())
+        }
+
         fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {
             self.forgets.fetch_add(1, Ordering::SeqCst);
         }
@@ -3901,13 +3919,14 @@ mod tests {
     }
 
     // verifies: ARCH-CORE-R14
-    // verifies: PROTO-CORE-API-R12
     #[tokio::test]
     async fn a_write_to_a_stopped_session_waits_for_its_exclusive_operation() {
         let adapter = Arc::new(GatedReads::default());
         let dir = tempfile::tempdir().unwrap();
         let manager = Arc::new(gated_manager(dir.path(), &adapter));
         store_gated(&manager).await;
+        // The rename's rewrite, once it has its turn, is not held up here.
+        adapter.rename.notify_one();
         type Write = fn(Arc<SessionManager>) -> tokio::task::JoinHandle<bool>;
         let writes: [(&str, Write); 3] = [
             ("a mode change", |manager| {
@@ -3935,17 +3954,10 @@ mod tests {
             let held = manager.exclusive("s-gated").await.unwrap();
             let writing = write(Arc::clone(&manager));
             // The write waits its turn, held in admission.
-            let waiting = async {
-                while manager.admission.snapshot().held().is_empty() {
-                    tokio::task::yield_now().await;
-                }
-            };
-            let waited = tokio::time::timeout(Duration::from_secs(5), waiting).await;
-            assert!(waited.is_ok(), "{name} did not wait");
             let wanted = Command::BeginExclusive {
                 session: "s-gated".into(),
             };
-            assert_eq!(manager.admission.snapshot().held(), [wanted], "{name}");
+            assert_eq!(held_in(&manager).await, [wanted], "{name}");
             assert!(!writing.is_finished(), "{name}");
             // With its turn it goes on, and lets go when it is done.
             drop(held);
@@ -3958,6 +3970,50 @@ mod tests {
             manager.get("s-gated").unwrap().mode.as_deref(),
             Some("plan")
         );
+    }
+
+    // verifies: ARCH-CORE-R16
+    // Paused time: the request's limit passes when the test's clock says so.
+    #[tokio::test(start_paused = true)]
+    async fn a_rename_given_up_on_holds_its_session_until_the_record_is_written() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        // The record is on a disk that hangs: the request gives up on it.
+        let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+        let found = |_: &str| Some(transport);
+        let renamed = manager.set_title("s-gated", "Renamed", found).await;
+        let timed_out = |e: &io::Error| e.kind() == io::ErrorKind::TimedOut;
+        assert!(
+            matches!(&renamed, Err(SessionError::Adapter(AdapterError::Io(e))) if timed_out(e)),
+            "{renamed:?}"
+        );
+
+        // The rewrite is still running, so the session is still held: a
+        // start asked for now waits, and never begins on a record that is
+        // being written.
+        let under_way = |manager: &SessionManager| {
+            let state = manager.admission.snapshot();
+            state.session("s-gated").unwrap().exclusive.clone()
+        };
+        assert_eq!(
+            under_way(&manager),
+            Some(crate::admission::Exclusive::Other)
+        );
+        let start = Command::BeginStart {
+            session: "s-gated".into(),
+        };
+        let starting = tokio::spawn({
+            let (admission, start) = (Arc::clone(&manager.admission), start.clone());
+            async move { admission.command(start).await }
+        });
+        assert_eq!(held_in(&manager).await, [start]);
+        assert!(!starting.is_finished());
+
+        // The rewrite ends: the start has its turn.
+        adapter.rename.notify_one();
+        let started = tokio::time::timeout(Duration::from_secs(5), starting).await;
+        assert!(started.expect("answered in time").expect("joined").is_ok());
     }
 
     /// What admission holds, once it holds something.
