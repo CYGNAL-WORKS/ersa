@@ -72,6 +72,8 @@ pub struct WorkspaceEntry {
     /// Whether it is the project's own folder.
     pub root: bool,
     pub phase: WorkspacePhase,
+    /// The session whose `session.delete` holds the workspace.
+    pub deleting: Option<Id>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -82,6 +84,8 @@ pub struct SessionEntry {
     pub found: bool,
     /// Whether its row is stored yet.
     pub stored: bool,
+    /// Whether a `session.remove` of it is under way.
+    pub removing: bool,
 }
 
 /// Everything admission decides from. Ordered maps and no counters, so two
@@ -126,6 +130,7 @@ impl State {
                 project: workspace.project,
                 root: workspace.root,
                 phase: workspace.phase,
+                deleting: None,
             };
             state.workspaces.insert(workspace.id, entry);
         }
@@ -137,6 +142,7 @@ impl State {
                     workspace,
                     found,
                     stored,
+                    removing: false,
                 },
             );
         }
@@ -179,14 +185,34 @@ impl State {
             .any(|session| session.workspace == workspace && !session.found)
     }
 
-    /// Whether a session found in the backend's records was admitted into
-    /// `workspace` and its row is not stored yet. A removal waits for it:
-    /// whether there is a row to take with the workspace is not known until
-    /// that reports.
-    fn has_arriving_found_session(&self, workspace: &str) -> bool {
+    /// Whether a session was admitted into `workspace` and its row is not
+    /// stored yet. A removal or a delete waits for it: which rows there are
+    /// to take, or to count, is not known until that reports.
+    fn has_arriving_session(&self, workspace: &str) -> bool {
         self.sessions
             .values()
-            .any(|session| session.workspace == workspace && session.found && !session.stored)
+            .any(|session| session.workspace == workspace && !session.stored)
+    }
+
+    /// Whether something holds `workspace`: its own removal, its project's
+    /// removal when it is the project's own folder, or a session's delete.
+    /// A held workspace takes no session, and no other removal or delete.
+    /// One admission does not have counts as held: it went with a removal
+    /// or a delete, and nothing may start in what is left of it.
+    pub fn workspace_held(&self, workspace: &str) -> bool {
+        let Some(entry) = self.workspaces.get(workspace) else {
+            return true;
+        };
+        let removing = match entry.phase {
+            WorkspacePhase::Removing { .. } => true,
+            WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => false,
+        };
+        let project_going = entry.root
+            && match self.projects.get(&entry.project).map(|entry| entry.phase) {
+                Some(ProjectPhase::Removing) => true,
+                Some(ProjectPhase::Adding | ProjectPhase::Present) | None => false,
+            };
+        removing || project_going || entry.deleting.is_some()
     }
 
     fn has_session(&self, workspace: &str) -> bool {
@@ -253,6 +279,14 @@ pub enum Command {
         session: Id,
         found: bool,
     },
+    /// `session.delete`: holds the session's workspace until it ends.
+    DeleteSession {
+        session: Id,
+    },
+    /// `session.remove`.
+    RemoveSession {
+        session: Id,
+    },
 }
 
 /// An operation admission has let begin, named by what it is on.
@@ -263,6 +297,8 @@ pub enum Operation {
     CreateWorkspace(Id),
     RemoveWorkspace(Id),
     CreateSession(Id),
+    DeleteSession(Id),
+    RemoveSession(Id),
 }
 
 /// What happened, said once it is stored. A report is never refused or
@@ -354,10 +390,11 @@ pub enum Refusal {
     WorkspaceBusy,
     WorkspaceHasSessions,
     WorkspaceNotReady,
-    /// The workspace is the root of a project being removed.
+    /// A removal or a delete holds the workspace.
     WorkspaceHeld,
     /// The id is taken.
     SessionExists,
+    NoSession,
 }
 
 /// Admission's answer to one input.
@@ -488,6 +525,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         project: project.clone(),
                         root: true,
                         phase: WorkspacePhase::Ready,
+                        deleting: None,
                     };
                     state.workspaces.insert(root.clone(), entry);
                     Outcome::Admitted(Operation::AddProject(project.clone()))
@@ -512,11 +550,18 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         .any(|workspace| &workspace.project == project && !workspace.root);
                     let arriving = root
                         .as_ref()
-                        .is_some_and(|root| state.has_arriving_found_session(root));
+                        .is_some_and(|root| state.has_arriving_session(root));
+                    let deleting = root
+                        .as_ref()
+                        .and_then(|root| state.workspaces.get(root))
+                        .is_some_and(|root| root.deleting.is_some());
                     if sessions {
                         Outcome::Refused(Refusal::ProjectHasSessions)
                     } else if isolated {
                         Outcome::Refused(Refusal::ProjectHasWorkspaces)
+                    } else if deleting {
+                        // A delete of a session found there holds the folder.
+                        Outcome::Refused(Refusal::ProjectBusy { root })
                     } else if arriving {
                         Outcome::Held
                     } else {
@@ -542,6 +587,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         project: project.clone(),
                         root: false,
                         phase: WorkspacePhase::Creating,
+                        deleting: None,
                     };
                     state.workspaces.insert(workspace.clone(), entry);
                     Outcome::Admitted(Operation::CreateWorkspace(workspace.clone()))
@@ -565,7 +611,11 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             if state.has_started_session(workspace) {
                 return Outcome::Refused(Refusal::WorkspaceHasSessions);
             }
-            if state.has_arriving_found_session(workspace) {
+            // A delete of a session found there holds it.
+            if entry.deleting.is_some() {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            if state.has_arriving_session(workspace) {
                 return Outcome::Held;
             }
             if let Some(entry) = state.workspaces.get_mut(workspace) {
@@ -592,6 +642,10 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 }
                 WorkspacePhase::Ready => {}
             }
+            // A delete holds it: what the delete counted must not change.
+            if entry.deleting.is_some() {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
             match state.projects.get(&entry.project).map(|entry| entry.phase) {
                 Some(ProjectPhase::Present) => {}
                 // The folder is on its way out: nothing joins it, a session
@@ -608,9 +662,47 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 workspace: workspace.clone(),
                 found: *found,
                 stored: false,
+                removing: false,
             };
             state.sessions.insert(session.clone(), entry);
             Outcome::Admitted(Operation::CreateSession(session.clone()))
+        }
+        Command::DeleteSession { session } => {
+            let Some(entry) = state.sessions.get(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            let workspace = entry.workspace.clone();
+            if state.workspace_held(&workspace) {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            // Whether there is a session to delete is not known until its
+            // removal reports; nor what the delete would count, until every
+            // session admitted into the workspace is stored.
+            if entry.removing || state.has_arriving_session(&workspace) {
+                return Outcome::Held;
+            }
+            if let Some(entry) = state.workspaces.get_mut(&workspace) {
+                entry.deleting = Some(session.clone());
+            }
+            Outcome::Admitted(Operation::DeleteSession(session.clone()))
+        }
+        Command::RemoveSession { session } => {
+            let Some(entry) = state.sessions.get(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            if state.workspace_held(&entry.workspace) {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            // Its row is still being stored, or another removal of it is
+            // under way: whether there is a session to remove is known once
+            // that reports.
+            if !entry.stored || entry.removing {
+                return Outcome::Held;
+            }
+            if let Some(entry) = state.sessions.get_mut(session) {
+                entry.removing = true;
+            }
+            Outcome::Admitted(Operation::RemoveSession(session.clone()))
         }
     }
 }
@@ -766,6 +858,27 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     Some(true) | None => Outcome::Stale,
                 }
             }
+            // A delete ends by letting go: what it did, it reported.
+            Operation::DeleteSession(session) => {
+                let held = state
+                    .workspaces
+                    .values_mut()
+                    .find(|workspace| workspace.deleting.as_ref() == Some(&session));
+                match held {
+                    Some(workspace) => {
+                        workspace.deleting = None;
+                        Outcome::Noted
+                    }
+                    None => Outcome::Stale,
+                }
+            }
+            Operation::RemoveSession(session) => match state.sessions.get_mut(&session) {
+                Some(entry) if entry.removing => {
+                    entry.removing = false;
+                    Outcome::Noted
+                }
+                Some(_) | None => Outcome::Stale,
+            },
         },
     }
 }
@@ -872,6 +985,21 @@ impl Admission {
         match self.lock().state.workspace(workspace)?.phase {
             WorkspacePhase::Removing { replaced } => Some(replaced),
             WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => None,
+        }
+    }
+
+    /// Whether a removal or a delete holds `workspace`
+    /// ([`State::workspace_held`]).
+    pub fn workspace_held(&self, workspace: &str) -> bool {
+        self.lock().state.workspace_held(workspace)
+    }
+
+    /// Whether a delete of `session` holds `workspace`, or the workspace
+    /// went already, with that delete or with a removal.
+    pub fn deleting(&self, workspace: &str, session: &str) -> bool {
+        match self.lock().state.workspace(workspace) {
+            Some(entry) => entry.deleting.as_deref() == Some(session),
+            None => true,
         }
     }
 
