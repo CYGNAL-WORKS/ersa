@@ -12,7 +12,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use super::{Result, Store, conflict};
 
 /// One session's row.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SessionRow {
     pub id: String,
     pub workspace_id: String,
@@ -140,14 +140,7 @@ impl Store {
     }
 
     pub async fn sessions(&self) -> Result<Vec<SessionRow>> {
-        self.call(|conn| {
-            let mut stmt = conn.prepare(&format!(
-                "SELECT {SESSION_COLUMNS} FROM sessions s JOIN workspaces w ON w.id = s.workspace_id"
-            ))?;
-            let rows = stmt.query_map([], session_row)?;
-            super::collect(rows)
-        })
-        .await
+        self.call(|conn| read_sessions(conn)).await
     }
 
     pub async fn session(&self, id: String) -> Result<Option<SessionRow>> {
@@ -408,6 +401,15 @@ pub(super) fn forget_found_sessions_unless_others(
                          WHERE workspace_id = ?1 AND started_elsewhere = 0)",
         [workspace_id],
     )
+}
+
+/// Every session's row.
+pub(super) fn read_sessions(conn: &Connection) -> Result<Vec<SessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {SESSION_COLUMNS} FROM sessions s JOIN workspaces w ON w.id = s.workspace_id"
+    ))?;
+    let rows = stmt.query_map([], session_row)?;
+    super::collect(rows)
 }
 
 fn read_session(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {

@@ -37,8 +37,9 @@ pub(super) type InFlight = Arc<Mutex<HashSet<(String, String)>>>;
 /// removal takes their rows ([`SessionManager::quiet_found`]).
 #[must_use]
 pub struct QuietFound {
-    /// Held only to be dropped: each drop ends that session's operation.
-    _held: Vec<UnderWay>,
+    /// Each session's row as it was when its operation was taken, and
+    /// the operation, which ends when dropped.
+    held: Vec<(SessionRow, UnderWay)>,
 }
 
 /// One folder to list: a `ready` workspace, for one backend.
@@ -137,7 +138,10 @@ impl SessionManager {
                         continue;
                     }
                     if let Some(handle) = self.record_found(folder, backend_id).await? {
-                        let row = lock(&handle.row).clone();
+                        // Gone again already: nothing to read for it.
+                        let Some(row) = handle.stored_row() else {
+                            continue;
+                        };
                         let (store, tiles) = (self.store.clone(), self.tiles.clone());
                         let (adapter, transport) =
                             (Arc::clone(&folder.adapter), Arc::clone(&folder.transport));
@@ -176,7 +180,7 @@ impl SessionManager {
         folder: &Folder,
         backend_id: &str,
     ) -> Result<Option<Arc<Handle>>, SessionError> {
-        let mut row = SessionRow {
+        let row = SessionRow {
             id: persistence::new_id("s"),
             workspace_id: folder.workspace.id.clone(),
             host_id: folder.host_id.clone(),
@@ -212,7 +216,7 @@ impl SessionManager {
             return Ok(None);
         }
         admitted.end(Report::SessionStored {
-            session: row.id.clone(),
+            row: Box::new(row.clone()),
         });
         if let Some(gate) = &self.found_gate {
             gate.stop().await;
@@ -220,8 +224,10 @@ impl SessionManager {
         // As at startup: with no request of Core's, the permission mode is
         // the backend's default until the record says otherwise.
         let default = BackendChoices::default_of(&folder.adapter.choices().permission_modes);
-        row.permission_mode = (!default.is_empty()).then_some(default);
-        let handle = Arc::new(Handle::new(row, UNKNOWN_TIME.to_string()));
+        let default = (!default.is_empty()).then_some(default);
+        let admission = Arc::clone(&self.admission);
+        let started = UNKNOWN_TIME.to_string();
+        let handle = Arc::new(Handle::new(&row, started, admission, default));
         // Loaded only while admission still has it. A removal that took its
         // row since tells admission before it reads this registry
         // ([`SessionManager::forget_found`]), so the session is either
@@ -245,15 +251,16 @@ impl SessionManager {
         lock(&self.sessions)
             .values()
             .filter(|handle| {
-                let row = lock(&handle.row);
-                row.started_elsewhere
-                    && row.workspace_id == folder.workspace.id
-                    && row.backend == folder.adapter.backend()
-                    && row.deleting.is_none()
-                    && row
-                        .backend_session_id
-                        .as_ref()
-                        .is_some_and(|id| !listed.contains(id))
+                handle.stored_row().is_some_and(|row| {
+                    row.started_elsewhere
+                        && row.workspace_id == folder.workspace.id
+                        && row.backend == folder.adapter.backend()
+                        && row.deleting.is_none()
+                        && row
+                            .backend_session_id
+                            .as_ref()
+                            .is_some_and(|id| !listed.contains(id))
+                })
             })
             .cloned()
             .collect()
@@ -269,7 +276,8 @@ impl SessionManager {
     ) -> Result<(), SessionError> {
         let mut asked = tokio::task::JoinSet::new();
         for (handle, folder) in missing {
-            let Some(backend_id) = lock(&handle.row).backend_session_id.clone() else {
+            let Some(backend_id) = handle.stored_row().and_then(|row| row.backend_session_id)
+            else {
                 continue;
             };
             let (adapter, transport) = (Arc::clone(&folder.adapter), Arc::clone(&folder.transport));
@@ -289,50 +297,46 @@ impl SessionManager {
             let Ok(_exclusive) = self.exclusive(&handle.id).await else {
                 continue;
             };
-            if handle.live().is_some()
-                || handle.removed.load(Ordering::SeqCst)
-                || lock(&handle.row).deleting.is_some()
-            {
+            // Gone since, though the exclusive operation was given: none.
+            let Some(row) = handle.stored_row() else {
+                continue;
+            };
+            if handle.live().is_some() || row.deleting.is_some() {
                 continue;
             }
             self.forget_row(&handle.id).await?;
-            self.let_go(&handle).await;
+            self.let_go(&handle, &row).await;
         }
         Ok(())
     }
 
-    /// The sessions found in workspace `workspace_id`'s folder.
-    fn found_in(&self, workspace_id: &str) -> Vec<Arc<Handle>> {
-        lock(&self.sessions)
-            .values()
-            .filter(|handle| {
-                let row = lock(&handle.row);
-                row.started_elsewhere && row.workspace_id == workspace_id
-            })
-            .cloned()
-            .collect()
-    }
-
-    /// Takes the exclusive operation of each found session loaded in
-    /// workspace `workspace_id`, waiting for any under way, before a removal
-    /// deletes their rows: an archive or an arrangement still writing one
-    /// finishes first, and nothing else begins on them. Given to
+    /// Takes the exclusive operation of each found session in workspace
+    /// `workspace_id`, waiting for any under way, before a removal deletes
+    /// their rows: an archive or an arrangement still writing one finishes
+    /// first, and nothing else begins on them. Asked of admission, which
+    /// has every one whose row is stored, loaded here or not, and kept with
+    /// each row as it then is: admission keeps none once the workspace is
+    /// gone. Given to
     /// [`SessionManager::forget_found`] once admission was told the
     /// workspace is gone; dropped when the delete fails, which lets them go
     /// on.
     pub async fn quiet_found(&self, workspace_id: &str) -> QuietFound {
         let mut quiet = Vec::new();
-        for handle in self.found_in(workspace_id) {
+        for found in self.admission.found_in(workspace_id) {
             // One that is gone already has nothing under way.
-            if let Ok(exclusive) = self.exclusive(&handle.id).await {
-                quiet.push(exclusive);
+            let Ok(exclusive) = self.exclusive(&found.id).await else {
+                continue;
+            };
+            // Read again with the operation held: nothing writes it now.
+            if let Some(row) = self.admission.row(&found.id) {
+                quiet.push((row, exclusive));
             }
         }
-        QuietFound { _held: quiet }
+        QuietFound { held: quiet }
     }
 
-    /// Lets go of the found sessions loaded in workspace `workspace_id`,
-    /// whose rows went with it, their records left
+    /// Lets go of the found sessions `quiet` names that are loaded, whose
+    /// rows went with their workspace, their records left
     /// (FLOW-RESUME-SESSION-R13). Called once admission was told the
     /// workspace is gone: a list that stored a found session there loads it
     /// before this reads the registry, or finds admission without it and
@@ -340,10 +344,14 @@ impl SessionManager {
     /// none has an operation under way: `quiet` holds each one's, taken
     /// before the rows went, and lets go last. A request that waited there
     /// finds the session gone.
-    pub async fn forget_found(&self, workspace_id: &str, quiet: QuietFound) {
-        for handle in self.found_in(workspace_id) {
-            handle.removed.store(true, Ordering::SeqCst);
-            self.let_go(&handle).await;
+    pub async fn forget_found(&self, quiet: QuietFound) {
+        for (row, _exclusive) in &quiet.held {
+            // One never loaded (its backend has no adapter here, or a list
+            // found admission without it) has nothing to let go of.
+            let loaded = lock(&self.sessions).get(&row.id).cloned();
+            if let Some(handle) = loaded {
+                self.let_go(&handle, row).await;
+            }
         }
         drop(quiet);
     }

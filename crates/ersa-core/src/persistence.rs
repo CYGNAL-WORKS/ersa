@@ -381,10 +381,7 @@ impl Store {
                 })
             })?;
             existing.workspaces = collect(rows)?;
-            let mut sessions =
-                conn.prepare("SELECT id, workspace_id, started_elsewhere FROM sessions")?;
-            let rows = sessions.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
-            existing.sessions = collect(rows)?;
+            existing.sessions = sessions::read_sessions(conn)?;
             Ok(existing)
         })
         .await
