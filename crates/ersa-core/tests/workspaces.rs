@@ -528,9 +528,10 @@ fn admin_dir(worktree: &Path) -> std::path::PathBuf {
     std::path::PathBuf::from(git_dir.trim())
 }
 
-/// Sets a workspace's row state directly, as a Core that died would leave it.
-async fn set_state(core: &TestCore, id: &Value, state: &'static str) {
-    let db = core.dir.path().join("data").join("ersa.db");
+/// Sets a workspace's row state directly, as a Core that died would leave
+/// it, in the database of the stopped Core whose folder is `dir`.
+async fn set_state(dir: &Path, id: &Value, state: &'static str) {
+    let db = dir.join("data").join("ersa.db");
     let store = ersa_core::persistence::Store::open(&db).expect("open");
     let id = id.as_str().unwrap().to_string();
     store
@@ -566,8 +567,14 @@ async fn a_killed_add_leaves_a_lock_that_only_an_error_workspace_overrides() {
     assert_eq!(kind(&error), "vcs_error");
     assert!(path.exists());
 
-    // On one that never finished (`error`), it is the add's leftover.
-    set_state(&core, &workspace["id"], "error").await;
+    // On one that never finished, it is the add's leftover: a Core that
+    // died making it left the row `creating`, which the next start marks
+    // `error`.
+    client.result("core.shutdown", json!({})).await;
+    core.task.await.expect("joined").expect("stopped cleanly");
+    set_state(core.dir.path(), &workspace["id"], "creating").await;
+    let core = support::start_with(core.dir, |_| {}).await;
+    let mut client = core.client().await;
     client
         .result("workspace.remove", json!({ "id": workspace["id"] }))
         .await;

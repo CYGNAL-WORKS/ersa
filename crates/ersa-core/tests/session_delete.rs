@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
-use ersa_core::{Adapter, Gate};
+use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records};
 use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
@@ -1033,75 +1033,24 @@ async fn workspace_state(client: &mut Client, project: &Value, workspace: &Value
         .expect("the workspace is listed")
 }
 
-/// Where a test lands another request in a `workspace.remove`.
-#[derive(Clone, Copy, PartialEq)]
-enum Land {
-    /// After its read, before its claim.
-    BeforeClaim,
-    /// While it holds the claim.
-    WhileClaimed,
-}
-
-/// A Core whose `workspace.remove` stops at each of its test stops (before
-/// and after claiming the workspace, after its sessions check, after it
-/// holds the found sessions) until the test lets it go, and that gate.
-async fn start_with_remove_gate(fake: &Arc<FakeAdapter>) -> (TestCore, Arc<Gate>) {
-    let gate = Arc::new(Gate::default());
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
-    let config_gate = Arc::clone(&gate);
-    let core = start_with_adapters(
-        tempdir(),
-        move |config| config.remove_gate = Some(config_gate),
-        adapters,
-    )
-    .await;
-    (core, gate)
-}
-
-/// Waits until the removal under way is stopped at `land`.
-async fn removal_stopped_at(gate: &Gate, land: Land) {
-    gate.reached().await;
-    if land == Land::WhileClaimed {
-        gate.go();
-        gate.reached().await;
-    }
-}
-
-/// Lets the removal stopped at `land` run to its end.
-fn let_removal_finish(gate: &Gate, land: Land) {
-    gate.go();
-    if land == Land::BeforeClaim {
-        // The stop after the claim; the removal waits there only for this.
-        gate.go();
-    }
-    // The stops after its check and after it holds the found sessions, for
-    // a removal its sessions don't hold back.
-    gate.go();
-    gate.go();
-}
-
-/// A delete marks the workspace `error` while a `workspace.remove` is
-/// stopped at `land`: before its claim (it read `ready`) or while it holds
-/// the claim. The removal is refused for the session and leaves `error`, so
-/// the workspace takes no new session while its folder may be going. The
-/// delete takes the files (a sole session, a token it showed), so it sets
-/// `error` (R57), and a locked worktree stops it at step 5 with the session
-/// kept.
-async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark(land: Land) {
+/// A `workspace.remove` of a workspace a delete set to `error` is refused
+/// for the session that delete left, and leaves `error`, so the workspace
+/// takes no new session while its folder may be going. The delete takes the
+/// files (a sole session, a token it showed), so it sets `error` (R57), and
+/// a locked worktree stops it at step 5 with the session kept. How a removal
+/// under way and the mark order is admission's table, fed directly in
+/// `tests/admission.rs`.
+// verifies: PROTO-CORE-API-R94
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark() {
     let fake = Arc::new(FakeAdapter::new(1));
-    let (core, gate) = start_with_remove_gate(&fake).await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
+    let (core, mut client) = start(&fake).await;
     let (project, repo) = project(&mut client, core.dir.path()).await;
     let (workspace, folder) = isolated(&mut client, &project).await;
     let id = idle_session(&mut client, &workspace).await;
     git(&repo, &["worktree", "lock", folder.to_str().unwrap()]);
     let shown = token(&mut client, &workspace).await;
 
-    let removal = remover
-        .request("workspace.remove", json!({ "id": workspace["id"] }))
-        .await;
-    removal_stopped_at(&gate, land).await;
     let error = client
         .error("session.delete", json!({ "id": id, "token": shown }))
         .await;
@@ -1110,77 +1059,15 @@ async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark(land: Land) {
         workspace_state(&mut client, &project, &workspace).await,
         "error"
     );
-    let_removal_finish(&gate, land);
 
-    let response = remover.response(removal).await;
-    let error = &response["error"];
-    assert_eq!(kind(error), "invalid_state", "{response}");
-    assert!(
-        error["message"].as_str().unwrap().contains("has sessions"),
-        "{response}"
-    );
-    assert_eq!(
-        workspace_state(&mut client, &project, &workspace).await,
-        "error"
-    );
     let error = client
-        .error(
-            "session.create",
-            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
-        )
+        .error("workspace.remove", json!({ "id": workspace["id"] }))
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
-}
-
-// verifies: PROTO-CORE-API-R94
-#[tokio::test(flavor = "multi_thread")]
-async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_before_its_claim() {
-    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(Land::BeforeClaim).await;
-}
-
-// verifies: PROTO-CORE-API-R94
-#[tokio::test(flavor = "multi_thread")]
-async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_while_it_holds_the_claim() {
-    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(Land::WhileClaimed).await;
-}
-
-/// The same, where git refuses the removal: another request marks the
-/// workspace `error` between the removal's read and its claim, and the
-/// refusal leaves it `error`.
-// verifies: PROTO-CORE-API-R94
-#[tokio::test(flavor = "multi_thread")]
-async fn a_removal_git_refuses_keeps_an_error_mark_set_after_its_read() {
-    let fake = Arc::new(FakeAdapter::new(1));
-    let (core, gate) = start_with_remove_gate(&fake).await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
-    let (project, repo) = project(&mut client, core.dir.path()).await;
-    let (workspace, folder) = isolated(&mut client, &project).await;
-    git(&repo, &["worktree", "lock", folder.to_str().unwrap()]);
-
-    let removal = remover
-        .request("workspace.remove", json!({ "id": workspace["id"] }))
-        .await;
-    removal_stopped_at(&gate, Land::BeforeClaim).await;
-    // As `session.delete` step 4 writes it (R57), straight to the row.
-    let db = core.dir.path().join("data").join("ersa.db");
-    let store = ersa_core::persistence::Store::open(&db).expect("open");
-    let workspace_id = workspace["id"].as_str().unwrap().to_string();
-    store
-        .call(move |conn| {
-            conn.execute(
-                "UPDATE workspaces SET state = 'error' WHERE id = ?1",
-                [workspace_id.as_str()],
-            )?;
-            Ok(())
-        })
-        .await
-        .expect("update");
-    let_removal_finish(&gate, Land::BeforeClaim);
-
-    let response = remover.response(removal).await;
-    assert_eq!(kind(&response["error"]), "vcs_error", "{response}");
-    assert!(folder.is_dir(), "a refusal leaves the folder");
+    assert!(
+        error["message"].as_str().unwrap().contains("has sessions"),
+        "{error}"
+    );
     assert_eq!(
         workspace_state(&mut client, &project, &workspace).await,
         "error"

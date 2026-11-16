@@ -5,7 +5,7 @@
 //! There are two layers. [`step`] is the transition function: plain data
 //! in, plain data out, no waiting and no I/O, so a test can feed it any
 //! ordering directly. [`Admission`] puts one lock around it and hands out
-//! [`Ticket`]s, so the rest of Core can use it from many tasks.
+//! [`UnderWay`] handles, so the rest of Core can use it from many tasks.
 //!
 //! An input is a command (a request asking to do something) or a report (an
 //! operation saying what happened). A command is admitted, refused, or held
@@ -193,6 +193,20 @@ impl State {
             .map(|(id, _)| id)
     }
 
+    /// Forgets `project`, its workspaces and every session in them.
+    fn drop_project(&mut self, project: &str) {
+        self.projects.remove(project);
+        let workspaces: Vec<Id> = self
+            .workspaces
+            .iter()
+            .filter(|(_, workspace)| workspace.project == project)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for workspace in workspaces {
+            self.drop_workspace(&workspace);
+        }
+    }
+
     /// Forgets `workspace` and every session in it.
     fn drop_workspace(&mut self, workspace: &str) {
         self.workspaces.remove(workspace);
@@ -204,8 +218,12 @@ impl State {
 /// A request asking admission to let an operation begin.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Command {
+    /// `root` is the id its root workspace will have, so that a request
+    /// naming either waits for the add to report rather than be told there
+    /// is no such thing.
     AddProject {
         project: Id,
+        root: Id,
         folder: Folder,
     },
     /// `root_runs_found`: whether Core is running a session found in the
@@ -250,7 +268,6 @@ pub enum Report {
     /// The project and its root workspace are stored.
     ProjectStored {
         project: Id,
-        root: Id,
     },
     /// The project's rows are gone, with its root workspace's and those of
     /// the sessions found there.
@@ -413,10 +430,17 @@ fn release(state: &mut State) -> Vec<(usize, Outcome)> {
 /// refused or held one leaves it as it was.
 fn decide(state: &mut State, command: &Command) -> Outcome {
     match command {
-        Command::AddProject { project, folder } => {
+        Command::AddProject {
+            project,
+            root,
+            folder,
+        } => {
             if state.projects.contains_key(project) {
                 let existing = project.clone();
                 return Outcome::Refused(Refusal::AlreadyProject { existing });
+            }
+            if state.workspaces.contains_key(root) {
+                return Outcome::Refused(Refusal::WorkspaceExists);
             }
             let at_folder = state
                 .projects
@@ -436,6 +460,12 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         phase: ProjectPhase::Adding,
                     };
                     state.projects.insert(project.clone(), entry);
+                    let entry = WorkspaceEntry {
+                        project: project.clone(),
+                        root: true,
+                        phase: WorkspacePhase::Ready,
+                    };
+                    state.workspaces.insert(root.clone(), entry);
                     Outcome::Admitted(Operation::AddProject(project.clone()))
                 }
             }
@@ -446,8 +476,10 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
         } => {
             let root = state.root_of(project).cloned();
             match state.projects.get(project).map(|entry| entry.phase) {
-                // One still being added has no id a client could name.
-                None | Some(ProjectPhase::Adding) => Outcome::Refused(Refusal::NoProject),
+                None => Outcome::Refused(Refusal::NoProject),
+                // Stored, perhaps, and its add yet to report: whether there
+                // is a project to remove is known once it does.
+                Some(ProjectPhase::Adding) => Outcome::Held,
                 Some(ProjectPhase::Removing) => Outcome::Refused(Refusal::ProjectBusy { root }),
                 Some(ProjectPhase::Present) => {
                     let sessions = *root_runs_found
@@ -476,10 +508,10 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 return Outcome::Refused(Refusal::WorkspaceExists);
             }
             match state.projects.get(project).map(|entry| entry.phase) {
-                None | Some(ProjectPhase::Adding) => Outcome::Refused(Refusal::NoProject),
-                // Whether there is still a project to make it in is not
-                // known until the removal reports.
-                Some(ProjectPhase::Removing) => Outcome::Held,
+                None => Outcome::Refused(Refusal::NoProject),
+                // Whether there is a project to make it in is not known
+                // until the add or the removal reports.
+                Some(ProjectPhase::Adding | ProjectPhase::Removing) => Outcome::Held,
                 Some(ProjectPhase::Present) => {
                     let entry = WorkspaceEntry {
                         project: project.clone(),
@@ -544,10 +576,10 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                         return Outcome::Refused(Refusal::WorkspaceHeld);
                     }
                 }
-                // A workspace always has a stored project.
-                None | Some(ProjectPhase::Adding) => {
-                    return Outcome::Refused(Refusal::NoWorkspace);
-                }
+                // Its project's add is yet to report.
+                Some(ProjectPhase::Adding) => return Outcome::Held,
+                // A workspace always has a project.
+                None => return Outcome::Refused(Refusal::NoWorkspace),
             }
             let entry = SessionEntry {
                 workspace: workspace.clone(),
@@ -564,7 +596,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
 /// when it does not fit it.
 fn note(state: &mut State, report: Report) -> Outcome {
     match report {
-        Report::ProjectStored { project, root } => {
+        Report::ProjectStored { project } => {
             match state
                 .projects
                 .get_mut(&project)
@@ -575,12 +607,6 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     return Outcome::Stale;
                 }
             }
-            let entry = WorkspaceEntry {
-                project,
-                root: true,
-                phase: WorkspacePhase::Ready,
-            };
-            state.workspaces.insert(root, entry);
             Outcome::Noted
         }
         Report::ProjectRemoved { project } => {
@@ -590,16 +616,7 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     return Outcome::Stale;
                 }
             }
-            state.projects.remove(&project);
-            let workspaces: Vec<Id> = state
-                .workspaces
-                .iter()
-                .filter(|(_, workspace)| workspace.project == project)
-                .map(|(id, _)| id.clone())
-                .collect();
-            for workspace in workspaces {
-                state.drop_workspace(&workspace);
-            }
+            state.drop_project(&project);
             Outcome::Noted
         }
         Report::ProjectRemovalRefused { project } => put_project_back(state, &project),
@@ -701,7 +718,7 @@ fn note(state: &mut State, report: Report) -> Outcome {
             Operation::AddProject(project) => {
                 match state.projects.get(&project).map(|entry| entry.phase) {
                     Some(ProjectPhase::Adding) => {
-                        state.projects.remove(&project);
+                        state.drop_project(&project);
                         Outcome::Noted
                     }
                     None | Some(ProjectPhase::Present | ProjectPhase::Removing) => Outcome::Stale,
@@ -772,7 +789,7 @@ fn put_project_back(state: &mut State, project: &str) -> Outcome {
     }
 }
 
-// -- The lock around the function, and tickets ------------------------------
+// -- The lock around the function, and operations under way ----------------
 
 /// Admission for a running Core: [`step`] behind one lock. The lock is a
 /// leaf: it is held only for one step, never across an await and never
@@ -799,9 +816,9 @@ impl Admission {
     }
 
     /// Asks to begin an operation. Answers at once unless the command is
-    /// held, and then when a report lets it be decided. The [`Ticket`] of an
+    /// held, and then when a report lets it be decided. The [`UnderWay`] of an
     /// admitted operation reports its end, however its task ends.
-    pub async fn command(self: &Arc<Self>, command: Command) -> Result<Ticket, Refusal> {
+    pub async fn command(self: &Arc<Self>, command: Command) -> Result<UnderWay, Refusal> {
         let (outcome, waiter) = self.apply(Input::Command(command));
         let outcome = match waiter {
             // Waited for outside the lock. The sender lives in `self`,
@@ -810,7 +827,7 @@ impl Admission {
             None => outcome,
         };
         match outcome {
-            Outcome::Admitted(operation) => Ok(Ticket {
+            Outcome::Admitted(operation) => Ok(UnderWay {
                 admission: Arc::clone(self),
                 operation: Some(operation),
             }),
@@ -868,8 +885,8 @@ impl Admission {
 }
 
 /// Gives each released command's answer to whoever waits for it. A command
-/// admitted with nobody left to take its ticket is ended at once, as a
-/// dropped ticket ends its operation (ARCH-CORE-R16).
+/// admitted with nobody left to take it is ended at once, as a dropped
+/// [`UnderWay`] ends its operation (ARCH-CORE-R16).
 fn answer_released(inner: &mut Inner, released: Vec<(usize, Outcome)>) {
     let mut abandoned = Vec::new();
     // From the last place down, so the places before it stay where they are.
@@ -885,18 +902,18 @@ fn answer_released(inner: &mut Inner, released: Vec<(usize, Outcome)>) {
     }
 }
 
-/// An admitted operation. Ending it with [`Ticket::end`] says how it
+/// An admitted operation. Ending it with [`UnderWay::end`] says how it
 /// ended; dropping it any other way says only that it ended
 /// ([`Report::Ended`]), so nothing it holds is held for ever
 /// (ARCH-CORE-R16).
-#[must_use = "dropping a ticket ends its operation"]
-pub struct Ticket {
+#[must_use = "dropping it ends the operation"]
+pub struct UnderWay {
     admission: Arc<Admission>,
     /// `None` once the operation's end was reported.
     operation: Option<Operation>,
 }
 
-impl Ticket {
+impl UnderWay {
     /// Reports how the operation ended, once that is stored.
     pub fn end(mut self, report: Report) {
         self.operation = None;
@@ -904,7 +921,7 @@ impl Ticket {
     }
 }
 
-impl Drop for Ticket {
+impl Drop for UnderWay {
     fn drop(&mut self) {
         if let Some(operation) = self.operation.take() {
             self.admission.report(Report::Ended(operation));

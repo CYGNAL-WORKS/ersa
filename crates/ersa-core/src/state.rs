@@ -10,6 +10,7 @@ use ersa_protocol::core_api::{BackendState, HelloHost};
 use tokio::sync::{Mutex, Semaphore, watch};
 
 use crate::adapters::{self, Detected};
+use crate::admission::Admission;
 use crate::app_log::AppLog;
 use crate::persistence::{LOCAL_HOST_ID, Store};
 use crate::platform;
@@ -46,11 +47,11 @@ pub struct CoreConfig {
     /// of its run. Zero, except in tests that need a request to land while
     /// a run winds down.
     pub wind_down_pause: Duration,
-    /// Where `workspace.remove` stops until a test lets it go: before
-    /// claiming the workspace, after, once its sessions no longer hold it
-    /// back, and once the sessions found in its folder are held; and where
-    /// `project.remove` stops once it holds those of its own folder. `None`,
-    /// except in tests that need another request to land at one of those.
+    /// Where `workspace.remove` stops until a test lets it go: before it
+    /// asks admission, and once the sessions found in its folder are held;
+    /// and where `project.remove` stops once it holds those of its own
+    /// folder. `None`, except in tests that need another request to land
+    /// at one of those.
     pub remove_gate: Option<Arc<Gate>>,
     /// Where the folder inspection of `project.add` and `project.find`
     /// stops, on its own thread before it touches the folder, until a test
@@ -199,6 +200,9 @@ impl CoreConfig {
 pub struct Core {
     pub config: CoreConfig,
     pub store: Store,
+    /// Decides every change to which projects, workspaces and sessions
+    /// exist (ARCH-CORE, Admission).
+    pub admission: Arc<Admission>,
     /// Every session, and the adapters that start them.
     pub sessions: SessionManager,
     local_transport: Arc<dyn Transport>,
@@ -238,12 +242,15 @@ impl Core {
             .as_ref()
             .map(|CommandTransport(transport)| Arc::clone(transport))
             .unwrap_or_else(|| Arc::new(LocalTreeTransport::for_commands()));
+        let admission = Arc::new(Admission::default());
         let sessions = SessionManager::new(store.clone(), adapters, app_log)
+            .with_admission(Arc::clone(&admission))
             .with_copy_pause(config.copy_pause)
             .with_wind_down_pause(config.wind_down_pause)
             .with_found_gate(config.found_gate.clone());
         Core {
             config,
+            admission,
             sessions,
             store,
             local_transport,
