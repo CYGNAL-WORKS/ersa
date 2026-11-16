@@ -3,7 +3,7 @@
 // runs, in the order that fails cheapest first.
 //
 //   node scripts/check.mjs          run every check, then summarise
-//   node scripts/check.mjs --quick  skip the full test run (fmt, clippy, manifest only)
+//   node scripts/check.mjs --quick  skip the test runs (fmt, clippy, generated files, manifest only)
 //
 // Exit 0 when everything passes.
 
@@ -36,6 +36,8 @@ const checks = [
         { name: "interface types", cmd: "node", args: ["scripts/gen-types.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
         { name: "interface tokens", cmd: "node", args: ["scripts/gen-tokens.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
         { name: "interface catalog export", cmd: "node", args: ["scripts/gen-catalog.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
+        // The interface's unit tests, as CI's Interface job runs them (`pnpm test`).
+        ...(QUICK ? [] : [{ name: "interface tests", cmd: "node", args: ["node_modules/vitest/vitest.mjs", "run"], cwd: join(ROOT, "apps", "shell") }]),
       ]
     : []),
   { name: "manifest", cmd: "node", args: ["scripts/manifest.mjs", "--check"] },
