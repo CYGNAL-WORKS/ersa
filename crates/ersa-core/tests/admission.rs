@@ -878,6 +878,18 @@ async fn admit(admission: &Arc<Admission>, command: Command) -> ersa_core::admis
     waited.await.expect("answered in time").expect("admitted")
 }
 
+/// Waits until a command is held: it is in admission's state, not answered.
+async fn until_held(admission: &Admission) {
+    let held = async {
+        while admission.snapshot().held().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), held)
+        .await
+        .expect("the command is held in time");
+}
+
 // verifies: ARCH-CORE-R16
 #[tokio::test]
 async fn an_operation_dropped_without_a_report_is_ended() {
@@ -912,10 +924,7 @@ async fn a_held_command_is_answered_when_what_it_waits_for_reports() {
         let admission = Arc::clone(&admission);
         async move { admission.command(add_project("p2")).await.map(|_| ()) }
     });
-    // Held: the command is in admission's state, not answered.
-    while admission.snapshot().held().is_empty() {
-        tokio::task::yield_now().await;
-    }
+    until_held(&admission).await;
     first.end(Report::ProjectStored {
         project: "p1".into(),
     });
@@ -940,9 +949,7 @@ async fn a_held_command_admitted_after_its_caller_left_is_ended_at_once() {
         let admission = Arc::clone(&admission);
         async move { admission.command(add_project("p2")).await.map(|_| ()) }
     });
-    while admission.snapshot().held().is_empty() {
-        tokio::task::yield_now().await;
-    }
+    until_held(&admission).await;
     // The caller stops waiting; then the first add ends without a project.
     second.abort();
     let _ = second.await;
