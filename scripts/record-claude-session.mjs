@@ -267,8 +267,10 @@ if (!version) {
 
 const dir = join(ROOT, "docs", "briefs", "protocol", "fixtures", "claude-code", version);
 mkdirSync(join(dir, "record"), { recursive: true });
-const existing = readdirSync(dir).filter((f) => /^\d{2}-.*\.jsonl$/.test(f)).length;
-const stem = `${String(existing).padStart(2, "0")}-${name}`;
+// One past the highest number taken, not the count: a retired fixture leaves a
+// gap, and the count would hand its neighbor's number out again.
+const taken = readdirSync(dir).map((f) => /^(\d{2,})-.*\.jsonl$/.exec(f)).filter(Boolean).map((m) => Number(m[1]));
+const stem = `${String(Math.max(-1, ...taken) + 1).padStart(2, "0")}-${name}`;
 if (existsSync(join(dir, stem + ".jsonl"))) {
   console.error(`fixture ${stem} already exists`);
   process.exit(1);

@@ -86,6 +86,21 @@ const problems = [];
 
 // ---- Briefs ---------------------------------------------------------------
 
+// The recorded fixtures by base name ("22-message-during-turn"), whatever their
+// version folder and extension. A brief cites one as `fixture 22-…` or as
+// `2.1.316/22-…` anywhere, and as a code span on a line that speaks of fixtures
+// or recordings, which is how a list of several is written. A citation of a
+// recording nobody made is a claim about a vendor's behavior with nothing behind it.
+const FIXTURES_DIR = join(BRIEFS_DIR, "protocol", "fixtures");
+const fixtures = new Set(existsSync(FIXTURES_DIR) ? walk(FIXTURES_DIR).map((f) => basename(f).replace(/\..*$/, "")) : []);
+const FIXTURE_NAME = "(\\d{2,}-[a-z][a-z0-9]*(?:-[a-z0-9]+)*)";
+const FIXTURE_NAMED = new RegExp(`(?:fixtures?\\s+|\\d+\\.\\d+\\.\\d+/(?:record/)?)${FIXTURE_NAME}`, "g");
+const FIXTURE_SPAN = new RegExp("`" + FIXTURE_NAME + "(?:\\.[a-z.]+)?`", "g");
+const citedFixtures = (line) => [
+  ...[...line.matchAll(FIXTURE_NAMED)].map((m) => m[1]),
+  ...(/fixture|record/i.test(line) ? [...line.matchAll(FIXTURE_SPAN)].map((m) => m[1]) : []),
+];
+
 const briefs = [];
 for (const file of walk(BRIEFS_DIR)) {
   if (!file.endsWith(".md")) continue;
@@ -115,6 +130,9 @@ for (const file of walk(BRIEFS_DIR)) {
   // two lines is what a union merge of two planning commits that each rewrote
   // it leaves, adjacent, each telling a different story of what is built.
   let builtLines = 0;
+  // A union merge can also keep a whole section twice, heading included.
+  const sections = new Set();
+  const missing = new Set();
   const checkBuilt = () => {
     if (section === "Built so far" && builtLines > 1) problems.push(`${fm.id}: Built so far holds ${builtLines} lines; a union merge kept both, keep the one the newest Changes line describes`);
     builtLines = 0;
@@ -128,6 +146,10 @@ for (const file of walk(BRIEFS_DIR)) {
     if (!fenced && /^#{1,6}\s/.test(line)) {
       checkBuilt();
       section = line.replace(/^#+\s*/, "").trim();
+      if (/^##\s/.test(line)) {
+        if (sections.has(section)) problems.push(`${fm.id}: the section "${section}" appears twice; a union merge kept both, keep one`);
+        sections.add(section);
+      }
     } else if (section === "Built so far" && !fenced && !f && line.trim()) builtLines++;
     if (!fenced && /^(#{1,6}|[-*])\s/.test(line)) parent = line;
     const b = !fenced && /^(\s*)[-*]\s+(\*\*.+?\*\*|`[^`]+`)/.exec(line);
@@ -138,6 +160,7 @@ for (const file of walk(BRIEFS_DIR)) {
       if (labels.has(key)) problems.push(`${fm.id}: ${label} appears twice under "${section}"`);
       labels.add(key);
     }
+    if (!fenced) for (const name of citedFixtures(line)) if (!fixtures.has(name)) missing.add(name);
     for (const m of line.matchAll(REQ_ID)) {
       const id = m[1];
       if (!id.startsWith(fm.id + "-R")) continue;
@@ -151,7 +174,8 @@ for (const file of walk(BRIEFS_DIR)) {
   checkBuilt();
   // An unclosed fence would hide every bullet after it from the check above.
   if (fence) problems.push(`${fm.id}: a code fence (${fence}) is never closed`);
-  for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);
+  for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times; when a union merge kept two wordings, a planning pass keeps the one the newest Changes line describes`);
+  for (const name of missing) problems.push(`${fm.id} cites fixture ${name}, which is not under docs/briefs/protocol/fixtures/`);
 
   briefs.push({
     id: fm.id,
