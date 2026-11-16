@@ -1073,6 +1073,8 @@ fn let_removal_finish(gate: &Gate, land: Land) {
         // The stop after the claim; the removal waits there only for this.
         gate.go();
     }
+    // The stop after its check, for a removal its sessions don't hold back.
+    gate.go();
 }
 
 /// A delete marks the workspace `error` while a `workspace.remove` is
