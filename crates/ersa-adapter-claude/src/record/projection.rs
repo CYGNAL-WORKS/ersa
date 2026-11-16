@@ -400,6 +400,17 @@ fn chain_fields(value: &Value) -> Value {
             kept.insert(key.to_string(), field.clone());
         }
     }
+    // Where a compaction kept part of the conversation, its boundary names
+    // the kept segment's first entry and the summary it now follows.
+    let segment = value.pointer("/compactMetadata/preservedSegment");
+    for (pointer, key) in [
+        ("/headUuid", "segmentHead"),
+        ("/anchorUuid", "segmentAnchor"),
+    ] {
+        if let Some(field) = segment.and_then(|s| s.pointer(pointer)) {
+            kept.insert(key.to_string(), field.clone());
+        }
+    }
     Value::Object(kept)
 }
 
@@ -411,6 +422,11 @@ fn uuid(value: &Value) -> Option<&str> {
 struct Node<'a> {
     index: usize,
     parent: Option<&'a str>,
+    /// The summary a compaction that kept this entry's segment wrote: the
+    /// CLI reads the kept segment as following it, so the chain reaches the
+    /// summary through the segment's first entry as well as going on to
+    /// that entry's own parent.
+    anchor: Option<&'a str>,
     main: bool,
     message: bool,
 }
@@ -435,6 +451,15 @@ struct Conversation {
 /// compaction, `logicalParentUuid` continues it, so the history before the
 /// compaction stays.
 ///
+/// A compaction that kept part of the conversation (fixture 2.1.316/44)
+/// leaves the entries after it chained to the kept segment, not to the
+/// summary; only the boundary's `preservedSegment` names the summary, as its
+/// anchor, with the segment's first entry as its head. So the chain runs from
+/// that head both to the summary (and through it the boundary) and on to the
+/// head's own parent. The chain is a set and entries project in file order,
+/// so the summary shows after the kept segment, where the compaction
+/// happened, and every entry shows once.
+///
 /// A damaged record never silently loses history. When the chain names a
 /// parent the record does not have (a line that could not be read, say),
 /// every main-thread entry before the break counts too, in file order; when
@@ -450,6 +475,17 @@ fn conversation(entries: &[&Value]) -> Conversation {
     if !entries.iter().any(|e| e.get("parentUuid").is_some()) {
         return every_entry(None);
     }
+    // Each kept segment's head and the summary it follows, from the main
+    // thread's compaction boundaries.
+    let anchors: HashMap<&str, &str> = entries
+        .iter()
+        .filter(|e| is_main_thread(e))
+        .filter(|e| e.get("subtype").and_then(Value::as_str) == Some("compact_boundary"))
+        .filter_map(|e| {
+            let text = |key: &str| e.get(key).and_then(Value::as_str);
+            Some((text("segmentHead")?, text("segmentAnchor")?))
+        })
+        .collect();
     let mut nodes: HashMap<&str, Node> = HashMap::new();
     for (index, entry) in entries.iter().enumerate() {
         let Some(id) = uuid(entry) else {
@@ -462,6 +498,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
         nodes.entry(id).or_insert(Node {
             index,
             parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
+            anchor: anchors.get(id).copied(),
             main: is_main_thread(entry),
             // A local command's output shows in the transcript as a message
             // does (PROTO-CLAUDE-CODE-STREAM-R23), so a chain may end on it.
@@ -473,7 +510,8 @@ fn conversation(entries: &[&Value]) -> Conversation {
     let parents: HashSet<&str> = nodes
         .values()
         .filter(|n| n.main)
-        .filter_map(|n| n.parent)
+        .flat_map(|n| [n.parent, n.anchor])
+        .flatten()
         .collect();
     let mut leaves: Vec<(&str, &Node)> = nodes
         .iter()
@@ -516,39 +554,48 @@ fn conversation(entries: &[&Value]) -> Conversation {
         }));
     };
 
+    // Each entry has one link back, or two at a kept segment's head; the
+    // chain set doubles as the walk's visited set, so a cycle (a boundary's
+    // logical parent is often the kept segment itself) ends that path.
     let mut chain = HashSet::new();
-    let mut at = last_message;
-    loop {
+    let mut to_walk = vec![last_message];
+    let mut break_at: Option<(usize, &str)> = None;
+    while let Some(at) = to_walk.pop() {
         if !chain.insert(at.to_string()) {
-            break; // A cycle: the chain is complete as far as it goes.
+            continue;
         }
         let node = &nodes[at];
+        // A summary the record does not have is not a break in the
+        // history: the head's own parent still carries it.
+        if let Some(anchor) = node.anchor.filter(|a| nodes.contains_key(a)) {
+            to_walk.push(anchor);
+        }
         match node.parent {
-            None => break,
-            Some(parent) if nodes.contains_key(parent) => at = parent,
+            None => {}
+            Some(parent) if nodes.contains_key(parent) => to_walk.push(parent),
+            // The chain names an entry the record does not have. Of two
+            // such breaks, the later one keeps more of the history.
             Some(parent) => {
-                // The chain names an entry the record does not have.
-                let root = node.index;
-                for (id, earlier) in &nodes {
-                    if earlier.main && earlier.index < root {
-                        chain.insert(id.to_string());
-                    }
+                if break_at.is_none_or(|(root, _)| node.index > root) {
+                    break_at = Some((node.index, parent));
                 }
-                return Conversation {
-                    chain: Some(chain),
-                    trailing,
-                    problem: Some(format!(
-                        "the record's chain names entry {parent}, which it does not have; \
-                         the entries before the break are shown in file order"
-                    )),
-                };
             }
         }
     }
+    let problem = break_at.map(|(root, parent)| {
+        for (id, earlier) in &nodes {
+            if earlier.main && earlier.index < root {
+                chain.insert(id.to_string());
+            }
+        }
+        format!(
+            "the record's chain names entry {parent}, which it does not have;              the entries before the break are shown in file order"
+        )
+    });
     Conversation {
         chain: Some(chain),
         trailing,
-        problem: None,
+        problem,
     }
 }
 
