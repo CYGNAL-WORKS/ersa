@@ -497,7 +497,16 @@ fn conversation(entries: &[&Value]) -> Conversation {
         // projected.
         nodes.entry(id).or_insert(Node {
             index,
-            parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
+            // A boundary that kept a segment names the segment's tail as its
+            // logical parent; the history before it comes through the
+            // segment's head instead, so a branch that left the segment (an
+            // edit inside it) does not bring the old tail back.
+            parent: text("parentUuid").or_else(|| {
+                text("segmentHead")
+                    .is_none()
+                    .then(|| text("logicalParentUuid"))
+                    .flatten()
+            }),
             anchor: anchors.get(id).copied(),
             main: is_main_thread(entry),
             // A local command's output shows in the transcript as a message
@@ -587,7 +596,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
             }
         }
         format!(
-            "the record's chain names entry {parent}, which it does not have;              the entries before the break are shown in file order"
+            "the record's chain names entry {parent}, which it does not have; \n             the entries before the break are shown in file order"
         )
     });
     Conversation {
