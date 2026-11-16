@@ -233,6 +233,8 @@ pub struct SessionManager {
     /// and while a delete removes a session's row, so a list never records
     /// a session twice or finds a deleted one again (`found`).
     listing: tokio::sync::Mutex<()>,
+    /// The folders whose listing is still under way (`found`).
+    listing_in_flight: found::InFlight,
 }
 
 /// Claimed workspaces, by id, with the session each delete is for.
@@ -833,6 +835,7 @@ impl SessionManager {
             claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
             listing: tokio::sync::Mutex::new(()),
+            listing_in_flight: Arc::default(),
         }
     }
 

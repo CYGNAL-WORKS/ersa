@@ -10,8 +10,10 @@
 //! - [`project_record`] turns a record into Ersa events, through the
 //!   same projection of messages as the live stream, and [`read_record`]
 //!   finds a session's record and does that to it.
-//! - [`list_sessions`] lists a directory's sessions, reading only the head and
-//!   tail of each record.
+//! - [`list_records`] lists the records filed under a directory with the
+//!   folder each names, leaving out SDK runs; Core lists folders with it.
+//!   [`list_sessions`] summarizes a directory's sessions from the head and
+//!   tail of each record, SDK runs included; no production code calls it.
 //! - [`record_settings`] reads back what a record says of its session's
 //!   model, effort and permission mode, for a relaunch; a listing reads
 //!   them from the tail.

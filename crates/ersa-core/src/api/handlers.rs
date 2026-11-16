@@ -359,6 +359,7 @@ pub(super) async fn project_set_trust(
 /// root workspace; it never cascades. Its root workspace goes with it.
 pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Project, ApiError> {
     let project = find_project(core, &params.id).await?;
+    let mut root = None;
     for workspace in core.store.workspaces(project.id.clone()).await? {
         match workspace.kind {
             WorkspaceKind::Isolated => {
@@ -368,34 +369,21 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
                 )));
             }
             WorkspaceKind::Root => {
-                // Sessions started in the backend's own tools don't hold it
-                // back unless Core is running one (FLOW-RESUME-SESSION-R13, R14).
-                if !core
-                    .store
-                    .sessions_in_workspace(workspace.id.clone())
-                    .await?
-                    .is_empty()
-                    || core.sessions.running_found(&workspace.id).is_some()
-                {
+                if holds_back_removal(core, &workspace.id).await? {
                     return Err(ApiError::invalid_state(format!(
                         "project {} has sessions in its own folder; stop and remove them first",
                         project.id
                     )));
                 }
+                root = Some(workspace.id);
             }
         }
     }
     // Anything created since the checks above makes the delete a conflict.
-    let root = core
-        .store
-        .workspaces(project.id.clone())
-        .await?
-        .into_iter()
-        .find(|w| w.kind == WorkspaceKind::Root);
     core.store.delete_project(project.id.clone()).await?;
     // The sessions found in its folder went with it, their records left.
     if let Some(root) = root {
-        core.sessions.forget_found(&root.id).await?;
+        core.sessions.forget_found(&root).await?;
     }
     Ok(project)
 }
@@ -663,15 +651,7 @@ pub(super) async fn workspace_remove(
     // deleted directory. Checked after the claim, because a session can
     // only be created in a `ready` workspace: one created before the claim
     // is seen here, and none can be created after it.
-    // Sessions started in the backend's own tools don't hold it back unless
-    // Core is running one (FLOW-RESUME-SESSION-R13, R14).
-    if !core
-        .store
-        .sessions_in_workspace(workspace.id.clone())
-        .await?
-        .is_empty()
-        || core.sessions.running_found(&workspace.id).is_some()
-    {
+    if holds_back_removal(core, &workspace.id).await? {
         release_claim(core, &workspace.id, replaced).await?;
         return Err(ApiError::invalid_state(format!(
             "workspace {} has sessions; stop and remove them first",
@@ -761,4 +741,16 @@ pub(super) async fn settings_set(
     params: SettingsSetParams,
 ) -> Result<Map<String, Value>, ApiError> {
     Ok(core.store.patch_settings(params.patch).await?)
+}
+
+/// Whether workspace `workspace_id`'s sessions hold back removing it: any
+/// session Ersa started there, and one started in the backend's own tools
+/// only while Core runs it (FLOW-RESUME-SESSION-R13, R14).
+async fn holds_back_removal(core: &Core, workspace_id: &str) -> Result<bool, ApiError> {
+    Ok(!core
+        .store
+        .sessions_in_workspace(workspace_id.to_string())
+        .await?
+        .is_empty()
+        || core.sessions.runs_found_in(workspace_id))
 }

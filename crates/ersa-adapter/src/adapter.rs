@@ -174,7 +174,8 @@ pub trait Adapter: Send + Sync {
     /// included, each with the working folder the record itself names: a
     /// backend may file two folders' records together (Claude Code's
     /// directory names are lossy), so Core counts only those naming `cwd`
-    /// (FLOW-RESUME-SESSION-R12). A record that cannot be read is left out;
+    /// (FLOW-RESUME-SESSION-R12). A record that cannot be read, or names no
+    /// folder, is left out;
     /// a folder that cannot be read is an error. A backend without records
     /// lists none, which is the default.
     async fn list_records(
@@ -405,8 +406,8 @@ pub struct ListedRecord {
     /// The backend's own id for the session, which resumes it.
     pub backend_session_id: String,
     /// The working folder the record itself names, spelled as the backend
-    /// spelled it; `None` when the part of the record read names none.
-    pub cwd: Option<String>,
+    /// spelled it. A record that names none is not listed.
+    pub cwd: String,
 }
 
 /// A session as its record presents it.

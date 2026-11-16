@@ -708,7 +708,7 @@ impl Adapter for FakeAdapter {
             .filter(|(id, filed)| filed.under == cwd && records.contains_key(*id))
             .map(|(id, filed)| ersa_adapter::ListedRecord {
                 backend_session_id: id.clone(),
-                cwd: Some(filed.cwd.clone()),
+                cwd: filed.cwd.clone(),
             })
             .collect();
         listed.sort_by(|a, b| a.backend_session_id.cmp(&b.backend_session_id));
