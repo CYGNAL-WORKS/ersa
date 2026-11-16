@@ -100,6 +100,10 @@ pub struct SessionEntry {
     pub exclusive: Option<Exclusive>,
     /// The message being sent to it, if one is: one at a time.
     pub send: Option<Sending>,
+    /// Whether a fork of it is starting: from its reads until the fork's
+    /// backend has read the record it copies. No message is sent to it and
+    /// it is not deleted meanwhile, and no second fork of it begins.
+    pub forking: bool,
     /// Whether Core runs its backend.
     pub run: Run,
 }
@@ -240,6 +244,7 @@ impl State {
                     removing: false,
                     exclusive: None,
                     send: None,
+                    forking: false,
                     run: Run::Stopped,
                 },
             );
@@ -495,6 +500,13 @@ pub enum Command {
         session: Id,
         resumes: bool,
     },
+    /// A `session.fork` of the session, or a fork of it made again: marks
+    /// it as being forked, for as long as the fork's reads, its registry
+    /// check or the fork's start hold the operation. Not the session's
+    /// exclusive operation: a stop, a removal and an archive of it go on.
+    Fork {
+        session: Id,
+    },
     /// Waits until the session's send slot is as `until` says, and begins
     /// nothing: the reporter of a send that waits its turn waits for a
     /// send to take the slot and then to free it, and a send waits to hear
@@ -552,6 +564,8 @@ pub enum Operation {
     /// A message being sent, from the step that gives it the session's
     /// slot.
     Send(Id),
+    /// A fork of the session starting.
+    Fork(Id),
     RemoveSection(Id),
     /// A session's run, from its launch until Core has let go of it.
     Run(Id),
@@ -724,6 +738,11 @@ pub enum Refusal {
     SendInProgress,
     /// No message is being sent, or it is handed over.
     NoSendToCancel,
+    /// A fork of the session is starting: it takes no message and is not
+    /// deleted until the fork has started.
+    BeingForked,
+    /// An earlier fork of the session has not finished starting.
+    Forking,
     NoSection,
     WorkspaceHasSessions,
     WorkspaceNotReady,
@@ -1053,6 +1072,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 removing: false,
                 exclusive: None,
                 send: None,
+                forking: false,
                 run: Run::Stopped,
             };
             state.sessions.insert(session.clone(), entry);
@@ -1071,6 +1091,11 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             // session admitted into the workspace is stored.
             if entry.removing || state.has_arriving_session(&workspace) {
                 return Outcome::Held;
+            }
+            // The fork's backend has yet to read the record a delete would
+            // take. Said last, with nothing held for it.
+            if entry.forking {
+                return Outcome::Refused(Refusal::BeingForked);
             }
             if let Some(entry) = state.workspaces.get_mut(&workspace) {
                 entry.deleting = Some(session.clone());
@@ -1187,6 +1212,11 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             if let Some(refusal) = refusal {
                 return Outcome::Refused(refusal);
             }
+            // A turn begun before the fork's backend has read the record
+            // would be copied part way.
+            if entry.forking {
+                return Outcome::Refused(Refusal::BeingForked);
+            }
             if entry.send.is_some() {
                 return Outcome::Refused(Refusal::SendInProgress);
             }
@@ -1198,6 +1228,40 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 entry.send = Some(sending);
             }
             Outcome::Admitted(Operation::Send(session.clone()))
+        }
+        Command::Fork { session } => {
+            let Some(entry) = state.sessions.get(session) else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            let Some(row) = &entry.row else {
+                return Outcome::Refused(Refusal::NoSession);
+            };
+            // In the order a fork has always been told them: its own
+            // delete has its workspace, it is marked deleting, something
+            // else holds its workspace.
+            let workspace = state.workspaces.get(&entry.workspace);
+            let own_delete = workspace.and_then(|workspace| workspace.deleting.as_ref());
+            if own_delete == Some(session) {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            if row.deleting.is_some() {
+                return Outcome::Refused(Refusal::SessionDeleting);
+            }
+            if state.workspace_held(&entry.workspace) {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            // A message on its way starts a turn the fork would copy part
+            // of.
+            if entry.send.is_some() {
+                return Outcome::Refused(Refusal::SendInProgress);
+            }
+            if entry.forking {
+                return Outcome::Refused(Refusal::Forking);
+            }
+            if let Some(entry) = state.sessions.get_mut(session) {
+                entry.forking = true;
+            }
+            Outcome::Admitted(Operation::Fork(session.clone()))
         }
         Command::AwaitSend { session, until } => {
             let Some(entry) = state.sessions.get(session) else {
@@ -1557,6 +1621,14 @@ fn note(state: &mut State, report: Report) -> Outcome {
             Operation::Arrange(session) => end_exclusive(state, &session, |exclusive| {
                 matches!(exclusive, Exclusive::Arrange { .. })
             }),
+            // Its last holder let go: the fork has started, or never will.
+            Operation::Fork(session) => match state.sessions.get_mut(&session) {
+                Some(entry) if entry.forking => {
+                    entry.forking = false;
+                    Outcome::Noted
+                }
+                Some(_) | None => Outcome::Stale,
+            },
             // However the send ended, the slot is free.
             Operation::Send(session) => {
                 match state

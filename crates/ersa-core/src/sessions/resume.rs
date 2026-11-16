@@ -46,9 +46,10 @@ struct HowToStart {
     /// The id of the record the backend continues.
     resume: Option<String>,
     fork_of: Option<ForkOf>,
-    /// For a fork made again: holds sends to its original until the fork's
-    /// backend is ready, as `session.fork` does (FLOW-RESUME-SESSION-R10).
-    fork_hold: Option<Arc<ForkHold>>,
+    /// For a fork made again: the operation that marks its original as
+    /// being forked until the fork's backend is ready, as `session.fork`
+    /// has (FLOW-RESUME-SESSION-R10).
+    forking: Option<Arc<UnderWay>>,
 }
 
 impl SessionManager {
@@ -180,7 +181,7 @@ impl SessionManager {
             config,
             how.backend_version,
             Launched::Resumed {
-                fork_hold: start.fork_hold,
+                forking: start.forking,
             },
         );
         drop(sessions);
@@ -246,7 +247,7 @@ impl SessionManager {
                 backend_session_id: chosen,
                 resume: None,
                 fork_of: None,
-                fork_hold: None,
+                forking: None,
             });
         };
         let version = adapter.record_version(Arc::clone(transport), &row.cwd, &own);
@@ -261,7 +262,7 @@ impl SessionManager {
                 backend_session_id: None,
                 resume: Some(own),
                 fork_of: None,
-                fork_hold: None,
+                forking: None,
             });
         }
         let Some(original) = row.forked_from.clone() else {
@@ -269,7 +270,7 @@ impl SessionManager {
                 backend_session_id: Some(own),
                 resume: None,
                 fork_of: None,
-                fork_hold: None,
+                forking: None,
             });
         };
         // A fork with no record of its own copies its original again, so it
@@ -277,12 +278,13 @@ impl SessionManager {
         // with the same answer when they refuse (FLOW-RESUME-SESSION-R10).
         // An original Core no longer lists has no checks to pass; the
         // backend then says what is wrong with copying it (FLOW-RESUME-SESSION-R11).
-        let fork_hold = match self.session_with_backend_id(&original) {
+        let forking = match self.session_with_backend_id(&original) {
             Some(original_id) => {
+                let marked = self.begin_fork(&original_id).await?;
                 let forkable = self
-                    .prepare_fork(&original_id, Arc::clone(transport))
+                    .prepare_fork(&original_id, Arc::clone(transport), marked)
                     .await?;
-                forkable.beginning.fork_hold
+                forkable.beginning.forking
             }
             None => None,
         };
@@ -293,7 +295,7 @@ impl SessionManager {
                 original,
                 name: lock(&handle.presented).title.clone(),
             }),
-            fork_hold,
+            forking,
         })
     }
 }
