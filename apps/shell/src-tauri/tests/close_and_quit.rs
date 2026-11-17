@@ -36,6 +36,97 @@ const HELPER: &str = "ERSA_QUIT_TEST_HELPER";
 const HELPER_ENDPOINT: &str = "ERSA_QUIT_TEST_ENDPOINT";
 const HELPER_PIDS: &str = "ERSA_QUIT_TEST_PIDS";
 
+// verifies: FLOW-CLOSE-AND-QUIT-R01
+#[test]
+fn closing_the_window_hides_it_and_the_app_keeps_running() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("the mock app builds");
+    WebviewWindowBuilder::new(
+        &app,
+        ersa_shell::WINDOW,
+        WebviewUrl::App("index.html".into()),
+    )
+    .build()
+    .expect("the window builds");
+
+    // How many times the window was hidden; whether it was still there after
+    // the close; whether the app was asked to exit before that was checked.
+    let hidden = Arc::new(AtomicUsize::new(0));
+    let still_open = Arc::new(AtomicBool::new(false));
+    let checked = Arc::new(AtomicBool::new(false));
+    let exit_asked = Arc::new(AtomicBool::new(false));
+    let (counted, open, done, asked) = (
+        hidden.clone(),
+        still_open.clone(),
+        checked.clone(),
+        exit_asked.clone(),
+    );
+    app.run_return(move |handle, event| match event {
+        // The mock runs a task sent from its own thread at once, so the
+        // close and the check are sent from another, to arrive in order.
+        // Had the window closed, the mock's loop would have ended with its
+        // last window and the check would never run; the check ends the
+        // loop itself.
+        RunEvent::Ready => {
+            let handle = handle.clone();
+            let (open, done) = (open.clone(), done.clone());
+            std::thread::spawn(move || {
+                let window = handle
+                    .get_webview_window(ersa_shell::WINDOW)
+                    .expect("the window");
+                window.close().expect("the close is sent");
+                let check = handle.clone();
+                handle
+                    .run_on_main_thread(move || {
+                        let window = check.get_webview_window(ersa_shell::WINDOW);
+                        open.store(window.is_some(), Ordering::SeqCst);
+                        done.store(true, Ordering::SeqCst);
+                        if let Some(window) = window {
+                            window.destroy().expect("the window is destroyed");
+                        }
+                    })
+                    .expect("the check is sent");
+            });
+        }
+        // The mock hands window events only to this callback, not to a
+        // builder's handler, so the Shell's handler is called here, with a
+        // hide that counts: the mock's own hide does nothing it can see.
+        RunEvent::WindowEvent { label, event, .. } => {
+            let window = handle
+                .get_webview_window(&label)
+                .expect("the event's window")
+                .as_ref()
+                .window();
+            ersa_shell::on_window_event(&window, &event, |_| {
+                counted.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        RunEvent::ExitRequested { .. } if !done.load(Ordering::SeqCst) => {
+            asked.store(true, Ordering::SeqCst);
+        }
+        _ => {}
+    });
+
+    assert!(
+        still_open.load(Ordering::SeqCst),
+        "the window was closed, not kept"
+    );
+    assert!(
+        !exit_asked.load(Ordering::SeqCst),
+        "closing the window asked the app to exit"
+    );
+    assert_eq!(
+        hidden.load(Ordering::SeqCst),
+        1,
+        "the window was not hidden once"
+    );
+}
+
 // verifies: FLOW-CLOSE-AND-QUIT-R03
 #[tokio::test]
 async fn quit_shuts_core_down_and_returns_once_it_has_exited() {

@@ -49,7 +49,10 @@ use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::Url;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, Runtime, State, WebviewUrl, WebviewWindowBuilder, Window,
+    WindowEvent,
+};
 use tokio::sync::Mutex;
 
 use bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
@@ -221,7 +224,8 @@ async fn shell_quit(app: AppHandle) -> Result<(), ()> {
 }
 
 /// The window's name, as built in [`run`].
-const WINDOW: &str = "main";
+/// The window's label.
+pub const WINDOW: &str = "main";
 
 fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(WINDOW) {
@@ -374,6 +378,27 @@ fn opens_unfocused(label: Option<&str>, background: Option<&str>) -> bool {
     label.is_some() && background == Some("1")
 }
 
+/// What the window does with its events. Closing it hides it, with `hide`;
+/// the tray icon stays, and Core and the sessions keep running
+/// (FLOW-CLOSE-AND-QUIT-R01). Only Quit, from the tray icon's menu, ends the
+/// app. `hide` is the window's own in the app, and a counter in
+/// tests/close_and_quit.rs, since Tauri's mock runtime cannot say whether a
+/// window is visible.
+///
+/// Public so that test can call it: the mock runtime hands window events
+/// only to the app's run callback.
+pub fn on_window_event<R: Runtime>(
+    window: &Window<R>,
+    event: &WindowEvent,
+    hide: impl Fn(&Window<R>),
+) {
+    if let WindowEvent::CloseRequested { api, .. } = event {
+        // Without this the window closes, and closing the last window exits.
+        api.prevent_close();
+        hide(window);
+    }
+}
+
 /// Opens the window, or shows the window of the Shell already running.
 /// Called by `main`.
 pub fn run() {
@@ -463,13 +488,10 @@ pub fn run() {
             }
             Ok(())
         })
-        // Closing the window hides it; Core and the sessions keep running
-        // (FLOW-CLOSE-AND-QUIT-R01). Only Quit ends the app.
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
+            on_window_event(window, event, |window| {
                 let _ = window.hide();
-            }
+            })
         })
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");
