@@ -141,3 +141,48 @@ describe("a menu from the pointer", () => {
     expect(closed).toEqual(["away"]);
   });
 });
+
+describe("a menu opened at the pointer", () => {
+  // The window is 800 by 600; the menu, as laid out, 200 by 300. (jsdom lays nothing out, so its size is given.)
+  const W = 800;
+  const H = 600;
+  const size = { width: 200, height: 300 };
+  const realRect = HTMLElement.prototype.getBoundingClientRect;
+
+  afterEach(() => {
+    HTMLElement.prototype.getBoundingClientRect = realRect;
+  });
+
+  /** Opens a menu at the press and gives back its box, as the window shows it. */
+  function openAt(x: number, y: number) {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: W });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: H });
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      if (!this.classList.contains("menu")) return realRect.call(this);
+      const left = parseFloat(this.style.left);
+      const top = parseFloat(this.style.top);
+      return { left, top, right: left + size.width, bottom: top + size.height, width: size.width, height: size.height, x: left, y: top, toJSON: () => ({}) };
+    };
+    render(createElement(Menu, { label: "Actions", entries, open: true, place: { x, y }, focus: "menu", onClose: () => {} }));
+    return screen.getByRole("menu").getBoundingClientRect();
+  }
+
+  // Near each edge and corner, every item stays inside the window: the menu opens the other way, and stays inside.
+  it.each([
+    ["the foot", 100, 590, { left: 100, top: 290 }],
+    ["the right edge", 790, 100, { left: 590, top: 100 }],
+    ["the bottom right corner", 795, 595, { left: 595, top: 295 }],
+    ["the top left corner", 2, 2, { left: 2, top: 2 }],
+    ["the middle of a short window's foot", 150, 200, { left: 150, top: 0 }],
+  ])("near %s, the whole menu is inside the window", (_, x, y, want) => {
+    if (y === 200) size.height = 500;
+    const box = openAt(x, y);
+    size.height = 300;
+    expect(box.left).toBe(want.left);
+    expect(box.top).toBe(want.top);
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(W);
+    expect(box.bottom).toBeLessThanOrEqual(H);
+  });
+});

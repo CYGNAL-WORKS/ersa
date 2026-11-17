@@ -36,7 +36,7 @@
   margin: 0 var(--space-xs);
 }
 
-/* Opened at the pointer: its corner at the press. */
+/* Opened at the pointer: its corner at the press, or the other way with no room, and always inside the window (placed by Menu.tsx, which measures it). */
 .menu[data-place="point"] {
   position-area: none;
 }
