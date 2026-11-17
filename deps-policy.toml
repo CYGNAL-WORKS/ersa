@@ -60,3 +60,12 @@ package = "chrono"
 version = "0.4.45"
 reason = "Unmaintained, not vulnerable: listed in Cargo.lock only as an optional dependency of serde_with 3.24 (through Tauri 2's tauri-utils) whose feature is off, so it is never built. Ends when Tauri or serde_with drops the entry, or the advisory is withdrawn."
 expires = 2027-01-30
+
+# The Interface's build and test tooling: Vite, Vitest and tinyglobby match
+# globs with picomatch. None of it ships in Ersa.
+[[vulnerability_exception]]
+id = "GHSA-fc5q-39xc-vjpf"
+package = "picomatch"
+version = "4.0.7"
+reason = "ReDoS from a crafted glob pattern, with no fixed release yet. picomatch is only in build and test tooling (Vite, Vitest, tinyglobby), which match patterns from the repository's own configuration, never untrusted input, and none of it ships. Ends when a fixed picomatch is released."
+expires = 2027-01-30
