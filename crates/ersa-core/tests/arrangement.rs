@@ -165,6 +165,60 @@ async fn arrange_sets_only_the_fields_given_and_each_outlives_core() {
     assert!(row.get("section_id").is_none(), "{row:#}");
 }
 
+/// `unseen` is set and cleared by `session.arrange` alone, leaves the pin
+/// and section as they were, is left by an arrangement that does not give
+/// it, and outlives Core.
+// verifies: PROTO-CORE-API-R78
+#[tokio::test(flavor = "multi_thread")]
+async fn unseen_is_set_only_when_given_and_outlives_core() {
+    let (core, mut client) = start().await;
+    let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
+    let id = new_session(&mut client, &workspace_id).await;
+    let other = new_session(&mut client, &workspace_id).await;
+    let work = create_section(&mut client, "Work").await;
+
+    // A session listed for the first time is not unseen.
+    assert_eq!(session_row(&mut client, &id).await["unseen"], false);
+
+    arrange(
+        &mut client,
+        json!({ "id": id, "pinned": true, "section_id": work["id"] }),
+    )
+    .await;
+    // Marked unseen; the pin and section are left as they were.
+    let arranged = arrange(&mut client, json!({ "id": id, "unseen": true })).await;
+    assert_eq!(arranged["unseen"], true);
+    assert_eq!(arranged["pinned"], true);
+    assert_eq!(arranged["section_id"], work["id"]);
+    assert_eq!(session_row(&mut client, &id).await["unseen"], true);
+    // Only that session.
+    assert_eq!(session_row(&mut client, &other).await["unseen"], false);
+
+    // Pin and section alone leave the mark.
+    let arranged = arrange(
+        &mut client,
+        json!({ "id": id, "pinned": false, "section_id": null }),
+    )
+    .await;
+    assert_eq!(arranged["unseen"], true);
+
+    drop(client);
+    let (core, mut client) = restarted(core).await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["unseen"], true, "kept across the restart");
+    assert_eq!(row["pinned"], false);
+    assert_eq!(session_row(&mut client, &other).await["unseen"], false);
+
+    // Cleared, and that outlives Core too.
+    let arranged = arrange(&mut client, json!({ "id": id, "unseen": false })).await;
+    assert_eq!(arranged["unseen"], false);
+    arrange(&mut client, json!({ "id": other, "unseen": true })).await;
+    drop(client);
+    let (_core, mut client) = restarted(core).await;
+    assert_eq!(session_row(&mut client, &id).await["unseen"], false);
+    assert_eq!(session_row(&mut client, &other).await["unseen"], true);
+}
+
 /// A section that does not exist is `not_found`, and the session is left
 /// as it was, the pin given beside it included.
 // verifies: PROTO-CORE-API-R34
