@@ -703,7 +703,7 @@ describe("arranging the rail", () => {
     expect(rail().querySelector('[data-session-id="s2"]')?.textContent).toContain("Alpha");
     expect(screen.getByRole("heading", { name: "Alpha" })).toBeTruthy();
     fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "All sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
     await settle();
     expect([...document.querySelectorAll(".sessions-page-title")].map((el) => el.textContent)).toContain("Alpha");
     expect(reads()).toBe(before);

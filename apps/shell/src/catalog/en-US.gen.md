@@ -88,9 +88,9 @@ Show
 
 Reset to defaults
 
-### `rail.arrange.allSessionsButton`
+### `rail.arrange.viewAllButton`
 
-All sessions
+View all
 
 ### `rail.arrange.groupByProjectButton`
 
