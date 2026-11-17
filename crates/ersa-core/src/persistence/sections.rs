@@ -1,9 +1,9 @@
 //! Sections: the groups the user makes for sessions in the rail (ADR 0026).
 //!
-//! A section's name is unique ignoring case. The caller passes each name
-//! with its key, the name as sections are compared, and the table's unique
-//! key on it refuses a second section with the same key, two requests
-//! racing included, with [`super::Error::Conflict`].
+//! A section's name is unique, compared exactly: names that differ only in
+//! case are different sections (PROTO-CORE-API-R76). The table's unique
+//! `name_key` holds the name, so two requests racing never make two
+//! sections with one name.
 
 use ersa_protocol::core_api::Section;
 use rusqlite::{OptionalExtension, Row, params};
@@ -26,38 +26,53 @@ impl Store {
         .await
     }
 
-    /// Makes a section. Fails with [`super::Error::Conflict`] when another
-    /// section has `key`.
-    pub async fn insert_section(&self, name: String, key: String) -> Result<Section> {
+    /// Makes a section named `name`, or finds the one that has it already.
+    /// `made` runs with a
+    /// section this call made, before the connection is free for another
+    /// call, so whatever it does comes before any later call finds the
+    /// section: a caller that tells others of the section there never
+    /// answers with one they have not been told of.
+    ///
+    /// [`super::Error::Conflict`] is not possible here: a taken name finds
+    /// its section.
+    pub async fn insert_section(
+        &self,
+        name: String,
+        made: impl FnOnce(&Section) + Send + 'static,
+    ) -> Result<Section> {
         self.call(move |conn| {
-            let section = Section {
-                id: new_id("sec"),
-                name,
-                created_at: now_rfc3339(),
-            };
-            conn.execute(
-                "INSERT INTO sections (id, name, name_key, created_at) VALUES (?1, ?2, ?3, ?4)",
-                params![section.id, section.name, key, section.created_at],
-            )
-            .map_err(|e| conflict(e, TAKEN))?;
-            Ok(section)
+            let inserted = conn
+                .query_row(
+                    // `DO NOTHING` returns no row when the name is taken.
+                    "INSERT INTO sections (id, name, name_key, created_at) VALUES (?1, ?2, ?2, ?3)
+                     ON CONFLICT (name_key) DO NOTHING
+                     RETURNING id, name, created_at",
+                    params![new_id("sec"), name, now_rfc3339()],
+                    section_row,
+                )
+                .optional()?;
+            if let Some(section) = inserted {
+                made(&section);
+                return Ok(section);
+            }
+            let found = conn.query_row(
+                "SELECT id, name, created_at FROM sections WHERE name_key = ?1",
+                [&name],
+                section_row,
+            )?;
+            Ok(found)
         })
         .await
     }
 
     /// Renames section `id`; `None` when there is no such section. Fails
-    /// with [`super::Error::Conflict`] when another section has `key`.
-    pub async fn rename_section(
-        &self,
-        id: String,
-        name: String,
-        key: String,
-    ) -> Result<Option<Section>> {
+    /// with [`super::Error::Conflict`] when another section has `name`.
+    pub async fn rename_section(&self, id: String, name: String) -> Result<Option<Section>> {
         self.call(move |conn| {
             conn.query_row(
-                "UPDATE sections SET name = ?2, name_key = ?3 WHERE id = ?1
+                "UPDATE sections SET name = ?2, name_key = ?2 WHERE id = ?1
                  RETURNING id, name, created_at",
-                params![id, name, key],
+                params![id, name],
                 section_row,
             )
             .optional()
