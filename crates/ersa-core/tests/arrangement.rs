@@ -91,6 +91,7 @@ async fn section_names(client: &mut Client) -> Vec<String> {
 /// a session belongs to one section at most; and what it sets, and the
 /// sections themselves, outlive Core.
 // verifies: PROTO-CORE-API-R34
+// verifies: PROTO-CORE-API-R64
 // verifies: FLOW-ORGANIZE-SESSIONS-R03
 // verifies: FLOW-ORGANIZE-SESSIONS-R13
 #[tokio::test(flavor = "multi_thread")]
@@ -167,7 +168,7 @@ async fn arrange_sets_only_the_fields_given_and_each_outlives_core() {
 
 /// A section that does not exist is `not_found`, and the session is left
 /// as it was, the pin given beside it included.
-// verifies: PROTO-CORE-API-R34
+// verifies: PROTO-CORE-API-R64
 #[tokio::test(flavor = "multi_thread")]
 async fn arranging_into_a_missing_section_is_not_found_and_changes_nothing() {
     let (core, mut client) = start().await;
@@ -197,77 +198,86 @@ async fn arranging_into_a_missing_section_is_not_found_and_changes_nothing() {
     assert_eq!(kind(&error), "not_found");
 }
 
-/// Core trims a section's name and refuses, with `invalid_params`, one
-/// that is then blank, longer than 80 characters, or another section's,
-/// ignoring case; `section.rename` likewise. A refusal changes nothing.
-// was FLOW-ORGANIZE-SESSIONS-R06; R23 replaces it, unbuilt
-// was PROTO-CORE-API-R61; R76 replaces it, unbuilt
+/// Section names follow Claude Desktop's rules: Core trims a name and
+/// refuses, with `invalid_params`, one that is then blank or longer than
+/// 200 characters; `section.create` with exactly another section's name
+/// answers with that section and makes none; `section.rename` to exactly
+/// another's name is refused; and names that differ only in case are
+/// different sections. A refusal changes nothing, and all of it outlives Core.
+// verifies: PROTO-CORE-API-R76
 #[tokio::test(flavor = "multi_thread")]
-async fn section_names_are_trimmed_and_blank_long_or_taken_ones_refused() {
+async fn section_names_follow_claude_desktops_rules() {
     let (core, mut client) = start().await;
 
     let work = create_section(&mut client, "  Work \t").await;
     assert_eq!(work["name"], "Work");
     assert!(work["id"].as_str().is_some_and(|id| !id.is_empty()));
-    // 80 characters, not bytes: each of these is two bytes in UTF-8.
-    let longest = "é".repeat(80);
+    // 200 characters, not bytes: each of these is two bytes in UTF-8.
+    let longest = "é".repeat(200);
     let summer = create_section(&mut client, &longest).await;
     assert_eq!(summer["name"], longest.as_str());
+
+    // Exactly another's name, once trimmed: that section, the same one in
+    // every field, and no second section.
+    for name in ["Work", " Work  "] {
+        assert_eq!(create_section(&mut client, name).await, work, "{name:?}");
+    }
+    assert_eq!(sections(&mut client).await, json!([work, summer]));
+
+    // Another case is another name, beyond ASCII too.
+    let lower = create_section(&mut client, "work").await;
+    let upper = create_section(&mut client, "É".repeat(200).as_str()).await;
+    assert_ne!(lower["id"], work["id"]);
+    assert_eq!(lower["name"], "work");
+    assert_ne!(upper["id"], summer["id"]);
+    let all = json!([work, summer, lower, upper]);
+    assert_eq!(sections(&mut client).await, all);
 
     let refused_names = [
         String::new(),
         " \t ".to_string(),
-        "é".repeat(81),
-        "x".repeat(81),
-        "work".to_string(),
-        " WORK ".to_string(),
-        // Case is ignored beyond ASCII too.
-        "É".repeat(80),
+        "é".repeat(201),
+        "x".repeat(201),
     ];
     for name in &refused_names {
         let response = client.call("section.create", json!({ "name": name })).await;
         assert_valid("section.create", &response);
         assert_eq!(response["error"]["code"], -32602, "{name:?}: {response:#}");
     }
-    assert_eq!(
-        section_names(&mut client).await,
-        vec!["Work".to_string(), longest.clone()]
-    );
+    assert_eq!(sections(&mut client).await, all);
 
-    // Renaming: the same rules, and a section may keep its own name in
-    // another case.
-    for name in &refused_names {
-        if name.trim().eq_ignore_ascii_case("work") {
-            continue;
-        }
+    // Renaming: the same limits, and exactly another's name is refused.
+    let taken = [" work ".to_string(), longest.clone()];
+    for name in refused_names.iter().chain(&taken) {
         let response = client
             .call("section.rename", json!({ "id": work["id"], "name": name }))
             .await;
         assert_valid("section.rename", &response);
         assert_eq!(response["error"]["code"], -32602, "{name:?}: {response:#}");
     }
+    assert_eq!(sections(&mut client).await, all);
+
+    // A section may take its own name again, or another case of another's.
     let response = client
         .call(
             "section.rename",
-            json!({ "id": summer["id"], "name": "work" }),
+            json!({ "id": work["id"], "name": "Work" }),
         )
         .await;
-    assert_eq!(response["error"]["code"], -32602, "{response:#}");
-    assert_eq!(
-        section_names(&mut client).await,
-        vec!["Work".to_string(), longest.clone()]
-    );
-
-    let response = client
-        .call(
+    assert_valid("section.rename", &response);
+    assert_eq!(response["result"], work);
+    let renamed = client
+        .result(
             "section.rename",
             json!({ "id": work["id"], "name": " WORK " }),
         )
         .await;
-    assert_valid("section.rename", &response);
-    assert_eq!(response["result"]["name"], "WORK");
-    assert_eq!(response["result"]["id"], work["id"]);
-    assert_eq!(response["result"]["created_at"], work["created_at"]);
+    assert_eq!(renamed["name"], "WORK");
+    assert_eq!(renamed["id"], work["id"]);
+    assert_eq!(renamed["created_at"], work["created_at"]);
+    // Its old name is free once it is renamed.
+    let again = create_section(&mut client, "Work").await;
+    assert_ne!(again["id"], work["id"]);
 
     let error = client
         .error(
@@ -277,12 +287,21 @@ async fn section_names_are_trimmed_and_blank_long_or_taken_ones_refused() {
         .await;
     assert_eq!(kind(&error), "not_found");
 
-    // A rename outlives Core.
+    // The rules hold after a restart: the names Core stored are compared
+    // exactly.
     drop(client);
     let (_core, mut client) = restarted(core).await;
+    assert_eq!(create_section(&mut client, "work").await, lower);
+    assert_eq!(create_section(&mut client, "WORK").await, renamed);
     assert_eq!(
         section_names(&mut client).await,
-        vec!["WORK".to_string(), longest]
+        vec![
+            "WORK".to_string(),
+            longest,
+            "work".to_string(),
+            "É".repeat(200),
+            "Work".to_string()
+        ]
     );
 }
 
@@ -460,9 +479,9 @@ async fn last_activity_changes_only_when_a_turn_ends() {
 
 /// A section's name is taken as a session's title is: each run of spacing
 /// is one space, and a name holding any other control character is refused
-/// with `invalid_params`, renaming included. Case is compared by Unicode
-/// lowercase and nothing else, so two spellings of one accented letter are
-/// two names.
+/// with `invalid_params`, renaming included. Names are compared character
+/// for character, without normalizing, so two spellings of one accented
+/// letter are two names.
 // verifies: PROTO-CORE-API-R60
 #[tokio::test(flavor = "multi_thread")]
 async fn section_names_are_one_line_without_control_characters() {
@@ -470,11 +489,8 @@ async fn section_names_are_one_line_without_control_characters() {
 
     let spaced = create_section(&mut client, " Two \n\t  words  ").await;
     assert_eq!(spaced["name"], "Two words");
-    // Taken once collapsed, ignoring case.
-    let response = client
-        .call("section.create", json!({ "name": "two   WORDS" }))
-        .await;
-    assert_eq!(response["error"]["code"], -32602, "{response:#}");
+    // Exactly that name once collapsed: the same section.
+    assert_eq!(create_section(&mut client, "Two 	 words").await, spaced);
 
     for name in ["Bell\u{7}", "Null\u{0}here", "Esc\u{1b}[1m", "Del\u{7f}"] {
         let response = client.call("section.create", json!({ "name": name })).await;

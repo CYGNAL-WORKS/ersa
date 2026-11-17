@@ -2047,7 +2047,7 @@
         "name": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 80
+          "maxLength": 200
         },
         "created_at": {
           "type": "string",
@@ -3167,7 +3167,7 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case."
+          "description": "Core trims it and refuses with invalid_params one that is then blank or longer than 200 characters. Names are compared exactly: section.create with another section's name answers with that section, section.rename to it is refused with invalid_params, and names that differ only in case are different sections."
         }
       }
     },
@@ -3187,7 +3187,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case."
+          "description": "Core trims it and refuses with invalid_params one that is then blank, longer than 200 characters, or exactly another section's name. Names that differ only in case are different sections."
         }
       }
     },
