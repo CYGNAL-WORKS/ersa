@@ -86,6 +86,19 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
     };
   }, [open, shown]);
 
+  // A menu at the pointer is measured once it is laid out, before it is painted, and moved so all of it is inside the
+  // window: the other way from the press where there is no room, as a desktop's menus do, then held inside the edge.
+  const [at, setAt] = useState<{ left: number; top: number }>();
+  const px = "x" in place ? place.x : undefined;
+  const py = "y" in place ? place.y : undefined;
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el || !open || px === undefined || py === undefined) return;
+    const { width, height } = el.getBoundingClientRect();
+    const next = placeAtPoint(px, py, width, height, window.innerWidth, window.innerHeight);
+    setAt((was) => (was?.left === next.left && was.top === next.top ? was : next));
+  }, [open, shown, px, py]);
+
   // Focus moves in as it opens, as the opener asked.
   useEffect(() => {
     if (!open) return;
@@ -153,7 +166,7 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
   };
 
   if (!shown) return null;
-  const position = "anchor" in place ? ({ positionAnchor: place.anchor } as CSSProperties) : { left: place.x, top: place.y };
+  const position = "anchor" in place ? ({ positionAnchor: place.anchor } as CSSProperties) : (at ?? { left: place.x, top: place.y });
   return (
     <ul
       ref={list}
@@ -259,6 +272,19 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
       })}
     </ul>
   );
+}
+
+/**
+ * Where a menu w by h opened at the press (x, y) sits in a window vw by vh: to the right of and below the press where
+ * it fits, else to its left or above it, and in any case inside the window, its top-left corner winning when the menu
+ * is larger than the window.
+ */
+export function placeAtPoint(x: number, y: number, w: number, h: number, vw: number, vh: number) {
+  const along = (p: number, size: number, room: number) => {
+    const start = p + size > room ? p - size : p;
+    return Math.max(0, Math.min(start, room - size));
+  };
+  return { left: along(x, w, vw), top: along(y, h, vh) };
 }
 
 /** The first item a menu can take focus on. */
