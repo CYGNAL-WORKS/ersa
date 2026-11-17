@@ -43,7 +43,7 @@ export const enUS = {
       sortByButton: "Sort by",
       showButton: "Show",
       resetButton: "Reset to defaults",
-      allSessionsButton: "All sessions",
+      viewAllButton: "View all",
       groupByProjectButton: "Project",
       groupByDateButton: "Date",
       groupByNoneButton: "None",
