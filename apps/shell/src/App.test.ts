@@ -1847,3 +1847,68 @@ describe("a refused send App's composer says", () => {
     expect(line).toBe("the backend could not be started: Claude Code is not signed in");
   });
 });
+
+// Withdrawing trust from a project's heading (FLOW-NEW-SESSION-R31), against a fake Core that keeps each project's trust.
+describe("withdrawing trust", () => {
+  const note = "Claude Code still trusts this folder when you use it outside Ersa.";
+  /** The note beneath a project's heading, empty when it says nothing. */
+  const noteOf = (name: string) => screen.getByRole("button", { name: `More for ${name}` }).closest("li")?.querySelector(".rail-project-note")?.textContent;
+
+  async function withdraw(name: string) {
+    fireEvent.click(screen.getByRole("button", { name: `More for ${name}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Don't trust" }));
+    await settle();
+    await settle();
+  }
+
+  // verifies: FLOW-NEW-SESSION-R31
+  it("says beneath the heading that the backend's own tools keep trusting the folder, with no session running, until trusted again", async () => {
+    const trusted = new Map(projects.map((p) => [p.id, true]));
+    const core = fakeCore({
+      "project.list": () => projects.map((p) => ({ ...p, trusted: trusted.get(p.id) ?? true })),
+      "project.set_trust": (params: { id: string; trusted: boolean }) => {
+        trusted.set(params.id, params.trusted);
+        return {};
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    expect(noteOf("alpha")).toBe("");
+
+    // Every session is ended, so nothing runs that started trusted.
+    await withdraw("alpha");
+    expect(core.calls).toContainEqual({ method: "project.set_trust", params: { id: "alpha", trusted: false } });
+    expect(noteOf("alpha")).toBe(note);
+    expect(noteOf("beta")).toBe("");
+
+    // It stays while the heading is collapsed, and through Core's lists being read again.
+    fireEvent.click(screen.getByRole("button", { name: /^alpha/ }));
+    core.emit({ kind: "notification", method: "session.changed", params: sessions[0] } as never);
+    await settle();
+    expect(noteOf("alpha")).toBe(note);
+
+    // Trusted again, it no longer applies.
+    fireEvent.click(screen.getByRole("button", { name: "More for alpha" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Trust…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trust" }));
+    await settle();
+    await settle();
+    expect(noteOf("alpha")).toBe("");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R31
+  it("says nothing when Core refuses the withdrawal", async () => {
+    const core = fakeCore({
+      "project.set_trust": () => {
+        throw { kind: "rpc", error: { code: -32602, message: "project.set_trust: no project alpha" } };
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    await withdraw("alpha");
+    expect(noteOf("alpha")).toBe("");
+    expect(screen.getByText("Ersa can't change this project's trust.")).toBeTruthy();
+  });
+});

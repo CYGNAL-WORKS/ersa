@@ -77,12 +77,21 @@ describe("the rail's tree", () => {
     expect(failed).toContain("no answer");
   });
 
-  it("says what changing trust does: saving, failing, and running sessions keeping theirs", () => {
+  it("says what changing trust does: saving, failing, and the backend keeping its own trust", () => {
     expect(render({ trusting: { ersa: { state: "sending" } } })).toContain('role="status">Saving…</p>');
     const refused = render({ trusting: { ersa: { state: "failed", message: "no project ersa" } } });
     expect(refused).toContain("Ersa can&#x27;t change this project&#x27;s trust.");
     expect(refused).toContain("no project ersa");
-    expect(render({ keepingTrust: ["ersa"] })).toContain("Running sessions keep their current settings until they are stopped.");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R31
+  it("says beneath a heading whose trust was withdrawn that the backend's tools keep trusting the folder, collapsed too", () => {
+    const note = "Claude Code still trusts this folder when you use it outside Ersa.";
+    const open = '<div class="rail-project-note" data-open=""><p class="rail-project-note-text" role="status">';
+    expect(render({ backendTrusts: ["ersa"] })).toContain(open + note + "</p>");
+    expect(render({ backendTrusts: ["ersa"], collapsed: new Set(["ersa"]) })).toContain(open + note + "</p>");
+    // Saying nothing, it is there for a screen reader but closed.
+    expect(render({})).toContain('<div class="rail-project-note"><p class="rail-project-note-text" role="status"></p>');
   });
 
   it("counts a collapsed heading's sessions, and collapsed and not trusted, gives its words to the shield and a tooltip", () => {

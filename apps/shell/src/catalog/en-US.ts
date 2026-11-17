@@ -94,8 +94,8 @@ export const enUS = {
       savingProgress: "Saving…",
       trustError: "Ersa can't change this project's trust.",
       workspacesError: "Ersa can't read this project's workspaces.",
-      // Beneath a project whose trust was withdrawn while sessions that started trusted still run.
-      keepTrust: "Running sessions keep their current settings until they are stopped.",
+      // Beneath a project whose trust the user withdrew in Ersa: the backend keeps its own record of the folder.
+      backendTrustNote: "Claude Code still trusts this folder when you use it outside Ersa.",
     },
     foot: {
       attachedLabel: "Attached to {label}",
