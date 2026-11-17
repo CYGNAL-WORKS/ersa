@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// The sessions page in the window (FLOW-ORGANIZE-SESSIONS, step 9): All sessions in the arrange menu, what the page
+// The sessions page in the window (FLOW-ORGANIZE-SESSIONS, step 9): View all in the arrange menu, what the page
 // lists and hides, choosing a row against a fake Core, and a row's menu being the tile's.
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -111,11 +111,23 @@ async function start(more: Parameters<typeof fakeCore>[0] = {}, shell?: ShellCon
 
 async function allSessions() {
   fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "All sessions" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
   await settle();
 }
 
 describe("the sessions page", () => {
+  // verifies: FLOW-ORGANIZE-SESSIONS-R26
+  it("is opened by the arrange menu's View all, set apart after Reset to defaults", async () => {
+    await start();
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+    expect(items.at(-1)).toBe("View all");
+    expect(items).not.toContain("All sessions");
+    fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
+    await settle();
+    expect(screen.getByRole("tab", { name: /Active/ })).toBeTruthy();
+  });
+
   // verifies: FLOW-ORGANIZE-SESSIONS-R16
   it("opens from the arrange menu listing every session for its tab, Active first, whatever the rail's arrangement", async () => {
     // The rail shows archived sessions only, with its one group folded: none of that reaches the page.
