@@ -1036,8 +1036,12 @@ const entries: Entry[] = [
       ["Asking to trust", <RailTree {...strangerOnly} initialAsking="p4" />],
       ["Saving trust", <RailTree {...ersaOnly} trusting={{ p1: { state: "sending" } }} />],
       [
-        "Trust withdrawn, sessions running",
-        <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} keepingTrust={["p1"]} />,
+        "Trust withdrawn",
+        <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} backendTrusts={["p1"]} />,
+      ],
+      [
+        "Trust withdrawn, collapsed",
+        <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} backendTrusts={["p1"]} collapsed={folded("p1")} />,
       ],
       ["Trust refused", <RailTree {...ersaOnly} trusting={{ p1: { state: "failed", message: "no project p1" } }} />],
       ["Every tile state", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: everyState }} activeId={undefined} />],

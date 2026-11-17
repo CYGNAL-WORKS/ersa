@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-17 FLOW-NEW-SESSION-R31: "for as long as the window stays open" can be read as ending when the window is closed, which R01 makes a hide, or as lasting while Ersa runs; and nothing says whether trusting the project again ends the note. #316 keeps the note until Ersa quits (closing and reopening the window keeps it; it is never saved) and drops it while the project is trusted again.
 
 ## Resolved recently (optional, trimmed in planning passes)
