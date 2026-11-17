@@ -2469,6 +2469,71 @@ fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
 /// root and one isolated workspace, and `sessions`. Without `runs`, those
 /// that begin or end a run, wait for one, or close Core are left out.
 fn every_input(sessions: &[&str], runs: bool, sections: bool, sends: bool) -> Vec<Input> {
+    // The send's world leaves the project and its workspaces as they are:
+    // a send's row reads its session, its session's own delete, an archive
+    // and the run, never a project's or a workspace's phase, and the other
+    // worlds take those through every phase.
+    inputs_of(sessions, runs, sections, sends, !sends)
+}
+
+/// The inputs of two sessions found in the isolated workspace: their
+/// recording, their runs and exclusive operations, and the removals of the
+/// workspace and of the project, with every report those have.
+fn found_pair_inputs() -> Vec<Input> {
+    let mut inputs = Vec::new();
+    for session in ["s1", "s2"] {
+        inputs.push(Input::Command(find_session(W, session)));
+        inputs.push(Input::Command(begin_exclusive(session)));
+        inputs.push(Input::Command(begin_start(session)));
+        inputs.push(Input::Command(launch(session)));
+        let id = || session.to_string();
+        for report in [
+            stored_in(W, session, true),
+            run_ending(session),
+            Report::Ended(Operation::CreateSession(id())),
+            Report::Ended(Operation::Exclusive(id())),
+            Report::Ended(Operation::Run(id())),
+            Report::SessionGone { session: id() },
+        ] {
+            inputs.push(Input::Report(report));
+        }
+    }
+    inputs.push(Input::Command(remove_workspace(W)));
+    inputs.push(Input::Command(remove_project()));
+    let workspace = || W.to_string();
+    for report in [
+        Report::WorkspaceRemoved {
+            workspace: workspace(),
+        },
+        Report::WorkspaceRemovalRefused {
+            workspace: workspace(),
+        },
+        Report::WorkspaceRemovalFailed {
+            workspace: workspace(),
+        },
+        Report::Ended(Operation::RemoveWorkspace(workspace())),
+        Report::ProjectRemoved { project: P.into() },
+        Report::ProjectRemovalRefused { project: P.into() },
+        Report::Ended(Operation::RemoveProject(P.into())),
+        Report::GaveUp { place: 0 },
+    ] {
+        inputs.push(Input::Report(report));
+    }
+    inputs
+}
+
+/// Every input there is, of every kind at once: the whole world.
+fn every_input_of_the_whole_world(sessions: &[&str]) -> Vec<Input> {
+    inputs_of(sessions, true, true, true, true)
+}
+
+fn inputs_of(
+    sessions: &[&str],
+    runs: bool,
+    sections: bool,
+    sends: bool,
+    places: bool,
+) -> Vec<Input> {
     let mut inputs = Vec::new();
     let workspaces = [ROOT, W];
     inputs.push(Input::Command(add_project(P)));
@@ -2644,11 +2709,7 @@ fn every_input(sessions: &[&str], runs: bool, sections: bool, sends: bool) -> Ve
         reports.push(Report::GaveUp { place });
     }
     inputs.extend(reports.into_iter().map(Input::Report));
-    // The send's world leaves the project and its workspaces as they are:
-    // a send's row reads its session, its session's own delete, an archive
-    // and the run, never a project's or a workspace's phase, and the other
-    // worlds take those through every phase.
-    if sends {
+    if !places {
         inputs.retain(|input| !about_a_place(input));
     }
     inputs
@@ -3105,7 +3166,25 @@ fn explore(
     sections: bool,
     sends: bool,
 ) -> HashSet<State> {
-    let inputs = every_input(sessions, runs, sections, sends);
+    explore_with(every_input(sessions, runs, sections, sends), held, sends)
+}
+
+/// Only a step that changed the state answers a held command.
+fn check_released(input: &Input, stepped: &ersa_core::admission::Step) {
+    match (input, &stepped.outcome) {
+        // An interrupt that is done marked a send cancelled.
+        (Input::Command(Command::Interrupt { .. }), Outcome::Done) => {}
+        (_, Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale) => {
+            assert!(stepped.released.is_empty(), "{input:?}");
+        }
+        (_, Outcome::Admitted(_) | Outcome::Noted) => {}
+    }
+}
+
+/// Every state `inputs` reach with at most `held` commands held, each
+/// checked, with every input applied in it. `sends`: whether the inputs
+/// hold the writes a send's row reads, which are then explored from.
+fn explore_with(inputs: Vec<Input>, held: usize, sends: bool) -> HashSet<State> {
     let mut seen: HashSet<State> = HashSet::new();
     let mut queue: VecDeque<State> = VecDeque::new();
     for start in [State::default(), world()] {
@@ -3123,15 +3202,7 @@ fn explore(
             let stepped = step(&mut after, input.clone());
             steps += 1;
             check_step(&before, input, &stepped.outcome, &after);
-            // Only a step that changed the state answers a held command.
-            match (input, &stepped.outcome) {
-                // An interrupt that is done marked a send cancelled.
-                (Input::Command(Command::Interrupt { .. }), Outcome::Done) => {}
-                (_, Outcome::Refused(_) | Outcome::Done | Outcome::Held | Outcome::Stale) => {
-                    assert!(stepped.released.is_empty(), "{input:?}");
-                }
-                (_, Outcome::Admitted(_) | Outcome::Noted) => {}
-            }
+            check_released(input, &stepped);
             // A write changes one session's row and nothing else, answers no
             // held command, and no row of the table reads a row's contents:
             // the state it leads to decides every input as this one does, so
@@ -3228,6 +3299,30 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
             .any(|s| s.sessions().filter(|(_, session)| session.stored()).count() == 2)
     );
 
+    // What the pairs leave out, a run, a removal reads across every
+    // session found in the folder: it waits while any is not stored or has
+    // an operation under way, and is refused while any runs. Two sessions
+    // found in the isolated workspace, with their runs, their exclusive
+    // operations and both removals, one command held at a time.
+    let found = explore_with(found_pair_inputs(), 1, false);
+    assert!(found.len() > 500, "only {} states", found.len());
+    let both =
+        |wanted: fn(&State, &str) -> bool| found.iter().any(|s| wanted(s, "s1") && wanted(s, "s2"));
+    assert!(both(|s, id| run_of(s, id) == Some(Run::Running)));
+    assert!(both(exclusive));
+    // A removal waiting on one of them while the other runs, and one let
+    // through with both stopped.
+    let removal = |c: &Command| matches!(c, Command::RemoveWorkspace { .. });
+    assert!(
+        found
+            .iter()
+            .any(|s| { s.held().iter().any(removal) && run_of(s, "s2") == Some(Run::Running) })
+    );
+    assert!(found.iter().any(|s| {
+        let removing = matches!(phase(s, W), Some(WorkspacePhase::Removing { .. }));
+        removing && s.sessions().filter(|(_, e)| e.stored()).count() == 2
+    }));
+
     // Archive, arrange, a section's coming and going, and a send's
     // question, with every other input but a run's: their rows read the
     // session's exclusive operation, whether its row is stored, and the
@@ -3298,6 +3393,113 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
             .iter()
             .any(|s| forking(s, "s1") && sending(s, "s1").is_some())
     );
+}
+
+/// Numbers that are the same on every machine for a seed (xorshift).
+struct Dice(u64);
+
+impl Dice {
+    fn roll(&mut self, sides: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        usize::try_from(self.0 % sides as u64).unwrap()
+    }
+}
+
+/// Says which walk failed, and where, when a check panics.
+struct Walking {
+    seed: u64,
+    step: usize,
+}
+
+impl Drop for Walking {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            let (seed, step) = (self.seed, self.step);
+            eprintln!("the walk failed at step {step} under ERSA_WALK={seed}");
+        }
+    }
+}
+
+// The exhaustive worlds above each leave some kind of input out, with the
+// reason no row they keep reads it. This takes no such reason on trust: it
+// walks the one world with every input there is (two sessions, sections,
+// sends, forks, runs, the project and its workspaces, shutdown, up to three
+// commands held), at random from a seed, and checks every step and every
+// state it passes as the exhaustive worlds do. That world whole is too
+// large for every check: see the ignored test below.
+// verifies: ARCH-CORE-R18
+#[test]
+fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
+    let inputs = every_input_of_the_whole_world(&["s1", "s2"]);
+    let seeds: Vec<u64> = match std::env::var("ERSA_WALK") {
+        Ok(seed) => vec![seed.parse().expect("ERSA_WALK is a number")],
+        Err(_) => (1..=2_000).collect(),
+    };
+    // Shutdown ends a walk: nothing starts after it. One walk in four may
+    // meet it; the others go on without.
+    let closing = Input::Report(Report::Closing);
+    let open: Vec<Input> = inputs.iter().filter(|i| **i != closing).cloned().collect();
+    let mut passed: HashSet<State> = HashSet::new();
+    for seed in seeds {
+        let mut walking = Walking { seed, step: 0 };
+        let mut dice = Dice(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        // From nothing, and from a project that is there already.
+        let mut state = if seed % 2 == 0 {
+            State::default()
+        } else {
+            world()
+        };
+        let inputs = if seed % 4 == 0 { &inputs } else { &open };
+        for step_number in 0..300 {
+            walking.step = step_number;
+            let input = inputs[dice.roll(inputs.len())].clone();
+            let before = state.clone();
+            let stepped = step(&mut state, input.clone());
+            check_step(&before, &input, &stepped.outcome, &state);
+            check_released(&input, &stepped);
+            // More held than three: the walk does not go there.
+            if state.held().len() > 3 {
+                state = before;
+                continue;
+            }
+            if passed.insert(state.clone()) {
+                check_state(&state);
+                check_every_held_command_is_answered(&state);
+            }
+        }
+    }
+    // It went somewhere: thousands of states, with what only this world
+    // has together: both sessions stored, a run beside a send, a workspace
+    // on its way out while a section is, Core closing with a command held.
+    assert!(passed.len() > 5_000, "only {} states", passed.len());
+    let reached = |wanted: fn(&State) -> bool| passed.iter().any(wanted);
+    assert!(reached(|s| s
+        .sessions()
+        .filter(|(_, e)| e.stored())
+        .count()
+        == 2));
+    assert!(reached(
+        |s| run_of(s, "s1") == Some(Run::Running) && sending(s, "s2").is_some()
+    ));
+    assert!(reached(|s| {
+        let removing = matches!(phase(s, W), Some(WorkspacePhase::Removing { .. }));
+        removing && s.section(SECTION) == Some(SectionPhase::Removing)
+    }));
+    assert!(reached(|s| s.closing() && !s.held().is_empty()));
+}
+
+// The whole world, exhaustively: one session and one command held, with
+// every input. 2.8 million states, a quarter of an hour in an optimized
+// build, so it is not part of every check:
+// `cargo test -p ersa-core --release --test admission -- --ignored`.
+// verifies: ARCH-CORE-R18
+#[test]
+#[ignore = "about fifteen minutes in an optimized build"]
+fn every_input_in_every_reachable_state_of_the_whole_world() {
+    let whole = explore_with(every_input_of_the_whole_world(&["s1"]), 1, true);
+    assert!(whole.len() > 2_000_000, "only {} states", whole.len());
 }
 
 // -- Operations under way and waiters (the wrapper around the function) -----
