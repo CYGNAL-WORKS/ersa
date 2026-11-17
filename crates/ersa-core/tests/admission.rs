@@ -2463,7 +2463,7 @@ fn a_found_session_core_runs_holds_back_removing_its_workspace_and_project() {
     );
 }
 
-// -- Every input in every state (ARCH-CORE-R18) -----------------------------
+// -- Every input in every state (ARCH-CORE-R19) -----------------------------
 
 /// Every command and report over a world of one project in one folder, its
 /// root and one isolated workspace, and `sessions`. Without `runs`, those
@@ -3241,7 +3241,6 @@ fn explore_with(inputs: Vec<Input>, held: usize, sends: bool) -> HashSet<State> 
     seen
 }
 
-// verifies: ARCH-CORE-R18
 // verifies: ARCH-CORE-R15
 // verifies: ARCH-CORE-R17
 #[test]
@@ -3429,7 +3428,6 @@ impl Drop for Walking {
 // commands held), at random from a seed, and checks every step and every
 // state it passes as the exhaustive worlds do. That world whole is too
 // large for every check: see the ignored test below.
-// verifies: ARCH-CORE-R18
 #[test]
 fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
     let inputs = every_input_of_the_whole_world(&["s1", "s2"]);
@@ -3499,7 +3497,6 @@ fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
 // every input. 2.8 million states, a quarter of an hour in an optimized
 // build, so it is not part of every check:
 // `cargo test -p ersa-core --release --test admission -- --ignored`.
-// verifies: ARCH-CORE-R18
 #[test]
 #[ignore = "about fifteen minutes in an optimized build"]
 fn every_input_in_every_reachable_state_of_the_whole_world() {
