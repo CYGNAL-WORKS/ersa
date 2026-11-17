@@ -2316,12 +2316,13 @@ impl UnderWay {
         let session = row.id.clone();
         let stored = Input::Report(Report::SessionStored { row: Box::new(row) });
         let mut replaced = None;
-        // For a session that went meanwhile, the step's sweep takes it out
-        // again.
+        // Admission takes its own hold on it under the lock; the caller's,
+        // and what it replaced, are let go of once the lock is. For a
+        // session that went meanwhile, the step's sweep takes it out again.
         self.admission.apply_then(stored, |inner, _| {
-            replaced = inner.sessions.insert(session, mine);
+            replaced = inner.sessions.insert(session, Arc::clone(&mine));
         });
-        drop(replaced);
+        drop((replaced, mine));
     }
 }
 

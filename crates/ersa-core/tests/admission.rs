@@ -3545,18 +3545,35 @@ async fn a_found_session_is_loaded_before_a_removal_that_waited_for_it_is_answer
     assert!(removal.as_mut().poll(&mut context).is_pending());
 
     finding.end_stored(row("s1", W, true), found.clone());
-    // Admission held it already: the test, the waker, and admission. The
-    // removal, whenever it runs, finds the session with what Core keeps
-    // for it, and lets go of it: it is never left behind.
+    // When the removal was woken, admission had taken its own hold on it:
+    // the test's, the waker's, the one given to the call, and admission's.
+    // Attached only after the step, there would be three. The removal,
+    // whenever it runs, so finds the session with what Core keeps for it.
     let holders = woken.holders.load(std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(holders, 3);
+    assert_eq!(
+        holders, 4,
+        "admission did not hold it when the removal was let go"
+    );
     let removing = admitted(Operation::RemoveWorkspace(W.into()));
     assert_eq!(removal.await, removing);
     assert_eq!(label(admission.attached("s1")), Some("found".into()));
     assert!(admission.row("s1").is_some_and(|row| row.started_elsewhere));
 
-    // A row reported stored for a session that went meanwhile attaches
-    // nothing.
+    // The removal takes the session, and what was attached goes with it:
+    // only the test and the waker hold it now.
+    admission.report(Report::WorkspaceRemoved {
+        workspace: W.into(),
+    });
+    assert!(admission.row("s1").is_none());
+    assert_eq!(label(admission.attached("s1")), None);
+    assert_eq!(Arc::strong_count(&found), 2);
+}
+
+// verifies: ARCH-CORE-R14
+#[tokio::test]
+async fn a_row_reported_stored_for_a_session_that_went_attaches_nothing() {
+    let admission = Arc::new(Admission::default());
+    admission.restore(existing());
     let late = admit(&admission, find_session(ROOT, "s2")).await;
     admission.report(Report::SessionGone {
         session: "s2".into(),
