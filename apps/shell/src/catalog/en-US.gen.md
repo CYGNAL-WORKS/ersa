@@ -234,9 +234,9 @@ Ersa can't change this project's trust.
 
 Ersa can't read this project's workspaces.
 
-### `rail.heading.keepTrust`
+### `rail.heading.backendTrustNote`
 
-Running sessions keep their current settings until they are stopped.
+Claude Code still trusts this folder when you use it outside Ersa.
 
 ### `rail.foot.attachedLabel`
 
