@@ -10,6 +10,7 @@
 
 pub mod fake;
 pub mod procs;
+pub mod schedule;
 pub mod suite;
 
 use std::collections::VecDeque;
