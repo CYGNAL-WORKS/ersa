@@ -30,7 +30,7 @@ use ersa_core::{Adapter, CommandTransport, Core};
 use ersa_protocol::core_api::rpc::{Request, RequestId};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Filed, FiledRecord, Records, Stats};
-use support::schedule::{Choices, Operation, Schedule, drive, every_schedule};
+use support::schedule::{Choices, Operation, Schedule, drive, every_schedule, replaying};
 use support::{git_repo, kind, tempdir, test_config};
 
 /// Core's command transport here: a command waits at the schedule's point,
@@ -288,8 +288,22 @@ where
         seen.insert(outcomes);
     });
     eprintln!("{name}: {schedules} schedules, outcomes {seen:#?}");
-    assert!(schedules > 3, "only {schedules} schedules");
+    // One schedule run alone says nothing of how many there are.
+    assert!(replaying() || schedules > 3, "only {schedules} schedules");
     seen
+}
+
+/// Every one of `wanted` happened under some schedule.
+fn all_happened(seen: &BTreeSet<String>, wanted: &[&str]) {
+    if replaying() {
+        return;
+    }
+    for outcomes in wanted {
+        assert!(
+            seen.contains(*outcomes),
+            "{outcomes} never happened: {seen:#?}"
+        );
+    }
 }
 
 /// The driver itself: two operations that each wait on one call run under
@@ -320,6 +334,9 @@ fn every_order_of_two_operations_runs_once_and_replays_from_its_seed() {
         let steps = run(choices.clone());
         orders.push((choices.seed(), steps));
     });
+    if replaying() {
+        return;
+    }
     // Each begins before its call is let go: six orders of the four steps.
     assert_eq!(count, 6);
     let distinct: BTreeSet<&String> = orders.iter().map(|(_, steps)| steps).collect();
@@ -373,11 +390,11 @@ fn a_delete_against_a_create_in_the_same_workspace() {
         format!("delete {}, create {created_outcome}", outcome(deleted))
     });
     // Both ways round happened: the create let in, and held off.
-    assert!(seen.contains("delete ok, create ok"), "{seen:#?}");
-    assert!(
-        seen.contains("delete ok, create invalid_state (busy)"),
-        "{seen:#?}"
-    );
+    let both = [
+        "delete ok, create ok",
+        "delete ok, create invalid_state (busy)",
+    ];
+    all_happened(&seen, &both);
 }
 
 /// A request that starts a found session's backend (`method`) against
@@ -461,16 +478,14 @@ fn starting_a_found_session_against_the_removal_of_its_workspace(
 fn a_resume_against_the_removal_of_its_workspace() {
     let seen =
         starting_a_found_session_against_the_removal_of_its_workspace("session.resume", json!({}));
-    for outcomes in [
-        "start ok, removal invalid_state",
-        "start invalid_state (busy), removal ok",
-        "start not_found, removal ok",
-    ] {
-        assert!(
-            seen.contains(outcomes),
-            "{outcomes} never happened: {seen:#?}"
-        );
-    }
+    all_happened(
+        &seen,
+        &[
+            "start ok, removal invalid_state",
+            "start invalid_state (busy), removal ok",
+            "start not_found, removal ok",
+        ],
+    );
 }
 
 // verifies: FLOW-RESUME-SESSION-R13
@@ -481,16 +496,14 @@ fn a_message_to_a_found_session_against_the_removal_of_its_workspace() {
         "session.send",
         json!({ "text": "hello" }),
     );
-    for outcomes in [
-        "start ok, removal invalid_state",
-        "start invalid_state (busy), removal ok",
-        "start not_found, removal ok",
-    ] {
-        assert!(
-            seen.contains(outcomes),
-            "{outcomes} never happened: {seen:#?}"
-        );
-    }
+    all_happened(
+        &seen,
+        &[
+            "start ok, removal invalid_state",
+            "start invalid_state (busy), removal ok",
+            "start not_found, removal ok",
+        ],
+    );
 }
 
 // verifies: PROTO-CORE-API-R77
@@ -558,15 +571,13 @@ fn an_archive_against_a_send() {
         );
         outcomes
     });
-    for outcomes in [
-        "archive ok, send ok",
-        "archive ok, send invalid_state",
-        "archive ok, send invalid_state (session_archived)",
-        "archive invalid_state (session_busy), send ok",
-    ] {
-        assert!(
-            seen.contains(outcomes),
-            "{outcomes} never happened: {seen:#?}"
-        );
-    }
+    all_happened(
+        &seen,
+        &[
+            "archive ok, send ok",
+            "archive ok, send invalid_state",
+            "archive ok, send invalid_state (session_archived)",
+            "archive invalid_state (session_busy), send ok",
+        ],
+    );
 }
