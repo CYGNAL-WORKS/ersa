@@ -59,4 +59,4 @@ id = "RUSTSEC-2026-0543"
 package = "chrono"
 version = "0.4.45"
 reason = "Unmaintained, not vulnerable: listed in Cargo.lock only as an optional dependency of serde_with 3.24 (through Tauri 2's tauri-utils) whose feature is off, so it is never built. Ends when Tauri or serde_with drops the entry, or the advisory is withdrawn."
-expires = 2027-02-10
+expires = 2027-01-30
