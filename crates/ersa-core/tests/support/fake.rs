@@ -77,6 +77,7 @@ use ersa_protocol::events::{
 };
 use serde_json::{Map, Value, json};
 
+use super::schedule::Schedule;
 use super::{TestCore, start_replay_of};
 
 pub const BACKEND: &str = "fake";
@@ -278,6 +279,11 @@ pub struct FakeAdapter {
     pub open_elsewhere: Arc<Mutex<OpenElsewhere>>,
     /// Held by a test to hold every registry check until it lets go.
     pub open_check_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Where a backend's start, a message to it, its stop and a record's
+    /// deletion each wait for a test that orders them (`schedule`); a
+    /// schedule that is off, as this one is until a test turns it on, lets
+    /// them pass.
+    pub schedule: Arc<Schedule>,
     /// When set, what deleting a record answers instead of deleting it: the
     /// registry saying so at the moment of deletion.
     pub delete_refusal: Arc<Mutex<Option<OpenElsewhere>>>,
@@ -349,6 +355,7 @@ impl FakeAdapter {
             records: Arc::default(),
             open_elsewhere: Arc::new(Mutex::new(OpenElsewhere::No)),
             open_check_gate: Arc::default(),
+            schedule: Arc::default(),
             delete_refusal: Arc::default(),
             delete_gate: Arc::default(),
             conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
@@ -520,6 +527,7 @@ impl Adapter for FakeAdapter {
         }
         tokio::time::sleep(self.start_delay).await;
         drop(self.start_gate.lock().await);
+        self.schedule.point("the backend's start").await;
         if self.fail_start.load(Ordering::SeqCst) {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
@@ -561,6 +569,7 @@ impl Adapter for FakeAdapter {
             );
         }
         Ok(Box::new(FakeSession {
+            schedule: Arc::clone(&self.schedule),
             sink,
             stats: Arc::clone(&self.stats),
             records: Arc::clone(&self.records),
@@ -662,6 +671,7 @@ impl Adapter for FakeAdapter {
         call_off: &CallOff,
     ) -> Result<RecordDeletion, AdapterError> {
         drop(self.delete_gate.lock().await);
+        self.schedule.point("the record's deletion").await;
         let deletion = if let Some(refused) = self.delete_refusal.lock().unwrap().clone() {
             Ok(RecordDeletion::Refused(refused))
         } else if call_off.is_called_off() {
@@ -776,6 +786,7 @@ impl Adapter for FakeAdapter {
 }
 
 struct FakeSession {
+    schedule: Arc<Schedule>,
     sink: Arc<dyn AdapterSink>,
     stats: Arc<Stats>,
     records: Records,
@@ -844,6 +855,7 @@ impl Drop for FakeSession {
 #[async_trait]
 impl AdapterSession for FakeSession {
     async fn send_message(&self, message: &OutgoingMessage) -> Result<(), AdapterError> {
+        self.schedule.point("the message's hand-over").await;
         self.running()?;
         if message.text == "broken pipe" {
             return Err(AdapterError::Io(std::io::Error::new(
@@ -1030,6 +1042,7 @@ impl AdapterSession for FakeSession {
     }
 
     async fn stop(&self) -> Result<(), AdapterError> {
+        self.schedule.point("the backend's stop").await;
         self.stats.stops.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.stop_delay).await;
         if !self.stop_hangs {
