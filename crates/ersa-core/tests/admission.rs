@@ -2522,6 +2522,46 @@ fn found_pair_inputs() -> Vec<Input> {
     inputs
 }
 
+/// The inputs of each world explored on every check, by name. Together
+/// they hold every input of the table (`every_input_is_in_a_world`); each
+/// leaves out a kind of input only where no row of an input it keeps reads
+/// what that kind changes.
+fn worlds() -> Vec<(&'static str, Vec<Input>)> {
+    vec![
+        // One project, its two workspaces, one session and its run.
+        ("small", every_input(&["s1"], true, false, false)),
+        // Two sessions in the workspaces they share, without their runs.
+        ("pairs", every_input(&["s1", "s2"], false, false, false)),
+        // Two found sessions, their runs, and the removals that read them.
+        ("found pair", found_pair_inputs()),
+        // Archive, arrange and a section, without a run.
+        ("arranged", every_input(&["s1"], false, true, false)),
+        // The send slot, the fork's mark, the run and the archive, in a
+        // project and workspaces that stay as they are.
+        ("sent", every_input(&["s1"], true, false, true)),
+        // A fork with the project and its workspaces coming and going.
+        ("forked", forked_inputs()),
+    ]
+}
+
+fn world_inputs(name: &str) -> Vec<Input> {
+    let found = worlds().into_iter().find(|(world, _)| *world == name);
+    found.expect("a world of that name").1
+}
+
+/// A fork's row reads whether its session's workspace is held, by a delete
+/// or by a removal of the workspace or the project, and the send's world
+/// leaves the removals out. Here: one session, a fork of it, and every
+/// input of the project, its workspaces and the session's own coming and
+/// going, without a run or a send.
+fn forked_inputs() -> Vec<Input> {
+    let mut inputs = every_input(&["s1"], false, false, false);
+    inputs.push(Input::Command(fork("s1")));
+    let ended = Report::Ended(Operation::Fork("s1".into()));
+    inputs.push(Input::Report(ended));
+    inputs
+}
+
 /// Every input there is, of every kind at once: the whole world.
 fn every_input_of_the_whole_world(sessions: &[&str]) -> Vec<Input> {
     inputs_of(sessions, true, true, true, true)
@@ -2671,7 +2711,8 @@ fn inputs_of(
         }
         // Every kind of write, checked and not explored from; in a world
         // with sends, the writes a send's row reads are explored, above.
-        if !sends {
+        // The send's own world holds only those; the whole world, every one.
+        if !sends || places {
             reports.extend(
                 writes(&session)
                     .into_iter()
@@ -3159,14 +3200,18 @@ fn same_but_rows(before: &State, after: &State, changed: impl Fn(&str) -> bool) 
         && before.closing() == after.closing()
 }
 
-fn explore(
-    sessions: &[&str],
-    held: usize,
-    runs: bool,
-    sections: bool,
-    sends: bool,
-) -> HashSet<State> {
-    explore_with(every_input(sessions, runs, sections, sends), held, sends)
+/// Whether a send's row, or a fork's, reads what `change` writes: whether
+/// the session is archived or marked deleting.
+fn read_by_a_send(change: &RowChange) -> bool {
+    match change {
+        RowChange::Archived(_) | RowChange::Deleting(_) => true,
+        RowChange::Arranged { .. }
+        | RowChange::Mode(_)
+        | RowChange::BackendId(_)
+        | RowChange::LastActivity(_)
+        | RowChange::Requested { .. }
+        | RowChange::ForkLinkCleared => false,
+    }
 }
 
 /// Only a step that changed the state answers a held command.
@@ -3221,7 +3266,9 @@ fn explore_with(inputs: Vec<Input>, held: usize, sends: bool) -> HashSet<State> 
                     assert_eq!(&same, &before, "{input:?}");
                     continue;
                 }
-                Input::Report(Report::RowWritten { session, .. }) if !sends => {
+                Input::Report(Report::RowWritten { session, change })
+                    if !sends || !read_by_a_send(change) =>
+                {
                     assert!(stepped.released.is_empty(), "{input:?}");
                     assert!(
                         same_but_rows(&before, &after, |id| id == session),
@@ -3241,6 +3288,103 @@ fn explore_with(inputs: Vec<Input>, held: usize, sends: bool) -> HashSet<State> 
     seen
 }
 
+/// `input` with the second session's name for the first's: an input about
+/// one session is the same row of the table as about another.
+fn of_the_first_session(input: &Input) -> String {
+    format!("{input:?}").replace("\"s2\"", "\"s1\"")
+}
+
+// verifies: ARCH-CORE-R19
+#[test]
+fn every_input_is_in_a_world() {
+    let explored: HashSet<String> = worlds()
+        .iter()
+        .flat_map(|(_, inputs)| inputs.iter().map(of_the_first_session))
+        .collect();
+    let whole: HashSet<String> = every_input_of_the_whole_world(&["s1", "s2"])
+        .iter()
+        .map(of_the_first_session)
+        .collect();
+    // Every input of the table is explored in some world: one added to the
+    // whole world and to no smaller one fails here.
+    let mut left_out: Vec<&String> = whole.difference(&explored).collect();
+    left_out.sort();
+    assert!(left_out.is_empty(), "in no world: {left_out:#?}");
+    // And the whole world holds every input any world explores.
+    let mut missing: Vec<&String> = explored.difference(&whole).collect();
+    missing.sort();
+    assert!(missing.is_empty(), "not in the whole world: {missing:#?}");
+    // Every kind of command and report there is, not only those listed
+    // here: a new one makes these matches fail to compile until it is
+    // counted, and the count fail until some input of it is in the world.
+    let kind = |input: &Input| -> &'static str {
+        match input {
+            Input::Command(command) => match command {
+                Command::AddProject { .. } => "AddProject",
+                Command::RemoveProject { .. } => "RemoveProject",
+                Command::CreateWorkspace { .. } => "CreateWorkspace",
+                Command::RemoveWorkspace { .. } => "RemoveWorkspace",
+                Command::CreateSession { .. } => "CreateSession",
+                Command::DeleteSession { .. } => "DeleteSession",
+                Command::RemoveSession { .. } => "RemoveSession",
+                Command::BeginExclusive { .. } => "BeginExclusive",
+                Command::Archive { .. } => "Archive",
+                Command::Arrange { .. } => "Arrange",
+                Command::RemoveSection { .. } => "RemoveSection",
+                Command::Send { .. } => "Send",
+                Command::Interrupt { .. } => "Interrupt",
+                Command::Fork { .. } => "Fork",
+                Command::AwaitSend { .. } => "AwaitSend",
+                Command::BeginStart { .. } => "BeginStart",
+                Command::BeginRemoval { .. } => "BeginRemoval",
+                Command::Launch { .. } => "Launch",
+                Command::AwaitRunEnd { .. } => "AwaitRunEnd",
+            },
+            Input::Report(report) => match report {
+                Report::ProjectStored { .. } => "ProjectStored",
+                Report::ProjectRemoved { .. } => "ProjectRemoved",
+                Report::ProjectRemovalRefused { .. } => "ProjectRemovalRefused",
+                Report::WorkspaceReady { .. } => "WorkspaceReady",
+                Report::WorkspaceCreateFailed { .. } => "WorkspaceCreateFailed",
+                Report::WorkspaceRemoved { .. } => "WorkspaceRemoved",
+                Report::WorkspaceRemovalRefused { .. } => "WorkspaceRemovalRefused",
+                Report::WorkspaceRemovalFailed { .. } => "WorkspaceRemovalFailed",
+                Report::WorkspaceErrored { .. } => "WorkspaceErrored",
+                Report::WorkspaceDeleted { .. } => "WorkspaceDeleted",
+                Report::SessionStored { .. } => "SessionStored",
+                Report::RowWritten { .. } => "RowWritten",
+                Report::SectionStored { .. } => "SectionStored",
+                Report::SectionRemoved { .. } => "SectionRemoved",
+                Report::SendStage { .. } => "SendStage",
+                Report::StartEnded { .. } => "StartEnded",
+                Report::SessionGone { .. } => "SessionGone",
+                Report::RunEnding { .. } => "RunEnding",
+                Report::Closing => "Closing",
+                Report::GaveUp { .. } => "GaveUp",
+                Report::Ended(_) => "Ended",
+            },
+        }
+    };
+    let whole = every_input_of_the_whole_world(&["s1"]);
+    let kinds: HashSet<&str> = whole.iter().map(kind).collect();
+    assert_eq!(kinds.len(), 19 + 21, "{kinds:#?}");
+    // Every operation's end, and every kind of write.
+    let ends: HashSet<_> = whole
+        .iter()
+        .filter_map(|input| match input {
+            Input::Report(Report::Ended(operation)) => Some(std::mem::discriminant(operation)),
+            Input::Command(_) | Input::Report(_) => None,
+        })
+        .collect();
+    assert_eq!(ends.len(), 14, "the end of every kind of operation");
+    for change in writes("s1") {
+        let (session, change) = ("s1".to_string(), change);
+        let written = Input::Report(Report::RowWritten { session, change });
+        assert!(whole.contains(&written), "{written:?}");
+    }
+}
+
+// verifies: ARCH-CORE-R19
 // verifies: ARCH-CORE-R15
 // verifies: ARCH-CORE-R17
 #[test]
@@ -3250,7 +3394,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // Every phase of a project, a workspace, a session and its run, every
     // operation, shutdown, and every way one command waits behind another
     // is reached.
-    let whole = explore(&["s1"], 2, true, false, false);
+    let whole = explore_with(world_inputs("small"), 2, false);
     assert!(whole.len() > 10_000, "only {} states", whole.len());
     for wanted in [
         WorkspacePhase::Creating,
@@ -3290,7 +3434,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // sessions and one command held at a time, without the inputs of a
     // run, which act on one session alone (a removal's "does any found
     // session run" over several is a fed sequence).
-    let pairs = explore(&["s1", "s2"], 1, false, false, false);
+    let pairs = explore_with(world_inputs("pairs"), 1, false);
     assert!(pairs.len() > 1_000, "only {} states", pairs.len());
     assert!(
         pairs
@@ -3303,7 +3447,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // an operation under way, and is refused while any runs. Two sessions
     // found in the isolated workspace, with their runs, their exclusive
     // operations and both removals, one command held at a time.
-    let found = explore_with(found_pair_inputs(), 1, false);
+    let found = explore_with(world_inputs("found pair"), 1, false);
     assert!(found.len() > 500, "only {} states", found.len());
     let both =
         |wanted: fn(&State, &str) -> bool| found.iter().any(|s| wanted(s, "s1") && wanted(s, "s2"));
@@ -3322,12 +3466,39 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
         removing && s.sessions().filter(|(_, e)| e.stored()).count() == 2
     }));
 
+    // A fork against the removals: its row reads whether the session's
+    // workspace is held, which the send's world below never changes by a
+    // removal. One session, one command held at a time.
+    let forked = explore_with(world_inputs("forked"), 1, false);
+    assert!(forked.len() > 500, "only {} states", forked.len());
+    let with_fork =
+        |wanted: fn(&State) -> bool| forked.iter().any(|s| forking(s, "s1") && wanted(s));
+    // A fork under way while its workspace is removed, while its project
+    // is, and while the session's own delete holds the workspace: each
+    // began before the hold, and none begins under one (`check_step`).
+    assert!(with_fork(|s| matches!(
+        phase(s, W),
+        Some(WorkspacePhase::Removing { .. })
+    )));
+    assert!(with_fork(|s| {
+        let removing = ersa_core::admission::ProjectPhase::Removing;
+        s.projects().any(|(_, project)| project.phase == removing)
+    }));
+    assert!(with_fork(|s| s
+        .workspaces()
+        .any(|(_, w)| w.deleting.is_some())));
+    assert!(
+        forked
+            .iter()
+            .any(|s| !forking(s, "s1") && s.session("s1").is_some())
+    );
+
     // Archive, arrange, a section's coming and going, and a send's
     // question, with every other input but a run's: their rows read the
     // session's exclusive operation, whether its row is stored, and the
     // section's phase, never the run. One session, one section, up to two
     // commands held at once.
-    let arranged = explore(&["s1"], 2, false, true, false);
+    let arranged = explore_with(world_inputs("arranged"), 2, false);
     assert!(arranged.len() > 1_000, "only {} states", arranged.len());
     for wanted in [SectionPhase::Present, SectionPhase::Removing] {
         assert!(
@@ -3355,7 +3526,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     // session takes a message only from a sender that can start it), the
     // archive, the session's delete and the row's marks a send is refused
     // for, and one command held at a time.
-    let sent = explore(&["s1"], 1, true, false, true);
+    let sent = explore_with(world_inputs("sent"), 1, true);
     assert!(sent.len() > 1_000, "only {} states", sent.len());
     let reached = |wanted: Sending| sent.iter().any(|s| sending(s, "s1") == Some(wanted));
     for stage in [
@@ -3428,6 +3599,7 @@ impl Drop for Walking {
 // commands held), at random from a seed, and checks every step and every
 // state it passes as the exhaustive worlds do. That world whole is too
 // large for every check: see the ignored test below.
+// verifies: ARCH-CORE-R20
 #[test]
 fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
     let inputs = every_input_of_the_whole_world(&["s1", "s2"]);
