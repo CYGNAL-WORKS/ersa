@@ -50,3 +50,13 @@ package = "proc-macro-error"
 version = "1.0.4"
 reason = "Unmaintained, not vulnerable: a build-time proc macro of glib-macros 0.18 (Linux only, through Tauri 2's gtk). Ends with the glib exception above."
 expires = 2027-01-29
+
+# The Shell, every platform: Tauri 2's tauri-utils uses serde_with, which names
+# chrono as an optional dependency. Cargo lists it in the lockfile; nothing
+# builds it.
+[[vulnerability_exception]]
+id = "RUSTSEC-2026-0543"
+package = "chrono"
+version = "0.4.45"
+reason = "Unmaintained, not vulnerable: listed in Cargo.lock only as an optional dependency of serde_with 3.24 (through Tauri 2's tauri-utils) whose feature is off, so it is never built. Ends when Tauri or serde_with drops the entry, or the advisory is withdrawn."
+expires = 2027-02-10
