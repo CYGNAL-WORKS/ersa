@@ -707,6 +707,15 @@ impl Live {
     }
 }
 
+impl Drop for SessionManager {
+    /// Each session's handle holds admission, and admission holds the
+    /// handle: let go of here, so a Core that goes takes its sessions with
+    /// it.
+    fn drop(&mut self) {
+        self.admission.detach_all();
+    }
+}
+
 /// The refusal for a request that needs a backend the session does not have.
 pub(crate) fn not_running() -> SessionError {
     SessionError::refused(ErrorReason::SessionNotRunning, "the session is not running")
@@ -4183,6 +4192,19 @@ mod tests {
         assert!(matches!(&sent, Err(SessionError::Busy(_))), "{sent:?}");
         assert_eq!(slot(), None);
         drop(deleting);
+    }
+
+    #[tokio::test]
+    async fn a_manager_that_goes_takes_its_sessions_with_it() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let handle = Arc::downgrade(&manager.handle("s-gated").unwrap());
+        let admission = Arc::downgrade(&manager.admission);
+        drop(manager);
+        // Admission held the handle, and the handle admission.
+        assert!(handle.upgrade().is_none());
+        assert!(admission.upgrade().is_none());
     }
 
     #[tokio::test]
