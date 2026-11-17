@@ -3433,9 +3433,10 @@ impl Drop for Walking {
 #[test]
 fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
     let inputs = every_input_of_the_whole_world(&["s1", "s2"]);
-    let seeds: Vec<u64> = match std::env::var("ERSA_WALK") {
-        Ok(seed) => vec![seed.parse().expect("ERSA_WALK is a number")],
-        Err(_) => (1..=2_000).collect(),
+    let one = std::env::var("ERSA_WALK").ok();
+    let seeds: Vec<u64> = match &one {
+        Some(seed) => vec![seed.parse().expect("ERSA_WALK is a number")],
+        None => (1..=2_000).collect(),
     };
     // Shutdown ends a walk: nothing starts after it. One walk in four may
     // meet it; the others go on without.
@@ -3469,6 +3470,10 @@ fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
                 check_every_held_command_is_answered(&state);
             }
         }
+    }
+    // One walk run alone says nothing of where they all go.
+    if one.is_some() {
+        return;
     }
     // It went somewhere: thousands of states, with what only this world
     // has together: both sessions stored, a run beside a send, a workspace
