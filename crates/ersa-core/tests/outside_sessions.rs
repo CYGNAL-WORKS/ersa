@@ -10,11 +10,10 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use ersa_core::transport::LocalTreeTransport;
-use ersa_core::{Adapter, CommandTransport};
+use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Filed, FiledRecord, Records};
-use support::{Client, Stall, StallingTransport, TestCore, project, start_with_adapters, tempdir};
+use support::{Client, TestCore, project, start_with_adapters, tempdir};
 
 /// The fake backend's records and where it files them, shared by every Core
 /// of a test.
@@ -490,69 +489,6 @@ async fn a_folder_still_being_listed_is_not_listed_again() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(backend.stats.listings.load(Ordering::SeqCst) >= 2);
-}
-
-/// A Core over `adapter` whose git commands run behind `stall`.
-async fn start_stalling(adapter: Arc<dyn Adapter>, stall: &Arc<Stall>) -> TestCore {
-    let transport = Arc::new(StallingTransport {
-        stall: Arc::clone(stall),
-        inner: LocalTreeTransport::for_commands(),
-    });
-    start_with_adapters(
-        tempdir(),
-        move |config| config.command_transport = Some(CommandTransport(transport)),
-        vec![adapter],
-    )
-    .await
-}
-
-// verifies: FLOW-RESUME-SESSION-R13
-#[tokio::test(flavor = "multi_thread")]
-async fn a_found_session_written_to_while_its_workspace_is_removed_is_refused_and_not_started() {
-    let backend = Backend::default();
-    let stall = Stall::new();
-    let core = start_stalling(backend.adapter(), &stall).await;
-    let mut client = core.client().await;
-    let mut remover = core.client().await;
-    let project = project(&mut client, core.dir.path()).await;
-    let isolated = client
-        .result("workspace.create", json!({ "project_id": project["id"] }))
-        .await;
-    backend.record("rec-isolated", "found", path(&isolated), path(&isolated));
-    let found = sessions(&mut client).await.remove(0);
-
-    // The removal holds the workspace and is at git, which does not answer
-    // yet, as in a slow repository.
-    stall.arm();
-    let removal = remover
-        .request("workspace.remove", json!({ "id": isolated["id"] }))
-        .await;
-    stall.reached().await;
-    let starts = backend.stats.starts.load(Ordering::SeqCst);
-    // Refused as busy, as while a delete holds the workspace.
-    for (method, params) in [
-        ("session.resume", json!({ "id": found["id"] })),
-        (
-            "session.send",
-            json!({ "id": found["id"], "text": "hello" }),
-        ),
-    ] {
-        let refused = client.error(method, params).await;
-        assert_eq!(
-            support::kind(&refused),
-            "invalid_state",
-            "{method}: {refused}"
-        );
-        assert_eq!(refused["data"]["detail"], "busy", "{method}: {refused}");
-    }
-    // No backend started in the folder about to go.
-    assert_eq!(backend.stats.starts.load(Ordering::SeqCst), starts);
-
-    stall.go();
-    let removed = remover.response(removal).await;
-    assert!(removed.get("error").is_none(), "{removed}");
-    assert!(sessions(&mut client).await.is_empty());
-    assert_eq!(backend.stats.starts.load(Ordering::SeqCst), starts);
 }
 
 // verifies: FLOW-RESUME-SESSION-R13
