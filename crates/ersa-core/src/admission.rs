@@ -1829,12 +1829,20 @@ impl Admission {
         let mut inner = self.lock();
         inner.state = State::restored(existing);
         inner.waiting.clear();
-        // Let go of once the lock is: what is attached is Core's, and its
-        // destructor may ask admission.
+        drop(inner);
+        self.detach_all();
+    }
+
+    /// Lets go of everything attached, for a Core that is going: what is
+    /// attached holds admission, so neither would go while it is kept.
+    pub fn detach_all(&self) {
+        let mut inner = self.lock();
         let attached = (
             std::mem::take(&mut inner.sessions),
             std::mem::take(&mut inner.runs),
         );
+        // Let go of once the lock is: what is attached is Core's, and its
+        // destructor may ask admission.
         drop(inner);
         drop(attached);
     }
@@ -2296,6 +2304,24 @@ impl UnderWay {
     pub fn end(mut self, report: Report) {
         self.operation = None;
         self.admission.report(report);
+    }
+
+    /// Ends the creation of a session Core loads as it records it, its
+    /// `row` stored: `mine` is attached to the session in the step that
+    /// reports it stored, before any command that step lets go is
+    /// answered. A removal that waited for the row so finds the session
+    /// with what Core keeps for it.
+    pub fn end_stored(mut self, row: SessionRow, mine: Attached) {
+        self.operation = None;
+        let session = row.id.clone();
+        let stored = Input::Report(Report::SessionStored { row: Box::new(row) });
+        let mut replaced = None;
+        // For a session that went meanwhile, the step's sweep takes it out
+        // again.
+        self.admission.apply_then(stored, |inner, _| {
+            replaced = inner.sessions.insert(session, mine);
+        });
+        drop(replaced);
     }
 }
 

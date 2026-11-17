@@ -223,16 +223,13 @@ impl SessionManager {
         let admission = Arc::clone(&self.admission);
         let started = UNKNOWN_TIME.to_string();
         let handle = Arc::new(Handle::new(&row, started, admission, default));
-        // Attached before its row is reported stored. A removal of its
-        // workspace or project waits while a session there is not stored
-        // yet, so one admitted after this finds the session loaded and
-        // lets go of it ([`SessionManager::forget_found`]): it is never
+        // Attached in the step that reports its row stored. A removal of
+        // its workspace or project waits while a session there is not
+        // stored yet, so one let go by that step finds the session loaded
+        // and lets go of it ([`SessionManager::forget_found`]): it is never
         // left listed in what was removed (FLOW-RESUME-SESSION-R13).
-        // Admission has the session: its creation is under way here.
-        self.attach(&handle);
-        admitted.end(Report::SessionStored {
-            row: Box::new(row.clone()),
-        });
+        let mine: Arc<Handle> = Arc::clone(&handle);
+        admitted.end_stored(row, mine);
         Ok(Some(handle))
     }
 

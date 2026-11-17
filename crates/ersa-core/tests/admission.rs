@@ -1484,38 +1484,6 @@ fn a_start_s_failure_is_kept_until_a_later_start_succeeds() {
     assert_eq!(state, before);
 }
 
-// verifies: FLOW-RESUME-SESSION-R13
-#[test]
-fn a_removal_waits_for_a_found_session_being_recorded_and_then_takes_it() {
-    // A list is recording a session it found in the project's own folder:
-    // admitted, its row not stored yet. A removal of the project asked for
-    // now waits, so the list has the session stored and loaded before the
-    // removal goes on, and the removal lets go of it: it is never left
-    // listed in what was removed.
-    let mut only_root = existing();
-    only_root.workspaces.retain(|workspace| workspace.root);
-    let mut state = State::restored(only_root);
-    command(&mut state, find_session(ROOT, "s1"));
-    assert_eq!(command(&mut state, remove_project()), Outcome::Held);
-    let stored = step(&mut state, Input::Report(stored_in(ROOT, "s1", true)));
-    let removing = admitted(Operation::RemoveProject(P.into()));
-    assert_eq!(stored.released, [(0, removing)]);
-    assert!(state.row("s1").is_some());
-    report(&mut state, Report::ProjectRemoved { project: P.into() });
-    assert!(state.session("s1").is_none());
-    assert!(state.project(P).is_none());
-
-    // The same for its workspace.
-    let mut state = world();
-    command(&mut state, find_session(W, "s1"));
-    assert_eq!(command(&mut state, remove_workspace(W)), Outcome::Held);
-    let stored = step(&mut state, Input::Report(stored_in(W, "s1", true)));
-    assert_eq!(
-        stored.released,
-        [(0, admitted(Operation::RemoveWorkspace(W.into())))]
-    );
-}
-
 // -- A fork's mark on its original (ARCH-CORE-R14) --------------------------
 
 // verifies: FLOW-FORK-SESSION-R03
@@ -3541,6 +3509,62 @@ async fn what_core_attaches_to_a_session_is_found_there_and_goes_with_it() {
     assert_eq!(label(admission.attached("s2")), None);
     assert_eq!(Arc::strong_count(&second), 1);
     assert!(admission.all_attached().is_empty());
+}
+
+/// Notes, when it is woken, how many hold `mine`.
+struct HoldersWhenWoken {
+    mine: Arc<String>,
+    holders: std::sync::atomic::AtomicUsize,
+}
+
+impl std::task::Wake for HoldersWhenWoken {
+    fn wake(self: Arc<Self>) {
+        let holders = Arc::strong_count(&self.mine);
+        self.holders
+            .store(holders, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+// verifies: FLOW-RESUME-SESSION-R13
+#[tokio::test]
+async fn a_found_session_is_loaded_before_a_removal_that_waited_for_it_is_answered() {
+    let admission = Arc::new(Admission::default());
+    admission.restore(existing());
+    // A list records a session it found; a removal of its workspace waits.
+    let finding = admit(&admission, find_session(W, "s1")).await;
+    let mut removal = std::pin::pin!(admission.ask(remove_workspace(W)));
+    // The removal is woken inside the step that lets it go. Its waker
+    // notes who holds the session's own at that moment.
+    let found = mine("found");
+    let woken = Arc::new(HoldersWhenWoken {
+        mine: Arc::clone(&found),
+        holders: Default::default(),
+    });
+    let waker = std::task::Waker::from(Arc::clone(&woken));
+    let mut context = std::task::Context::from_waker(&waker);
+    assert!(removal.as_mut().poll(&mut context).is_pending());
+
+    finding.end_stored(row("s1", W, true), found.clone());
+    // Admission held it already: the test, the waker, and admission. The
+    // removal, whenever it runs, finds the session with what Core keeps
+    // for it, and lets go of it: it is never left behind.
+    let holders = woken.holders.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(holders, 3);
+    let removing = admitted(Operation::RemoveWorkspace(W.into()));
+    assert_eq!(removal.await, removing);
+    assert_eq!(label(admission.attached("s1")), Some("found".into()));
+    assert!(admission.row("s1").is_some_and(|row| row.started_elsewhere));
+
+    // A row reported stored for a session that went meanwhile attaches
+    // nothing.
+    let late = admit(&admission, find_session(ROOT, "s2")).await;
+    admission.report(Report::SessionGone {
+        session: "s2".into(),
+    });
+    let nobody = mine("nobody's");
+    late.end_stored(row("s2", ROOT, true), nobody.clone());
+    assert_eq!(label(admission.attached("s2")), None);
+    assert_eq!(Arc::strong_count(&nobody), 1);
 }
 
 // verifies: ARCH-CORE-R14
