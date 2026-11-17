@@ -24,6 +24,12 @@ use tokio::sync::oneshot;
 /// The variable that runs one schedule alone: the choices a failure printed.
 pub const SCHEDULE: &str = "ERSA_SCHEDULE";
 
+/// Whether one schedule is being run alone ([`SCHEDULE`]): a test then
+/// checks that schedule only, not how many there are or what they reach.
+pub fn replaying() -> bool {
+    std::env::var(SCHEDULE).is_ok()
+}
+
 /// How much of the paused clock one run may use while its operations wait
 /// on nothing the test orders: past it, an operation is stuck.
 const PATIENCE: Duration = Duration::from_secs(600);
@@ -187,7 +193,8 @@ impl Choices {
 
 /// Runs `run` once for every schedule: every way its decisions can be
 /// taken, depth first. Returns how many there were. A run that panics
-/// prints its choices, which [`SCHEDULE`] set to them runs alone.
+/// prints its choices, which [`SCHEDULE`] set to them runs alone: name the
+/// test too, since the choices fit only the scenario that printed them.
 pub fn every_schedule(name: &str, mut run: impl FnMut(Choices)) -> usize {
     let only = std::env::var(SCHEDULE).ok();
     let mut next = Some(Choices::replay(only.as_deref().unwrap_or_default()));
