@@ -1,0 +1,82 @@
+# Daily exploration of admission's whole world (ARCH-CORE-R21, ADR 0037).
+# Every check explores smaller worlds; this run applies every input to every
+# reachable state of the world that holds them all, which takes about a
+# quarter of an hour in an optimized build. A failing run opens an issue, or
+# comments on the one it opened before, so nobody has to look for it.
+name: Admission
+
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs never overlap, so a failure never files two issues.
+concurrency:
+  group: admission-whole-world
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  explore:
+    name: Whole world of admission
+    runs-on: ubuntu-24.04
+    # With swap the exploration took 65 minutes (15 with enough memory);
+    # the limit leaves room for the world to grow to more than three times that.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # The exploration holds every state it has reached: about 20 GB at
+      # its peak today, more than the runner's 16 GB of memory. A swap file on the
+      # runner's spare disk takes the rest, so the runner is not starved.
+      - name: Add swap
+        run: |
+          sudo swapoff -a
+          sudo fallocate -l 32G /mnt/admission.swap
+          sudo chmod 600 /mnt/admission.swap
+          sudo mkswap /mnt/admission.swap
+          sudo swapon /mnt/admission.swap
+          free -m
+
+      - name: Explore every reachable state
+        run: cargo test -p ersa-core --release --locked --test admission -- --ignored
+
+  report:
+    name: Report a failure
+    needs: explore
+    if: failure()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # The only write this workflow needs: opening or commenting on an issue.
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TITLE: Scheduled exploration of admission failed
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Open or update the issue
+        run: |
+          # Find the issue an earlier failure opened, by its exact title.
+          number=$(gh issue list --state open --author "app/github-actions" --search "\"$TITLE\" in:title" \
+            --json number,title --jq "map(select(.title == env.TITLE)) | .[0].number // empty")
+          body="The scheduled exploration of admission's whole world (ARCH-CORE-R21) failed on \`main\`: $RUN"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
