@@ -3928,12 +3928,11 @@ mod tests {
             found: true,
         };
         let admitted = manager.admission.command(command).await.unwrap();
-        admitted.end(Report::SessionStored {
-            row: Box::new(found.clone()),
-        });
         let admission = Arc::clone(&manager.admission);
         let handle = Arc::new(Handle::new(&found, now_rfc3339(), admission, None));
-        assert!(manager.attach(&handle));
+        // As a list does: attached in the step that reports it stored.
+        let mine: Arc<Handle> = Arc::clone(&handle);
+        admitted.end_stored(found.clone(), mine);
 
         // As a removal does: quiet them, take their rows, then let go.
         let quiet = manager.quiet_found("w").await;
