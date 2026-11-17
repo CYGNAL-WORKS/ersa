@@ -335,7 +335,7 @@ impl SessionManager {
             Err(SessionError::Refused {
                 reason: ErrorReason::SessionNotRunning,
                 ..
-            }) if lock(&handle.start_failure).is_some() => {
+            }) if handle.admission.start_failure(&handle.id).is_some() => {
                 // The session's run ends just after; answer once it has, so
                 // `session.list` already says the session failed and the
                 // sender can tell a failed start from a slow one by its
