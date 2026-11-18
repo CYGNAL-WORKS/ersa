@@ -167,7 +167,11 @@ describe("a section heading's Delete", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R05
   it("deletes the section asking nothing, and puts its sessions in No section, keeping every session", async () => {
     const core = await start();
+    const listings = () => core.calls.filter((c) => c.method === "session.list").length;
+    const before = listings();
     await chooseFromMore("Work", "Delete");
+    // Core moved the sessions, so the window reads them again rather than keep their old section.
+    expect(listings()).toBeGreaterThan(before);
     expect(core.calls.filter((c) => c.method.startsWith("section.") && c.method !== "section.list").map((c) => [c.method, c.params])).toEqual([
       ["section.remove", { id: "work" }],
     ]);

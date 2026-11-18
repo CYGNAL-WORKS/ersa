@@ -145,7 +145,7 @@
 }
 
 /* The heading holds its menu, so the pointer over the open menu is not over the heading. */
-.rail-heading:hover:not(:has(.menu:hover)),
+.rail-heading:not([data-editing]):hover:not(:has(.menu:hover)),
 .rail-heading[data-force="hover"] {
   color: var(--color-ink);
   background: var(--material-hover);
@@ -360,6 +360,8 @@
   box-sizing: border-box;
   flex: 1;
   min-width: 0;
+  /* Its edge and padding sit before the name, so the name stays where it was as it becomes a field. */
+  margin-inline-start: calc(-1 * (var(--line-hairline) + var(--space-xs)));
   height: var(--size-control-sm);
   padding: 0 var(--space-xs);
   font: inherit;
@@ -381,15 +383,11 @@
   color: var(--color-ink-muted);
 }
 
-/* Renaming, the heading is a field and takes no fill under the pointer. */
-.rail-heading[data-editing]:hover {
-  background: transparent;
-}
-
-/* Why a name was refused, beneath the heading, starting where the field's text does. */
+/* Why a name was refused, beneath the heading, its glyph starting where the name does: past the heading's edge, the
+   toggle's padding, the chevron and the gap after it. */
 .rail-heading-problem {
   margin: 0;
-  padding-inline: calc(var(--line-hairline) + var(--space-sm));
+  padding-inline: calc(var(--line-hairline) + var(--space-sm) + var(--size-icon-sm) + var(--space-sm)) calc(var(--line-hairline) + var(--space-sm));
   font-size: var(--type-ui-small-size);
   line-height: var(--type-ui-small-leading);
 }

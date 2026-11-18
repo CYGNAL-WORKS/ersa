@@ -12,7 +12,7 @@ export type DateKey = "today" | "yesterday" | "previous_7_days" | "older";
 export const DATE_KEYS: readonly DateKey[] = ["today", "yesterday", "previous_7_days", "older"];
 
 /** "No section"'s key, also its key among the collapsed groups (PROTO-CORE-API, Settings). */
-export const NO_SECTION_KEY = "no_section" as const;
+const NO_SECTION_KEY = "no_section" as const;
 
 /**
  * A group with a heading, after the Pinned group: a project, a section, "No section", or a date group. Its `key` is

@@ -13,7 +13,7 @@ import { Icon, IconButton } from "./Icon";
 import { MenuButton } from "./MenuButton";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
 import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
-import { useLeavingFocus } from "./useLeavingFocus";
+import { besideGone, useLeavingFocus } from "./useLeavingFocus";
 import { useTitleDraft } from "./SessionTitle";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
@@ -832,9 +832,9 @@ function useSectionDeletedFocus(root: RefObject<HTMLElement | null>, keys: reado
     const now = document.activeElement;
     if (now !== null && now !== document.body) return;
     const toggleOf = (key: string) => el.querySelector<HTMLElement>(`[data-slide="${CSS.escape(headingSlide(key))}"] .rail-heading-toggle`);
-    const at = going.order.indexOf(going.key);
-    const next = [...going.order.slice(at + 1), ...going.order.slice(0, Math.max(at, 0)).reverse()].map(toggleOf).find((found) => found);
-    (next ?? el.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"))?.focus({ preventScroll: true });
+    // The tiles' rule (useLeavingFocus), over the headings: a heading is never folded away, so each drawn is open.
+    const to = besideGone(going.order, going.key, keys.filter((key) => toggleOf(key) !== null));
+    (to === undefined ? el.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session") : toggleOf(to))?.focus({ preventScroll: true });
   });
   return (key: string) => {
     // Only a choice made with focus in the rail or in the heading's menu has focus to give back.
