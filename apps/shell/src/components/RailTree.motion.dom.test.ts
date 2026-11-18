@@ -247,7 +247,7 @@ describe("a new session's tile", () => {
     ];
 
     // verifies: FLOW-ORGANIZE-SESSIONS-R31
-    it("slides each tile over motion-settle when a turn ends while sorted by last activity", () => {
+    it("slides each tile over motion-settle when Core reports a later last activity while sorted by last activity", () => {
       const { rerender } = render(sorted([older, newer], "last_activity"));
       rerender(sorted([ended, newer], "last_activity"));
       expect(slid).toEqual(swapped);
