@@ -30,10 +30,9 @@ import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
 import { type Attached, attached, sendable, unreadable, waitingName } from "./session/attachments";
 import { type Follower, type SendProgress, type SessionView, type Sending, type WaitingHere, follow, progressOf, waitingOf } from "./session/follow";
-import { type Moving, sectionsUnavailable } from "./components/TileMenu";
+import { type Moving, sectionsUnavailable, useSections } from "./session/sections";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
-import { useSections } from "./session/sections";
 import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
@@ -463,19 +462,31 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const pin = (id: string, pinned: boolean) => void arrangeSession(id, "pin", { pinned });
   // Moving a pinned session to a section unpins it in the same change, so the move shows; to no section, the pin
   // stays (R22).
+  // The listing as it stands now, for a move that starts once Core has made its section, after the render that
+  // asked for it.
+  const sessionsNow = useRef(sessions);
+  sessionsNow.current = sessions;
   const moveToSection = (id: string, sectionId: string | null) => {
-    const pinned = sessions.state === "ready" && sessions.sessions.some((s) => s.id === id && s.pinned);
+    const listed = sessionsNow.current;
+    const pinned = listed.state === "ready" && listed.sessions.some((s) => s.id === id && s.pinned);
     void arrangeSession(id, "section", sectionId !== null && pinned ? { section_id: sectionId, pinned: false } : { section_id: sectionId });
   };
   // A new section's heading, while it is shown with its name field: from the arrange menu, or from a session's Move
   // to section, which moves that session into it once named (FLOW-ORGANIZE-SESSIONS, steps 3 and 5). Sections are
   // seen only grouped by section, so choosing it under another grouping switches to grouping by section (R36).
-  const [newSection, setNewSection] = useState<{ for?: string }>();
+  // `opener` is what the menu gave focus back to as New section was chosen (More, the tile, or the arrange button),
+  // which takes it again when nothing is made.
+  const [newSection, setNewSection] = useState<{ for?: string; opener?: HTMLElement }>();
   const startNewSection = (forSession?: string) => {
     sections.createReset();
-    setNewSection({ for: forSession });
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    setNewSection({ for: forSession, opener });
     if (arrangement.groupBy !== "section") arrange(choicePatch({ groupBy: "section" }));
   };
+  // A section being made for a session counts as that session's change on its way, so Pin, Unpin and Move to section
+  // wait for it, one at a time, and its move is measured from where it is (R22).
+  const movingShown: Record<string, Moving> =
+    newSection?.for !== undefined && sections.creating?.state === "sending" ? { ...moving, [newSection.for]: { state: "sending", change: "section" } } : moving;
   // Grouped by anything else, as when Core refused the switch, the heading has nowhere to show, so it goes.
   if (newSection && arrangement.groupBy !== "section") setNewSection(undefined);
   const nameNewSection = async (name: string) => {
@@ -857,7 +868,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onToggle={toggleGroup}
               onPin={pin}
               onMove={moveToSection}
-              moving={moving}
+              moving={movingShown}
               sections={sections.view}
               onNewSection={startNewSection}
               onRename={rename}
@@ -912,7 +923,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onNewSession={() => dispatch({ type: "newSession" })}
               onPin={pin}
               onMove={moveToSection}
-              moving={moving}
+              moving={movingShown}
               sections={sections.view}
               onNewSection={startNewSection}
               onRename={rename}
