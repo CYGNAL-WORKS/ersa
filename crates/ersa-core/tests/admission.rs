@@ -3692,6 +3692,7 @@ fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
 // every input. 2.8 million states, a quarter of an hour in an optimized
 // build, so it is not part of every check:
 // `cargo test -p ersa-core --release --test admission -- --ignored`.
+// verifies: ARCH-CORE-R21
 #[test]
 #[ignore = "about fifteen minutes in an optimized build"]
 fn every_input_in_every_reachable_state_of_the_whole_world() {
