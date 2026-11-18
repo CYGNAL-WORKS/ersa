@@ -175,6 +175,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         effort_at: requested.effort,
         permission_mode_at: requested.permission_mode,
         started_elsewhere: false,
+        unseen: false,
         archived: false,
         deleting: None,
         pinned: false,
@@ -334,6 +335,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         effort_at: requested.effort,
         permission_mode_at: requested.permission_mode,
         started_elsewhere: false,
+        unseen: false,
         archived: false,
         deleting: None,
         pinned: false,
@@ -520,7 +522,7 @@ pub(super) async fn set_archived(
 pub(super) async fn arrange(core: &Core, params: ArrangeParams) -> Result<Session, ApiError> {
     Ok(core
         .sessions
-        .arrange(&params.id, params.pinned, params.section_id)
+        .arrange(&params.id, params.pinned, params.section_id, params.unseen)
         .await?)
 }
 

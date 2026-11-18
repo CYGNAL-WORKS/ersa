@@ -689,14 +689,14 @@ export interface SessionRawLogParams {
 export interface SectionListParams {}
 export interface SectionCreateParams {
   /**
-   * Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case.
+   * Core trims it and refuses with invalid_params one that is then blank or longer than 200 characters. Names are compared exactly: section.create with another section's name answers with that section, section.rename to it is refused with invalid_params, and names that differ only in case are different sections.
    */
   name: string;
 }
 export interface SectionRenameParams {
   id: Id;
   /**
-   * Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case.
+   * Core trims it and refuses with invalid_params one that is then blank, longer than 200 characters, or exactly another section's name. Names that differ only in case are different sections.
    */
   name: string;
 }
