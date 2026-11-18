@@ -152,6 +152,7 @@ describe("a menu opened at the pointer", () => {
   afterEach(() => {
     HTMLElement.prototype.getBoundingClientRect = realRect;
     size.height = 300;
+    size.width = 200;
   });
 
   /** Opens a menu at the press and gives back its box, as the window shows it. */
@@ -192,24 +193,25 @@ describe("a menu opened at the pointer", () => {
   it("larger than the window both ways, it sits against the window's left and top edges", () => {
     size.width = 900;
     size.height = 700;
-    try {
-      const box = openAt(400, 300);
-      expect(box.left).toBe(0);
-      expect(box.top).toBe(0);
-    } finally {
-      size.width = 200;
-    }
+    const box = openAt(400, 300);
+    expect(box.left).toBe(0);
+    expect(box.top).toBe(0);
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R30
   it("is placed again when it grows while open, or the window shrinks", () => {
-    let grew: () => void = () => {};
+    // The fake observer reports a change only for the elements it was asked to watch.
+    let callback: () => void = () => {};
+    const watched = new Set<Element>();
+    const grew = (el: Element) => watched.has(el) && callback();
     const real = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class {
       constructor(cb: () => void) {
-        grew = cb;
+        callback = cb;
       }
-      observe() {}
+      observe(el: Element) {
+        watched.add(el);
+      }
       disconnect() {}
     } as unknown as typeof ResizeObserver;
     try {
@@ -218,7 +220,9 @@ describe("a menu opened at the pointer", () => {
       expect(menu.getBoundingClientRect().top).toBe(300);
       // An item gains its reason: the menu grows past the foot, and moves up to stay inside.
       size.height = 350;
-      act(() => grew());
+      act(() => {
+        grew(menu);
+      });
       expect(menu.getBoundingClientRect().bottom).toBeLessThanOrEqual(H);
       expect(menu.getBoundingClientRect().top).toBe(0);
       // The window shrinks: it moves in again.
