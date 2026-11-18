@@ -39,7 +39,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins.
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
-- **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed. Work done outside Ersa counts, and shows the next time the rail lists sessions (PROTO-CORE-API-R75).
+- **Last activity** moves a tile only when its session's last activity gets later: at a turn's end, or when work done outside Ersa shows the next time the rail lists sessions (PROTO-CORE-API-R75). It never moves one while a reply streams or because the session's state changed. A session that stops keeps its place, though its record's time is a little earlier than its last turn's end; the record's time stands once the rail lists sessions anew, after a restart or a lost connection.
 - **Unseen.** A session is unseen when it goes idle after working while not the active one, or when the user chooses Mark as unread; the mark goes when the user makes it active or chooses Mark as read.
 
 ## Requirements
@@ -53,7 +53,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R07**: When grouping by date, Ersa shall put each session in Today, Yesterday, Previous 7 days or Older by the local date it was created.
 - **FLOW-ORGANIZE-SESSIONS-R08**: When grouping by project, Ersa shall group as `LAY-SHELL` (The rail) gives; when grouping by none, Ersa shall show one list with no headings after the Pinned group.
 - **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first. The order holds whenever what it sorts by changes, so a tile moves when its name changes while sorting by name, whether the user renamed it or its backend titled it later.
-- **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core reports when a turn ends, or a corrected date created for a session with no last activity yet.
+- ~~**FLOW-ORGANIZE-SESSIONS-R10**~~: retired 2026-11-18 (Core's last activity also changes when a session stops and when work is done outside Ersa), replaced by R31.
 - **FLOW-ORGANIZE-SESSIONS-R11**: When showing Active, Ersa shall leave archived sessions out of the rail; showing Archived, only archived sessions; showing All, both, each archived tile marked as archived.
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
 - **FLOW-ORGANIZE-SESSIONS-R13**: Pins, sections and their membership, the grouping, the sort, the filter and the collapsed groups shall survive a restart of Ersa and of Core.
@@ -73,6 +73,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R27**: Ersa shall refuse a section name holding a control character other than spacing.
 - **FLOW-ORGANIZE-SESSIONS-R28**: A menu opened at the pointer that is no larger than the window shall lie wholly inside the window.
 - **FLOW-ORGANIZE-SESSIONS-R29**: A menu opened at the pointer shall have its top-left corner at the press where it fits there; on an axis where it does not, it shall open the other way from the press, and where it fits neither way it shall sit against the window's left or top edge.
+- **FLOW-ORGANIZE-SESSIONS-R31**: When sorting by last activity, Ersa shall move a tile only when Core reports its session's first last activity, or a later one than the one shown, or a corrected date created for a session with no last activity yet.
 - **FLOW-ORGANIZE-SESSIONS-R30**: A menu opened at the pointer shall be placed again when its size or the window's changes.
 
 ## Out of scope
@@ -87,6 +88,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-18: from #337 inbox: Core's last activity for a session changes at a turn's end, when a live session stops (to its record's time, a little earlier) and when work is done outside Ersa (PROTO-CORE-API-R75), so the rule is now the rail's own: a tile moves only for a session's first last activity or a later one, and a stop moves nothing. FLOW-ORGANIZE-SESSIONS-R10 retired; R31 added.
 - 2026-11-18: from #290 inbox: a menu opened at the pointer stays inside the window, opening the other way from the press where it has no room, as a desktop's menus do, and is placed again when it or the window changes size (FLOW-ORGANIZE-SESSIONS-R28 to R30 added). `RAIL.md` (Menus) holds the rule.
 - 2026-11-15: from #413 inbox: a corrected date created reaches the rail on `session.tile` (PROTO-CORE-API-R105, R106), which is how R07, R09 and R10 hold without a reread of the list; until those are built it shows at the next read of the list. No requirement IDs changed.
 - 2026-11-14: from the triage of #289: a section name holding a control character other than spacing is refused, as Core does (PROTO-CORE-API-R60), and the edge case says so. R27 added. The 2026-11-07 line named PROTO-CORE-API-R61, the rule on case, and now names R60 alone.

@@ -146,7 +146,7 @@ export function RailTree(props: RailTreeProps) {
   // The rail rearranges when the grouping or filter changes, when the day turns while grouped by date, when Core has a
   // session's pin, or when what the sort reads of a session differs from the listing before, as it does when the
   // user chooses another sort or a turn ends while sorted by last activity (FLOW-ORGANIZE-SESSIONS, step 4;
-  // DESIGN.md, Motion); a tile's state is no part of it (R10). Then each tile and heading slides from where it sat
+  // DESIGN.md, Motion); a tile's state is no part of it (FLOW-ORGANIZE-SESSIONS-R31). Then each tile and heading slides from where it sat
   // just before this commit, and what the commit takes away fades out there. Only what this commit takes away: one
   // that went earlier, as a tile archived while a pin saves, is long gone and stays gone.
   const arranged = `${groupBy}/${show}/${groupBy === "date" ? now.toDateString() : ""}`;
