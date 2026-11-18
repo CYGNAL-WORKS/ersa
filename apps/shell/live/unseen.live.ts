@@ -10,7 +10,7 @@ import { expect, test } from "./harness";
 const rail = (page: Page) => page.getByRole("navigation", { name: "Rail" });
 
 async function newSession(page: Page, text: string) {
-  await page.keyboard.press("Control+o");
+  await rail(page).getByRole("button", { name: /^New session in / }).click();
   const words = page.getByRole("textbox", { name: "Message" });
   await words.fill(text);
   await words.press("Enter");
@@ -35,7 +35,7 @@ test("Mark as unread keeps a session unseen across a restart until it is opened"
 
   // The newest is active: Mark as unread is unavailable on it, with the reason.
   const active = rail(page).locator(".session[aria-current]");
-  const activeId = await rail(page).locator("[data-session-id]").filter({ has: active }).getAttribute("data-session-id");
+  const activeId = await rail(page).locator("[data-session-id]").filter({ has: page.locator(".session[aria-current]") }).getAttribute("data-session-id");
   await active.click({ button: "right" });
   const unavailable = page.getByRole("menuitem", { name: /^Mark as unread/ });
   await expect(unavailable).toHaveAttribute("aria-disabled", "true");
@@ -44,18 +44,17 @@ test("Mark as unread keeps a session unseen across a restart until it is opened"
   await page.keyboard.press("Escape");
 
   // The other one is marked unread: its title reads strong.
-  const other = rail(page).locator(".session:not([aria-current])").first();
-  const otherId = await rail(page).locator("[data-session-id]").filter({ has: other }).getAttribute("data-session-id");
+  const otherId = await rail(page).locator("[data-session-id]").filter({ has: page.locator(".session:not([aria-current])") }).getAttribute("data-session-id");
   const otherTile = () => rail(page).locator(`[data-session-id="${otherId}"] .session`);
   await otherTile().click({ button: "right" });
-  await page.getByRole("menuitem", { name: "Mark as unread" }).click();
-  await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "");
+  await page.getByRole("menuitem", { name: "Mark as unread", exact: true }).click();
+  await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "true");
   await ersa.shot("marked-unread");
 
   // Quit and open again, Core too: Core kept the mark.
   await ersa.restart();
   page = ersa.page;
-  await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "", { timeout: 60_000 });
+  await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "true", { timeout: 60_000 });
   await ersa.shot("unseen-after-restart");
 
   // Opened, it is seen, and stays seen through another restart.
@@ -64,10 +63,10 @@ test("Mark as unread keeps a session unseen across a restart until it is opened"
   // Back on the other session, the tile reads as Core now has it: seen.
   await rail(page).locator(`[data-session-id="${activeId}"] .session`).click();
   await expect(otherTile()).not.toHaveAttribute("aria-current", "true");
-  await expect(otherTile().locator(".session-title")).not.toHaveAttribute("data-unseen", "");
+  await expect(otherTile().locator(".session-title")).not.toHaveAttribute("data-unseen");
   await ersa.restart();
   page = ersa.page;
   await expect(otherTile()).toBeVisible({ timeout: 60_000 });
-  await expect(otherTile().locator(".session-title")).not.toHaveAttribute("data-unseen", "");
+  await expect(otherTile().locator(".session-title")).not.toHaveAttribute("data-unseen");
   await ersa.shot("seen-after-restart");
 });
