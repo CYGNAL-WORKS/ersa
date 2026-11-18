@@ -82,6 +82,30 @@ function fakeCore(more: Answers = {}, start: { sessions?: Session[]; sections?: 
       sections = sections.map((s) => (s.id === params.id ? renamed : s));
       return renamed;
     },
+    // As Core does (PROTO-CORE-API-R60, R76): spacing settled, a name refused blank, over 200 characters or holding a
+    // control character other than spacing, and one exactly another's answered with that section, case and all.
+    "section.create": (params: { name: string }) => {
+      if ([...params.name].some((c) => /\p{Cc}/u.test(c) && !/\s/u.test(c)))
+        throw { kind: "rpc", error: { code: -32602, message: "section.create: a section's name is one line, without control characters" } };
+      const name = params.name.trim().replace(/\s+/g, " ");
+      if (name === "") throw { kind: "rpc", error: { code: -32602, message: "section.create: a section's name cannot be blank" } };
+      if ([...name].length > 200) throw { kind: "rpc", error: { code: -32602, message: "section.create: a section's name can have at most 200 characters" } };
+      const taken = sections.find((s) => s.name === name);
+      if (taken) return taken;
+      const made = { id: `made-${sections.length}`, name, created_at: "2026-11-18T09:00:00Z" };
+      sections = [...sections, made];
+      return made;
+    },
+    // Core keeps each session's pin and section, and answers with the session as session.list lists it.
+    "session.arrange": (params: { id: string; pinned?: boolean; section_id?: string | null }) => {
+      sessions = sessions.map((s) => {
+        if (s.id !== params.id) return s;
+        const { section_id, ...rest } = s;
+        const next = params.section_id === undefined ? section_id : (params.section_id ?? undefined);
+        return { ...rest, pinned: params.pinned ?? s.pinned, ...(next ? { section_id: next } : {}) };
+      });
+      return sessions.find((s) => s.id === params.id);
+    },
     ...more,
   };
   const client: CoreClient = {
@@ -268,5 +292,241 @@ describe("a section heading's Rename", () => {
     expect(screen.queryByRole("textbox", { name: "Section name" })).toBeNull();
     expect(groups().map(([name]) => name)).toEqual(["Work", "Errands", "Later", "No section"]);
     expect(core.calls.filter((c) => c.method === "section.rename")).toHaveLength(1);
+  });
+});
+
+// A tile, its More menu and Move to section ▸ (LAY-SHELL, A tile's menu).
+const tileOf = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.querySelector(".session-title")?.textContent === title)!;
+const pinnedTitles = () => [...rail().querySelectorAll(".rail-pinned .session-title")].map((el) => el.textContent);
+const arranges = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.arrange").map((c) => c.params);
+const creates = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "section.create").map((c) => c.params);
+const nameField = () => screen.queryByRole("textbox", { name: "Section name" }) as HTMLInputElement | null;
+// The headings after the Pinned group, a new section's field read as "field".
+const headings = () => [...rail().querySelectorAll(".rail-projects > .rail-project")].map((g) => g.querySelector(".rail-heading-name")?.textContent ?? "field");
+
+function openMoveTo(title: string) {
+  const more = within(tileOf(title).closest("li")!).getByRole("button", { name: `More for ${title}` });
+  more.focus();
+  fireEvent.click(more, { detail: 0 });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Move to section" }));
+  return within(screen.getByRole("menu", { name: "Move to section" }));
+}
+
+async function moveTo(title: string, item: string) {
+  const submenu = openMoveTo(title);
+  fireEvent.click(submenu.getByRole(item === "New section…" ? "menuitem" : "menuitemradio", { name: item }));
+  await settle();
+  await settle();
+}
+
+async function typeName(name: string, key = "Enter") {
+  fireEvent.change(nameField()!, { target: { value: name } });
+  fireEvent.keyDown(nameField()!, { key });
+  await settle();
+  await settle();
+}
+
+describe("a tile's Move to section", () => {
+  // verifies: FLOW-ORGANIZE-SESSIONS-R03
+  it("offers each section, the current one marked, then No section and New section…", async () => {
+    await start();
+    const submenu = openMoveTo("Buy stamps");
+    const options = submenu.getAllByRole("menuitemradio").map((el) => [el.textContent, el.getAttribute("aria-checked")]);
+    expect(options).toEqual([
+      ["Work", "false"],
+      ["Errands", "true"],
+      ["Later", "false"],
+      ["No section", "false"],
+    ]);
+    // New section… is an action after them, not an option.
+    expect(submenu.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(["New section…"]);
+    fireEvent.keyDown(screen.getByRole("menu", { name: "Move to section" }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("menu", { name: "More for Buy stamps" }), { key: "Escape" });
+    // A closed menu fades out before it goes.
+    await settle();
+    // A session in no section has No section marked.
+    const other = openMoveTo("Tidy the docs");
+    expect(other.getByRole("menuitemradio", { name: "No section" }).getAttribute("aria-checked")).toBe("true");
+    expect(other.getByRole("menuitemradio", { name: "Errands" }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R03
+  it("stores the move in Core, and the tile shows in its new section; No section takes it out of every one", async () => {
+    const core = await start();
+    await moveTo("Tidy the docs", "Errands");
+    expect(arranges(core)).toEqual([{ id: "s4", section_id: "errands" }]);
+    expect(groups()).toEqual([
+      ["Work", ["Write the notes", "Fix the build"]],
+      ["Errands", ["Tidy the docs", "Buy stamps"]],
+      ["Later", []],
+    ]);
+    // Focus follows the tile to its new place (docs/design/RAIL.md, Menus).
+    expect(document.activeElement).toBe(tileOf("Tidy the docs"));
+    await moveTo("Fix the build", "No section");
+    expect(arranges(core)[1]).toEqual({ id: "s1", section_id: null });
+    expect(groups()[3]).toEqual(["No section", ["Fix the build"]]);
+    // Choosing where it already is asks Core nothing.
+    await moveTo("Buy stamps", "Errands");
+    expect(arranges(core)).toHaveLength(2);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R22
+  it("unpins a pinned session moved to a section in the one change, and keeps the pin moving it to No section", async () => {
+    const core = await start({}, { sessions: [{ ...listed[3]!, pinned: true }, { ...listed[0]!, pinned: true }] });
+    expect(pinnedTitles()).toEqual(["Tidy the docs", "Fix the build"]);
+    await moveTo("Tidy the docs", "Later");
+    expect(arranges(core)).toEqual([{ id: "s4", section_id: "later", pinned: false }]);
+    expect(pinnedTitles()).toEqual(["Fix the build"]);
+    expect(groups()[2]).toEqual(["Later", ["Tidy the docs"]]);
+    await moveTo("Fix the build", "No section");
+    expect(arranges(core)[1]).toEqual({ id: "s1", section_id: null });
+    expect(pinnedTitles()).toEqual(["Fix the build"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R15
+  it("leaves the tile where Core has it and says why when Core refuses the move", async () => {
+    await start({
+      "session.arrange": () => {
+        throw { kind: "unavailable", message: "the database is locked" };
+      },
+    });
+    await moveTo("Tidy the docs", "Errands");
+    expect(groups()[1]).toEqual(["Errands", ["Buy stamps"]]);
+    expect(groups()[3]).toEqual(["No section", ["Tidy the docs"]]);
+    expect(rail().textContent).toContain("Ersa can't move this session.");
+    expect(rail().textContent).toContain("the database is locked");
+  });
+});
+
+describe("New section", () => {
+  async function fromArrangeMenu() {
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New section" }));
+    await settle();
+  }
+
+  it("shows a new heading with an empty name field after the sections, and Enter makes an empty section", async () => {
+    const core = await start();
+    await fromArrangeMenu();
+    expect(document.activeElement).toBe(nameField());
+    expect(nameField()?.value).toBe("");
+    // Where Core will put it: after every section, before No section.
+    expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+    await typeName("Someday");
+    expect(creates(core)).toEqual([{ name: "Someday" }]);
+    expect(nameField()).toBeNull();
+    expect(headings()).toEqual(["Work", "Errands", "Later", "Someday", "No section"]);
+    expect(arranges(core)).toEqual([]);
+    // The field became the heading, which takes focus.
+    expect(document.activeElement).toBe(heading("Someday")?.querySelector(".rail-heading-toggle"));
+  });
+
+  it("makes nothing on Escape or on Enter with a blank name, and focus goes back to what opened it", async () => {
+    const core = await start();
+    await fromArrangeMenu();
+    await typeName("Someday", "Escape");
+    expect(nameField()).toBeNull();
+    expect(document.activeElement).toBe(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    await moveTo("Tidy the docs", "New section…");
+    await typeName("   ");
+    expect(nameField()).toBeNull();
+    expect(document.activeElement).toBe(tileOf("Tidy the docs"));
+    expect(creates(core)).toEqual([]);
+    expect(arranges(core)).toEqual([]);
+    expect(headings()).toEqual(["Work", "Errands", "Later", "No section"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R22
+  it("from a tile, makes the section and moves the session into it in one change, unpinning it", async () => {
+    const core = await start({}, { sessions: [{ ...listed[3]!, pinned: true }] });
+    await moveTo("Tidy the docs", "New section…");
+    expect(document.activeElement).toBe(nameField());
+    await typeName("Docs");
+    expect(creates(core)).toEqual([{ name: "Docs" }]);
+    expect(arranges(core)).toEqual([{ id: "s4", section_id: "made-3", pinned: false }]);
+    expect(pinnedTitles()).toEqual([]);
+    expect(groups()).toEqual([
+      ["Work", []],
+      ["Errands", []],
+      ["Later", []],
+      ["Docs", ["Tidy the docs"]],
+    ]);
+    // Focus follows the session's tile into the new section.
+    expect(document.activeElement).toBe(tileOf("Tidy the docs"));
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R23
+  it("gives the section already named exactly so, and makes a new one for a name that differs only in case", async () => {
+    const core = await start();
+    await moveTo("Tidy the docs", "New section…");
+    await typeName("Errands");
+    // Nothing new appears, and the session goes to the existing section.
+    expect(headings()).toEqual(["Work", "Errands", "Later"]);
+    expect(groups()[1]).toEqual(["Errands", ["Tidy the docs", "Buy stamps"]]);
+    expect(arranges(core)).toEqual([{ id: "s4", section_id: "errands" }]);
+    // "errands" is another section: the window leaves comparing names to Core and takes its answer.
+    await fromArrangeMenu();
+    await typeName("errands");
+    expect(creates(core)).toEqual([{ name: "Errands" }, { name: "errands" }]);
+    expect(headings()).toEqual(["Work", "Errands", "Later", "errands"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R23
+  it("keeps the field and the name typed with Core's reason for a name over 200 characters, and moves nothing", async () => {
+    const core = await start();
+    await moveTo("Tidy the docs", "New section…");
+    const long = "a".repeat(201);
+    await typeName(long);
+    expect(nameField()?.value).toBe(long);
+    expect(screen.getByRole("alert").textContent).toBe("a section's name can have at most 200 characters");
+    expect(document.activeElement).toBe(nameField());
+    expect(arranges(core)).toEqual([]);
+    expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+    // Typing again leaves the reason behind; Escape then makes nothing.
+    fireEvent.change(nameField()!, { target: { value: "a".repeat(200) } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.keyDown(nameField()!, { key: "Escape" });
+    expect(nameField()).toBeNull();
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R27
+  it("keeps the field with Core's reason for a name holding a control character, making nothing", async () => {
+    const core = await start();
+    await fromArrangeMenu();
+    await typeName("Bell\u0007");
+    expect(creates(core)).toEqual([{ name: "Bell\u0007" }]);
+    expect(nameField()?.value).toBe("Bell\u0007");
+    expect(screen.getByRole("alert").textContent).toBe("a section's name is one line, without control characters");
+    expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+    // Spacing is not refused: a tab is one space, as Core takes it.
+    await typeName("Odd\tjobs");
+    expect(headings()).toEqual(["Work", "Errands", "Later", "Odd jobs", "No section"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R36
+  it("switches the grouping to Section when chosen under another grouping, from either menu", async () => {
+    const core = await start({ "settings.get": () => ({ rail: { group_by: "date" } }) });
+    const groupings = () => core.calls.filter((c) => c.method === "settings.set").map((c) => c.params);
+    await fromArrangeMenu();
+    expect(groupings()).toEqual([{ patch: { rail: { group_by: "section" } } }]);
+    expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+    fireEvent.keyDown(nameField()!, { key: "Escape" });
+    // Grouped by project again, then New section… from a tile.
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Group by/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Project" }));
+    await settle();
+    expect(headings()).toEqual(["alpha"]);
+    await moveTo("Tidy the docs", "New section…");
+    expect(groupings().at(-1)).toEqual({ patch: { rail: { group_by: "section" } } });
+    expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+  });
+
+  it("is unavailable, saying why, while the sections can't be read", async () => {
+    await start({ "section.list": () => Promise.reject({ kind: "unavailable", message: "the database is locked" }) });
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    const item = screen.getByRole("menuitem", { name: /^New section/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Ersa can't read your sections.");
   });
 });

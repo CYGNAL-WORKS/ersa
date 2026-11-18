@@ -30,6 +30,7 @@ import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
 import { type Attached, attached, sendable, unreadable, waitingName } from "./session/attachments";
 import { type Follower, type SendProgress, type SessionView, type Sending, type WaitingHere, follow, progressOf, waitingOf } from "./session/follow";
+import { type Moving, sectionsUnavailable } from "./components/TileMenu";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
 import { useSections } from "./session/sections";
@@ -444,18 +445,46 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   };
   const resetChange = (id: string) => changesOf(id, refusalSeen);
 
-  // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
-  // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
-  const [pinning, setPinning] = useState<Record<string, Sending>>({});
-  const pin = async (id: string, pinned: boolean) => {
-    setPinning((p) => ({ ...p, [id]: { state: "sending" } }));
+  // Pin, Unpin and Move to section on a tile (FLOW-ORGANIZE-SESSIONS-R01, R03): Core stores the pin and the section,
+  // and the rail moves the tile once Core has them. A refusal leaves the tile where Core has it and says why beneath
+  // it until the next try (R15).
+  const [moving, setMoving] = useState<Record<string, Moving>>({});
+  const arrangeSession = async (id: string, change: Moving["change"], params: { pinned?: boolean; section_id?: string | null }) => {
+    setMoving((p) => ({ ...p, [id]: { state: "sending", change } }));
     try {
-      const arranged = await client.call("session.arrange", { id, pinned });
-      setPinning(({ [id]: _, ...rest }) => rest);
-      connection.current?.changed(id, { pinned: arranged.pinned });
+      const arranged = await client.call("session.arrange", { id, ...params });
+      setMoving(({ [id]: _, ...rest }) => rest);
+      // Core answers with the session as it lists it: in no section, it has no `section_id`.
+      connection.current?.changed(id, { pinned: arranged.pinned, section_id: arranged.section_id });
     } catch (error) {
-      setPinning((p) => ({ ...p, [id]: { state: "failed", message: describeError(error) } }));
+      setMoving((p) => ({ ...p, [id]: { state: "failed", message: describeError(error), change } }));
     }
+  };
+  const pin = (id: string, pinned: boolean) => void arrangeSession(id, "pin", { pinned });
+  // Moving a pinned session to a section unpins it in the same change, so the move shows; to no section, the pin
+  // stays (R22).
+  const moveToSection = (id: string, sectionId: string | null) => {
+    const pinned = sessions.state === "ready" && sessions.sessions.some((s) => s.id === id && s.pinned);
+    void arrangeSession(id, "section", sectionId !== null && pinned ? { section_id: sectionId, pinned: false } : { section_id: sectionId });
+  };
+  // A new section's heading, while it is shown with its name field: from the arrange menu, or from a session's Move
+  // to section, which moves that session into it once named (FLOW-ORGANIZE-SESSIONS, steps 3 and 5). Sections are
+  // seen only grouped by section, so choosing it under another grouping switches to grouping by section (R36).
+  const [newSection, setNewSection] = useState<{ for?: string }>();
+  const startNewSection = (forSession?: string) => {
+    sections.createReset();
+    setNewSection({ for: forSession });
+    if (arrangement.groupBy !== "section") arrange(choicePatch({ groupBy: "section" }));
+  };
+  // Grouped by anything else, as when Core refused the switch, the heading has nowhere to show, so it goes.
+  if (newSection && arrangement.groupBy !== "section") setNewSection(undefined);
+  const nameNewSection = async (name: string) => {
+    const section = await sections.create(name);
+    if (!section) return undefined;
+    const forSession = newSection?.for;
+    setNewSection(undefined);
+    if (forSession !== undefined) moveToSection(forSession, section.id);
+    return section;
   };
 
   // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
@@ -791,6 +820,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             onGroupBy: (groupBy) => arrange(choicePatch({ groupBy })),
             onSortBy: (sortBy) => arrange(choicePatch({ sortBy })),
             onShow: (show) => arrange(choicePatch({ show })),
+            onNewSection: () => startNewSection(),
+            newSectionUnavailable: sectionsUnavailable(sections.view),
             onReset: () => arrange(RESET_PATCH),
             onAllSessions: () => dispatch({ type: "allSessions" }),
           }}
@@ -807,7 +838,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               now={today}
               arrangeProblem={arrangeProblem}
               sessions={railWaits && railSessions.state === "ready" ? { state: "loading" } : railSessions}
-              sections={sections.view}
               sectionHandlers={{
                 onRename: sections.rename,
                 renaming: sections.renaming,
@@ -815,6 +845,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                 onDelete: (id) => void sections.remove(id),
                 removing: sections.removing,
               }}
+              newSection={newSection && { ...newSection, creating: sections.creating, onName: nameNewSection, onReset: sections.createReset, onCancel: () => setNewSection(undefined) }}
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
@@ -825,7 +856,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               collapsed={collapsed}
               onToggle={toggleGroup}
               onPin={pin}
-              pinning={pinning}
+              onMove={moveToSection}
+              moving={moving}
+              sections={sections.view}
+              onNewSection={startNewSection}
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
@@ -877,7 +911,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               }}
               onNewSession={() => dispatch({ type: "newSession" })}
               onPin={pin}
-              pinning={pinning}
+              onMove={moveToSection}
+              moving={moving}
+              sections={sections.view}
+              onNewSection={startNewSection}
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}

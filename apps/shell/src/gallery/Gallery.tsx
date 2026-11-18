@@ -280,7 +280,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -1124,13 +1124,13 @@ const entries: Entry[] = [
         <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />,
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
-      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" moving={{ p2: { state: "sending", change: "pin" } }} />)],
       ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
         <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: t("errors.refusal.noFinishedReplyError") } }} />,
       ],
-      ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Pin refused", <RailTree {...pairOnly} moving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError"), change: "pin" } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",
