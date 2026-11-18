@@ -59,7 +59,7 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 
 **More** fades in over the state mark, in the same `size-control-sm` square, under the pointer or keyboard focus, over `motion-quick` with `motion-ease-out`; the mark returns when it goes. While the tile's menu is open, More stays, reading `ink` on `material-pressed`. A session that needs the user keeps its chevron, and More sits before it in a second `size-control-sm` square whose place is kept while More is hidden, so the title never shifts.
 
-**An archived tile**, shown when the rail shows archived sessions, has an archive icon at `size-icon-xs` in `ink-muted` as its mark, and its title reads `ink-muted`; line two keeps its state's phrase, such as Ended. A refused Archive or Unarchive says why beneath the tile, as the rail's notes do: a danger glyph at `size-glyph`, then the reason.
+**An archived tile**, shown when the rail shows archived sessions, has an archive icon at `size-icon-xs` in `ink-muted` as its mark, and its title reads `ink-muted`, unless the session is unseen, when it reads as any unseen session's so the mark the user chose shows; line two keeps its state's phrase, such as Ended. A refused Archive or Unarchive says why beneath the tile, as the rail's notes do: a danger glyph at `size-glyph`, then the reason.
 
 **A tile that leaves the rail** (archived, deleted, or moved out of what the rail shows) passes keyboard focus to the next tile, else the previous, else New session.
 
