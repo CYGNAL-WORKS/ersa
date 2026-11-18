@@ -45,6 +45,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0009_session_fork.sql"),
     include_str!("persistence/0010_session_requested_at.sql"),
     include_str!("persistence/0011_session_started_elsewhere.sql"),
+    include_str!("persistence/0012_session_unseen.sql"),
+    include_str!("persistence/0013_section_names_exact.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -680,6 +682,28 @@ mod tests {
         assert!(matches!(Store::open(&path), Err(Error::TooNew { .. })));
     }
 
+    /// The migration files, in file-name order, are `MIGRATIONS` in order,
+    /// so each file's number is the `user_version` it runs as. Two branches
+    /// that each add a migration then meet as a conflict in file names, and
+    /// the one merged second renumbers its own file, never reorders.
+    #[test]
+    fn migration_files_are_numbered_by_the_order_they_run_in() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/persistence");
+        let mut files: Vec<_> = std::fs::read_dir(&dir)
+            .expect("the migrations folder")
+            .map(|entry| entry.expect("an entry").path())
+            .filter(|path| path.extension().is_some_and(|e| e == "sql"))
+            .collect();
+        files.sort();
+        assert_eq!(files.len(), MIGRATIONS.len(), "{files:?}");
+        for (index, (path, sql)) in files.iter().zip(MIGRATIONS).enumerate() {
+            let name = path.file_name().unwrap().to_string_lossy();
+            assert!(name.starts_with(&format!("{:04}_", index + 1)), "{name}");
+            let on_disk = std::fs::read_to_string(path).expect("the file");
+            assert_eq!(&on_disk, sql, "{name} is not migration {}", index + 1);
+        }
+    }
+
     /// A database as it stood after migration `version`.
     fn database_at(path: &Path, version: usize) -> Connection {
         let conn = Connection::open(path).expect("open");
@@ -810,6 +834,8 @@ mod tests {
                 "permission_mode_at",
                 // Migration 11's.
                 "started_elsewhere",
+                // Migration 12's.
+                "unseen",
             ]
         );
     }
@@ -1048,5 +1074,27 @@ mod tests {
         // `2026-10-31T12:00:00.123Z`: UTC, milliseconds, nothing else.
         assert_eq!(ts.len(), 24, "{ts}");
         assert!(ts.ends_with('Z') && ts.as_bytes()[19] == b'.', "{ts}");
+    }
+
+    /// Migration 13 makes the key of every section made before it its exact
+    /// name, so after it another case of an old name is another section, and
+    /// the old name itself still finds its section.
+    // verifies: PROTO-CORE-API-R76
+    #[tokio::test]
+    async fn migration_13_compares_the_names_of_existing_sections_exactly() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        // The database as it stood before migration 13.
+        let conn = database_at(&path, 12);
+        conn.execute_batch("INSERT INTO sections VALUES ('sec-old', 'Work', 'work', 't');")
+            .expect("old section");
+        drop(conn);
+
+        let store = Store::open(&path).expect("migrates");
+        let found = store.insert_section("Work".into(), |_| {}).await.unwrap();
+        assert_eq!(found.id, "sec-old");
+        let other = store.insert_section("work".into(), |_| {}).await.unwrap();
+        assert_ne!(other.id, "sec-old");
+        assert_eq!(other.name, "work");
     }
 }
