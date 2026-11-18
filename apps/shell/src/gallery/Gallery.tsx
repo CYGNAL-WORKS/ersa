@@ -1136,7 +1136,7 @@ const entries: Entry[] = [
         "New section, refused",
         <RailTree
           {...sectionedTree}
-          newSection={{ ...newSection, initialDraft: "Reviews\u0007", creating: { state: "failed", message: "a section's name is one line, without control characters" } }}
+          newSection={{ ...newSection, initialDraft: "Reviews ".repeat(29), creating: { state: "failed", message: "a section's name can have at most 200 characters" } }}
         />,
       ],
       ["Move refused", <RailTree {...sectionedTree} moving={{ s1: { state: "failed", message: "the database is locked", change: "section" } }} />],
