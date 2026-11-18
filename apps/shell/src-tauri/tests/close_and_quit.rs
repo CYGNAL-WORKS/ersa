@@ -40,7 +40,7 @@ const HELPER_PIDS: &str = "ERSA_QUIT_TEST_PIDS";
 #[test]
 fn closing_the_window_keeps_it_and_the_app_keeps_running() {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
     // Whether the window was still there after the close.
@@ -81,12 +81,24 @@ fn closing_the_window_keeps_it_and_the_app_keeps_running() {
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("the mock app builds");
 
-    // The Shell's own event loop, as the app runs it.
-    let code = ersa_shell::run_app(app);
+    // The Shell's own event loop, as the app runs it, with its hide counted:
+    // the mock's own hide changes nothing a test can see.
+    let hidden = Arc::new(AtomicUsize::new(0));
+    let counted = hidden.clone();
+    let code = ersa_shell::run_app(app, move |window| {
+        assert_eq!(window.label(), ersa_shell::WINDOW);
+        counted.fetch_add(1, Ordering::SeqCst);
+        ersa_shell::hide_window(window);
+    });
 
     assert!(
         still_open.load(Ordering::SeqCst),
         "the window was closed, not kept"
+    );
+    assert_eq!(
+        hidden.load(Ordering::SeqCst),
+        1,
+        "the window was not hidden once"
     );
     assert_eq!(code, 0);
 }
