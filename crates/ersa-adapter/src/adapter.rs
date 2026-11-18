@@ -423,6 +423,10 @@ pub struct RecordSummary {
     /// those of the turns after its own request with
     /// [`RecordedSettings::since`].
     pub settings: RecordedSettings,
+    /// When the session last had a turn: RFC 3339, the time of the latest
+    /// conversation entry in the part of the record read, as the record
+    /// gives it; `None` when that part holds none (PROTO-CORE-API-R75).
+    pub last_activity_at: Option<String>,
 }
 
 /// What a session's record says of its model, effort and permission mode,

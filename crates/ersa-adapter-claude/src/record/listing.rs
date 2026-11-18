@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use ersa_adapter::RecordedSettings;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use super::settings::settings;
 use super::{is_session_id, project_dir};
@@ -53,6 +55,10 @@ pub struct SessionSummary {
     /// The model, effort and permission mode the tail holds; a value only
     /// the rest of the record holds is none (PROTO-CLAUDE-CODE-STREAM-R59).
     pub settings: RecordedSettings,
+    /// The `timestamp` of the latest `user` or `assistant` entry in the
+    /// tail, as the record gives it; `None` when the tail holds none
+    /// (PROTO-CLAUDE-CODE-STREAM-R42).
+    pub last_activity_at: Option<String>,
 }
 
 /// The sessions the CLI recorded for working directory `cwd`. A directory
@@ -96,6 +102,7 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
                 title: ends.title(),
                 modified: metadata.modified().ok(),
                 settings: settings(&ends.tail),
+                last_activity_at: last_activity(&ends.tail),
                 created_at: ends.created_at,
             }),
             // The CLI's retention deleted it since the directory was read.
@@ -217,6 +224,7 @@ pub fn summarize_session(
         title: ends.title(),
         modified,
         settings: settings(&ends.tail),
+        last_activity_at: last_activity(&ends.tail),
         created_at: ends.created_at,
     }))
 }
@@ -268,6 +276,25 @@ fn first_timestamp(head: &[u8]) -> Option<String> {
     head.split(|b| *b == b'\n')
         .filter_map(|line| serde_json::from_slice::<serde_json::Value>(line).ok())
         .find_map(|entry| entry.get("timestamp")?.as_str().map(String::from))
+}
+
+/// The `timestamp` of the latest `user` or `assistant` entry in `tail`
+/// (PROTO-CLAUDE-CODE-STREAM-R42): the conversation, not the titles, prompts
+/// and notes the CLI appends beside it. Entries are not written in time
+/// order, so the latest is found by time; a time that does not parse is
+/// skipped. The record's own spelling of it is kept.
+fn last_activity(tail: &[RecordEntry]) -> Option<String> {
+    tail.iter()
+        .filter_map(|entry| match entry {
+            RecordEntry::User(user) => user.timestamp.as_deref(),
+            RecordEntry::Assistant(reply) => reply.timestamp.as_deref(),
+            _ => None,
+        })
+        .filter_map(|at| Some((OffsetDateTime::parse(at, &Rfc3339).ok()?, at)))
+        // `max_by_key` keeps the last of equals: of two entries stamped
+        // alike, the one written later.
+        .max_by_key(|(time, _)| *time)
+        .map(|(_, at)| at.to_string())
 }
 
 /// The entries of the complete lines in `bytes`, skipping the first segment

@@ -1,7 +1,8 @@
 //! The user's arrangement of sessions (ADR 0026; PROTO-CORE-API, Sessions
 //! and Sections; FLOW-ORGANIZE-SESSIONS), driven over the socket with the
 //! fake backend: pins and sections set by `session.arrange`, the sections
-//! themselves, and `last_activity_at`, each kept across a restart of Core.
+//! themselves, each kept across a restart of Core, and `last_activity_at`,
+//! which comes from the record and the turns.
 
 mod support;
 
@@ -446,13 +447,56 @@ async fn removing_a_section_leaves_its_sessions_in_no_section() {
     );
 }
 
-/// `last_activity_at` is the time a session's latest turn ended: absent
-/// until one has, set as each ends (whatever its outcome), and left alone
-/// while a turn runs and a reply streams, and by anything else.
-// was PROTO-CORE-API-R37; R75 replaces it, unbuilt
+/// Core over the fake backend sharing `records`, on data directory `dir`.
+async fn start_on(dir: tempfile::TempDir, records: &fake::Records) -> (TestCore, Client) {
+    let adapters: Vec<Arc<dyn Adapter>> =
+        vec![Arc::new(FakeAdapter::with_records(Arc::clone(records)))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let client = core.client().await;
+    (core, client)
+}
+
+/// Shuts `core` down and hands back its data directory.
+async fn shut_down(core: TestCore) -> tempfile::TempDir {
+    let mut client = core.client().await;
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    dir
+}
+
+/// Lists sessions until session `id`'s `last_activity_at` is `want`,
+/// failing after 10 seconds: a session's record is read again once its run
+/// has ended, which may land after the end is published.
+async fn until_last_activity(client: &mut Client, id: &str, want: Option<&str>) -> Value {
+    let want = want.map(|at| json!(at));
+    let found = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let row = session_row(client, id).await;
+            if row.get("last_activity_at").cloned() == want {
+                return row;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    found.unwrap_or_else(|_| panic!("last activity {want:?} within 10 s"))
+}
+
+/// The time the fake's record gives the reply to a message that is not a
+/// command (`fake::recorded_reply`).
+const RECORDED_REPLY_AT: &str = "2026-11-01T00:00:01.000Z";
+
+/// A session's last activity, live, is the `ts` of its latest
+/// `turn.completed` since it went live, whatever its outcome, else what its
+/// record gave when it went live; not live, its record's latest
+/// conversation entry, absent when there is none. Core stores none, so no
+/// stored time outlives the record.
+// verifies: PROTO-CORE-API-R75
 #[tokio::test(flavor = "multi_thread")]
-async fn last_activity_changes_only_when_a_turn_ends() {
-    let (core, mut client) = start().await;
+async fn last_activity_comes_from_the_turns_while_live_and_from_the_record_otherwise() {
+    let records = fake::Records::default();
+    let (core, mut client) = start_on(tempdir(), &records).await;
     let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
     let id = new_session(&mut client, &workspace_id).await;
     client
@@ -462,72 +506,109 @@ async fn last_activity_changes_only_when_a_turn_ends() {
     let last_activity = |row: &Value| row.get("last_activity_at").cloned();
     assert_eq!(last_activity(&session_row(&mut client, &id).await), None);
 
-    // A turn that keeps working: none yet.
-    client
-        .result("session.send", json!({ "id": id, "text": "work" }))
-        .await;
-    client.events_until("turn.started").await;
-    let row = session_row(&mut client, &id).await;
-    assert_eq!(row["state"], "running");
-    assert_eq!(last_activity(&row), None);
-
-    // It ends, interrupted: the time it ended.
-    client
-        .result("session.interrupt", json!({ "id": id }))
-        .await;
-    let ended = client.events_until("turn.completed").await;
-    let first = ended.last().unwrap()["ts"].clone();
-    assert!(first.is_string());
-    let row = session_row(&mut client, &id).await;
-    assert_eq!(last_activity(&row), Some(first.clone()));
-    let response = client.call("session.list", json!({})).await;
-    assert_valid("session.list", &response);
-
-    // A turn whose reply streams but has not ended: unchanged.
+    // Live, the record gains a turn's entries, but no turn has ended since
+    // the session went live, and its record gave none then.
     client
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     client.events_until("assistant.text").await;
+    let response = client.call("session.list", json!({})).await;
+    assert_valid("session.list", &response);
+    assert_eq!(last_activity(&session_row(&mut client, &id).await), None);
+
+    // A turn that keeps working sets none; its end, interrupted, does.
+    client
+        .result("session.send", json!({ "id": id, "text": "work" }))
+        .await;
+    client.events_until("turn.started").await;
+    assert_eq!(last_activity(&session_row(&mut client, &id).await), None);
+    client
+        .result("session.interrupt", json!({ "id": id }))
+        .await;
+    let ended = client.events_until("turn.completed").await;
+    let interrupted = ended.last().unwrap()["ts"].clone();
+    assert!(interrupted.is_string());
     assert_eq!(
         last_activity(&session_row(&mut client, &id).await),
-        Some(first.clone())
+        Some(interrupted)
     );
-
-    // A turn that ends successfully: the time it ended.
+    // A turn that ends successfully: its time.
     client
         .result("session.send", json!({ "id": id, "text": "finish" }))
         .await;
     let ended = client.events_until("turn.completed").await;
-    let second = ended.last().unwrap()["ts"].clone();
-    assert_eq!(ended.last().unwrap()["event"]["outcome"], "success");
+    let finished = ended.last().unwrap()["ts"].clone();
     assert_eq!(
         last_activity(&session_row(&mut client, &id).await),
-        Some(second.clone())
+        Some(finished.clone())
     );
+    assert_ne!(finished, json!(RECORDED_REPLY_AT));
 
-    // Arranging, renaming and stopping it are not turns.
-    let work = create_section(&mut client, "Work").await;
-    let arranged = arrange(
-        &mut client,
-        json!({ "id": id, "pinned": true, "section_id": work["id"] }),
-    )
-    .await;
-    assert_eq!(last_activity(&arranged), Some(second.clone()));
-    client
-        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
-        .await;
+    // Stopped, it is not live: its record's latest conversation entry.
     client.result("session.stop", json!({ "id": id })).await;
     client.events_until("session.ended").await;
-    assert_eq!(
-        last_activity(&session_row(&mut client, &id).await),
-        Some(second.clone())
-    );
+    until_last_activity(&mut client, &id, Some(RECORDED_REPLY_AT)).await;
 
+    // Work done elsewhere shows the next time sessions are listed.
+    let backend_id = records.lock().unwrap().keys().next().cloned().unwrap();
+    let mut later = fake::recorded_user("u-elsewhere", "from the terminal");
+    later.ts = Some("2026-11-05T00:00:00.000Z".into());
+    records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(later);
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(last_activity(&row), Some(json!("2026-11-05T00:00:00.000Z")));
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+
+    // Nothing stored outlives the record: after a restart, a record with no
+    // conversation left gives none.
+    let dir = shut_down(core).await;
+    records.lock().unwrap().insert(
+        backend_id.clone(),
+        vec![fake::recorded_title("Only a title")],
+    );
+    let (core, mut client) = start_on(dir, &records).await;
+    assert_eq!(last_activity(&session_row(&mut client, &id).await), None);
+    drop(client);
+
+    // Gone live again, it shows what its record gave until a turn ends.
+    let dir = shut_down(core).await;
+    let mut entry = fake::recorded_reply("r-old", "old");
+    entry.ts = Some("2026-11-07T00:00:00.000Z".into());
+    records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(entry);
+    let (_core, mut client) = start_on(dir, &records).await;
     assert_eq!(
         last_activity(&session_row(&mut client, &id).await),
-        Some(second)
+        Some(json!("2026-11-07T00:00:00.000Z"))
+    );
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.result("session.resume", json!({ "id": id })).await;
+    client.events_until("session.started").await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello again" }))
+        .await;
+    client.events_until("assistant.text").await;
+    assert_eq!(
+        last_activity(&session_row(&mut client, &id).await),
+        Some(json!("2026-11-07T00:00:00.000Z"))
+    );
+    client
+        .result("session.send", json!({ "id": id, "text": "finish" }))
+        .await;
+    let ended = client.events_until("turn.completed").await;
+    assert_eq!(
+        last_activity(&session_row(&mut client, &id).await),
+        Some(ended.last().unwrap()["ts"].clone())
     );
 }
 
@@ -680,7 +761,7 @@ async fn the_tile_sent_on_opening_a_stored_session_carries_its_last_activity() {
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let mut client = core.client().await;
     let listed = session_row(&mut client, &id).await["last_activity_at"].clone();
-    assert!(listed.is_string(), "kept across the restart");
+    assert_eq!(listed, json!(RECORDED_REPLY_AT), "from the record");
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
