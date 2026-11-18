@@ -168,6 +168,8 @@ describe("a menu opened at the pointer", () => {
     return screen.getByRole("menu").getBoundingClientRect();
   }
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R28
+  // verifies: FLOW-ORGANIZE-SESSIONS-R29
   // Near each edge and corner, every item stays inside the window: the menu opens the other way, and stays inside.
   it.each([
     ["the foot", 100, 590, 300, { left: 100, top: 290 }],
@@ -186,6 +188,20 @@ describe("a menu opened at the pointer", () => {
     expect(box.bottom).toBeLessThanOrEqual(H);
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R29
+  it("larger than the window both ways, it sits against the window's left and top edges", () => {
+    size.width = 900;
+    size.height = 700;
+    try {
+      const box = openAt(400, 300);
+      expect(box.left).toBe(0);
+      expect(box.top).toBe(0);
+    } finally {
+      size.width = 200;
+    }
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R30
   it("is placed again when it grows while open, or the window shrinks", () => {
     let grew: () => void = () => {};
     const real = globalThis.ResizeObserver;
