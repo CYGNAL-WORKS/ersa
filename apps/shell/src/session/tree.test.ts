@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Project, Session } from "../protocol/core-api.gen";
+import type { Project, Section, Session } from "../protocol/core-api.gen";
 import { type Tree, collapsedOf, dateGroupOf, treeOf } from "./tree";
 
 const project = (id: string): Project => ({ id, host_id: "local", path: `D:\\${id}`, name: id, vcs: "git", trusted: true });
@@ -171,6 +171,63 @@ describe("the rail's tree as the user arranges it", () => {
     // Showing archived or all, only projects with sessions shown have a heading (LAY-SHELL, Projects).
     expect([ids(arranged("archived").pinned), byGroup(arranged("archived"))]).toEqual([["pinned-gone"], [["ersa", ["gone"]]]]);
     expect([ids(arranged("all").pinned), byGroup(arranged("all"))]).toEqual([["pinned-live", "pinned-gone"], [["ersa", ["gone", "live"]]]]);
+  });
+});
+
+describe("the rail's tree grouped by section", () => {
+  const projects = [project("ersa")];
+  const workspaces = { "w-ersa": { project_id: "ersa" } };
+  const now = new Date(2026, 10, 7, 12, 0);
+  const at = (day: number) => new Date(2026, 10, day, 9).toISOString();
+  // Core lists the sections in the order they were made (PROTO-CORE-API, Sections): "Zebra" first, though it sorts
+  // last by name, and "Empty", made second, holds nothing.
+  const sections: Section[] = [
+    { id: "zebra", name: "Zebra", created_at: at(1) },
+    { id: "empty", name: "Empty", created_at: at(2) },
+    { id: "alpha", name: "Alpha", created_at: at(3) },
+  ];
+  const sectioned = (s: Session, section_id: string): Session => ({ ...s, section_id });
+  const arranged = (sessions: Session[], show: "active" | "archived" | "all" = "active") =>
+    treeOf(projects, workspaces, sessions, { groupBy: "section", sortBy: "created", show, now, sections });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R04
+  it("shows every section, empty or not, in the order they were made, then No section for sessions in none", () => {
+    const sessions = [
+      sectioned(session("a1", "w-ersa", at(1)), "alpha"),
+      sectioned(session("a2", "w-ersa", at(4)), "alpha"),
+      session("loose", "w-ersa", at(2)),
+      sectioned(session("z1", "w-ersa", at(3)), "zebra"),
+      // Its section is not in the list Core gave: it is in none, never missing.
+      sectioned(session("stale", "w-ersa", at(5)), "gone"),
+      { ...sectioned(session("pinned", "w-ersa", at(6)), "alpha"), pinned: true },
+    ];
+    const tree = arranged(sessions);
+    expect(byGroup(tree)).toEqual([
+      ["zebra", ["z1"]],
+      ["empty", []],
+      ["alpha", ["a2", "a1"]],
+      ["no_section", ["stale", "loose"]],
+    ]);
+    expect(tree.groups.map((g) => g.kind)).toEqual(["section", "section", "section", "no_section"]);
+    expect(ids(tree.pinned)).toEqual(["pinned"]);
+    expect(tree.loose).toEqual([]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R04
+  // verifies: FLOW-ORGANIZE-SESSIONS-R32
+  it("shows every section whatever the filter, and No section only while it holds a session", () => {
+    const sessions = [sectioned(session("a1", "w-ersa", at(1)), "alpha"), { ...session("old", "w-ersa", at(2)), archived: true }];
+    expect(byGroup(arranged(sessions, "active"))).toEqual([
+      ["zebra", []],
+      ["empty", []],
+      ["alpha", ["a1"]],
+    ]);
+    expect(byGroup(arranged(sessions, "archived"))).toEqual([
+      ["zebra", []],
+      ["empty", []],
+      ["alpha", []],
+      ["no_section", ["old"]],
+    ]);
   });
 });
 

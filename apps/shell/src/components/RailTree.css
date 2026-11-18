@@ -145,7 +145,7 @@
 }
 
 /* The heading holds its menu, so the pointer over the open menu is not over the heading. */
-.rail-heading:hover:not(:has(.menu:hover)),
+.rail-heading:not([data-editing]):hover:not(:has(.menu:hover)),
 .rail-heading[data-force="hover"] {
   color: var(--color-ink);
   background: var(--material-hover);
@@ -347,6 +347,51 @@
 }
 
 
+/* A section's name, renamed in place (RAIL.md, A group heading): a field size-control-sm high, so the heading keeps
+   its height, in ui-small at the heading weight on surface, with a line edge that turns accent while focused. It
+   starts where the toggle's chevron does. */
+.rail-heading-rename {
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-xs) 0 var(--space-sm);
+}
+
+.rail-heading-field {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  /* Its edge and padding sit before the name, so the name stays where it was as it becomes a field. */
+  margin-inline-start: calc(-1 * (var(--line-hairline) + var(--space-xs)));
+  height: var(--size-control-sm);
+  padding: 0 var(--space-xs);
+  font: inherit;
+  font-weight: var(--type-heading-weight);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.rail-heading-field:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* While the name is on its way to Core, the field takes no typing, and reads so. */
+.rail-heading-field:read-only {
+  color: var(--color-ink-muted);
+}
+
+/* Why a name was refused, beneath the heading, its glyph starting where the name does: past the heading's edge, the
+   toggle's padding, the chevron and the gap after it. */
+.rail-heading-problem {
+  margin: 0;
+  padding-inline: calc(var(--line-hairline) + var(--space-sm) + var(--size-icon-sm) + var(--space-sm)) calc(var(--line-hairline) + var(--space-sm));
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
 /* New session and More fade in as the pointer or keyboard focus enters the heading; their place is kept while
    they are hidden, so nothing in the heading shifts. */
 .rail-heading-actions {
@@ -358,7 +403,7 @@
 
 .rail-heading:hover .rail-heading-actions,
 .rail-heading:focus-within .rail-heading-actions,
-.rail-heading[data-open] .rail-heading-actions,
+.rail-heading:has(.icon-button[aria-expanded="true"]) .rail-heading-actions,
 .rail-heading[data-force] .rail-heading-actions {
   opacity: 1;
 }
@@ -387,6 +432,7 @@
   .rail-heading-trust,
   .rail-heading-count,
   .rail-heading-tip,
+  .rail-heading-field,
   .rail-heading-actions {
     transition: none;
   }

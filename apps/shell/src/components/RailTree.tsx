@@ -1,21 +1,35 @@
-import { Component, type CSSProperties, type ReactNode, type RefObject, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { Component, type CSSProperties, type ReactNode, type Ref, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
-import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import type { Project, Section, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
+import type { SectionsView } from "../session/sections";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { HeightEase, type Place, arrive, placesOf, rearrange } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
-import { Menu, type MenuClose } from "./Menu";
+import { MenuButton } from "./MenuButton";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
 import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
-import { useLeavingFocus } from "./useLeavingFocus";
+import { besideGone, useLeavingFocus } from "./useLeavingFocus";
+import { useTitleDraft } from "./SessionTitle";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 import "./Tip.css";
+
+/** What the window does for a section heading's More menu, and how those changes stand, by section id. */
+export interface SectionHandlers {
+  /** Renames a section in Core; resolves true once Core has. */
+  onRename?: (id: string, name: string) => Promise<boolean>;
+  renaming?: Readonly<Record<string, Sending>>;
+  /** Editing a name starts or ends: its earlier refusal goes. */
+  onRenameReset?: (id: string) => void;
+  /** Deletes a section, asking nothing (FLOW-ORGANIZE-SESSIONS-R05). */
+  onDelete?: (id: string) => void;
+  removing?: Readonly<Record<string, Sending>>;
+}
 
 interface RailTreeProps extends TileHandlers {
   projects: ProjectsView;
@@ -56,6 +70,12 @@ interface RailTreeProps extends TileHandlers {
   show?: Show;
   /** Now, whose local date the date groups count from. */
   now?: Date;
+  /** The user's sections, as Core lists them, the groups while grouping by section; and what their headings do. */
+  sections?: SectionsView;
+  sectionHandlers?: SectionHandlers;
+  /** For the gallery: a section's More menu open, and a section's name being edited. */
+  initialSectionMenu?: string;
+  initialSectionDraft?: { id: string; draft: string };
   /** The groups the user collapsed in the grouping in use, by key (LAY-SHELL, Collapsing); every other one is expanded. */
   collapsed?: ReadonlySet<string>;
   /** The user collapsed or expanded a group's heading, named by its key. */
@@ -147,9 +167,11 @@ export function RailTree(props: RailTreeProps) {
   // DESIGN.md, Motion); a tile's state is no part of it (R10). Then each tile and heading slides from where it sat
   // just before this commit, and what the commit takes away fades out there. Only what this commit takes away: one
   // that went earlier, as a tile archived while a pin saves, is long gone and stays gone.
-  const arranged = `${groupBy}/${show}/${groupBy === "date" ? now.toDateString() : ""}`;
+  // Grouped by section, a section made or deleted rearranges too: its heading fades in or out as the others slide.
+  const sectionList = props.sections?.state === "ready" ? props.sections.sections : [];
+  const arranged = `${groupBy}/${show}/${groupBy === "date" ? now.toDateString() : ""}/${groupBy === "section" ? sectionList.map((x) => x.id).join() : ""}`;
   const lastArranged = useRef(arranged);
-  const placings = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, `${s.pinned}/${sortValueOf(s, sortBy)}`])) : undefined;
+  const placings = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, `${s.pinned}/${s.section_id}/${sortValueOf(s, sortBy)}`])) : undefined;
   const lastPlacings = useRef(placings);
   const werePlaced = lastPlacings.current;
   lastPlacings.current = placings;
@@ -171,7 +193,10 @@ export function RailTree(props: RailTreeProps) {
   });
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
-  const tree = treeOf(listed, workspaces, all, { groupBy, sortBy, show, now });
+  // Grouped by section with the sections not read, every session sits under no heading, as with the projects.
+  const sectionsLost = groupBy === "section" && props.sections?.state === "error";
+  const tree = treeOf(listed, workspaces, all, { groupBy: sectionsLost ? "none" : groupBy, sortBy, show, now, sections: sectionList });
+  const deleted = useSectionDeletedFocus(root, tree.groups.map((g) => g.key), props.sectionHandlers?.removing);
   // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
   // end. Grouped otherwise, no session waits on its project.
@@ -248,6 +273,7 @@ export function RailTree(props: RailTreeProps) {
         {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
         {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
         {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}
+        {sectionsLost && props.sections?.state === "error" && <Problem lead={t("rail.tree.sectionsError")} reason={props.sections.message} />}
         {projects.state === "ready" && listed.length === 0 && (
           <p className="rail-note">
             {t("rail.tree.noProjectsEmpty")}
@@ -285,11 +311,39 @@ export function RailTree(props: RailTreeProps) {
             {tree.groups.map((group) => {
               const closed = folded(group.key, group.sessions);
               const held = group.sessions.length > 0 && tiles(group.sessions);
-              if (group.kind === "date")
+              if (group.kind === "date" || group.kind === "no_section")
                 return (
-                  <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
+                  <PlainGroup
+                    key={group.key}
+                    name={group.kind === "date" ? t(DATE_NAMES[group.key]) : t("rail.group.noSectionHeading")}
+                    slide={headingSlide(group.key)}
+                    folded={closed.folded}
+                    summary={collapsedOf(group.sessions)}
+                    toggle={closed.toggle}
+                  >
                     {held}
-                  </DateGroup>
+                  </PlainGroup>
+                );
+              if (group.kind === "section")
+                return (
+                  <SectionGroup
+                    key={group.key}
+                    section={group.section}
+                    {...props.sectionHandlers}
+                    onDelete={(id) => {
+                      deleted(id);
+                      props.sectionHandlers?.onDelete?.(id);
+                    }}
+                    offline={props.offline}
+                    force={props.forceHeading?.id === group.key ? props.forceHeading.state : undefined}
+                    initialMenu={props.initialSectionMenu === group.key}
+                    initialDraft={props.initialSectionDraft?.id === group.key ? props.initialSectionDraft.draft : undefined}
+                    folded={closed.folded}
+                    summary={collapsedOf(group.sessions)}
+                    toggle={closed.toggle}
+                  >
+                    {held}
+                  </SectionGroup>
                 );
               return (
                 <ProjectGroup key={group.key} project={group.project} {...props} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
@@ -354,8 +408,8 @@ const DATE_NAMES = {
   older: "rail.group.olderHeading",
 } as const satisfies Record<DateKey, string>;
 
-/** A date group: its heading, with no actions (docs/design/RAIL.md, A group heading), and its tiles. */
-function DateGroup({ name, slide, folded, summary, toggle, children }: { name: string; slide: string; folded: boolean; summary: Collapsed; toggle: () => void; children: ReactNode }) {
+/** A date group or "No section": its heading, with no actions (docs/design/RAIL.md, A group heading), and its tiles. */
+function PlainGroup({ name, slide, folded, summary, toggle, children }: { name: string; slide: string; folded: boolean; summary: Collapsed; toggle: () => void; children: ReactNode }) {
   const tilesId = useId();
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
@@ -380,8 +434,8 @@ export function Problem({ lead, reason }: { lead: string; reason: string }) {
 }
 
 /**
- * Why Core refused a session's pin, mark as unread or read, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
- * (R15; FLOW-FORK-SESSION, Variations).
+ * Why Core refused a session's pin, unseen mark, archive, unarchive or fork, beneath its tile or row, which stays as
+ * Core has it (R15; FLOW-FORK-SESSION, Variations).
  */
 export function Refusals({
   session,
@@ -400,12 +454,26 @@ export function Refusals({
   const mark = marking?.[session.id];
   const archive = archiving?.[session.id];
   const fork = forking?.[session.id];
-  // A note opens growing and fading in (docs/design/RAIL.md, notes), pushing the tiles beneath it down over
-  // motion-settle: the box's height eases whenever which notes show changes, and is measured afresh on every other
-  // render, so a reason rewrapped meanwhile is where the next ease starts from.
+  return (
+    <EasedNotes shown={`${fork?.state}/${archive?.state}/${pin?.state}/${mark?.state}`}>
+      {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
+      {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
+      {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
+      {/* Core refused the change, so the session is as it was: unseen if Mark as read was refused. */}
+      {mark?.state === "failed" && <Problem lead={session.unseen ? t("rail.tile.markReadError") : t("rail.tile.markUnreadError")} reason={mark.message} />}
+    </EasedNotes>
+  );
+}
+
+/**
+ * The box notes sit in beneath a tile, a row or a heading. A note opens growing and fading in (docs/design/RAIL.md,
+ * notes), pushing what is beneath it down over motion-settle: the box's height eases whenever `shown`, which names
+ * the notes showing, changes, and is measured afresh on every other render, so a reason rewrapped meanwhile is where
+ * the next ease starts from.
+ */
+function EasedNotes({ shown, children }: { shown: string; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const ease = useRef(new HeightEase()).current;
-  const shown = `${fork?.state}/${archive?.state}/${pin?.state}/${mark?.state}`;
   const lastShown = useRef(shown);
   useLayoutEffect(() => {
     if (!box.current) return;
@@ -415,11 +483,7 @@ export function Refusals({
   });
   return (
     <div ref={box} className="rail-refusals">
-      {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
-      {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
-      {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
-      {/* Core refused the change the menu offered, so the session is as it was: unseen if Mark as read was refused. */}
-      {mark?.state === "failed" && <Problem lead={session.unseen ? t("rail.tile.markReadError") : t("rail.tile.markUnreadError")} reason={mark.message} />}
+      {children}
     </div>
   );
 }
@@ -452,24 +516,15 @@ function ProjectGroup({
 }) {
   // The tiles' element, which the heading's toggle says it controls.
   const tilesId = useId();
-  // The More menu, while open: where focus went as it opened (RAIL.md, Menus). The gallery's open menu takes none.
-  const [menu, setMenu] = useState<"item" | "menu" | "none" | undefined>(initialMenu === project.id ? "none" : undefined);
   const [asking, setAsking] = useState(initialAsking === project.id);
   const more = useRef<HTMLButtonElement>(null);
-  // The menu floats above the rail in the top layer, anchored to More by this name.
-  const anchor = `--rail-more-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const trust = trusting[project.id];
   const saving = trust?.state === "sending";
   const host = localHost !== undefined && project.host_id !== localHost ? (hostNames?.[project.host_id] ?? project.host_id) : undefined;
   const forced = forceHeading?.id === project.id ? forceHeading.state : undefined;
 
-  // Once the menu or the trust question closes, focus goes back to More, which opened it.
+  // Once the trust question closes, focus goes back to More, whose menu opened it.
   const back = () => more.current?.focus({ preventScroll: true });
-  const closeMenu = useCallback((how: MenuClose) => {
-    setMenu(undefined);
-    if (how !== "away") back();
-  }, []);
-  const insideMenu = useCallback(() => [more.current], []);
   const choose = () => {
     if (!onSetTrust) return;
     if (project.trusted) onSetTrust(project, false);
@@ -484,7 +539,7 @@ function ProjectGroup({
   const nameLabel = { project: project.name };
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
-      <div className="rail-heading" data-slide={headingSlide(project.id)} data-force={forced} data-open={menu ? true : undefined}>
+      <div className="rail-heading" data-slide={headingSlide(project.id)} data-force={forced}>
         <GroupToggle
           folded={folded}
           controls={children ? tilesId : undefined}
@@ -497,37 +552,22 @@ function ProjectGroup({
         <span className="rail-heading-actions">
           {onNewSession && <IconButton icon={Plus} size="icon-sm" label={t("rail.heading.newSessionLabel", nameLabel)} onClick={() => onNewSession(project)} />}
           {onSetTrust && (
-            <IconButton
+            <MenuButton
               ref={more}
               icon={Ellipsis}
-              size="icon-sm"
               label={t("rail.heading.moreLabel", nameLabel)}
-              aria-haspopup="menu"
-              aria-expanded={!!menu}
-              style={{ anchorName: anchor } as CSSProperties}
-              // A click the keyboard made (Enter or Space) has no pointer presses to count.
-              onClick={(event) => setMenu(menu ? undefined : event.detail === 0 ? "item" : "menu")}
+              initialOpen={initialMenu === project.id}
+              entries={[
+                {
+                  kind: "item",
+                  label: project.trusted ? t("rail.heading.distrustButton") : t("rail.heading.trustButton"),
+                  unavailable: saving ? t("rail.heading.savingProgress") : undefined,
+                  onChoose: choose,
+                },
+              ]}
             />
           )}
         </span>
-        {onSetTrust && (
-          <Menu
-            label={t("rail.heading.moreLabel", nameLabel)}
-            open={menu !== undefined}
-            place={{ anchor }}
-            focus={menu}
-            inside={insideMenu}
-            onClose={closeMenu}
-            entries={[
-              {
-                kind: "item",
-                label: project.trusted ? t("rail.heading.distrustButton") : t("rail.heading.trustButton"),
-                unavailable: saving ? t("rail.heading.savingProgress") : undefined,
-                onChoose: choose,
-              },
-            ]}
-          />
-        )}
       </div>
       {asking && onSetTrust && (
         <TrustQuestion
@@ -562,6 +602,7 @@ function ProjectGroup({
  * trusted" and, collapsed, how many sessions it holds.
  */
 function GroupToggle({
+  ref,
   folded,
   controls,
   summary,
@@ -571,6 +612,8 @@ function GroupToggle({
   notTrusted = false,
   children,
 }: {
+  /** The toggle itself, which an owner gives focus back to. */
+  ref?: Ref<HTMLButtonElement>;
   folded: boolean;
   /** The tiles' element id, when it has tiles. */
   controls?: string;
@@ -587,7 +630,7 @@ function GroupToggle({
   return (
     <h3 className="rail-heading-title">
       {/* The heading's name collapses and expands its tiles, and says which it is (LAY-SHELL, Collapsing). */}
-      <button type="button" className="rail-heading-toggle" aria-expanded={!folded} aria-controls={controls} onClick={toggle}>
+      <button ref={ref} type="button" className="rail-heading-toggle" aria-expanded={!folded} aria-controls={controls} onClick={toggle}>
         <span className="rail-heading-chevron">
           <Icon icon={ChevronDown} size="icon-sm" />
         </span>
@@ -648,4 +691,156 @@ function GroupTiles({ id, folded, children }: { id: string; folded: boolean; chi
       <div className="rail-group-tiles-inner">{children}</div>
     </div>
   );
+}
+
+/**
+ * A section: its heading, whose More holds Rename, in place, and Delete (LAY-SHELL, Sections and dates; RAIL.md, A
+ * group heading), why a change to it was refused, and its tiles.
+ */
+function SectionGroup({
+  section,
+  onRename,
+  renaming,
+  onRenameReset,
+  onDelete,
+  removing,
+  offline,
+  force,
+  initialMenu,
+  initialDraft,
+  folded,
+  summary,
+  toggle,
+  children,
+}: SectionHandlers & {
+  section: Section;
+  /** Ersa can't reach Core: Rename and Delete are unavailable, saying why. */
+  offline?: boolean;
+  force?: "hover" | "focus" | "pressed";
+  initialMenu?: boolean;
+  initialDraft?: string;
+  folded: boolean;
+  summary: Collapsed;
+  toggle: () => void;
+  children: ReactNode;
+}) {
+  const tilesId = useId();
+  const home = useRef<HTMLButtonElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  const id = section.id;
+  const deleting = removing?.[id];
+  const unavailable = offline ? t("rail.tile.offlineReason") : deleting?.state === "sending" ? t("rail.heading.savingProgress") : undefined;
+  // Editing the name in place, as a tile's title is edited (useTitleDraft): Enter saves, Escape restores, and a
+  // refusal keeps the field and the name typed, with Core's reason beneath (FLOW-ORGANIZE-SESSIONS, Variations).
+  const { draft, setDraft, busy, refused, edit, onFieldKey } = useTitleDraft({
+    title: section.name,
+    onRename: onRename && ((name: string) => onRename(id, name)),
+    renaming: renaming?.[id],
+    onReset: () => onRenameReset?.(id),
+    disabled: unavailable !== undefined,
+    initialDraft,
+    field,
+    home,
+  });
+  const editing = draft !== undefined;
+  // The field takes focus as it opens, its text selected to type over.
+  useEffect(() => {
+    if (!editing || initialDraft !== undefined) return;
+    field.current?.focus();
+    field.current?.select();
+  }, [editing, initialDraft]);
+  const label = t("rail.section.moreLabel", { section: section.name });
+  return (
+    <li className="rail-project" data-collapsed={folded || undefined}>
+      <div className="rail-heading" data-slide={headingSlide(id)} data-force={force} data-editing={editing || undefined}>
+        {editing ? (
+          <h3 className="rail-heading-title rail-heading-rename">
+            <span className="rail-heading-chevron">
+              <Icon icon={ChevronDown} size="icon-sm" />
+            </span>
+            <input
+              ref={field}
+              className="rail-heading-field"
+              aria-label={t("rail.section.nameLabel")}
+              value={draft}
+              readOnly={busy}
+              aria-invalid={refused !== undefined || undefined}
+              aria-errormessage={refused !== undefined ? errorId : undefined}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                // Typing again leaves an earlier refusal behind.
+                if (refused !== undefined) onRenameReset?.(id);
+              }}
+              onKeyDown={(event) => onFieldKey(event, { enter: true })}
+              // Leaving the field without Enter restores the name, unless a rename is on its way or was refused.
+              onBlur={() => {
+                if (!busy && refused === undefined) setDraft(undefined);
+              }}
+            />
+          </h3>
+        ) : (
+          <GroupToggle ref={home} folded={folded} controls={children ? tilesId : undefined} summary={summary} toggle={toggle} name={section.name} />
+        )}
+        {!editing && (
+          <span className="rail-heading-actions">
+            <MenuButton
+              icon={Ellipsis}
+              label={label}
+              initialOpen={initialMenu}
+              entries={[
+                { kind: "item", label: t("rail.section.renameButton"), unavailable, onChoose: edit },
+                // Delete stands apart in its own group, its label in danger (RAIL.md, Menus); it asks nothing.
+                { kind: "rule" },
+                { kind: "item", label: t("rail.section.deleteButton"), danger: true, unavailable, onChoose: () => onDelete?.(id) },
+              ]}
+            />
+          </span>
+        )}
+      </div>
+      <EasedNotes shown={`${editing && refused !== undefined}/${deleting?.state}`}>
+        {editing && refused !== undefined && (
+          <p id={errorId} className="problem rail-heading-problem" role="alert">
+            {refused}
+          </p>
+        )}
+        {deleting?.state === "failed" && <Problem lead={t("rail.section.deleteError")} reason={deleting.message} />}
+      </EasedNotes>
+      {children && (
+        <GroupTiles id={tilesId} folded={folded}>
+          {children}
+        </GroupTiles>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Where keyboard focus goes once a section deleted from its heading's menu has gone: the menu gave it back to the
+ * heading's More, which goes with the heading, so it moves to the heading after it as drawn before, else the one
+ * before, else New session; unless the user put focus somewhere else meanwhile. Returns what to call as Delete is
+ * chosen.
+ */
+function useSectionDeletedFocus(root: RefObject<HTMLElement | null>, keys: readonly string[], removing: Readonly<Record<string, Sending>> | undefined) {
+  const pending = useRef<{ key: string; order: readonly string[] }>(undefined);
+  useLayoutEffect(() => {
+    const going = pending.current;
+    const el = root.current;
+    if (!going || !el) return;
+    // Refused: the heading stays, and so does focus.
+    if (removing?.[going.key]?.state === "failed") pending.current = undefined;
+    if (removing?.[going.key] !== undefined || keys.includes(going.key)) return;
+    pending.current = undefined;
+    const now = document.activeElement;
+    if (now !== null && now !== document.body) return;
+    const toggleOf = (key: string) => el.querySelector<HTMLElement>(`[data-slide="${CSS.escape(headingSlide(key))}"] .rail-heading-toggle`);
+    // The tiles' rule (useLeavingFocus), over the headings: a heading is never folded away, so each drawn is open.
+    const to = besideGone(going.order, going.key, keys.filter((key) => toggleOf(key) !== null));
+    (to === undefined ? el.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session") : toggleOf(to))?.focus({ preventScroll: true });
+  });
+  return (key: string) => {
+    // Only a choice made with focus in the rail or in the heading's menu has focus to give back.
+    const focus = document.activeElement;
+    if (focus && (root.current?.contains(focus) || focus.closest("[role=menu]"))) pending.current = { key, order: keys };
+  };
 }

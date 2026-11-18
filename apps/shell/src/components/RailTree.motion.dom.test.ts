@@ -326,7 +326,7 @@ describe("a new session's tile", () => {
       const more: Partial<Parameters<typeof RailTree>[0]> = { projects: { state: "ready", projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, initialMenu: "q", onSetTrust: () => {} };
       const below = session("c", "Below", "2026-11-06T07:00:00Z", undefined, "x");
       const { container, rerender } = render(rail([newer, below], undefined, more));
-      expect(container.querySelector("[data-open] .menu")).not.toBeNull();
+      expect(container.querySelector(".rail-heading .menu")).not.toBeNull();
       rerender(rail([older, newer, below], undefined, more));
       expect(slid.filter((s) => s.slide?.includes("q")).map((s) => s.keyframes)).toEqual([[{ top: "-10px" }, { top: "0" }]]);
       // `top` moves only what is positioned.
