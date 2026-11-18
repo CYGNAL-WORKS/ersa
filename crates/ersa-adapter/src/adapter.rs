@@ -187,7 +187,8 @@ pub trait Adapter: Send + Sync {
     }
 
     /// What the backend's session record says of the session as a whole: its
-    /// title and when it began. Read without reading the whole record, since
+    /// title, when it began, its settings and its last activity
+    /// ([`RecordSummary`]). Read without reading the whole record, since
     /// Core asks for every session it lists. `None` when the session has no
     /// record, which is also the default.
     async fn summarize_record(

@@ -16,7 +16,7 @@ use std::time::Duration;
 use ersa_adapter::{Adapter, BackendChoices, Transport};
 use ersa_protocol::core_api::{Workspace, WorkspaceState};
 
-use super::{Handle, STARTUP_SUMMARIES, SUMMARY_READ, SessionManager, UNKNOWN_TIME, lock};
+use super::{Handle, SUMMARY_READ, SessionManager, UNKNOWN_TIME, lock, wait_for_summaries};
 use super::{SessionError, read_summary};
 use crate::admission::{Command, Report, UnderWay};
 use crate::persistence::{self, SessionRow};
@@ -163,12 +163,11 @@ impl SessionManager {
         // A new session's title and date come from its record, read before
         // the list answers so it shows titled and in its place; never waited
         // on past a bound, as at startup.
-        let all = async { while summaries.join_next().await.is_some() {} };
-        if tokio::time::timeout(STARTUP_SUMMARIES, all).await.is_err() {
-            tracing::warn!(
-                "reading the titles of sessions found in the backend's records took too long"
-            );
-        }
+        wait_for_summaries(
+            summaries,
+            "the records of sessions found in the backend's records",
+        )
+        .await;
         Ok(())
     }
 
