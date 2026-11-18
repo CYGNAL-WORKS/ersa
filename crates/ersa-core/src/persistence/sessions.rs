@@ -67,11 +67,15 @@ pub struct SessionRow {
     /// such a session leaves the list once its record is gone (R06), and is
     /// forgotten with its workspace (R13).
     pub started_elsewhere: bool,
+    /// Whether the session is unseen, the user's arrangement (ADR 0033,
+    /// PROTO-CORE-API-R78). No session starts unseen, so the inserts leave
+    /// it to the column's default.
+    pub unseen: bool,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
      s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
-     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at, s.started_elsewhere";
+     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at, s.started_elsewhere, s.unseen";
 
 impl Store {
     /// Records a new session. Whether its workspace takes one is admission's
@@ -226,8 +230,9 @@ impl Store {
         .await
     }
 
-    /// Changes the arrangement fields given (ADR 0026): `pinned` when
-    /// `Some`, and the section when `Some`, `Some(None)` being no section.
+    /// Changes the arrangement fields given (ADR 0026, ADR 0033): `pinned`
+    /// and `unseen` when `Some`, and the section when `Some`, `Some(None)`
+    /// being no section.
     /// Returns `false`, changing nothing, when the section named does not
     /// exist.
     pub async fn arrange_session(
@@ -235,6 +240,7 @@ impl Store {
         id: String,
         pinned: Option<bool>,
         section_id: Option<Option<String>>,
+        unseen: Option<bool>,
     ) -> Result<bool> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
@@ -249,14 +255,22 @@ impl Store {
                     return Ok(false);
                 }
             }
-            // `COALESCE` keeps the pin when none is given; the `CASE` keeps
-            // the section unless one (or none, as NULL) is given.
+            // `COALESCE` keeps the pin and the unseen mark when none is
+            // given; the `CASE` keeps the section unless one (or none, as
+            // NULL) is given.
             tx.execute(
                 "UPDATE sessions SET
                      pinned = COALESCE(?2, pinned),
-                     section_id = CASE WHEN ?3 THEN ?4 ELSE section_id END
+                     section_id = CASE WHEN ?3 THEN ?4 ELSE section_id END,
+                     unseen = COALESCE(?5, unseen)
                  WHERE id = ?1",
-                params![id, pinned, section_id.is_some(), section_id.flatten()],
+                params![
+                    id,
+                    pinned,
+                    section_id.is_some(),
+                    section_id.flatten(),
+                    unseen
+                ],
             )?;
             tx.commit()?;
             Ok(true)
@@ -455,5 +469,6 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         effort_at: row.get(18)?,
         permission_mode_at: row.get(19)?,
         started_elsewhere: row.get(20)?,
+        unseen: row.get(21)?,
     })
 }
