@@ -45,6 +45,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0009_session_fork.sql"),
     include_str!("persistence/0010_session_requested_at.sql"),
     include_str!("persistence/0011_session_started_elsewhere.sql"),
+    include_str!("persistence/0012_session_unseen.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -810,6 +811,8 @@ mod tests {
                 "permission_mode_at",
                 // Migration 11's.
                 "started_elsewhere",
+                // Migration 12's.
+                "unseen",
             ]
         );
     }
