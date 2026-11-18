@@ -107,7 +107,7 @@ function sortedBy(sessions: readonly Session[], sortBy: SortBy): Session[] {
   return newestFirst(sessions).sort(SORTS[sortBy].compare);
 }
 
-/** What the chosen sort reads of a session, its tie-break included: while it holds, the tile keeps its place (R10). */
+/** What the chosen sort reads of a session, its tie-break included: while it holds, the tile keeps its place (FLOW-ORGANIZE-SESSIONS-R31). */
 export function sortValueOf(session: Session, sortBy: SortBy): string {
   return `${SORTS[sortBy].read(session)}/${session.created_at}`;
 }
