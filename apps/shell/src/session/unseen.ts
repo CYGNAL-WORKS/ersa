@@ -32,7 +32,11 @@ export function unseenWrites(
   for (const s of sessions) {
     const activity = activityOf(s.tile);
     if (activity === "working") now.add(s.id);
-    if (sending.has(s.id)) continue;
+    if (sending.has(s.id)) {
+      // Decided once its change has answered: a turn that ended meanwhile still marks it from the next list.
+      if (working.has(s.id)) now.add(s.id);
+      continue;
+    }
     if (s.id === activeId) {
       if (s.unseen) writes.push({ id: s.id, unseen: false });
     } else if (working.has(s.id) && activity === "idle" && !s.unseen) {

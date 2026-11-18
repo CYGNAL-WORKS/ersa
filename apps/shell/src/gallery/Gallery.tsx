@@ -1095,12 +1095,15 @@ const entries: Entry[] = [
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
       ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["Tile menu, while a mark is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" marking={{ p2: { state: "sending" } }} />)],
       ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
         <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: t("errors.refusal.noFinishedReplyError") } }} />,
       ],
       ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Mark as unread refused", <RailTree {...pairOnly} marking={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Mark as read refused", <RailTree {...unseenPair} marking={{ p1: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",

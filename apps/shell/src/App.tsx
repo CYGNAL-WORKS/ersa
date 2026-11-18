@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
@@ -21,7 +21,7 @@ import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
-import type { BackendInfo, Project, Session, Workspace } from "./protocol/core-api.gen";
+import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
@@ -176,31 +176,44 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const shownNow = useRef(shownId);
   shownNow.current = shownId;
 
-  // The unseen mark (FLOW-ORGANIZE-SESSIONS, Unseen), which Core stores so it survives a restart of Ersa and of Core
-  // (R25). Ersa's own mark and Mark as unread or read (R24) all go through `markUnseen`: Core answers with the session
-  // as listed, and the rail shows it once Core has it. A refusal leaves the session as Core has it and says why beneath
-  // its tile until the next try (R15), and while one is on its way or refused Ersa sends no other for that session, so
-  // a list read before Core answered can't send it twice, nor a refused one again on every list.
-  const [marking, setMarking] = useState<Record<string, Sending>>({});
-  const markingNow = useRef(marking);
-  markingNow.current = marking;
-  const markUnseen = async (id: string, unseen: boolean) => {
-    setMarking((m) => ({ ...m, [id]: { state: "sending" } }));
-    markingNow.current = { ...markingNow.current, [id]: { state: "sending" } };
+  // A change to a session's arrangement (FLOW-ORGANIZE-SESSIONS): Core stores it and answers with the session as
+  // listed, and the rail shows the fields changed once Core has them. A refusal leaves the session as Core has it and
+  // says why beneath its tile until the next try (R15). `track` holds the changes on their way and the refusals.
+  type Arrange = Omit<SessionArrangeParams, "id">;
+  const arrangeSession = async (track: Dispatch<SetStateAction<Record<string, Sending>>>, id: string, fields: Arrange) => {
+    track((t) => ({ ...t, [id]: { state: "sending" } }));
     try {
-      const arranged = await client.call("session.arrange", { id, unseen });
-      setMarking(({ [id]: _, ...rest }) => rest);
-      connection.current?.changed(id, { unseen: arranged.unseen });
+      const arranged = await client.call("session.arrange", { id, ...fields });
+      track(({ [id]: _, ...rest }) => rest);
+      const keys = Object.keys(fields) as (keyof Arrange & keyof Session)[];
+      connection.current?.changed(id, Object.fromEntries(keys.map((k) => [k, arranged[k]])));
     } catch (error) {
-      setMarking((m) => ({ ...m, [id]: { state: "failed", message: describeError(error) } }));
+      track((t) => ({ ...t, [id]: { state: "failed", message: describeError(error) } }));
     }
   };
+
+  // The unseen mark (FLOW-ORGANIZE-SESSIONS, Unseen), which Core stores so it survives a restart of Ersa and of Core
+  // (R25). Ersa's own mark and Mark as unread or read (R24) both go through `markUnseen`. While one is on its way Ersa
+  // sends no other for that session, so a list read before Core answered can't send it twice; a refused one is tried
+  // again from the next list that calls for it.
+  const [marking, setMarking] = useState<Record<string, Sending>>({});
+  // The sessions with a mark on its way now, which a list may be reported before a render shows.
+  const markSending = useRef(new Set<string>());
+  const markUnseen = async (id: string, unseen: boolean) => {
+    markSending.current.add(id);
+    await arrangeSession(setMarking, id, { unseen });
+    markSending.current.delete(id);
+  };
   // The sessions working in the last list, to tell "idle after working" from plain idle. In memory: a turn that
-  // finishes while Ersa is closed leaves no mark (LAY-SHELL, Open questions).
+  // finishes while Ersa is closed leaves no mark (LAY-SHELL, Open questions), and nor does one that finishes while
+  // Ersa can't reach Core, since what was working then is forgotten.
   const working = useRef<ReadonlySet<string>>(new Set());
   useEffect(() => {
-    if (sessions.state !== "ready") return;
-    const next = unseenWrites(working.current, sessions.sessions, shownId, new Set(Object.keys(markingNow.current)));
+    if (sessions.state !== "ready") {
+      working.current = new Set();
+      return;
+    }
+    const next = unseenWrites(working.current, sessions.sessions, shownId, markSending.current);
     working.current = next.working;
     for (const write of next.writes) void markUnseen(write.id, write.unseen);
     // markUnseen reads only refs and stable values.
@@ -469,16 +482,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
   // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
   const [pinning, setPinning] = useState<Record<string, Sending>>({});
-  const pin = async (id: string, pinned: boolean) => {
-    setPinning((p) => ({ ...p, [id]: { state: "sending" } }));
-    try {
-      const arranged = await client.call("session.arrange", { id, pinned });
-      setPinning(({ [id]: _, ...rest }) => rest);
-      connection.current?.changed(id, { pinned: arranged.pinned });
-    } catch (error) {
-      setPinning((p) => ({ ...p, [id]: { state: "failed", message: describeError(error) } }));
-    }
-  };
+  const pin = (id: string, pinned: boolean) => arrangeSession(setPinning, id, { pinned });
 
   // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
   // archives it, and keeps its pin and section either way. The list is read again to show the change; archiving the
