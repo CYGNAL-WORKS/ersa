@@ -84,6 +84,10 @@ Sort by
 
 Show
 
+### `rail.arrange.newSectionButton`
+
+New section
+
 ### `rail.arrange.resetButton`
 
 Reset to defaults
@@ -345,6 +349,22 @@ Ersa can't mark this session as unread.
 ### `rail.tile.markReadError`
 
 Ersa can't mark this session as read.
+
+### `rail.tile.moveToSectionButton`
+
+Move to section
+
+### `rail.tile.noSectionButton`
+
+No section
+
+### `rail.tile.newSectionButton`
+
+New section…
+
+### `rail.tile.moveError`
+
+Ersa can't move this session.
 
 ### `rail.tile.renameButton`
 

@@ -20,7 +20,7 @@ const entries: MenuEntry[] = [
     label: "Move to section",
     entries: [
       { kind: "item", label: "Ideas", checked: true, onChoose: () => chosen.push("Ideas") },
-      { kind: "item", label: "No section", onChoose: () => chosen.push("No section") },
+      { kind: "item", label: "No section", checked: false, onChoose: () => chosen.push("No section") },
     ],
   },
   { kind: "item", label: "Delete…", danger: true, onChoose: () => chosen.push("Delete") },

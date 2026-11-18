@@ -26,6 +26,10 @@ export interface ArrangeActions {
   onGroupBy: (groupBy: GroupBy) => void;
   onSortBy: (sortBy: SortBy) => void;
   onShow: (show: Show) => void;
+  /** Shows a new section's heading with its name field, grouping by section first (FLOW-ORGANIZE-SESSIONS, step 5; R36). */
+  onNewSection: () => void;
+  /** Why New section can't be used now, such as the sections not being read; given, it shows unavailable with this. */
+  newSectionUnavailable?: string;
   onReset: () => void;
   /** Shows the sessions page (FLOW-ORGANIZE-SESSIONS, step 9). */
   onAllSessions: () => void;
@@ -43,8 +47,7 @@ function choice<C>(label: string, values: readonly C[], chosen: C, name: (value:
 
 /**
  * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸, Sort by ▸ and Show ▸, each naming its current
- * choice and its submenu marking it, then Reset to defaults and View all apart. New section goes in the group with
- * Reset, as it is built.
+ * choice and its submenu marking it, then New section, Reset to defaults and View all apart.
  */
 export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActions): MenuEntry[] {
   return [
@@ -52,6 +55,7 @@ export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActi
     choice(t("rail.arrange.sortByButton"), SORT_BYS, arrangement.sortBy, (s) => t(SORT_BY_NAMES[s]), actions.onSortBy),
     choice(t("rail.arrange.showButton"), SHOWS, arrangement.show, (s) => t(SHOW_NAMES[s]), actions.onShow),
     { kind: "rule" },
+    { kind: "item", label: t("rail.arrange.newSectionButton"), unavailable: actions.newSectionUnavailable, onChoose: actions.onNewSection },
     { kind: "item", label: t("rail.arrange.resetButton"), onChoose: actions.onReset },
     { kind: "item", label: t("rail.arrange.viewAllButton"), onChoose: actions.onAllSessions },
   ];

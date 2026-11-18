@@ -16,7 +16,10 @@ export type MenuEntry =
       danger?: boolean;
       /** A key that does the same, at the item's trailing edge. */
       keyHint?: string;
-      /** In a submenu: the chosen option, marked with a check. */
+      /**
+       * In a submenu: whether it is the chosen option, marked with a check. Left out, the item is an action rather than
+       * an option, as Move to section's New section… is.
+       */
       checked?: boolean;
     }
   | {
@@ -214,7 +217,7 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
                 itemRefs.current[i] = el;
               }}
               type="button"
-              role={nested && entry.kind === "item" ? "menuitemradio" : "menuitem"}
+              role={nested && entry.kind === "item" && entry.checked !== undefined ? "menuitemradio" : "menuitem"}
               className="menu-item"
               data-takes={takes(entry) || undefined}
               data-danger={(entry.kind === "item" && entry.danger) || undefined}
@@ -222,7 +225,7 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
               aria-disabled={off || undefined}
               aria-haspopup={sub ? "menu" : undefined}
               aria-expanded={sub ? subOpen : undefined}
-              aria-checked={nested && entry.kind === "item" ? !!entry.checked : undefined}
+              aria-checked={nested && entry.kind === "item" && entry.checked !== undefined ? entry.checked : undefined}
               style={sub ? ({ anchorName: anchor } as CSSProperties) : undefined}
               onPointerEnter={() => {
                 if (!sub || off) return;
