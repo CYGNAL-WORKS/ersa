@@ -1061,8 +1061,6 @@ const entries: Entry[] = [
       ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],
       // p1 finished a turn while p2 was active: its title reads strong until it is opened.
       ["Unseen", <RailTree {...unseenPair} />],
-      // Its menu offers Mark as read.
-      ["Unseen, its menu open", <RailTree {...unseenPair} initialTileMenu="p1" />],
       ["Active tile", <RailTree {...pairOnly} activeId="p2" />],
       ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
       ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],
@@ -1074,6 +1072,9 @@ const entries: Entry[] = [
       // p2 is working, so Delete is unavailable with its reason; p1 is idle, so it can be deleted.
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       ["Tile menu, Delete available", room(<RailTree {...pairOnly} initialTileMenu="p1" />)],
+      // An unseen session's menu offers Mark as read; the active session's has Mark as unread unavailable, with its reason.
+      ["Tile menu, unseen", room(<RailTree {...unseenPair} initialTileMenu="p1" />)],
+      ["Tile menu, active session", room(<RailTree {...pairOnly} activeId="p2" initialTileMenu="p2" />)],
       // LAY-SHELL, Being deleted: Deleting while Core works on it, and Couldn't delete, whose menu holds Delete… alone.
       ["Being deleted, and a deletion that failed", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: beingDeleted }} initialTileMenu="p2" />)],
       // Renaming, archiving and deleting go through Core, so while Ersa can't reach it all are unavailable, with the reason.
