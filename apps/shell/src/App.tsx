@@ -505,14 +505,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [moving, setMoving] = useState<Record<string, Moving>>({});
   const pin = (id: string, pinned: boolean) => void arrangeSession<Pick<Moving, "change">>(setMoving, id, { pinned }, { change: "pin" });
   // Moving a pinned session to a section unpins it in the same change, so the move shows; to no section, the pin
-  // stays (R22).
-  // The listing as it stands now, for a move that starts once Core has made its section, after the render that
-  // asked for it.
-  const sessionsNow = useRef(sessions);
-  sessionsNow.current = sessions;
+  // stays (R22). A move into a section being made reads the pin as listed when its name was entered: the session's
+  // Pin and Unpin wait while Core makes it (`movingShown`), so the pin can't change in this window meanwhile.
   const moveToSection = (id: string, sectionId: string | null) => {
-    const listed = sessionsNow.current;
-    const pinned = listed.state === "ready" && listed.sessions.some((s) => s.id === id && s.pinned);
+    const pinned = sessions.state === "ready" && sessions.sessions.some((s) => s.id === id && s.pinned);
     const fields = sectionId !== null && pinned ? { section_id: sectionId, pinned: false } : { section_id: sectionId };
     void arrangeSession<Pick<Moving, "change">>(setMoving, id, fields, { change: "section" });
   };
