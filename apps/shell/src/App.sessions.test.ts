@@ -117,7 +117,7 @@ async function allSessions() {
 
 describe("the sessions page", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R26
-  it("is opened by the arrange menu's View all, set apart after Reset to defaults", async () => {
+  it("is opened by the arrange menu's View all, its last item", async () => {
     await start();
     fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
     const items = screen.getAllByRole("menuitem").map((item) => item.textContent);

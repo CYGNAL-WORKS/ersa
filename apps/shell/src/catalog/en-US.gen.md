@@ -236,7 +236,7 @@ Ersa can't read this project's workspaces.
 
 ### `rail.heading.backendTrustNote`
 
-Claude Code still trusts this folder when you use it outside Ersa.
+Claude Code may still trust this folder when you use it outside Ersa.
 
 ### `rail.foot.attachedLabel`
 
