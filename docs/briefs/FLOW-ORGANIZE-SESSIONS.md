@@ -42,7 +42,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed. Work done outside Ersa counts, and shows the next time the rail lists sessions (PROTO-CORE-API-R75).
-- **Unseen.** A session is unseen when it goes idle after working while not the active one, or when the user chooses Mark as unread; the mark goes when the user makes it active or chooses Mark as read.
+- **Unseen.** A session is unseen when it goes idle after working while not the active one, or when the user chooses Mark as unread; the mark goes when the user makes it active or chooses Mark as read. Ersa remembers which sessions were working while it can't reach Core, so a turn that ends meanwhile marks its session once Ersa is connected again; one that ends while Ersa is not running marks nothing (R37 to R39).
 
 ## Requirements
 
@@ -81,6 +81,9 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R34**: When grouping by section and the sections cannot be read, Ersa shall say so with the reason and show the sessions as when grouping by none.
 - **FLOW-ORGANIZE-SESSIONS-R35**: While the sections are first being read under grouping by section, the rail's tree shall say it is loading.
 - **FLOW-ORGANIZE-SESSIONS-R36**: When the user chooses New section while grouping by anything but section, Ersa shall switch the grouping to Section.
+- **FLOW-ORGANIZE-SESSIONS-R37**: When Core reports as idle, with nothing waiting on the user, a session it last reported as working, and the session is not the active one, Ersa shall mark it unseen.
+- **FLOW-ORGANIZE-SESSIONS-R38**: Ersa shall keep which sessions were working while it cannot reach Core, so that R37 marks a session whose turn ended meanwhile once Ersa is connected again.
+- **FLOW-ORGANIZE-SESSIONS-R39**: When the user makes an unseen session the active one, Ersa shall clear its mark.
 
 ## Out of scope
 
@@ -94,6 +97,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-18: from #324 inbox: Ersa's own unseen mark gets its requirements (FLOW-ORGANIZE-SESSIONS-R37, R39), and a turn that ends while Ersa can't reach Core marks its session once Ersa is connected again (R38), which closes that half of LAY-SHELL's open question: the mark says a session finished while the user was not looking, whether or not Ersa watched it end. No requirement retired.
 - 2026-11-18: from #326 inbox: "No section" shows only while it holds a tile (FLOW-ORGANIZE-SESSIONS-R32); deleting a section from its heading passes keyboard focus on (R33); sections that can't be read, and sections being read, have their words (R34, R35). The switch to grouping by Section on New section, stated under Variations, gets an ID for the ticket that builds New section (R36). R31 is taken by #337's pass. No requirement retired.
 - 2026-11-18: from #290 inbox: a menu opened at the pointer stays inside the window, opening the other way from the press where it has no room, as a desktop's menus do, and is placed again when it or the window changes size (FLOW-ORGANIZE-SESSIONS-R28 to R30 added). `RAIL.md` (Menus) holds the rule.
 - 2026-11-15: from #413 inbox: a corrected date created reaches the rail on `session.tile` (PROTO-CORE-API-R105, R106), which is how R07, R09 and R10 hold without a reread of the list; until those are built it shows at the next read of the list. No requirement IDs changed.

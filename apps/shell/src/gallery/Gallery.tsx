@@ -209,6 +209,7 @@ const tree: Parameters<typeof RailTree>[0] = {
     return true;
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
+  onMark: (id, unseen) => (document.body.dataset.railCall = `mark ${id} ${unseen}`),
   onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
   onDelete: (id) => (document.body.dataset.railCall = `delete ${id}`),
   localHost: "local",
@@ -245,6 +246,7 @@ const sessionsPage: Parameters<typeof SessionsPage>[0] = {
   onNewSession: () => {},
   onRename: async () => true,
   onPin: () => {},
+  onMark: () => {},
   onArchive: () => {},
   onDelete: () => {},
 };
@@ -291,6 +293,12 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** p1 finished a turn while p2 was active, so Core reports it unseen (LAY-SHELL, Unseen). */
+const unseenPair: Parameters<typeof RailTree>[0] = {
+  ...pairOnly,
+  sessions: { state: "ready", sessions: pointerPair.map((s) => (s.id === "p1" ? { ...s, unseen: true } : s)) },
+  activeId: "p2",
+};
 /** A tile for each backend's mark (issue 399): Claude Code, Copilot, and one Ersa doesn't know. */
 const eachBackend: Parameters<typeof RailTree>[0] = {
   ...ersaOnly,
@@ -1076,7 +1084,7 @@ const entries: Entry[] = [
       ["Tile, pressed", <RailTree {...pairOnly} force={{ id: "p2", state: "pressed" }} />],
       ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],
       // p1 finished a turn while p2 was active: its title reads strong until it is opened.
-      ["Unseen", <RailTree {...pairOnly} activeId="p2" unseen={new Set(["p1"])} />],
+      ["Unseen", <RailTree {...unseenPair} />],
       ["Active tile", <RailTree {...pairOnly} activeId="p2" />],
       ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
       ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],
@@ -1088,12 +1096,20 @@ const entries: Entry[] = [
       // p2 is working, so Delete is unavailable with its reason; p1 is idle, so it can be deleted.
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       ["Tile menu, Delete available", room(<RailTree {...pairOnly} initialTileMenu="p1" />)],
+      // An unseen session's menu offers Mark as read; the active session's has Mark as unread unavailable, with its reason.
+      ["Tile menu, unseen", room(<RailTree {...unseenPair} initialTileMenu="p1" />)],
+      ["Tile menu, active session", room(<RailTree {...pairOnly} activeId="p2" initialTileMenu="p2" />)],
       // LAY-SHELL, Being deleted: Deleting while Core works on it, and Couldn't delete, whose menu holds Delete… alone.
       ["Being deleted, and a deletion that failed", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: beingDeleted }} initialTileMenu="p2" />)],
       // Renaming, archiving and deleting go through Core, so while Ersa can't reach it all are unavailable, with the reason.
       ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["An archived tile", <RailTree {...archivedPair} />],
       ["An archived tile, pointer over it", <RailTree {...archivedPair} force={{ id: "a1", state: "hover" }} />],
+      // Marked unread: its mark shows over the archived tile's muted title (docs/design/RAIL.md, A tile).
+      [
+        "An archived tile, unseen",
+        <RailTree {...archivedPair} sessions={{ state: "ready", sessions: archivedPair.sessions.state === "ready" ? archivedPair.sessions.sessions.map((s) => (s.id === "a1" ? { ...s, unseen: true } : s)) : [] }} />,
+      ],
       ["Tile menu, archived", room(<RailTree {...archivedPair} initialTileMenu="a1" />)],
       ["Grouped by date", <RailTree {...datedTree} />],
       ["Grouped by date, collapsed", <RailTree {...datedTree} collapsed={new Set(["yesterday"])} />],
@@ -1125,12 +1141,15 @@ const entries: Entry[] = [
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
       ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["Tile menu, while a mark is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" marking={{ p2: { state: "sending" } }} />)],
       ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
         <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: t("errors.refusal.noFinishedReplyError") } }} />,
       ],
       ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Mark as unread refused", <RailTree {...pairOnly} marking={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Mark as read refused", <RailTree {...unseenPair} marking={{ p1: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",
