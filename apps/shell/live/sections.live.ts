@@ -12,6 +12,9 @@ test("grouped by section, a heading renames in place and deletes keeping its ses
   const folder = path.join(ersa.dir, "sections-check");
   mkdirSync(folder);
   const rail = page.getByRole("navigation", { name: "Rail" });
+  // Each shot waits for the rail's motion to finish, leaving out the working glyph's, which loops.
+  const settled = () =>
+    page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getComputedTiming().iterations === Infinity));
 
   await page.getByRole("button", { name: "Project: Choose a folder" }).click();
   const answered = ersa.answerDialog(folder);
@@ -37,6 +40,7 @@ test("grouped by section, a heading renames in place and deletes keeping its ses
   await page.getByRole("menuitemradio", { name: "Section" }).click();
   const names = rail.locator(".rail-projects > .rail-project .rail-heading-name");
   await expect(names).toHaveText(["Docs", "Later"]);
+  await settled();
   await ersa.shot("grouped-by-section");
 
   // Rename, in place: the heading's name becomes a field; Enter saves the name Core keeps.
@@ -46,6 +50,7 @@ test("grouped by section, a heading renames in place and deletes keeping its ses
   await page.getByRole("menuitem", { name: "Rename" }).click();
   const field = rail.getByRole("textbox", { name: "Section name" });
   await expect(field).toBeFocused();
+  await settled();
   await ersa.shot("renaming");
   await field.fill("Someday");
   await field.press("Enter");
@@ -58,5 +63,6 @@ test("grouped by section, a heading renames in place and deletes keeping its ses
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await expect(names).toHaveText(["Someday", "No section"]);
   await expect(rail.locator(".rail-projects > .rail-project", { hasText: "No section" }).locator(`[data-session-id="${id}"]`)).toBeVisible();
+  await settled();
   await ersa.shot("deleted");
 });
