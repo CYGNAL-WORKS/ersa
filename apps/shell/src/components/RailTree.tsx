@@ -143,9 +143,7 @@ export function RailTree(props: RailTreeProps) {
     const lost = document.activeElement === null || document.activeElement === document.body;
     const item = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].find((tile) => tile.dataset.sessionId === pin.id);
     if (!pin.focused || !lost || !item) return;
-    const folded = item.closest<HTMLElement>("[inert]");
-    const target = folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(".session");
-    target?.focus({ preventScroll: true });
+    tileFocus(item, ".session")?.focus({ preventScroll: true });
   });
   // A new session's tile, a fork's included, slides in at its place while the others make room (DESIGN.md, Motion). New
   // means listed for the first time since Ersa started: the first listing draws every tile in place, and a listing
@@ -465,6 +463,15 @@ function movesInPlace(list: HTMLUListElement | null): void {
     return node;
   };
   list.appendChild = <T extends Node>(node: T): T => list.insertBefore(node, null);
+}
+
+/**
+ * Where focus that follows a tile drawn afresh goes: `part` of the tile (the tile itself or its More), or, while its
+ * group is collapsed and the tile out of reach, the group's heading (docs/design/RAIL.md, Menus).
+ */
+function tileFocus(item: HTMLElement, part: ".session" | ".session-more"): HTMLElement | null | undefined {
+  const folded = item.closest<HTMLElement>("[inert]");
+  return folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(part);
 }
 
 /**
@@ -954,7 +961,7 @@ function NewSectionHeading({ draft, saving }: { draft: NewSectionDraft; saving: 
         if (now !== null && now !== document.body) return;
         const was = opener.current;
         const tile = [...(rail.current?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].find((el) => el.dataset.sessionId === forSession.current);
-        const again = was?.classList.contains("session-more") ? tile?.querySelector<HTMLElement>(".session-more") : tile?.querySelector<HTMLElement>(".session");
+        const again = tile && tileFocus(tile, was?.classList.contains("session-more") ? ".session-more" : ".session");
         (was?.isConnected ? was : again)?.focus({ preventScroll: true });
       });
     };
