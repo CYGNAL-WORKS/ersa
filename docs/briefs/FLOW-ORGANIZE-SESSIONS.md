@@ -71,6 +71,9 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R25**: Whether a session is unseen, by Ersa's mark or the user's, shall survive a restart of Ersa and of Core.
 - **FLOW-ORGANIZE-SESSIONS-R26**: The arrange menu's item that opens the sessions page shall read View all.
 - **FLOW-ORGANIZE-SESSIONS-R27**: Ersa shall refuse a section name holding a control character other than spacing.
+- **FLOW-ORGANIZE-SESSIONS-R28**: A menu opened at the pointer that is no larger than the window shall lie wholly inside the window.
+- **FLOW-ORGANIZE-SESSIONS-R29**: A menu opened at the pointer shall have its top-left corner at the press where it fits there; on an axis where it does not, it shall open the other way from the press, and where it fits neither way it shall sit against the window's left or top edge.
+- **FLOW-ORGANIZE-SESSIONS-R30**: A menu opened at the pointer shall be placed again when its size or the window's changes.
 
 ## Out of scope
 
@@ -84,6 +87,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-18: from #290 inbox: a menu opened at the pointer stays inside the window, opening the other way from the press where it has no room, as a desktop's menus do, and is placed again when it or the window changes size (FLOW-ORGANIZE-SESSIONS-R28 to R30 added). `RAIL.md` (Menus) holds the rule.
 - 2026-11-15: from #413 inbox: a corrected date created reaches the rail on `session.tile` (PROTO-CORE-API-R105, R106), which is how R07, R09 and R10 hold without a reread of the list; until those are built it shows at the next read of the list. No requirement IDs changed.
 - 2026-11-14: from the triage of #289: a section name holding a control character other than spacing is refused, as Core does (PROTO-CORE-API-R60), and the edge case says so. R27 added. The 2026-11-07 line named PROTO-CORE-API-R61, the rule on case, and now names R60 alone.
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0033).
