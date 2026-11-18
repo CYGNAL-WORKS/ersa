@@ -204,7 +204,7 @@ export function SessionsPage({
                       initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
                     />
                   </ErrorBoundary>
-                  <Refusals session={s} pinning={handlers.pinning} archiving={handlers.archiving} forking={handlers.forking} />
+                  <Refusals session={s} moving={handlers.moving} archiving={handlers.archiving} forking={handlers.forking} />
                 </li>
               ))}
             </ul>

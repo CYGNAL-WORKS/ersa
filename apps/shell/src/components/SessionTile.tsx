@@ -52,6 +52,7 @@ export function SessionTile({
   rename,
   pin,
   fork,
+  move,
   archive,
   remove,
   initialMenu,
@@ -78,7 +79,7 @@ export function SessionTile({
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({
     session,
     title: view.title,
-    actions: { rename, pin, fork, archive, remove },
+    actions: { rename, pin, fork, move, archive, remove },
     beforeChevron: needsYou,
     initialMenu,
     initialDraft,

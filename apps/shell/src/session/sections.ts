@@ -17,6 +17,8 @@ export function useSections(client: CoreClient, link: number | undefined, descri
   const [view, setView] = useState<SectionsView>({ state: "loading" });
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
   const [removing, setRemoving] = useState<Record<string, Sending>>({});
+  // A new section on its way, or why Core refused the last (FLOW-ORGANIZE-SESSIONS, Variations).
+  const [creating, setCreating] = useState<Sending>();
 
   useEffect(() => {
     if (link === undefined) return;
@@ -34,6 +36,26 @@ export function useSections(client: CoreClient, link: number | undefined, descri
   // Core's answer replaces the section in the list, so the name shown is the one Core keeps, its spacing settled.
   const put = (section: Section) =>
     setView((v) => (v.state === "ready" ? { state: "ready", sections: v.sections.map((s) => (s.id === section.id ? section : s)) } : v));
+
+  /**
+   * Makes a section, resolving with the section Core answers with, or undefined once Core refused it, its reason kept
+   * in `creating`. A name exactly another section's gives that section, and nothing new appears (R23): Core compares
+   * names, case and all, and the window only takes its answer. A new one goes last, as Core lists them in the order
+   * they were made (R04).
+   */
+  const create = async (name: string): Promise<Section | undefined> => {
+    setCreating({ state: "sending" });
+    try {
+      const section = await client.call("section.create", { name });
+      setCreating(undefined);
+      setView((v) => (v.state === "ready" && !v.sections.some((s) => s.id === section.id) ? { state: "ready", sections: [...v.sections, section] } : v));
+      return section;
+    } catch (error) {
+      setCreating({ state: "failed", message: describe(error) });
+      return undefined;
+    }
+  };
+  const createReset = useCallback(() => setCreating(undefined), []);
 
   /** Renames a section; resolves true once Core has, else keeps Core's reason in `renaming` (FLOW-ORGANIZE-SESSIONS, Variations). */
   const rename = async (id: string, name: string): Promise<boolean> => {
@@ -65,5 +87,5 @@ export function useSections(client: CoreClient, link: number | undefined, descri
     }
   };
 
-  return { view, renaming, renameReset, rename, removing, remove };
+  return { view, creating, create, createReset, renaming, renameReset, rename, removing, remove };
 }
