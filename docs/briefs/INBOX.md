@@ -8,6 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-18 none (RAIL.md, Menus): a menu opened at the pointer has no rule for the window's edge. Built (#290): it opens the other way from the press where there is no room, is held inside the window with no inset, and is placed again when it or the window changes size; a menu larger than the window keeps its top-left corner in. Needs a rule, and an ID the tests can cite.
 
 ## Resolved recently (optional, trimmed in planning passes)
-- RAIL.md, Menus: a menu opened at the pointer has no rule for the window's edge. Built (#290): it opens the other way from the press where there is no room and is held inside the window with no inset; a menu larger than the window keeps its top-left corner in. Needs a rule (and an ID tests can cite).

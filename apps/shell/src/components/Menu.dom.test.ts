@@ -3,7 +3,7 @@
 // move through the items it can take, how Right and Left open and close a submenu, and what Escape and choosing close.
 // RAIL.md is a design document with no requirement IDs.
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Menu, type MenuClose, type MenuEntry } from "./Menu";
@@ -151,6 +151,7 @@ describe("a menu opened at the pointer", () => {
 
   afterEach(() => {
     HTMLElement.prototype.getBoundingClientRect = realRect;
+    size.height = 300;
   });
 
   /** Opens a menu at the press and gives back its box, as the window shows it. */
@@ -169,20 +170,49 @@ describe("a menu opened at the pointer", () => {
 
   // Near each edge and corner, every item stays inside the window: the menu opens the other way, and stays inside.
   it.each([
-    ["the foot", 100, 590, { left: 100, top: 290 }],
-    ["the right edge", 790, 100, { left: 590, top: 100 }],
-    ["the bottom right corner", 795, 595, { left: 595, top: 295 }],
-    ["the top left corner", 2, 2, { left: 2, top: 2 }],
-    ["the middle of a short window's foot", 150, 200, { left: 150, top: 0 }],
-  ])("near %s, the whole menu is inside the window", (_, x, y, want) => {
-    if (y === 200) size.height = 500;
+    ["the foot", 100, 590, 300, { left: 100, top: 290 }],
+    ["the right edge", 790, 100, 300, { left: 590, top: 100 }],
+    ["the bottom right corner", 795, 595, 300, { left: 595, top: 295 }],
+    ["the top left corner", 2, 2, 300, { left: 2, top: 2 }],
+    ["a press where the menu fits neither below nor above", 150, 200, 500, { left: 150, top: 0 }],
+  ])("near %s, the whole menu is inside the window", (_, x, y, height, want) => {
+    size.height = height;
     const box = openAt(x, y);
-    size.height = 300;
     expect(box.left).toBe(want.left);
     expect(box.top).toBe(want.top);
     expect(box.left).toBeGreaterThanOrEqual(0);
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.right).toBeLessThanOrEqual(W);
     expect(box.bottom).toBeLessThanOrEqual(H);
+  });
+
+  it("is placed again when it grows while open, or the window shrinks", () => {
+    let grew: () => void = () => {};
+    const real = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(cb: () => void) {
+        grew = cb;
+      }
+      observe() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      openAt(100, 300);
+      const menu = screen.getByRole("menu");
+      expect(menu.getBoundingClientRect().top).toBe(300);
+      // An item gains its reason: the menu grows past the foot, and moves up to stay inside.
+      size.height = 350;
+      act(() => grew());
+      expect(menu.getBoundingClientRect().bottom).toBeLessThanOrEqual(H);
+      expect(menu.getBoundingClientRect().top).toBe(0);
+      // The window shrinks: it moves in again.
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 250 });
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(menu.getBoundingClientRect().right).toBeLessThanOrEqual(250);
+    } finally {
+      globalThis.ResizeObserver = real;
+    }
   });
 });
