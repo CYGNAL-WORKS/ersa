@@ -224,7 +224,6 @@ async fn shell_quit(app: AppHandle) -> Result<(), ()> {
 }
 
 /// The window's name, as built in [`run`].
-/// The window's label.
 pub const WINDOW: &str = "main";
 
 fn show_window(app: &AppHandle) {
@@ -381,12 +380,12 @@ fn opens_unfocused(label: Option<&str>, background: Option<&str>) -> bool {
 /// What the window does with its events. Closing it hides it, with `hide`;
 /// the tray icon stays, and Core and the sessions keep running
 /// (FLOW-CLOSE-AND-QUIT-R01). Only Quit, from the tray icon's menu, ends the
-/// app. `hide` is the window's own in the app, and a counter in
-/// tests/close_and_quit.rs, since Tauri's mock runtime cannot say whether a
+/// app. `hide` is [`hide_window`] in the app; tests/close_and_quit.rs counts
+/// its calls around it, since Tauri's mock runtime cannot say whether a
 /// window is visible.
 ///
 /// Public so that test can call it: the mock runtime hands window events
-/// only to the app's run callback.
+/// only to the app's run callback, never to the handler [`run`] registers.
 pub fn on_window_event<R: Runtime>(
     window: &Window<R>,
     event: &WindowEvent,
@@ -397,6 +396,11 @@ pub fn on_window_event<R: Runtime>(
         api.prevent_close();
         hide(window);
     }
+}
+
+/// Hides the window to the tray icon, which is what closing it does.
+pub fn hide_window<R: Runtime>(window: &Window<R>) {
+    let _ = window.hide();
 }
 
 /// Opens the window, or shows the window of the Shell already running.
@@ -488,11 +492,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .on_window_event(|window, event| {
-            on_window_event(window, event, |window| {
-                let _ = window.hide();
-            })
-        })
+        .on_window_event(|window, event| on_window_event(window, event, hide_window))
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");
 }

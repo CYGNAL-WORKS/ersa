@@ -1850,7 +1850,7 @@ describe("a refused send App's composer says", () => {
 
 // Withdrawing trust from a project's heading (FLOW-NEW-SESSION-R31), against a fake Core that keeps each project's trust.
 describe("withdrawing trust", () => {
-  const note = "Claude Code still trusts this folder when you use it outside Ersa.";
+  const note = "Claude Code may still trust this folder when you use it outside Ersa.";
   /** The note beneath a project's heading, empty when it says nothing. */
   const noteOf = (name: string) => screen.getByRole("button", { name: `More for ${name}` }).closest("li")?.querySelector(".rail-project-note")?.textContent;
 
