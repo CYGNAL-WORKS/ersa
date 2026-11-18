@@ -179,41 +179,57 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // A change to a session's arrangement (FLOW-ORGANIZE-SESSIONS): Core stores it and answers with the session as
   // listed, and the rail shows the fields changed once Core has them. A refusal leaves the session as Core has it and
   // says why beneath its tile until the next try (R15). `track` holds the changes on their way and the refusals.
+  // Resolves whether Core took it.
   type Arrange = Omit<SessionArrangeParams, "id">;
-  const arrangeSession = async (track: Dispatch<SetStateAction<Record<string, Sending>>>, id: string, fields: Arrange) => {
+  const arrangeSession = async (track: Dispatch<SetStateAction<Record<string, Sending>>>, id: string, fields: Arrange): Promise<boolean> => {
     track((t) => ({ ...t, [id]: { state: "sending" } }));
     try {
       const arranged = await client.call("session.arrange", { id, ...fields });
       track(({ [id]: _, ...rest }) => rest);
       const keys = Object.keys(fields) as (keyof Arrange & keyof Session)[];
       connection.current?.changed(id, Object.fromEntries(keys.map((k) => [k, arranged[k]])));
+      return true;
     } catch (error) {
       track((t) => ({ ...t, [id]: { state: "failed", message: describeError(error) } }));
+      return false;
     }
   };
 
   // The unseen mark (FLOW-ORGANIZE-SESSIONS, Unseen), which Core stores so it survives a restart of Ersa and of Core
   // (R25). Ersa's own mark and Mark as unread or read (R24) both go through `markUnseen`. While one is on its way Ersa
-  // sends no other for that session, so a list read before Core answered can't send it twice; a refused one is tried
-  // again from the next list that calls for it.
+  // sends no other for that session, so a list read before Core answered can't send it twice. One Core refused is
+  // not sent again from the lists that follow, so its note stays (R15), until a new occasion for it: the user opens or
+  // leaves a session, the session works again, Core is reached again, or the user chooses it from the menu.
   const [marking, setMarking] = useState<Record<string, Sending>>({});
   // The sessions with a mark on its way now, which a list may be reported before a render shows.
   const markSending = useRef(new Set<string>());
+  // The marks Core refused, by session: what was asked.
+  const markRefused = useRef(new Map<string, boolean>());
   const markUnseen = async (id: string, unseen: boolean) => {
     markSending.current.add(id);
-    await arrangeSession(setMarking, id, { unseen });
+    const taken = await arrangeSession(setMarking, id, { unseen });
     markSending.current.delete(id);
+    if (taken) markRefused.current.delete(id);
+    else markRefused.current.set(id, unseen);
   };
   // The sessions working in the last list, to tell "idle after working" from plain idle. In memory: a turn that
   // finishes while Ersa is closed leaves no mark (LAY-SHELL, Open questions), and nor does one that finishes while
   // Ersa can't reach Core, since what was working then is forgotten.
   const working = useRef<ReadonlySet<string>>(new Set());
+  const lastShown = useRef(shownId);
   useEffect(() => {
     if (sessions.state !== "ready") {
       working.current = new Set();
+      markRefused.current.clear();
       return;
     }
-    const next = unseenWrites(working.current, sessions.sessions, shownId, markSending.current);
+    if (lastShown.current !== shownId) {
+      for (const id of [lastShown.current, shownId]) if (id !== undefined) markRefused.current.delete(id);
+      lastShown.current = shownId;
+    }
+    const next = unseenWrites(working.current, sessions.sessions, shownId, markSending.current, markRefused.current);
+    // Only the step into working is a new occasion: a session that keeps working is asked nothing again.
+    for (const id of next.working) if (!working.current.has(id)) markRefused.current.delete(id);
     working.current = next.working;
     for (const write of next.writes) void markUnseen(write.id, write.unseen);
     // markUnseen reads only refs and stable values.
