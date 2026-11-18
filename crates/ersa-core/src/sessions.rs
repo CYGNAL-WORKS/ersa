@@ -860,8 +860,8 @@ impl Handle {
         let listed = settings::listed(&row, &presented.recorded, &presented.reported);
         Session {
             id: row.id,
-            // Filled by the tickets that build them (PROTO-CORE-API,
-            // Sessions): the backend's id and the stored unseen mark.
+            // Filled by the ticket that builds it (PROTO-CORE-API,
+            // Sessions): the backend's id.
             backend_session_id: None,
             workspace_id: row.workspace_id,
             host_id: row.host_id,
@@ -880,7 +880,7 @@ impl Handle {
             archived: row.archived,
             pinned: row.pinned,
             section_id: row.section_id,
-            unseen: false,
+            unseen: row.unseen,
             last_activity_at: row.last_activity_at,
             deleting: row.deleting,
             tile,
@@ -1662,14 +1662,16 @@ impl SessionManager {
         handle.session()
     }
 
-    /// Pins or unpins the session and moves it between sections, changing
-    /// only what is given (ADR 0026, FLOW-ORGANIZE-SESSIONS). A section that
-    /// does not exist is `not_found`, and changes nothing.
+    /// Pins or unpins the session, moves it between sections, and marks it
+    /// unseen or not, changing only what is given (ADR 0026, ADR 0033,
+    /// FLOW-ORGANIZE-SESSIONS, PROTO-CORE-API-R78). A section that does not
+    /// exist is `not_found`, and changes nothing.
     pub async fn arrange(
         &self,
         id: &str,
         pinned: Option<bool>,
         section_id: Option<Option<String>>,
+        unseen: Option<bool>,
     ) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         // The session's exclusive operation, as `set_archived`: a
@@ -1702,14 +1704,19 @@ impl SessionManager {
         // what a restart would lose.
         let stored = self
             .store
-            .arrange_session(id.to_string(), pinned, section_id.clone())
+            .arrange_session(id.to_string(), pinned, section_id.clone(), unseen)
             .await?;
         if !stored {
             let missing = section_id.flatten().unwrap_or_default();
             return Err(SessionError::NoSection(missing));
         }
         let section = section_id;
-        self.wrote(&handle, RowChange::Arranged { pinned, section })?;
+        let change = RowChange::Arranged {
+            pinned,
+            section,
+            unseen,
+        };
+        self.wrote(&handle, change)?;
         handle.session()
     }
 
@@ -3666,6 +3673,7 @@ mod tests {
             effort_at: None,
             permission_mode_at: None,
             started_elsewhere: false,
+            unseen: false,
         };
         // Admission has the session and its workspace, as once it is
         // created: a removal is decided there.
@@ -4070,15 +4078,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let manager = Arc::new(gated_manager(dir.path(), &adapter));
         store_gated(&manager).await;
-        let (name, key) = ("Later".to_string(), "later".to_string());
-        let section = manager.store.insert_section(name, key).await.unwrap().id;
-        manager.admission.report(Report::SectionStored {
-            section: section.clone(),
-        });
+        let admission = Arc::clone(&manager.admission);
+        let section = manager
+            .store
+            .insert_section("Later".into(), move |section| {
+                admission.report(Report::SectionStored {
+                    section: section.id.clone(),
+                });
+            })
+            .await
+            .unwrap()
+            .id;
         let into = |manager: Arc<SessionManager>, section: String| {
             tokio::spawn(async move {
                 let section = Some(Some(section));
-                manager.arrange("s-gated", None, section).await
+                manager.arrange("s-gated", None, section, None).await
             })
         };
 
@@ -4487,6 +4501,7 @@ mod tests {
                 effort_at: None,
                 permission_mode_at: None,
                 started_elsewhere: false,
+                unseen: false,
             })
             .await
             .unwrap();
