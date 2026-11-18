@@ -203,6 +203,7 @@ impl SessionManager {
             forked_from: None,
             forked_through: None,
             started_elsewhere: true,
+            unseen: false,
         };
         let command = Command::CreateSession {
             workspace: row.workspace_id.clone(),
