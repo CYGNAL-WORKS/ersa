@@ -50,7 +50,7 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::Url;
 use tauri::{
-    AppHandle, Emitter, Manager, Runtime, State, WebviewUrl, WebviewWindowBuilder, Window,
+    AppHandle, Emitter, Manager, RunEvent, Runtime, State, WebviewUrl, WebviewWindowBuilder,
     WindowEvent,
 };
 use tokio::sync::Mutex;
@@ -377,30 +377,29 @@ fn opens_unfocused(label: Option<&str>, background: Option<&str>) -> bool {
     label.is_some() && background == Some("1")
 }
 
-/// What the window does with its events. Closing it hides it, with `hide`;
-/// the tray icon stays, and Core and the sessions keep running
-/// (FLOW-CLOSE-AND-QUIT-R01). Only Quit, from the tray icon's menu, ends the
-/// app. `hide` is [`hide_window`] in the app; tests/close_and_quit.rs counts
-/// its calls around it, since Tauri's mock runtime cannot say whether a
-/// window is visible.
+/// Runs the app until it exits, and returns its exit code. Closing the
+/// window hides it: the tray icon stays, and Core and the sessions keep
+/// running (FLOW-CLOSE-AND-QUIT-R01). Only Quit, from the tray icon's menu,
+/// ends the app ([`quit_now`]).
 ///
-/// Public so that test can call it: the mock runtime hands window events
-/// only to the app's run callback, never to the handler [`run`] registers.
-pub fn on_window_event<R: Runtime>(
-    window: &Window<R>,
-    event: &WindowEvent,
-    hide: impl Fn(&Window<R>),
-) {
-    if let WindowEvent::CloseRequested { api, .. } = event {
-        // Without this the window closes, and closing the last window exits.
-        api.prevent_close();
-        hide(window);
-    }
-}
-
-/// Hides the window to the tray icon, which is what closing it does.
-pub fn hide_window<R: Runtime>(window: &Window<R>) {
-    let _ = window.hide();
+/// Generic over Tauri's runtime, so tests/close_and_quit.rs runs it whole in
+/// Tauri's mock runtime.
+pub fn run_app<R: Runtime>(app: tauri::App<R>) -> i32 {
+    app.run_return(|app, event| {
+        if let RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } = &event
+        {
+            // Without this the window closes, and closing the last window
+            // exits.
+            api.prevent_close();
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.hide();
+            }
+        }
+    })
 }
 
 /// Opens the window, or shows the window of the Shell already running.
@@ -446,7 +445,7 @@ pub fn run() {
         quit_heard: AtomicU64::new(0),
         launched: std::sync::Mutex::new(None),
     };
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(shell)
         // The system's folder dialog, which adds a project from the project
         // chip (FLOW-NEW-SESSION-R27). The capability allows only `open`.
@@ -492,9 +491,9 @@ pub fn run() {
             }
             Ok(())
         })
-        .on_window_event(|window, event| on_window_event(window, event, hide_window))
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("the Tauri application failed to start");
+    std::process::exit(run_app(app));
 }
 
 #[cfg(test)]
