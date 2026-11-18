@@ -844,9 +844,9 @@ const menuParts: MenuEntry[] = [
     current: "Project",
     entries: [
       { kind: "item", label: "Project", checked: true },
-      { kind: "item", label: "Section" },
-      { kind: "item", label: "Date" },
-      { kind: "item", label: "None" },
+      { kind: "item", label: "Section", checked: false },
+      { kind: "item", label: "Date", checked: false },
+      { kind: "item", label: "None", checked: false },
     ],
   },
   { kind: "submenu", label: "Sort by", current: "Date created", entries: [{ kind: "item", label: "Date created", checked: true }] },

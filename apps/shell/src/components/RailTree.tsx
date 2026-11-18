@@ -1,18 +1,18 @@
-import { Component, type CSSProperties, type ReactNode, type Ref, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Component, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref, type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Section, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
-import type { SectionsView } from "../session/sections";
+import type { Moving, SectionsView } from "../session/sections";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { HeightEase, type Place, arrive, placesOf, rearrange } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { MenuButton } from "./MenuButton";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
-import { type Moving, type TileActions, type TileHandlers, tileActions } from "./TileMenu";
+import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
 import { besideGone, useLeavingFocus } from "./useLeavingFocus";
 import { useTitleDraft } from "./SessionTitle";
 import { TrustQuestion } from "./TrustQuestion";
@@ -45,6 +45,8 @@ export interface NewSectionDraft {
   onReset: () => void;
   /** Escape, Enter on a blank name, or leaving the field: nothing is made. */
   onCancel: () => void;
+  /** What the menu gave focus back to as New section was chosen, which takes it again when nothing is made. */
+  opener?: HTMLElement;
   /** For the gallery: the name typed, the field taking no focus. */
   initialDraft?: string;
 }
@@ -834,30 +836,22 @@ function SectionGroup({
     <li className="rail-project" data-collapsed={folded || undefined}>
       <div className="rail-heading" data-slide={headingSlide(id)} data-force={force} data-editing={editing || undefined}>
         {editing ? (
-          <h3 className="rail-heading-title rail-heading-rename">
-            <span className="rail-heading-chevron">
-              <Icon icon={ChevronDown} size="icon-sm" />
-            </span>
-            <input
-              ref={field}
-              className="rail-heading-field"
-              aria-label={t("rail.section.nameLabel")}
-              value={draft}
-              readOnly={busy}
-              aria-invalid={refused !== undefined || undefined}
-              aria-errormessage={refused !== undefined ? errorId : undefined}
-              onChange={(event) => {
-                setDraft(event.target.value);
-                // Typing again leaves an earlier refusal behind.
-                if (refused !== undefined) onRenameReset?.(id);
-              }}
-              onKeyDown={(event) => onFieldKey(event, { enter: true })}
-              // Leaving the field without Enter restores the name, unless a rename is on its way or was refused.
-              onBlur={() => {
-                if (!busy && refused === undefined) setDraft(undefined);
-              }}
-            />
-          </h3>
+          <SectionNameField
+            field={field}
+            value={draft}
+            busy={busy}
+            refusedBy={refused !== undefined ? errorId : undefined}
+            onChange={(name) => {
+              setDraft(name);
+              // Typing again leaves an earlier refusal behind.
+              if (refused !== undefined) onRenameReset?.(id);
+            }}
+            onKeyDown={(event) => onFieldKey(event, { enter: true })}
+            // Leaving the field without Enter restores the name, unless a rename is on its way or was refused.
+            onBlur={() => {
+              if (!busy && refused === undefined) setDraft(undefined);
+            }}
+          />
         ) : (
           <GroupToggle ref={home} folded={folded} controls={children ? tilesId : undefined} summary={summary} toggle={toggle} name={section.name} />
         )}
@@ -940,52 +934,57 @@ function NewSectionHeading({ draft, saving }: { draft: NewSectionDraft; saving: 
   useEffect(() => {
     if (draft.initialDraft === undefined) field.current?.focus({ preventScroll: true });
   }, [refused, draft.initialDraft]);
-  // Nothing made: focus goes back to what opened it, the session's tile or the arrange button.
-  const cancel = () => {
-    const rail = field.current?.closest(".rail");
-    const tile = draft.for === undefined ? undefined : [...(rail?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].find((el) => el.dataset.sessionId === draft.for);
-    draft.onCancel();
-    (tile?.querySelector<HTMLElement>(".session") ?? rail?.querySelector<HTMLElement>(".rail-arrange"))?.focus({ preventScroll: true });
+  // However the heading goes without a section made (Escape, a blank name, or the grouping switched back when Core
+  // refused it), focus it held goes back to what opened it: More, the tile or the row, or the arrange button
+  // (docs/design/RAIL.md, Menus). Once the field has gone, so the focus it lost is seen; focus the user put elsewhere
+  // stays.
+  const made = useRef(false);
+  const opener = useRef(draft.opener);
+  useEffect(
+    () => () => {
+      if (made.current) return;
+      queueMicrotask(() => {
+        const now = document.activeElement;
+        if ((now === null || now === document.body) && opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+      });
+    },
+    [],
+  );
+  const make = async (value: string) => {
+    if (await draft.onName(value)) made.current = true;
   };
   return (
     <li className="rail-project">
       <div className="rail-heading" data-slide={headingSlide("new-section")} data-editing>
-        <h3 className="rail-heading-title rail-heading-rename">
-          <span className="rail-heading-chevron">
-            <Icon icon={ChevronDown} size="icon-sm" />
-          </span>
-          <input
-            ref={field}
-            className="rail-heading-field"
-            aria-label={t("rail.section.nameLabel")}
-            value={name}
-            readOnly={busy}
-            aria-invalid={refused !== undefined || undefined}
-            aria-errormessage={refused !== undefined ? errorId : undefined}
-            onChange={(event) => {
-              setName(event.target.value);
-              // Typing again leaves an earlier refusal behind.
-              if (refused !== undefined) draft.onReset();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.stopPropagation();
-                // Not while the name is on its way: its answer would otherwise show nowhere.
-                if (!busy) cancel();
-              } else if (event.key === "Enter") {
-                event.preventDefault();
-                if (busy) return;
-                if (blank(name)) cancel();
-                else void draft.onName(name);
-              }
-            }}
-            // Leaving the field without Enter makes nothing, unless the name is on its way or was refused.
-            onBlur={() => {
-              if (!busy && refused === undefined) draft.onCancel();
-            }}
-          />
-        </h3>
+        <SectionNameField
+          field={field}
+          value={name}
+          busy={busy}
+          refusedBy={refused !== undefined ? errorId : undefined}
+          onChange={(value) => {
+            setName(value);
+            // Typing again leaves an earlier refusal behind.
+            if (refused !== undefined) draft.onReset();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              // Not while the name is on its way: its answer would otherwise show nowhere.
+              if (!busy) draft.onCancel();
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              if (busy) return;
+              // A blank name is nothing but spacing, as for a rename (useTitleDraft).
+              if (name.trim() === "") draft.onCancel();
+              else void make(name);
+            }
+          }}
+          // Leaving the field without Enter makes nothing, unless the name is on its way or was refused.
+          onBlur={() => {
+            if (!busy && refused === undefined) draft.onCancel();
+          }}
+        />
       </div>
       <EasedNotes shown={`${refused !== undefined}`}>
         {refused !== undefined && (
@@ -999,9 +998,45 @@ function NewSectionHeading({ draft, saving }: { draft: NewSectionDraft; saving: 
 }
 
 /**
- * Whether a name is blank as Core counts it: nothing but spacing. JavaScript's `\s` also counts a byte-order mark,
- * which Core does not, so a name of one is sent and Core's answer stands.
+ * A section heading's name as a field, renaming one or naming a new one (docs/design/RAIL.md, A group heading): in
+ * place of the name, after the chevron, so the heading keeps its height. While the name is on its way it takes no
+ * typing; refused, it names the note that says why.
  */
-function blank(name: string): boolean {
-  return [...name].every((c) => c !== "﻿" && /\s/u.test(c));
+function SectionNameField({
+  field,
+  value,
+  busy,
+  refusedBy,
+  onChange,
+  onKeyDown,
+  onBlur,
+}: {
+  field: RefObject<HTMLInputElement | null>;
+  value: string;
+  busy: boolean;
+  /** The id of the note saying why the name was refused, while it was. */
+  refusedBy?: string;
+  onChange: (value: string) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  onBlur: () => void;
+}) {
+  return (
+    <h3 className="rail-heading-title rail-heading-rename">
+      <span className="rail-heading-chevron">
+        <Icon icon={ChevronDown} size="icon-sm" />
+      </span>
+      <input
+        ref={field}
+        className="rail-heading-field"
+        aria-label={t("rail.section.nameLabel")}
+        value={value}
+        readOnly={busy}
+        aria-invalid={refusedBy !== undefined || undefined}
+        aria-errormessage={refusedBy}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={onBlur}
+      />
+    </h3>
+  );
 }

@@ -3,11 +3,22 @@
 // answer to it. Which section a session is in is the session's own, in `session.list`.
 
 import { useCallback, useEffect, useState } from "react";
+import { t } from "../catalog";
 import type { CoreClient } from "../core/client";
 import type { Section } from "../protocol/core-api.gen";
 import type { Sending } from "./follow";
 
 export type SectionsView = { state: "loading" } | { state: "ready"; sections: Section[] } | { state: "error"; message: string };
+
+/** A change to a session's place on its way to Core, or why Core refused the last: a pin or a move to a section. */
+export type Moving = Sending & { change: "pin" | "section" };
+
+/** Why nothing can be put in a section now: the sections are still being read, or can't be (FLOW-ORGANIZE-SESSIONS-R34). */
+export function sectionsUnavailable(sections: SectionsView | undefined): string | undefined {
+  if (sections?.state === "loading") return t("rail.tree.loadingProgress");
+  if (sections?.state === "error") return t("rail.tree.sectionsError");
+  return undefined;
+}
 
 /**
  * The sections and the changes to them on their way. `link` counts connections: a new one reads the list again.

@@ -6,7 +6,7 @@ import { archiveUnavailable } from "../session/archive";
 import { deleteUnavailable } from "../session/deletion";
 import { forkUnavailable } from "../session/fork";
 import type { Sending } from "../session/follow";
-import type { SectionsView } from "../session/sections";
+import { type Moving, type SectionsView, sectionsUnavailable } from "../session/sections";
 import { IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
 import { useTitleDraft } from "./SessionTitle";
@@ -54,9 +54,6 @@ interface TileMove {
   /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
   unavailable?: string;
 }
-
-/** A change to a session's arrangement on its way to Core, or why Core refused the last: a pin or a move to a section. */
-export type Moving = Sending & { change: "pin" | "section" };
 
 /** Archive or Unarchive on the menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
 interface TileArchive {
@@ -152,13 +149,6 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
     },
     remove: onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline) },
   };
-}
-
-/** Why nothing can be put in a section now: the sections are still being read, or can't be (FLOW-ORGANIZE-SESSIONS-R34). */
-export function sectionsUnavailable(sections: SectionsView | undefined): string | undefined {
-  if (sections?.state === "loading") return t("rail.tree.loadingProgress");
-  if (sections?.state === "error") return t("rail.tree.sectionsError");
-  return undefined;
 }
 
 /**
