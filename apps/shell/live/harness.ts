@@ -62,6 +62,12 @@ export interface Ersa {
    * then starts Core on the same label and data folder and opens a new window. `page` is the new window's afterward.
    */
   restart(): Promise<void>;
+  /** Closes the window as its close button does: the system's close message to the window. */
+  closeWindow(): Promise<void>;
+  /** Whether the window is on screen: the Shell's process has a visible top-level window titled Ersa. */
+  windowShown(): Promise<boolean>;
+  /** Whether the Shell's process and Core's are both still running. */
+  running(): boolean;
 }
 
 /**
@@ -72,6 +78,31 @@ export interface Ersa {
 const START_LIMIT_MS = 60_000;
 
 let counter = 0;
+
+// PowerShell, given the Shell's process as `$p`: True when that process owns a visible top-level window titled Ersa.
+// Read through Windows' own window list, since a hidden window leaves the Interface's page reporting itself visible.
+const WINDOW_SHOWN = `Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Text;
+public static class ErsaWindows {
+  public delegate bool Each(IntPtr window, IntPtr data);
+  [DllImport("user32.dll")] static extern bool EnumWindows(Each each, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
+  public static bool Shown(int process, string title) {
+    bool shown = false;
+    EnumWindows((window, data) => {
+      uint owner; GetWindowThreadProcessId(window, out owner);
+      if (owner == process && IsWindowVisible(window)) {
+        var text = new StringBuilder(256); GetWindowText(window, text, 256);
+        if (text.ToString() == title) shown = true;
+      }
+      return true;
+    }, IntPtr.Zero);
+    return shown;
+  }
+}
+'@; [ErsaWindows]::Shown($p.Id, "Ersa")`;
 
 // What this worker started and has not yet ended. If the worker exits without a fixture's cleanup (Ctrl+C, a crash),
 // this ends them as the process exits.
@@ -114,6 +145,17 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
       let browser: Browser | undefined;
       const unanswered: string[] = [];
       let launches = 0;
+      // The Shell's process, once launched.
+      let shell: ChildProcess | undefined;
+      // Runs a PowerShell expression about the Shell's process and returns what it printed.
+      const aboutShell = async (expression: string) => {
+        const { stdout } = await promisify(execFile)(
+          "powershell",
+          ["-NoProfile", "-NonInteractive", "-Command", `$p = Get-Process -Id ${shell?.pid}; ${expression}`],
+          { windowsHide: true },
+        );
+        return stdout.trim();
+      };
       // Starts Core, then the window attached to it, within the start's limit; returns the window.
       const launch = async () => {
         const deadline = Date.now() + START_LIMIT_MS;
@@ -134,23 +176,22 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
         await waitFor(() => corePipe(label) !== undefined, "Core to serve its endpoint", running, deadline);
 
         const port = await freePort();
-        running.push(
-          start(
-            bin.shell,
-            [],
-            {
-              ...process.env,
-              ERSA_ATTACH: label,
-              // The window opens without taking focus: Playwright drives it over CDP, which needs none.
-              ERSA_BACKGROUND: "1",
-              // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
-              // so it never shares the browser process of the owner's Ersa or of another run.
-              WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
-              WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
-            },
-            log("shell"),
-          ),
+        shell = start(
+          bin.shell,
+          [],
+          {
+            ...process.env,
+            ERSA_ATTACH: label,
+            // The window opens without taking focus: Playwright drives it over CDP, which needs none.
+            ERSA_BACKGROUND: "1",
+            // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
+            // so it never shares the browser process of the owner's Ersa or of another run.
+            WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+            WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
+          },
+          log("shell"),
         );
+        running.push(shell);
         await waitFor(() => debuggerUp(port), "the window's debugging port", running, deadline);
         browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: remaining(deadline) });
         const page = await windowPage(browser, deadline);
@@ -183,6 +224,11 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
             await ersa.page.screenshot({ path: file });
             await testInfo.attach(name, { path: file, contentType: "image/png" });
           },
+          async closeWindow() {
+            await aboutShell("[void]$p.CloseMainWindow()");
+          },
+          windowShown: async () => (await aboutShell(WINDOW_SHOWN)) === "True",
+          running: () => running.length > 0 && running.every((child) => !ended(child)),
           async restart() {
             await quit();
             window = await launch();
