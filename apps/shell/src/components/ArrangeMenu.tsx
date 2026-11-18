@@ -43,7 +43,7 @@ function choice<C>(label: string, values: readonly C[], chosen: C, name: (value:
 
 /**
  * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸, Sort by ▸ and Show ▸, each naming its current
- * choice and its submenu marking it, then Reset to defaults and All sessions apart. New section goes in the group with
+ * choice and its submenu marking it, then Reset to defaults and View all apart. New section goes in the group with
  * Reset, as it is built.
  */
 export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActions): MenuEntry[] {
@@ -53,7 +53,7 @@ export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActi
     choice(t("rail.arrange.showButton"), SHOWS, arrangement.show, (s) => t(SHOW_NAMES[s]), actions.onShow),
     { kind: "rule" },
     { kind: "item", label: t("rail.arrange.resetButton"), onChoose: actions.onReset },
-    { kind: "item", label: t("rail.arrange.allSessionsButton"), onChoose: actions.onAllSessions },
+    { kind: "item", label: t("rail.arrange.viewAllButton"), onChoose: actions.onAllSessions },
   ];
 }
 
