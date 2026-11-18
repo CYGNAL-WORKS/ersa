@@ -676,7 +676,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       setTrusting(({ [project.id]: _, ...rest }) => rest);
       connection.current?.reload("projects");
       // Ersa's withdrawal leaves the backend's own record of the folder's trust (ADR 0028), so the heading says
-      // so while the project stays untrusted (FLOW-NEW-SESSION-R31).
+      // so while the project stays untrusted (FLOW-NEW-SESSION-R40, R41).
       if (!trusted) setWithdrawn((w) => new Set(w).add(project.id));
     } catch (error) {
       setTrusting((s) => ({ ...s, [project.id]: { state: "failed", message: describeError(error) } }));

@@ -84,7 +84,7 @@ describe("the rail's tree", () => {
     expect(refused).toContain("no project ersa");
   });
 
-  // verifies: FLOW-NEW-SESSION-R31
+  // verifies: FLOW-NEW-SESSION-R40
   it("says beneath a heading whose trust was withdrawn that the backend's tools keep trusting the folder, collapsed too", () => {
     const note = "Claude Code may still trust this folder when you use it outside Ersa.";
     const open = '<div class="rail-project-note" data-open=""><p class="rail-project-note-text" role="status">';

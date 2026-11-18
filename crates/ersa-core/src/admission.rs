@@ -675,11 +675,12 @@ pub enum Report {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RowChange {
     Archived(bool),
-    /// Pinned or not, and its section (`Some(None)`: no section), each
-    /// changed only when given.
+    /// Pinned or not, its section (`Some(None)`: no section), and unseen
+    /// or not, each changed only when given.
     Arranged {
         pinned: Option<bool>,
         section: Option<Option<Id>>,
+        unseen: Option<bool>,
     },
     /// Where the session's delete is.
     Deleting(Deleting),
@@ -1721,12 +1722,19 @@ fn end_exclusive(state: &mut State, session: &str, ours: impl Fn(&Exclusive) -> 
 fn write(row: &mut SessionRow, change: RowChange) {
     match change {
         RowChange::Archived(archived) => row.archived = archived,
-        RowChange::Arranged { pinned, section } => {
+        RowChange::Arranged {
+            pinned,
+            section,
+            unseen,
+        } => {
             if let Some(pinned) = pinned {
                 row.pinned = pinned;
             }
             if let Some(section) = section {
                 row.section_id = section;
+            }
+            if let Some(unseen) = unseen {
+                row.unseen = unseen;
             }
         }
         RowChange::Deleting(deleting) => row.deleting = Some(deleting),
