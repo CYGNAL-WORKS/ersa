@@ -94,16 +94,17 @@ fn closing_the_window_hides_it_and_the_app_keeps_running() {
             });
         }
         // The mock hands window events only to this callback, not to a
-        // builder's handler, so the Shell's handler is called here, with a
-        // hide that counts: the mock's own hide does nothing it can see.
+        // builder's handler, so the Shell's handler is called here, with the
+        // Shell's hide counted: the mock's own hide changes nothing it can see.
         RunEvent::WindowEvent { label, event, .. } => {
             let window = handle
                 .get_webview_window(&label)
                 .expect("the event's window")
                 .as_ref()
                 .window();
-            ersa_shell::on_window_event(&window, &event, |_| {
+            ersa_shell::on_window_event(&window, &event, |window| {
                 counted.fetch_add(1, Ordering::SeqCst);
+                ersa_shell::hide_window(window);
             });
         }
         RunEvent::ExitRequested { .. } if !done.load(Ordering::SeqCst) => {

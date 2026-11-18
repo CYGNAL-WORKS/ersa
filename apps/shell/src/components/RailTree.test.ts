@@ -86,7 +86,7 @@ describe("the rail's tree", () => {
 
   // verifies: FLOW-NEW-SESSION-R31
   it("says beneath a heading whose trust was withdrawn that the backend's tools keep trusting the folder, collapsed too", () => {
-    const note = "Claude Code still trusts this folder when you use it outside Ersa.";
+    const note = "Claude Code may still trust this folder when you use it outside Ersa.";
     const open = '<div class="rail-project-note" data-open=""><p class="rail-project-note-text" role="status">';
     expect(render({ backendTrusts: ["ersa"] })).toContain(open + note + "</p>");
     expect(render({ backendTrusts: ["ersa"], collapsed: new Set(["ersa"]) })).toContain(open + note + "</p>");

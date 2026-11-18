@@ -625,7 +625,6 @@ function GroupToggle({
   );
 }
 
-/** A group's tiles, which slide closed and open in this frame; folded away, they take no focus and are not read. */
 /**
  * What changing trust says beneath a project's heading (docs/design/RAIL.md, A project heading): it opens, growing and
  * fading in, while it has something to say, and takes no room while it has nothing.
@@ -640,6 +639,7 @@ function ProjectNote({ children }: { children: string }) {
   );
 }
 
+/** A group's tiles, which slide closed and open in this frame; folded away, they take no focus and are not read. */
 function GroupTiles({ id, folded, children }: { id: string; folded: boolean; children: ReactNode }) {
   return (
     <div id={id} className="rail-group-tiles" inert={folded || undefined}>
