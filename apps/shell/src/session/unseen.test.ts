@@ -63,6 +63,12 @@ describe("Ersa's unseen mark", () => {
     expect(run([[[s("a", "idle", { unseen: true })]]], "a", sending)).toEqual([]);
   });
 
+  it("marks a session whose turn ended while a change to it was on its way, from the next list", () => {
+    let working: ReadonlySet<string> = unseenWrites(new Set(), [s("a", "running")], "b", new Set()).working;
+    working = unseenWrites(working, [s("a", "idle")], "b", new Set(["a"])).working;
+    expect(unseenWrites(working, [s("a", "idle")], "b", new Set()).writes).toEqual([{ id: "a", unseen: true }]);
+  });
+
   it("does not mark a session that was idle all along, or that starts and goes idle without working", () => {
     expect(run([[[s("a", "idle")]], [[s("a", "idle")]]], "b")).toEqual([]);
     expect(run([[[s("a", "starting")]], [[s("a", "idle")]]], "b")).toEqual([]);
