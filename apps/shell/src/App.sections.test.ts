@@ -430,7 +430,8 @@ describe("New section", () => {
     await moveTo("Tidy the docs", "New section…");
     await typeName("   ");
     expect(nameField()).toBeNull();
-    expect(document.activeElement).toBe(tileOf("Tidy the docs"));
+    // Back to the More button that opened the tile's menu (docs/design/RAIL.md, Menus).
+    expect(document.activeElement).toBe(within(tileOf("Tidy the docs").closest("li")!).getByRole("button", { name: "More for Tidy the docs" }));
     expect(creates(core)).toEqual([]);
     expect(arranges(core)).toEqual([]);
     expect(headings()).toEqual(["Work", "Errands", "Later", "No section"]);
@@ -528,5 +529,47 @@ describe("New section", () => {
     const item = screen.getByRole("menuitem", { name: /^New section/ });
     expect(item.getAttribute("aria-disabled")).toBe("true");
     expect(item.textContent).toContain("Ersa can't read your sections.");
+  });
+});
+
+describe("New section from the sessions page", () => {
+  it("gives focus back to the row's More when nothing is made", async () => {
+    const core = await start();
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
+    await settle();
+    const row = [...document.querySelectorAll<HTMLElement>(".sessions-page-row")].find((el) => el.textContent?.includes("Tidy the docs"))!;
+    const more = within(row).getByRole("button", { name: "More for Tidy the docs" });
+    more.focus();
+    fireEvent.click(more, { detail: 0 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move to section" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Move to section" })).getByRole("menuitem", { name: "New section…" }));
+    await settle();
+    // The heading shows in the rail beside the page, and takes focus.
+    expect(document.activeElement).toBe(nameField());
+    await typeName("Docs", "Escape");
+    expect(nameField()).toBeNull();
+    expect(document.activeElement).toBe(more);
+    expect(creates(core)).toEqual([]);
+  });
+});
+
+describe("a new section being made for a session", () => {
+  // verifies: FLOW-ORGANIZE-SESSIONS-R22
+  it("holds Pin and Move to section until Core has made it, so the move unpins the session as it stands", async () => {
+    let made: (section: Section) => void = () => {};
+    const core = await start({ "section.create": () => new Promise<Section>((resolve) => (made = resolve)) });
+    await moveTo("Tidy the docs", "New section…");
+    await typeName("Docs");
+    // While Core makes it, the session's Pin waits, as for any change on its way.
+    fireEvent.click(within(tileOf("Tidy the docs").closest("li")!).getByRole("button", { name: "More for Tidy the docs" }));
+    const pin = screen.getByRole("menuitem", { name: /^Pin/ });
+    expect(pin.getAttribute("aria-disabled")).toBe("true");
+    expect(pin.textContent).toContain("Saving…");
+    fireEvent.click(pin);
+    fireEvent.keyDown(screen.getByRole("menu", { name: "More for Tidy the docs" }), { key: "Escape" });
+    await act(async () => made({ id: "docs", name: "Docs", created_at: "2026-11-18T09:00:00Z" }));
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s4", section_id: "docs" }]);
   });
 });
