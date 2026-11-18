@@ -38,10 +38,15 @@ const session = (id: string, title: string, created_at: string): Session => ({
 /**
  * A Core whose sessions outlive any window: `session.arrange` stores `unseen` and the list reports it, so a new App on
  * the same fake is Ersa restarted, and a drop and attach again is Core restarted. s2 is the newest, so the active
- * session on opening. `refuse` makes every arrange fail.
+ * session on opening. `refuse` makes every arrange fail, or the first so many; `unseen` lists sessions Core already
+ * has unseen.
  */
-function fakeCore({ refuse = false } = {}) {
-  let list = [session("s1", "Fix the build", "2026-11-01T09:00:00Z"), session("s2", "Write the notes", "2026-11-02T09:00:00Z")];
+function fakeCore({ refuse = false as boolean | number, unseen = [] as string[] } = {}) {
+  let list = [session("s1", "Fix the build", "2026-11-01T09:00:00Z"), session("s2", "Write the notes", "2026-11-02T09:00:00Z")].map((s) => ({
+    ...s,
+    unseen: unseen.includes(s.id),
+  }));
+  let refusals = refuse === true ? Infinity : refuse === false ? 0 : refuse;
   let onEvent: (event: CoreEvent) => void = () => {};
   const arranges: unknown[] = [];
   const answers: Partial<Record<Method, (params: never) => unknown>> = {
@@ -55,7 +60,7 @@ function fakeCore({ refuse = false } = {}) {
     "session.unsubscribe": () => ({}),
     "session.arrange": (params: { id: string; unseen?: boolean }) => {
       arranges.push(params);
-      if (refuse) throw { kind: "unavailable", message: "the database is locked" };
+      if (refusals-- > 0) throw { kind: "unavailable", message: "the database is locked" };
       list = list.map((s) => (s.id === params.id && params.unseen !== undefined ? { ...s, unseen: params.unseen } : s));
       return list.find((s) => s.id === params.id);
     },
@@ -79,7 +84,11 @@ function fakeCore({ refuse = false } = {}) {
       onEvent({ kind: "notification", method: "session.tile", params: { session_id: id, title: s.title, created_at: s.created_at, tile: s.tile } } as CoreEvent),
     );
   };
-  return { client, arranges, tile, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })), unseen: (id: string) => list.find((s) => s.id === id)?.unseen };
+  // A session's state changes in Core with no tile sent, as while the window can't reach it.
+  const quietly = (id: string, state: Tile["state"]) => {
+    list = list.map((s) => (s.id === id ? { ...s, state, tile: { state, pending: [] } } : s));
+  };
+  return { client, arranges, tile, quietly, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })), unseen: (id: string) => list.find((s) => s.id === id)?.unseen };
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -206,6 +215,35 @@ describe("the unseen mark across restarts", () => {
     await waitFor(() => expect(rail().textContent).toContain("Fix the build"), { timeout: 5_000 });
     expect(core.unseen("s1")).toBe(true);
     expect(reads("Fix the build")).toBe(true);
+  });
+
+  it("sends the mark again once Core takes it, after Core refused it", async () => {
+    const core = fakeCore({ refuse: 1, unseen: ["s1"] });
+    await open(core);
+    fireEvent.click(tileOf("Fix the build"));
+    await settle();
+    // Refused: Core still has it unseen, and the tile says why.
+    expect(core.unseen("s1")).toBe(true);
+    expect(rail().textContent).toContain("Ersa can't mark this session as read.");
+    // Left and opened again, it is marked seen, and the refusal goes.
+    fireEvent.click(tileOf("Write the notes"));
+    await settle();
+    fireEvent.click(tileOf("Fix the build"));
+    await settle();
+    expect(core.unseen("s1")).toBe(false);
+    expect(rail().textContent).not.toContain("Ersa can't mark this session");
+  });
+
+  it("leaves no mark on a session that finished its turn while Ersa couldn't reach Core", async () => {
+    const core = fakeCore();
+    await open(core);
+    await core.tile("s1", "running");
+    await core.drop();
+    core.quietly("s1", "idle");
+    await waitFor(() => expect(tileOf("Fix the build")).toBeTruthy(), { timeout: 5_000 });
+    await settle();
+    expect(core.arranges).toEqual([]);
+    expect(reads("Fix the build")).toBe(false);
   });
 
   it("never marks the active session, though it goes idle after working", async () => {
