@@ -127,10 +127,20 @@ const SCRATCH_REMOVAL: Duration = Duration::from_secs(30);
 /// folder) must not hold the session's other operations for ever.
 const RECORD_READ: Duration = Duration::from_secs(30);
 
-/// How long reading a record's title and creation time may take, and how
-/// long startup waits for all of them together.
+/// How long reading a record's summary may take, and how long startup or a
+/// list waits for all of them together ([`wait_for_summaries`]).
 const SUMMARY_READ: Duration = Duration::from_secs(5);
-const STARTUP_SUMMARIES: Duration = Duration::from_secs(10);
+const SUMMARIES: Duration = Duration::from_secs(10);
+
+/// Waits for the record reads in `summaries`, never past [`SUMMARIES`]: a
+/// file system that hangs leaves those sessions as they were rather than
+/// keeping Core from answering. `what` names the reads in the warning.
+pub(super) async fn wait_for_summaries(mut summaries: tokio::task::JoinSet<()>, what: &str) {
+    let all = async { while summaries.join_next().await.is_some() {} };
+    if tokio::time::timeout(SUMMARIES, all).await.is_err() {
+        tracing::warn!("reading {what} took too long; some are left to later");
+    }
+}
 
 /// After a stop interrupts a start, how long the session task waits for the
 /// adapter to report the half-started process's exit.
@@ -1040,10 +1050,7 @@ impl SessionManager {
         // Read side by side, and not waited on past a bound: a file system
         // that hangs leaves those titles to the next time a session opens,
         // rather than keeping Core from serving at all.
-        let all = async { while summaries.join_next().await.is_some() {} };
-        if tokio::time::timeout(STARTUP_SUMMARIES, all).await.is_err() {
-            tracing::warn!("reading the sessions' titles took too long; some are left to later");
-        }
+        wait_for_summaries(summaries, "the sessions' records").await;
         Ok(())
     }
 
@@ -1165,10 +1172,7 @@ impl SessionManager {
                 read_summary(&store, &handle, &tiles, adapter, transport, row).await;
             });
         }
-        let all = async { while summaries.join_next().await.is_some() {} };
-        if tokio::time::timeout(STARTUP_SUMMARIES, all).await.is_err() {
-            tracing::warn!("reading the sessions' records for the list took too long");
-        }
+        wait_for_summaries(summaries, "the sessions' records for the list").await;
     }
 
     /// Every session, oldest first.
@@ -2320,7 +2324,8 @@ fn register(
     (id, subscribed, backlog)
 }
 
-/// Reads the session's title and creation time from its record, keeping
+/// Reads the session's title, creation time, settings and last activity
+/// from its record, keeping
 /// what was known when the record has none or cannot be read. One read at
 /// a time per session ([`read_once`]).
 async fn apply_summary(
@@ -2332,7 +2337,6 @@ async fn apply_summary(
     backend_id: String,
 ) {
     let gone = handle.when_gone();
-    let live = handle.live().is_some();
     // Nothing is read for a session that is gone.
     let Some(row) = handle.stored_row() else {
         return;
@@ -2355,6 +2359,11 @@ async fn apply_summary(
     // so a joiner simply reads again.
     match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
         Some(Ok(Some(summary))) => {
+            // Whether the session is live is asked as the summary is taken,
+            // not before the read: a read can outlast its going live and a
+            // turn's end, whose time must stand (PROTO-CORE-API-R75). A turn
+            // cannot both start and end between this and the next line.
+            let live = handle.live().is_some();
             let changed = lock(&handle.presented).take_summary(summary, live, &handle.id);
             if changed {
                 send_current_tile(tiles, handle);
@@ -2362,10 +2371,10 @@ async fn apply_summary(
         }
         Some(Ok(None)) => {}
         Some(Err(e)) => {
-            tracing::warn!(session = %handle.id, error = %e, "could not read the session record's title");
+            tracing::warn!(session = %handle.id, error = %e, "could not read the session record's summary");
         }
         None => {
-            tracing::warn!(session = %handle.id, "reading the session record's title took too long");
+            tracing::warn!(session = %handle.id, "reading the session record's summary took too long");
         }
     }
 }
@@ -2408,7 +2417,8 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
-/// Reads session `row`'s title and creation time from the record that
+/// Reads session `row`'s summary (title, creation time, settings, last
+/// activity) from the record that
 /// holds its conversation ([`record_id`]).
 async fn read_summary(
     store: &Store,
