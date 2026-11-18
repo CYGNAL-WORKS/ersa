@@ -55,9 +55,9 @@ type Answers = Partial<Record<Method, (params: never) => unknown>>;
 
 // Core keeps the sections and the sessions' membership: section.remove and section.rename change what the lists
 // answer, as Core's do.
-function fakeCore(more: Answers = {}) {
-  let sessions = listed;
-  let sections = madeSections;
+function fakeCore(more: Answers = {}, start: { sessions?: Session[]; sections?: Section[] } = {}) {
+  let sessions = start.sessions ?? listed;
+  let sections = start.sections ?? madeSections;
   const calls: { method: Method; params: unknown }[] = [];
   const answers: Answers = {
     "core.status": () => ({ sessions_running: 0, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
@@ -112,8 +112,8 @@ const groups = () =>
   ]);
 const heading = (name: string) => [...rail().querySelectorAll<HTMLElement>(".rail-heading")].find((h) => h.querySelector(".rail-heading-name")?.textContent === name);
 
-async function start(more: Answers = {}) {
-  const core = fakeCore(more);
+async function start(more: Answers = {}, lists: Parameters<typeof fakeCore>[1] = {}) {
+  const core = fakeCore(more, lists);
   render(createElement(App, { client: core.client }));
   await settle();
   await settle();
@@ -154,17 +154,32 @@ describe("the rail grouped by section", () => {
     expect(groups().map(([name]) => name)).toEqual(["Work", "Errands", "Later", "No section"]);
   });
 
-  it("waits for the sections before grouping by them, and says why when they can't be read", async () => {
+  // verifies: FLOW-ORGANIZE-SESSIONS-R34
+  it("says why when the sections can't be read, and shows the sessions as grouped by none", async () => {
     await start({ "section.list": () => Promise.reject({ kind: "unavailable", message: "the database is locked" }) });
     expect(rail().textContent).toContain("Ersa can't read your sections.");
     expect(rail().textContent).toContain("the database is locked");
-    // Every session is still in the rail, under no heading.
+    // Every session is still in the rail, newest first under no heading, as grouping by none shows them.
+    expect(groups()).toEqual([]);
     expect([...rail().querySelectorAll(".session-title")].map((el) => el.textContent)).toEqual(["Tidy the docs", "Buy stamps", "Write the notes", "Fix the build"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R35
+  it("says it is loading while the sections are first read, and groups by them once they are", async () => {
+    let answer: (sections: Section[]) => void = () => {};
+    await start({ "section.list": () => new Promise<Section[]>((resolve) => (answer = resolve)) });
+    expect(rail().textContent).toContain("Loading…");
+    // No session is drawn one way and then regrouped.
+    expect(rail().querySelectorAll(".session-title")).toHaveLength(0);
+    await act(async () => answer(madeSections));
+    expect(rail().textContent).not.toContain("Loading…");
+    expect(groups().map(([name]) => name)).toEqual(["Work", "Errands", "Later", "No section"]);
   });
 });
 
 describe("a section heading's Delete", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R05
+  // verifies: FLOW-ORGANIZE-SESSIONS-R33
   it("deletes the section asking nothing, and puts its sessions in No section, keeping every session", async () => {
     const core = await start();
     const listings = () => core.calls.filter((c) => c.method === "session.list").length;
@@ -186,6 +201,24 @@ describe("a section heading's Delete", () => {
     ]);
     // Focus, given back to the gone heading's More, moves to the heading after it.
     expect(document.activeElement).toBe(heading("Errands")?.querySelector(".rail-heading-toggle"));
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R33
+  it("passes focus to the heading before the deleted section when none followed it", async () => {
+    // Every session is in a section, so no "No section" heading follows the last one.
+    await start({}, { sessions: listed.filter((s) => s.section_id !== undefined) });
+    await chooseFromMore("Later", "Delete");
+    expect(groups().map(([name]) => name)).toEqual(["Work", "Errands"]);
+    expect(document.activeElement).toBe(heading("Errands")?.querySelector(".rail-heading-toggle"));
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R33
+  it("passes focus to New session when no heading was beside the deleted section, a No section it makes included", async () => {
+    // The one section holds every session: deleting it makes "No section", which did not follow it when Delete was chosen.
+    await start({}, { sections: [madeSections[0]!], sessions: listed.slice(0, 2) });
+    await chooseFromMore("Work", "Delete");
+    expect(groups()).toEqual([["No section", ["Write the notes", "Fix the build"]]]);
+    expect(document.activeElement).toBe(within(rail()).getByRole("button", { name: "New session" }));
   });
 
   it("keeps the section and says why when Core refuses", async () => {
