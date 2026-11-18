@@ -40,6 +40,16 @@ interface TilePin {
   unavailable?: string;
 }
 
+/** Mark as unread or Mark as read (FLOW-ORGANIZE-SESSIONS-R24). */
+interface TileMark {
+  /** Whether Core reports the session unseen: the menu offers Mark as read if so, else Mark as unread. */
+  unseen: boolean;
+  /** Marks it unseen when it isn't, seen when it is. */
+  onChoose: () => void;
+  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** Archive or Unarchive on the menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
 interface TileArchive {
   /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
@@ -60,6 +70,7 @@ interface TileFork {
 export interface TileActions {
   rename?: TileRename;
   pin?: TilePin;
+  mark?: TileMark;
   fork?: TileFork;
   archive?: TileArchive;
   remove?: TileDelete;
@@ -77,6 +88,12 @@ export interface TileHandlers {
   onPin?: (id: string, pinned: boolean) => void;
   /** Pins and unpins on their way, and why the last was refused (R15). */
   pinning?: Readonly<Record<string, Sending>>;
+  /** Marks a session unseen or seen (FLOW-ORGANIZE-SESSIONS-R24). */
+  onMark?: (id: string, unseen: boolean) => void;
+  /** Marks on their way, and why the last was refused. */
+  marking?: Readonly<Record<string, Sending>>;
+  /** The active session, which can't be marked unseen: the user is looking at it. */
+  activeId?: string;
   /** Forks a session (FLOW-FORK-SESSION); the fork becomes the active session once Core has started it. */
   onFork?: (id: string) => void;
   /** Forks on their way, and why the last was refused, by the original's id. */
@@ -93,7 +110,7 @@ export interface TileHandlers {
 
 /** A session's menu actions, each unavailable with its reason while it can't be used. */
 export function tileActions(s: Session, h: TileHandlers): TileActions {
-  const { onRename, onPin, onFork, onArchive, onDelete, offline = false } = h;
+  const { onRename, onPin, onMark, onFork, onArchive, onDelete, offline = false } = h;
   const offlineReason = offline ? t("rail.tile.offlineReason") : undefined;
   // One pin at a time, so each move in the rail is measured from where the last one left it.
   const saving = Object.values(h.pinning ?? {}).some((p) => p.state === "sending");
@@ -111,6 +128,11 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
       onChoose: () => onPin(s.id, !s.pinned),
       unavailable: offlineReason ?? (saving ? t("rail.tile.savingProgress") : undefined),
     },
+    mark: onMark && {
+      unseen: s.unseen,
+      onChoose: () => onMark(s.id, !s.unseen),
+      unavailable: markUnavailable(s, h, offlineReason),
+    },
     fork: onFork && { onChoose: () => onFork(s.id), unavailable: forkUnavailable(s, offline, h.forking?.[s.id]) },
     archive: onArchive && {
       onChoose: (archived) => onArchive(s.id, archived),
@@ -118,6 +140,15 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
     },
     remove: onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline) },
   };
+}
+
+// Mark as unread is unavailable on the active session, which the user is looking at (FLOW-ORGANIZE-SESSIONS-R24);
+// Mark as read never is, so a mark Core still reports there can always go.
+function markUnavailable(s: Session, h: TileHandlers, offlineReason: string | undefined): string | undefined {
+  if (offlineReason) return offlineReason;
+  if (h.marking?.[s.id]?.state === "sending") return t("rail.tile.savingProgress");
+  if (!s.unseen && s.id === h.activeId) return t("rail.tile.markUnreadActiveReason");
+  return undefined;
 }
 
 /**
@@ -128,7 +159,7 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
 export function useTileMenu({
   session,
   title,
-  actions: { rename, pin, fork, archive, remove },
+  actions: { rename, pin, mark, fork, archive, remove },
   beforeChevron,
   initialMenu,
   initialDraft,
@@ -203,6 +234,16 @@ export function useTileMenu({
                   label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
                   unavailable: pin.unavailable,
                   onChoose: pin.onChoose,
+                },
+              ]
+            : []),
+          ...(mark
+            ? [
+                {
+                  kind: "item" as const,
+                  label: mark.unseen ? t("rail.tile.markReadButton") : t("rail.tile.markUnreadButton"),
+                  unavailable: mark.unavailable,
+                  onChoose: mark.onChoose,
                 },
               ]
             : []),
