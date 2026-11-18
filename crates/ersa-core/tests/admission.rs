@@ -78,6 +78,7 @@ fn row(id: &str, workspace: &str, found: bool) -> SessionRow {
         forked_from: None,
         forked_through: None,
         started_elsewhere: found,
+        unseen: false,
     }
 }
 
@@ -743,6 +744,7 @@ fn writes(_session: &str) -> Vec<RowChange> {
         RowChange::Arranged {
             pinned: Some(true),
             section: Some(Some(SECTION.into())),
+            unseen: None,
         },
         RowChange::Deleting(Deleting::Running),
         RowChange::Mode("plan".into()),
@@ -825,6 +827,7 @@ fn each_write_changes_the_row_it_names_and_no_other() {
     let pin = RowChange::Arranged {
         pinned: Some(true),
         section: None,
+        unseen: None,
     };
     wrote(&mut state, "s1", pin);
     expected.pinned = true;
@@ -832,6 +835,7 @@ fn each_write_changes_the_row_it_names_and_no_other() {
     let into_section = RowChange::Arranged {
         pinned: None,
         section: Some(Some(SECTION.into())),
+        unseen: None,
     };
     wrote(&mut state, "s1", into_section);
     expected.section_id = Some(SECTION.into());
@@ -839,6 +843,7 @@ fn each_write_changes_the_row_it_names_and_no_other() {
     let unpin = RowChange::Arranged {
         pinned: Some(false),
         section: None,
+        unseen: None,
     };
     wrote(&mut state, "s1", unpin);
     expected.pinned = false;
@@ -846,9 +851,26 @@ fn each_write_changes_the_row_it_names_and_no_other() {
     let out_of_it = RowChange::Arranged {
         pinned: Some(true),
         section: Some(None),
+        unseen: None,
     };
     wrote(&mut state, "s1", out_of_it);
     (expected.pinned, expected.section_id) = (true, None);
+    assert_eq!(state.row("s1"), Some(&expected));
+    let mark_unseen = RowChange::Arranged {
+        pinned: None,
+        section: None,
+        unseen: Some(true),
+    };
+    wrote(&mut state, "s1", mark_unseen);
+    expected.unseen = true;
+    assert_eq!(state.row("s1"), Some(&expected));
+    let mark_seen = RowChange::Arranged {
+        pinned: None,
+        section: None,
+        unseen: Some(false),
+    };
+    wrote(&mut state, "s1", mark_seen);
+    expected.unseen = false;
     assert_eq!(state.row("s1"), Some(&expected));
 
     wrote(&mut state, "s1", RowChange::Deleting(Deleting::Running));
@@ -1682,6 +1704,7 @@ fn a_section_s_removal_and_an_arrangement_into_it_land_in_one_order() {
     let into = || RowChange::Arranged {
         pinned: None,
         section: Some(Some(SECTION.into())),
+        unseen: None,
     };
     let removed = || Report::SectionRemoved {
         section: SECTION.into(),
