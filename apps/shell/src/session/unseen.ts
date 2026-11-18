@@ -16,8 +16,8 @@ export interface UnseenWrite {
  * What Ersa tells Core after Core reports `sessions` with `activeId` active, given the sessions that were working
  * in the report before (`working`). A session not active that goes from working to idle is marked unseen, unless it
  * already is; the active session is marked seen if Core reports it unseen. A session with a change already on its way
- * (`sending`) gets no other, so a list read before that change answers can't send it twice, and one Core refused
- * (`refused`: what was asked) is not asked the same again. Needing the user, failing, disconnecting or ending marks
+ * (`sending`) gets no other, so a list read before that change answers can't send it twice, and one whose last
+ * change Core refused (`refused`) is asked nothing. Needing the user, failing, disconnecting or ending marks
  * nothing.
  *
  * Returns the sessions working now, for the next report, and the changes to send.
@@ -27,7 +27,7 @@ export function unseenWrites(
   sessions: readonly Session[],
   activeId: string | undefined,
   sending: ReadonlySet<string>,
-  refused: ReadonlyMap<string, boolean> = new Map(),
+  refused: ReadonlySet<string> = new Set(),
 ): { working: ReadonlySet<string>; writes: UnseenWrite[] } {
   const now = new Set<string>();
   const writes: UnseenWrite[] = [];
@@ -45,5 +45,5 @@ export function unseenWrites(
       writes.push({ id: s.id, unseen: true });
     }
   }
-  return { working: now, writes: writes.filter((w) => refused.get(w.id) !== w.unseen) };
+  return { working: now, writes: writes.filter((w) => !refused.has(w.id)) };
 }
