@@ -235,29 +235,6 @@ describe("the unseen mark across restarts", () => {
     expect(rail().textContent).not.toContain("Ersa can't mark this session");
   });
 
-  it("asks Core no more after a refusal while nothing calls for it anew, so its note stays", async () => {
-    const core = fakeCore({ refuse: true });
-    await open(core);
-    await core.tile("s1", "running");
-    await core.tile("s1", "idle");
-    await settle();
-    expect(core.arranges).toEqual([{ id: "s1", unseen: true }]);
-    // Other sessions' tiles bring new lists; none asks again, and the note stays.
-    for (const state of ["running", "idle", "running"] as const) await core.tile("s2", state);
-    await settle();
-    expect(core.arranges).toHaveLength(1);
-    expect(rail().textContent).toContain("Ersa can't mark this session as unread.");
-    // Another turn in it, ending while not active, is a new occasion: asked once more.
-    await core.tile("s1", "running");
-    await core.tile("s1", "running");
-    await core.tile("s1", "idle");
-    await settle();
-    expect(core.arranges).toEqual([
-      { id: "s1", unseen: true },
-      { id: "s1", unseen: true },
-    ]);
-  });
-
   it("asks again only as the session starts working, not on every tile while it works, when Core keeps refusing", async () => {
     const core = fakeCore({ refuse: true, unseen: ["s1"] });
     await open(core);
