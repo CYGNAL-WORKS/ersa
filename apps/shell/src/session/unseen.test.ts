@@ -69,6 +69,12 @@ describe("Ersa's unseen mark", () => {
     expect(unseenWrites(working, [s("a", "idle")], "b", new Set()).writes).toEqual([{ id: "a", unseen: true }]);
   });
 
+  it("does not ask again what Core refused, but asks the other way", () => {
+    const refused = new Map([["a", true]]);
+    expect(unseenWrites(new Set(["a"]), [s("a", "idle")], "b", new Set(), refused).writes).toEqual([]);
+    expect(unseenWrites(new Set(), [s("a", "idle", { unseen: true })], "a", new Set(), refused).writes).toEqual([{ id: "a", unseen: false }]);
+  });
+
   it("does not mark a session that was idle all along, or that starts and goes idle without working", () => {
     expect(run([[[s("a", "idle")]], [[s("a", "idle")]]], "b")).toEqual([]);
     expect(run([[[s("a", "starting")]], [[s("a", "idle")]]], "b")).toEqual([]);
