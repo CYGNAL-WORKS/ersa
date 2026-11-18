@@ -1105,6 +1105,11 @@ const entries: Entry[] = [
       ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["An archived tile", <RailTree {...archivedPair} />],
       ["An archived tile, pointer over it", <RailTree {...archivedPair} force={{ id: "a1", state: "hover" }} />],
+      // Marked unread: its mark shows over the archived tile's muted title (docs/design/RAIL.md, A tile).
+      [
+        "An archived tile, unseen",
+        <RailTree {...archivedPair} sessions={{ state: "ready", sessions: archivedPair.sessions.state === "ready" ? archivedPair.sessions.sessions.map((s) => (s.id === "a1" ? { ...s, unseen: true } : s)) : [] }} />,
+      ],
       ["Tile menu, archived", room(<RailTree {...archivedPair} initialTileMenu="a1" />)],
       ["Grouped by date", <RailTree {...datedTree} />],
       ["Grouped by date, collapsed", <RailTree {...datedTree} collapsed={new Set(["yesterday"])} />],
