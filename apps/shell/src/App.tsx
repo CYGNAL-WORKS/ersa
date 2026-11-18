@@ -203,14 +203,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [marking, setMarking] = useState<Record<string, Sending>>({});
   // The sessions with a mark on its way now, which a list may be reported before a render shows.
   const markSending = useRef(new Set<string>());
-  // The marks Core refused, by session: what was asked.
-  const markRefused = useRef(new Map<string, boolean>());
+  // The sessions whose last mark Core refused.
+  const markRefused = useRef(new Set<string>());
   const markUnseen = async (id: string, unseen: boolean) => {
     markSending.current.add(id);
     const taken = await arrangeSession(setMarking, id, { unseen });
     markSending.current.delete(id);
     if (taken) markRefused.current.delete(id);
-    else markRefused.current.set(id, unseen);
+    else markRefused.current.add(id);
   };
   // The sessions working in the last list, to tell "idle after working" from plain idle. In memory: a turn that
   // finishes while Ersa is closed leaves no mark (LAY-SHELL, Open questions), and nor does one that finishes while
