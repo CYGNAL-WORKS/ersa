@@ -521,6 +521,10 @@ describe("New section", () => {
     await moveTo("Tidy the docs", "New section…");
     expect(groupings().at(-1)).toEqual({ patch: { rail: { group_by: "section" } } });
     expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+    // The tile was drawn afresh under No section; Escape gives focus to its More all the same.
+    fireEvent.keyDown(nameField()!, { key: "Escape" });
+    await settle();
+    expect(document.activeElement).toBe(within(tileOf("Tidy the docs").closest("li")!).getByRole("button", { name: "More for Tidy the docs" }));
   });
 
   it("is unavailable, saying why, while the sections can't be read", async () => {

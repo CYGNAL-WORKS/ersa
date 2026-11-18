@@ -939,19 +939,26 @@ function NewSectionHeading({ draft, saving }: { draft: NewSectionDraft; saving: 
   // However the heading goes without a section made (Escape, a blank name, or the grouping switched back when Core
   // refused it), focus it held goes back to what opened it: More, the tile or the row, or the arrange button
   // (docs/design/RAIL.md, Menus). Once the field has gone, so the focus it lost is seen; focus the user put elsewhere
-  // stays.
+  // stays. A tile the rail drew afresh, as when choosing New section regrouped it by section (R36), is found again by
+  // its session: its More, or the tile itself when the menu opened at it.
   const made = useRef(false);
   const opener = useRef(draft.opener);
-  useEffect(
-    () => () => {
+  const forSession = useRef(draft.for);
+  const rail = useRef<Element | null>(null);
+  useEffect(() => {
+    rail.current = field.current?.closest(".rail") ?? null;
+    return () => {
       if (made.current) return;
       queueMicrotask(() => {
         const now = document.activeElement;
-        if ((now === null || now === document.body) && opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+        if (now !== null && now !== document.body) return;
+        const was = opener.current;
+        const tile = [...(rail.current?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].find((el) => el.dataset.sessionId === forSession.current);
+        const again = was?.classList.contains("session-more") ? tile?.querySelector<HTMLElement>(".session-more") : tile?.querySelector<HTMLElement>(".session");
+        (was?.isConnected ? was : again)?.focus({ preventScroll: true });
       });
-    },
-    [],
-  );
+    };
+  }, []);
   const make = async (value: string) => {
     if (await draft.onName(value)) made.current = true;
   };
