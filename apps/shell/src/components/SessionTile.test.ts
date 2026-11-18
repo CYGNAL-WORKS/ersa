@@ -28,7 +28,6 @@ describe("a session's tile", () => {
       createElement(SessionTile, {
         session: { ...at("s", "2026-11-01T09:00:00.000Z"), title: "Fix the build", tile: { state: "idle", pending: [], ...tile } },
         active: activeId === "s",
-        unseen: false,
         onSelect: () => {},
       }),
     );
@@ -96,7 +95,7 @@ describe("a session's tile", () => {
   it("draws each backend's own mark, and a terminal for a backend it doesn't know", () => {
     const markOf = (backend: string) =>
       renderToStaticMarkup(
-        createElement(SessionTile, { session: { ...at("s", "2026-11-01T09:00:00.000Z"), backend }, active: false, unseen: false, onSelect: () => {} }),
+        createElement(SessionTile, { session: { ...at("s", "2026-11-01T09:00:00.000Z"), backend }, active: false, onSelect: () => {} }),
       ).match(/<span class="session-backend"[^>]*>(.*?)<\/span>/)?.[1] ?? "";
     expect(markOf("claude-code")).toContain('d="m4.7144 15.9555');
     expect(markOf("copilot")).toContain('d="M23.922 16.997');
