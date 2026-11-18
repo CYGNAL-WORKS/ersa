@@ -1863,7 +1863,7 @@ describe("withdrawing trust", () => {
 
   // verifies: FLOW-NEW-SESSION-R40
   // verifies: FLOW-NEW-SESSION-R41
-  it("says beneath the heading that the backend's own tools keep trusting the folder, with no session running, until trusted again", async () => {
+  it("says beneath the heading that Claude Code may still trust the folder, with no session running, until trusted again", async () => {
     const trusted = new Map(projects.map((p) => [p.id, true]));
     const core = fakeCore({
       "project.list": () => projects.map((p) => ({ ...p, trusted: trusted.get(p.id) ?? true })),
@@ -1895,6 +1895,17 @@ describe("withdrawing trust", () => {
     fireEvent.click(screen.getByRole("button", { name: "Trust" }));
     await settle();
     await settle();
+    expect(noteOf("alpha")).toBe("");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R41
+  it("shows no note for a project that was already untrusted when Ersa started", async () => {
+    const core = fakeCore({ "project.list": () => projects.map((p) => ({ ...p, trusted: p.id !== "alpha" })) });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    // Not trusted, as after a withdrawal in an earlier run, but nothing was withdrawn in this one.
+    expect(screen.getByRole("button", { name: "More for alpha" }).closest("li")?.textContent).toContain("Not trusted");
     expect(noteOf("alpha")).toBe("");
   });
 
