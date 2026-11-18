@@ -12,7 +12,7 @@ import { HeightEase, type Place, arrive, placesOf, rearrange } from "../theme/mo
 import { Icon, IconButton } from "./Icon";
 import { MenuButton } from "./MenuButton";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
-import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
+import { type Moving, type TileActions, type TileHandlers, tileActions } from "./TileMenu";
 import { besideGone, useLeavingFocus } from "./useLeavingFocus";
 import { useTitleDraft } from "./SessionTitle";
 import { TrustQuestion } from "./TrustQuestion";
@@ -29,6 +29,24 @@ export interface SectionHandlers {
   /** Deletes a section, asking nothing (FLOW-ORGANIZE-SESSIONS-R05). */
   onDelete?: (id: string) => void;
   removing?: Readonly<Record<string, Sending>>;
+}
+
+/**
+ * A new section's heading, shown with its name field (FLOW-ORGANIZE-SESSIONS, steps 3 and 5), and what naming it does.
+ */
+export interface NewSectionDraft {
+  /** The session that moves into the section once it is named; none when it came from the arrange menu. */
+  for?: string;
+  /** The section on its way to Core, or why Core refused its name. */
+  creating?: Sending;
+  /** Makes the section; resolves with the section Core answers with, or undefined once Core refused the name. */
+  onName: (name: string) => Promise<Section | undefined>;
+  /** Typing again: an earlier refusal goes. */
+  onReset: () => void;
+  /** Escape, Enter on a blank name, or leaving the field: nothing is made. */
+  onCancel: () => void;
+  /** For the gallery: the name typed, the field taking no focus. */
+  initialDraft?: string;
 }
 
 interface RailTreeProps extends TileHandlers {
@@ -75,6 +93,8 @@ interface RailTreeProps extends TileHandlers {
   /** The user's sections, as Core lists them, the groups while grouping by section; and what their headings do. */
   sections?: SectionsView;
   sectionHandlers?: SectionHandlers;
+  /** A new section's heading, while it is shown. */
+  newSection?: NewSectionDraft;
   /** For the gallery: a section's More menu open, and a section's name being edited. */
   initialSectionMenu?: string;
   initialSectionDraft?: { id: string; draft: string };
@@ -106,20 +126,19 @@ const headingSlide = (key: string) => `heading:${key}`;
  */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { archiving, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
+  const { archiving, moving, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   const root = useRef<HTMLElement>(null);
-  // The pin on its way, and whether focus was in the rail when it was chosen. One at a time: while it is saved, Pin
-  // and Unpin are unavailable on every tile.
+  // The pin or move on its way, and whether focus was in the rail when it was chosen. One at a time: while it is
+  // saved, Pin, Unpin and Move to section are unavailable on every tile.
   const pending = useRef<{ id: string; focused: boolean }>(undefined);
   useLayoutEffect(() => {
     const pin = pending.current;
     const el = root.current;
-    if (!pin || !el || pinning?.[pin.id]?.state === "sending") return;
+    if (!pin || !el || moving?.[pin.id]?.state === "sending") return;
     pending.current = undefined;
-    // Core refused it: nothing moved. Once Core has it, the tile moves as the rail rearranges (below).
-    if (pinning?.[pin.id]?.state === "failed") return;
     // The tile is drawn afresh in its new group, so the focus its menu gave back is lost: it goes to the tile in its
-    // new place or, when that group is collapsed, to the group's heading.
+    // new place or, when that group is collapsed, to the group's heading (docs/design/RAIL.md, Menus). When Core
+    // refused it nothing moved, and focus lost with a new section's field goes to the tile where it is.
     const lost = document.activeElement === null || document.activeElement === document.body;
     const item = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].find((tile) => tile.dataset.sessionId === pin.id);
     if (!pin.focused || !lost || !item) return;
@@ -148,19 +167,59 @@ export function RailTree(props: RailTreeProps) {
     for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
     arrive(el, items);
   });
-  // Pin and Unpin note whether focus is in the rail, to give it back to the moved tile once Core has the pin.
-  const actionsOf = (s: Session): TileActions => {
-    const actions = tileActions(s, props);
-    const { pin } = actions;
-    if (!pin) return actions;
-    const onChoose = () => {
-      const el = root.current;
-      // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
-      if (el) pending.current = { id: s.id, focused: el.contains(document.activeElement) };
-      pin.onChoose();
-    };
-    return { ...actions, pin: { ...pin, onChoose } };
+  // Pin, Unpin and Move to section note whether focus is in the rail, to give it back to the moved tile once Core has
+  // the change.
+  const noteFocus = (id: string) => {
+    const el = root.current;
+    // Only a choice made with focus in the rail (in the tile's menu, or a new section's field) has focus to give back.
+    if (el) pending.current = { id, focused: el.contains(document.activeElement) };
   };
+  const actionsOf = (s: Session): TileActions => {
+    const { pin, move, ...actions } = tileActions(s, props);
+    return {
+      ...actions,
+      pin: pin && {
+        ...pin,
+        onChoose: () => {
+          noteFocus(s.id);
+          pin.onChoose();
+        },
+      },
+      move: move && {
+        ...move,
+        onChoose: (sectionId) => {
+          noteFocus(s.id);
+          move.onChoose(sectionId);
+        },
+      },
+    };
+  };
+  // A new section's name: once Core has made it, focus goes from the field to the new heading or, when a session
+  // moves into it, follows the session's tile (RAIL.md, Menus).
+  const headingFocus = useRef<string>(undefined);
+  const newSection = props.newSection && {
+    ...props.newSection,
+    onName: async (name: string) => {
+      const draft = props.newSection;
+      // Whether focus is in the rail is taken before the answer, while the field still has it; the move is noted once
+      // Core has made the section, as the move starts.
+      const focused = root.current?.contains(document.activeElement) ?? false;
+      const section = await draft?.onName(name);
+      if (section && draft?.for !== undefined) pending.current = { id: draft.for, focused };
+      else if (section) headingFocus.current = section.id;
+      return section;
+    },
+  };
+  useLayoutEffect(() => {
+    const id = headingFocus.current;
+    const el = root.current;
+    if (id === undefined || !el) return;
+    const toggle = el.querySelector<HTMLElement>(`[data-slide="${CSS.escape(headingSlide(id))}"] .rail-heading-toggle`);
+    if (!toggle) return;
+    headingFocus.current = undefined;
+    const now = document.activeElement;
+    if (now === null || now === document.body) toggle.focus({ preventScroll: true });
+  });
   const leaving = useLeavingFocus(root, (section) => section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"));
   const { groupBy = DEFAULT_ARRANGEMENT.groupBy, sortBy = DEFAULT_ARRANGEMENT.sortBy, show = DEFAULT_ARRANGEMENT.show, now = new Date() } = props;
   // The rail rearranges when the grouping or filter changes, when the day turns while grouped by date, when Core has a
@@ -171,7 +230,8 @@ export function RailTree(props: RailTreeProps) {
   // that went earlier, as a tile archived while a pin saves, is long gone and stays gone.
   // Grouped by section, a section made or deleted rearranges too: its heading fades in or out as the others slide.
   const sectionList = props.sections?.state === "ready" ? props.sections.sections : [];
-  const arranged = `${groupBy}/${show}/${groupBy === "date" ? now.toDateString() : ""}/${groupBy === "section" ? sectionList.map((x) => x.id).join() : ""}`;
+  // So does a new section's heading as it is shown and as it goes.
+  const arranged = `${groupBy}/${show}/${groupBy === "date" ? now.toDateString() : ""}/${groupBy === "section" ? sectionList.map((x) => x.id).join() : ""}/${newSection ? "new" : ""}`;
   const lastArranged = useRef(arranged);
   const placings = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, `${s.pinned}/${s.section_id}/${sortValueOf(s, sortBy)}`])) : undefined;
   const lastPlacings = useRef(placings);
@@ -198,6 +258,11 @@ export function RailTree(props: RailTreeProps) {
   // Grouped by section with the sections not read, every session sits under no heading, as with the projects.
   const sectionsLost = groupBy === "section" && props.sections?.state === "error";
   const tree = treeOf(listed, workspaces, all, { groupBy: sectionsLost ? "none" : groupBy, sortBy, show, now, sections: sectionList });
+  // A session waiting to move into a new section moves one change at a time too: while another is on its way, the
+  // field reads busy and Enter waits.
+  const newSectionSaving = newSection?.for !== undefined && Object.values(moving ?? {}).some((m) => m.state === "sending");
+  // A new section's heading goes where Core will put the section: after every section, before "No section".
+  const draftHeading = newSection && <NewSectionHeading key="new-section" draft={newSection} saving={newSectionSaving} />;
   const deleted = useSectionDeletedFocus(root, tree.groups.map((g) => g.key), props.sectionHandlers?.removing);
   // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
@@ -256,7 +321,7 @@ export function RailTree(props: RailTreeProps) {
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
-          <Refusals session={s} pinning={pinning} archiving={archiving} forking={props.forking} />
+          <Refusals session={s} moving={moving} archiving={archiving} forking={props.forking} />
           </>
         )}
       </TileItem>
@@ -315,7 +380,8 @@ export function RailTree(props: RailTreeProps) {
               const closed = folded(group.key, group.sessions);
               const held = group.sessions.length > 0 && tiles(group.sessions);
               if (group.kind === "date" || group.kind === "no_section")
-                return (
+                return [
+                  group.kind === "no_section" && draftHeading,
                   <PlainGroup
                     key={group.key}
                     name={group.kind === "date" ? t(DATE_NAMES[group.key]) : t("rail.group.noSectionHeading")}
@@ -325,8 +391,8 @@ export function RailTree(props: RailTreeProps) {
                     toggle={closed.toggle}
                   >
                     {held}
-                  </PlainGroup>
-                );
+                  </PlainGroup>,
+                ];
               if (group.kind === "section")
                 return (
                   <SectionGroup
@@ -354,6 +420,7 @@ export function RailTree(props: RailTreeProps) {
                 </ProjectGroup>
               );
             })}
+            {!tree.groups.some((g) => g.kind === "no_section") && draftHeading}
           </ul>
         )}
         {looseShown && loose.length > 0 && tiles(loose)}
@@ -437,28 +504,33 @@ export function Problem({ lead, reason }: { lead: string; reason: string }) {
 }
 
 /**
- * Why Core refused a session's pin, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
+ * Why Core refused a session's pin, move to a section, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
  * (R15; FLOW-FORK-SESSION, Variations).
  */
 export function Refusals({
   session,
-  pinning,
+  moving,
   archiving,
   forking,
 }: {
   session: Session;
-  pinning?: Readonly<Record<string, Sending>>;
+  moving?: Readonly<Record<string, Moving>>;
   archiving?: Readonly<Record<string, Sending>>;
   forking?: Readonly<Record<string, Sending>>;
 }) {
-  const pin = pinning?.[session.id];
+  const pin = moving?.[session.id];
   const archive = archiving?.[session.id];
   const fork = forking?.[session.id];
   return (
     <EasedNotes shown={`${fork?.state}/${archive?.state}/${pin?.state}`}>
       {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
-      {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
+      {pin?.state === "failed" && (
+        <Problem
+          lead={pin.change === "section" ? t("rail.tile.moveError") : session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")}
+          reason={pin.message}
+        />
+      )}
     </EasedNotes>
   );
 }
@@ -841,4 +913,86 @@ function useSectionDeletedFocus(root: RefObject<HTMLElement | null>, keys: reado
     const focus = document.activeElement;
     if (focus && (root.current?.contains(focus) || focus.closest("[role=menu]"))) pending.current = { key, order: keys };
   };
+}
+
+/**
+ * A new section's heading (FLOW-ORGANIZE-SESSIONS, steps 3 and 5): a section heading whose name is an empty field, as
+ * when renaming one (docs/design/RAIL.md, A group heading). Enter makes the section; Escape, Enter on a blank name, or
+ * leaving the field makes nothing. A name Core refuses keeps the field and the name typed, with Core's reason beneath
+ * (R23, R27).
+ */
+function NewSectionHeading({ draft, saving }: { draft: NewSectionDraft; saving: boolean }) {
+  const field = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  const [name, setName] = useState(draft.initialDraft ?? "");
+  const busy = saving || draft.creating?.state === "sending";
+  const refused = draft.creating?.state === "failed" ? draft.creating.message : undefined;
+  // The field takes focus as it is shown, and again when Core refuses the name, to try again.
+  useEffect(() => {
+    if (draft.initialDraft === undefined) field.current?.focus({ preventScroll: true });
+  }, [refused, draft.initialDraft]);
+  // Nothing made: focus goes back to what opened it, the session's tile or the arrange button.
+  const cancel = () => {
+    const rail = field.current?.closest(".rail");
+    const tile = draft.for === undefined ? undefined : [...(rail?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].find((el) => el.dataset.sessionId === draft.for);
+    draft.onCancel();
+    (tile?.querySelector<HTMLElement>(".session") ?? rail?.querySelector<HTMLElement>(".rail-arrange"))?.focus({ preventScroll: true });
+  };
+  return (
+    <li className="rail-project">
+      <div className="rail-heading" data-slide={headingSlide("new-section")} data-editing>
+        <h3 className="rail-heading-title rail-heading-rename">
+          <span className="rail-heading-chevron">
+            <Icon icon={ChevronDown} size="icon-sm" />
+          </span>
+          <input
+            ref={field}
+            className="rail-heading-field"
+            aria-label={t("rail.section.nameLabel")}
+            value={name}
+            readOnly={busy}
+            aria-invalid={refused !== undefined || undefined}
+            aria-errormessage={refused !== undefined ? errorId : undefined}
+            onChange={(event) => {
+              setName(event.target.value);
+              // Typing again leaves an earlier refusal behind.
+              if (refused !== undefined) draft.onReset();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                // Not while the name is on its way: its answer would otherwise show nowhere.
+                if (!busy) cancel();
+              } else if (event.key === "Enter") {
+                event.preventDefault();
+                if (busy) return;
+                if (blank(name)) cancel();
+                else void draft.onName(name);
+              }
+            }}
+            // Leaving the field without Enter makes nothing, unless the name is on its way or was refused.
+            onBlur={() => {
+              if (!busy && refused === undefined) draft.onCancel();
+            }}
+          />
+        </h3>
+      </div>
+      <EasedNotes shown={`${refused !== undefined}`}>
+        {refused !== undefined && (
+          <p id={errorId} className="problem rail-heading-problem" role="alert">
+            {refused}
+          </p>
+        )}
+      </EasedNotes>
+    </li>
+  );
+}
+
+/**
+ * Whether a name is blank as Core counts it: nothing but spacing. JavaScript's `\s` also counts a byte-order mark,
+ * which Core does not, so a name of one is sent and Core's answer stands.
+ */
+function blank(name: string): boolean {
+  return [...name].every((c) => c !== "﻿" && /\s/u.test(c));
 }
