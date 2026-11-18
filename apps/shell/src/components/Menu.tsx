@@ -94,9 +94,20 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
   useLayoutEffect(() => {
     const el = list.current;
     if (!el || !open || px === undefined || py === undefined) return;
-    const { width, height } = el.getBoundingClientRect();
-    const next = placeAtPoint(px, py, width, height, window.innerWidth, window.innerHeight);
-    setAt((was) => (was?.left === next.left && was.top === next.top ? was : next));
+    const place = () => {
+      const { width, height } = el.getBoundingClientRect();
+      const next = placeAtPoint(px, py, width, height, window.innerWidth, window.innerHeight);
+      setAt((was) => (was?.left === next.left && was.top === next.top ? was : next));
+    };
+    place();
+    // Placed again while open when it grows (an item gains its reason) or the window changes size.
+    const grows = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(place);
+    grows?.observe(el);
+    window.addEventListener("resize", place);
+    return () => {
+      grows?.disconnect();
+      window.removeEventListener("resize", place);
+    };
   }, [open, shown, px, py]);
 
   // Focus moves in as it opens, as the opener asked.
@@ -279,7 +290,7 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
  * it fits, else to its left or above it, and in any case inside the window, its top-left corner winning when the menu
  * is larger than the window.
  */
-export function placeAtPoint(x: number, y: number, w: number, h: number, vw: number, vh: number) {
+function placeAtPoint(x: number, y: number, w: number, h: number, vw: number, vh: number) {
   const along = (p: number, size: number, room: number) => {
     const start = p + size > room ? p - size : p;
     return Math.max(0, Math.min(start, room - size));
