@@ -16,8 +16,16 @@ export type TileTone = "accent" | "caution" | "danger" | "faint" | "muted";
 
 export interface TileView {
   title: string;
-  /** The title reads `ink-muted` rather than `ink`: the session is idle or has ended. */
+  /**
+   * The title reads `ink-muted` rather than `ink`: the session is idle or has ended, or is archived, and is not
+   * unseen.
+   */
   titleMuted: boolean;
+  /**
+   * The title reads at the heading weight in `ink` (LAY-SHELL, Unseen): Core reports the session unseen and it is not
+   * the active one. An unseen title is never muted.
+   */
+  titleUnseen: boolean;
   /** The backend's name, the accessible name of its icon. */
   backend: string;
   mark?: TileMark;
@@ -38,8 +46,23 @@ const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "U
 /** A session's title as Ersa shows it. */
 export const titleOf = (session: Pick<Session, "title">) => session.title || t("rail.tile.untitledLabel");
 
+/** What the window knows of a session that Core doesn't list. */
+export interface TileContext {
+  /** A fork of it is on its way. */
+  forking?: boolean;
+  /** It is the active session: its title never reads unseen, even in the render that makes it active. */
+  active?: boolean;
+}
+
 /** What a session's tile shows. `backends` gives each host's backends, to name a session's backend by its own name. */
-export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendInfo[]>> = {}, forking = false): TileView {
+export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendInfo[]>> = {}, { forking = false, active = false }: TileContext = {}): TileView {
+  const view = viewOf(session, backends, forking);
+  // Unseen beats muted: a session that finished while the user looked elsewhere reads strong whatever rests it.
+  const titleUnseen = session.unseen && !active;
+  return { ...view, titleUnseen, titleMuted: view.titleMuted && !titleUnseen };
+}
+
+function viewOf(session: Session, backends: Readonly<Record<string, readonly BackendInfo[]>>, forking: boolean): Omit<TileView, "titleUnseen"> {
   const { tile } = session;
   const cost = tile.cost_usd_total;
   const base = {
@@ -82,11 +105,27 @@ export function wantTone(pending: Tile["pending"]): "accent" | "caution" {
   return pending.every((p) => p.kind === "question") ? "accent" : "caution";
 }
 
-// The pending requests decide before the state does: a session with one needs the user whatever Core reports,
-// and one reported as waiting on the user with none is idle.
+/**
+ * What a session is doing, as its tile and the unseen mark both read it (LAY-SHELL, State; Unseen). The pending
+ * requests decide before the state does: a session with one needs the user whatever Core reports, so it is neither
+ * working nor idle, and one reported as waiting on the user with none is idle. A state this interface doesn't know is
+ * neither.
+ */
+export function activityOf(tile: Tile): "needsYou" | "working" | "idle" | undefined {
+  if (tile.pending.length > 0) return "needsYou";
+  // A string, not the protocol's union: a newer Core may report a state this interface doesn't know.
+  const state: string = tile.state;
+  if (state === "running") return "working";
+  if (state === "idle" || state === "waiting_user") return "idle";
+  return undefined;
+}
+
 function stateOf(tile: Tile): StateView {
   const { pending } = tile;
-  if (pending.length > 0) {
+  const activity = activityOf(tile);
+  if (activity === "idle") return { titleMuted: true };
+  if (activity === "working") return { titleMuted: false, mark: "working", tone: "accent", markLabel: t("rail.tile.workingStatus") };
+  if (activity === "needsYou") {
     const tone = wantTone(pending);
     const only = pending.length === 1 ? pending[0]?.kind : undefined;
     const phrase =
@@ -99,16 +138,10 @@ function stateOf(tile: Tile): StateView {
             : t("rail.tile.needsYouWant");
     return { titleMuted: false, mark: "needsYou", tone, markLabel: phrase, phrase };
   }
-  // A string, not the protocol's union: a newer Core may report a state this interface doesn't know.
   const state: string = tile.state;
   switch (state) {
     case "starting":
       return { titleMuted: false, mark: "starting", tone: "accent", phrase: t("rail.tile.startingStatus") };
-    case "running":
-      return { titleMuted: false, mark: "working", tone: "accent", markLabel: t("rail.tile.workingStatus") };
-    case "waiting_user":
-    case "idle":
-      return { titleMuted: true };
     case "disconnected":
       return { titleMuted: false, mark: "disconnected", tone: "faint", phrase: t("rail.tile.disconnectedStatus") };
     case "error":

@@ -139,6 +139,14 @@ export const enUS = {
       // Followed by Core's reason, beneath the tile.
       pinError: "Ersa can't pin this session.",
       unpinError: "Ersa can't unpin this session.",
+      // After Pin: Mark as unread on a session that isn't unseen, Mark as read on one that is (FLOW-ORGANIZE-SESSIONS-R24).
+      markUnreadButton: "Mark as unread",
+      markReadButton: "Mark as read",
+      // Beneath Mark as unread on the active session.
+      markUnreadActiveReason: "Available once you open another session",
+      // Beneath the tile, before Core's reason, when Core refuses.
+      markUnreadError: "Ersa can't mark this session as unread.",
+      markReadError: "Ersa can't mark this session as read.",
       // Move to section ▸ and its submenu (FLOW-ORGANIZE-SESSIONS, step 3). New section… asks for a name, so it ends in
       // an ellipsis.
       moveToSectionButton: "Move to section",
