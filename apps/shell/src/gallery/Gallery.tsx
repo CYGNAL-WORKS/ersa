@@ -209,6 +209,7 @@ const tree: Parameters<typeof RailTree>[0] = {
     return true;
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
+  onMark: (id, unseen) => (document.body.dataset.railCall = `mark ${id} ${unseen}`),
   onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
   onDelete: (id) => (document.body.dataset.railCall = `delete ${id}`),
   localHost: "local",
@@ -245,6 +246,7 @@ const sessionsPage: Parameters<typeof SessionsPage>[0] = {
   onNewSession: () => {},
   onRename: async () => true,
   onPin: () => {},
+  onMark: () => {},
   onArchive: () => {},
   onDelete: () => {},
 };
@@ -291,6 +293,12 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** p1 finished a turn while p2 was active, so Core reports it unseen (LAY-SHELL, Unseen). */
+const unseenPair: Parameters<typeof RailTree>[0] = {
+  ...pairOnly,
+  sessions: { state: "ready", sessions: pointerPair.map((s) => (s.id === "p1" ? { ...s, unseen: true } : s)) },
+  activeId: "p2",
+};
 /** A tile for each backend's mark (issue 399): Claude Code, Copilot, and one Ersa doesn't know. */
 const eachBackend: Parameters<typeof RailTree>[0] = {
   ...ersaOnly,
@@ -1052,7 +1060,9 @@ const entries: Entry[] = [
       ["Tile, pressed", <RailTree {...pairOnly} force={{ id: "p2", state: "pressed" }} />],
       ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],
       // p1 finished a turn while p2 was active: its title reads strong until it is opened.
-      ["Unseen", <RailTree {...pairOnly} activeId="p2" unseen={new Set(["p1"])} />],
+      ["Unseen", <RailTree {...unseenPair} />],
+      // Its menu offers Mark as read.
+      ["Unseen, its menu open", <RailTree {...unseenPair} initialTileMenu="p1" />],
       ["Active tile", <RailTree {...pairOnly} activeId="p2" />],
       ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
       ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],

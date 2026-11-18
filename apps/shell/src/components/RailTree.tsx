@@ -44,8 +44,6 @@ interface RailTreeProps extends TileHandlers {
   hostNames?: Readonly<Record<string, string>>;
   /** Each host's backends, to name a tile's backend by its own name; until they are read, it is named by its id. */
   backends?: Backends;
-  /** The unseen sessions' ids (LAY-SHELL, Unseen): their titles read strong until they are made active. */
-  unseen?: ReadonlySet<string>;
   /** The open shelf: its session, its tone, and the shelf itself, which is drawn beside that session's tile. */
   shelf?: OpenShelf;
   /** The user chose a tile's chevron (FLOW-APPROVE-PERMISSION-R01). */
@@ -85,7 +83,7 @@ const headingSlide = (key: string) => `heading:${key}`;
  * heading with its sessions beneath it, and their notes.
  */
 export function RailTree(props: RailTreeProps) {
-  const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
+  const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, force, shelf, onChevron, onCloseShelf } = props;
   const { archiving, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   const root = useRef<HTMLElement>(null);
   // The pin on its way, and whether focus was in the rail when it was chosen. One at a time: while it is saved, Pin
@@ -220,7 +218,6 @@ export function RailTree(props: RailTreeProps) {
               session={s}
               backends={backends}
               active={s.id === activeId}
-              unseen={unseen?.has(s.id) ?? false}
               force={force?.id === s.id ? force.state : undefined}
               onSelect={onSelect}
               shelf={open && { tone: open.tone, domId: shelfDomId }}
@@ -231,7 +228,7 @@ export function RailTree(props: RailTreeProps) {
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
-          <Refusals session={s} pinning={pinning} archiving={archiving} forking={props.forking} />
+          <Refusals session={s} pinning={pinning} marking={props.marking} archiving={archiving} forking={props.forking} />
           </>
         )}
       </TileItem>
@@ -383,21 +380,24 @@ export function Problem({ lead, reason }: { lead: string; reason: string }) {
 }
 
 /**
- * Why Core refused a session's pin, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
+ * Why Core refused a session's pin, mark as unread or read, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
  * (R15; FLOW-FORK-SESSION, Variations).
  */
 export function Refusals({
   session,
   pinning,
+  marking,
   archiving,
   forking,
 }: {
   session: Session;
   pinning?: Readonly<Record<string, Sending>>;
+  marking?: Readonly<Record<string, Sending>>;
   archiving?: Readonly<Record<string, Sending>>;
   forking?: Readonly<Record<string, Sending>>;
 }) {
   const pin = pinning?.[session.id];
+  const mark = marking?.[session.id];
   const archive = archiving?.[session.id];
   const fork = forking?.[session.id];
   // A note opens growing and fading in (docs/design/RAIL.md, notes), pushing the tiles beneath it down over
@@ -405,7 +405,7 @@ export function Refusals({
   // render, so a reason rewrapped meanwhile is where the next ease starts from.
   const box = useRef<HTMLDivElement>(null);
   const ease = useRef(new HeightEase()).current;
-  const shown = `${fork?.state}/${archive?.state}/${pin?.state}`;
+  const shown = `${fork?.state}/${archive?.state}/${pin?.state}/${mark?.state}`;
   const lastShown = useRef(shown);
   useLayoutEffect(() => {
     if (!box.current) return;
@@ -418,6 +418,8 @@ export function Refusals({
       {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
       {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
+      {/* Core refused the change the menu offered, so the session is as it was: unseen if Mark as read was refused. */}
+      {mark?.state === "failed" && <Problem lead={session.unseen ? t("rail.tile.markReadError") : t("rail.tile.markUnreadError")} reason={mark.message} />}
     </div>
   );
 }
