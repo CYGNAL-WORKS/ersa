@@ -32,6 +32,7 @@ import { type Attached, attached, sendable, unreadable, waitingName } from "./se
 import { type Follower, type SendProgress, type SessionView, type Sending, type WaitingHere, follow, progressOf, waitingOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
+import { useSections } from "./session/sections";
 import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
@@ -204,6 +205,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Subscribe on each new connection, from where the transcript left off;
   // without one, the session is offline and answers wait.
   const link = view.phase === "connected" ? view.link : undefined;
+  // The user's sections, read on each connection; deleting one moves its sessions, so the list is read again (R05).
+  const sections = useSections(client, link, describeError, () => connection.current?.reload("sessions"));
   useEffect(() => {
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
@@ -773,6 +776,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     };
   })();
 
+  const railWaits = arranging || (arrangement.groupBy === "section" && sections.view.state === "loading");
   return (
     <div className="app">
       <nav className="rail" aria-label="Rail" inert={behind}>
@@ -794,14 +798,23 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         <div className="rail-body">
           <ErrorBoundary what={t("rail.tree.boundaryName")} resetKey={`${projectsVersion}:${sessionsVersion}`}>
             <RailTree
-              // Grouped as the user arranged it once that is read, so the tree never draws one way and then regroups.
-              projects={arranging && projects.state === "ready" ? { state: "loading" } : projects}
+              // Grouped as the user arranged it once that is read, and grouped by section once the sections are, so
+              // the tree never draws one way and then regroups.
+              projects={railWaits && projects.state === "ready" ? { state: "loading" } : projects}
               groupBy={arrangement.groupBy}
               sortBy={arrangement.sortBy}
               show={arrangement.show}
               now={today}
               arrangeProblem={arrangeProblem}
-              sessions={arranging && railSessions.state === "ready" ? { state: "loading" } : railSessions}
+              sessions={railWaits && railSessions.state === "ready" ? { state: "loading" } : railSessions}
+              sections={sections.view}
+              sectionHandlers={{
+                onRename: sections.rename,
+                renaming: sections.renaming,
+                onRenameReset: sections.renameReset,
+                onDelete: (id) => void sections.remove(id),
+                removing: sections.removing,
+              }}
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}

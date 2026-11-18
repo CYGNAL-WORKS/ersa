@@ -45,6 +45,7 @@ export const enUS = {
       resetButton: "Reset to defaults",
       viewAllButton: "View all",
       groupByProjectButton: "Project",
+      groupBySectionButton: "Section",
       groupByDateButton: "Date",
       groupByNoneButton: "None",
       sortByCreatedButton: "Date created",
@@ -64,6 +65,7 @@ export const enUS = {
       noProjectsHint: "Choose a folder in New session to start.",
       projectsError: "Ersa can't read your projects.",
       sessionsError: "Ersa can't read your sessions.",
+      sectionsError: "Ersa can't read your sections.",
       // The arrangement could not be read, so the rail is arranged by the defaults; or a change could not be saved and was undone.
       arrangeReadError: "Ersa can't read how you arranged the rail.",
       arrangeSaveError: "Ersa couldn't save that change to the rail.",
@@ -81,6 +83,19 @@ export const enUS = {
       yesterdayHeading: "Yesterday",
       previous7DaysHeading: "Previous 7 days",
       olderHeading: "Older",
+      // Grouped by section, the sessions in none, after every section (FLOW-ORGANIZE-SESSIONS-R04).
+      noSectionHeading: "No section",
+    },
+    // A section heading's More menu (docs/design/RAIL.md, A group heading) and renaming in place.
+    section: {
+      moreLabel: "More for {section}",
+      renameButton: "Rename",
+      // Deleting a section asks nothing, since no session is lost, so it has no ellipsis.
+      deleteButton: "Delete",
+      // The name field's label for assistive technology, while renaming.
+      nameLabel: "Section name",
+      // Followed by Core's reason, beneath the heading.
+      deleteError: "Ersa can't delete this section.",
     },
     // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
     heading: {

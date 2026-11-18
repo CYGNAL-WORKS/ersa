@@ -32,12 +32,12 @@
     background var(--motion-quick) var(--motion-ease-out),
     color var(--motion-quick) var(--motion-ease-out);
 }
-.icon-button:hover:not(:disabled),
+.icon-button:hover:not(:disabled, [aria-disabled="true"]),
 .icon-button[data-force="hover"] {
   color: var(--color-ink);
   background: var(--material-hover);
 }
-.icon-button:active:not(:disabled),
+.icon-button:active:not(:disabled, [aria-disabled="true"]),
 .icon-button[data-force="pressed"] {
   color: var(--color-ink);
   background: var(--material-pressed);
@@ -47,7 +47,9 @@
   outline: none;
   border-color: var(--color-ink);
 }
-.icon-button:disabled {
+/* Unavailable, natively or kept focusable (aria-disabled, so a keyboard user keeps their place), looks the same. */
+.icon-button:disabled,
+.icon-button[aria-disabled="true"] {
   color: var(--color-ink-faint);
   cursor: default;
 }
