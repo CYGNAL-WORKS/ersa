@@ -1810,27 +1810,34 @@ async fn a_backend_that_exited_before_a_write_says_it_is_not_running() {
 // verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_while_another_is_being_sent_is_refused_send_in_progress() {
-    let (core, _) = start_fake(FakeAdapter::slow_start(Duration::from_secs(5))).await;
+    let adapter = FakeAdapter::new(1);
+    let start_gate = Arc::clone(&adapter.start_gate);
+    let (core, _) = start_fake(adapter).await;
+    // Held, the backend `session.create` starts is never ready, so the
+    // first message waits for it holding the session's send slot for as
+    // long as the test needs.
+    let held = start_gate.lock().await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
-    // Waits for the backend to start.
     let first = client
         .request("session.send", json!({ "id": id, "text": "hello" }))
         .await;
+    // Waited for, not raced: the two connections' sends are not ordered, so
+    // the second is sent only once the first has the slot. Only the send
+    // holding the slot reports `starting`; one still waiting for its turn
+    // reports `checking`.
+    client
+        .notification_where(|n| {
+            n["method"] == "session.send_progress"
+                && n["params"]["session_id"] == id.as_str()
+                && n["params"]["phase"] == "starting"
+        })
+        .await;
     let mut second = core.client().await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let error = loop {
-        let response = second
-            .call("session.send", json!({ "id": id, "text": "again" }))
-            .await;
-        let error = response["error"].clone();
-        // The first may not have taken the session's slot yet.
-        if error["data"]["reason"] == "send_in_progress" {
-            break error;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "{response:#}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    };
+    let error = second
+        .error("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    assert_eq!(error["data"]["reason"], "send_in_progress", "{error:#}");
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
     assert!(
         error["message"]
@@ -1839,10 +1846,10 @@ async fn a_message_while_another_is_being_sent_is_refused_send_in_progress() {
             .contains("already being sent"),
         "{error:#}"
     );
-    client
-        .result("session.interrupt", json!({ "id": id }))
-        .await;
-    client.response(first).await;
+    // The first goes on: once the backend is ready it has the message.
+    drop(held);
+    let first = client.response(first).await;
+    assert!(first.get("result").is_some(), "{first:#}");
 }
 
 /// Renaming a stopped session whose backend has no record of it is refused
