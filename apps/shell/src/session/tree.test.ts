@@ -241,7 +241,7 @@ describe("the tiles' order within a group", () => {
     expect(byGroup(arranged(sessions.filter((s) => !s.pinned), "name", "date"))).toEqual([["today", ["r-a", "e-a", "r-b", "e-b"]]]);
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  // verifies: FLOW-ORGANIZE-SESSIONS-R31
   it("keeps a tile's place through everything but a new last activity", () => {
     const quiet = made("quiet", 9, { last_activity_at: "2026-11-01T14:00:00.000Z" });
     const busy = made("busy", 10, { last_activity_at: "2026-11-01T13:00:00.000Z" });

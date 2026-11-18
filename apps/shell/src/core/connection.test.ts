@@ -100,7 +100,7 @@ describe("connect", () => {
     expect(seen.at(-1)).toMatchObject({ phase: "connected", label: "replay" });
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  // verifies: FLOW-ORGANIZE-SESSIONS-R31
   it("keeps the last activity a tile carries, and what was listed when one comes without", async () => {
     const { client, notify } = fakeClient({ ...answering, "session.list": () => Promise.resolve([session]) });
     const seen: CoreView[] = [];
@@ -175,7 +175,7 @@ describe("connect", () => {
     expect(reads).toBe(1);
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  // verifies: FLOW-ORGANIZE-SESSIONS-R31
   it("does not let a list read before a turn's end put back the older last activity", async () => {
     let answer: (sessions: Session[]) => void = () => {};
     let reads = 0;
@@ -201,7 +201,7 @@ describe("connect", () => {
     expect(activity()).toBe("2026-11-01T15:00:00.000Z");
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  // verifies: FLOW-ORGANIZE-SESSIONS-R31
   it("takes a newer last activity from the list, which Core can write before its tile arrives", async () => {
     let reads = 0;
     const later = { ...session, last_activity_at: "2026-11-01T15:00:00.000Z" };

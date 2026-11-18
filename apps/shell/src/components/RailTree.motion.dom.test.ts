@@ -246,14 +246,14 @@ describe("a new session's tile", () => {
       { slide: "session:b", keyframes: [{ transform: "translateY(-10px)" }, { transform: "none" }], options: settle },
     ];
 
-    // verifies: FLOW-ORGANIZE-SESSIONS-R10
+    // verifies: FLOW-ORGANIZE-SESSIONS-R31
     it("slides each tile over motion-settle when a turn ends while sorted by last activity", () => {
       const { rerender } = render(sorted([older, newer], "last_activity"));
       rerender(sorted([ended, newer], "last_activity"));
       expect(slid).toEqual(swapped);
     });
 
-    // verifies: FLOW-ORGANIZE-SESSIONS-R10
+    // verifies: FLOW-ORGANIZE-SESSIONS-R31
     it("moves nothing as a session works, or when a turn ends under another sort", () => {
       const { container, rerender } = render(sorted([older, newer], "last_activity"));
       const order = () => [...container.querySelectorAll<HTMLElement>("[data-session-id]")].map((el) => el.dataset.sessionId);
@@ -281,7 +281,7 @@ describe("a new session's tile", () => {
       ]);
     });
 
-    // verifies: FLOW-ORGANIZE-SESSIONS-R10
+    // verifies: FLOW-ORGANIZE-SESSIONS-R31
     it("slides a tile with no last activity yet when Core corrects its date created", () => {
       const { rerender } = render(sorted([older, newer], "last_activity"));
       rerender(sorted([{ ...older, created_at: "2026-11-06T10:00:00Z" }, newer], "last_activity"));

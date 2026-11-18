@@ -24,7 +24,7 @@ export type SessionsView =
 
 /**
  * A list read before a turn's end carries an older last activity than the tile that reported it, so the newer stays
- * and the tile doesn't slide back (FLOW-ORGANIZE-SESSIONS-R10). Core writes these times at one width, so text orders them.
+ * and the tile doesn't slide back (FLOW-ORGANIZE-SESSIONS-R31). Core writes these times at one width, so text orders them.
  */
 function keepingActivity(listed: Session[], shown: SessionsView): Session[] {
   if (shown.state !== "ready") return listed;
@@ -186,7 +186,7 @@ export function connect(
                     sessions: {
                       state: "ready",
                       // Every tile carries the last activity once a turn has ended, and that is how the rail
-                      // hears of a new one (FLOW-ORGANIZE-SESSIONS-R10). Core never clears it, so one that
+                      // hears of a new one (FLOW-ORGANIZE-SESSIONS-R31). Core never clears it, so one that
                       // comes without keeps what was listed. Every tile carries the session's current title, absent
                       // while it has none (PROTO-CORE-API-R83), so the rail, the header and the sessions page show a
                       // rename or a generated name from it, with no list read (PROTO-CORE-API-R84). Every tile carries the
