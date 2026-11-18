@@ -1,4 +1,4 @@
-// Ersa's own unseen mark, as what it tells Core (FLOW-ORGANIZE-SESSIONS, Unseen; LAY-SHELL, Unseen). The App's test
+// Ersa's own unseen mark, as what it tells Core (FLOW-ORGANIZE-SESSIONS, Unseen, R37 and R39; LAY-SHELL, Unseen). The App's test
 // against a fake Core covers the mark surviving a restart (FLOW-ORGANIZE-SESSIONS-R25).
 
 import { describe, expect, it } from "vitest";
@@ -35,6 +35,7 @@ const run = (steps: [Session[], string?][], activeId?: string, sending: Readonly
 };
 
 describe("Ersa's unseen mark", () => {
+  // verifies: FLOW-ORGANIZE-SESSIONS-R37
   it.each(["idle", "waiting_user"])("marks a session that is not active and goes from working to %s", (state) => {
     expect(run([[[s("a", "running")]], [[s("a", state)]]], "b")).toEqual([{ id: "a", unseen: true }]);
   });
@@ -49,10 +50,12 @@ describe("Ersa's unseen mark", () => {
     expect(run([[[s("a", "running", { unseen: true })]], [[s("a", "idle", { unseen: true })]]], "b")).toEqual([]);
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R37
   it("never marks the active session", () => {
     expect(run([[[s("a", "running")]], [[s("a", "idle")]]], "a")).toEqual([]);
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R39
   it("marks the active session seen when Core reports it unseen, as when an unseen session is made active", () => {
     expect(run([[[s("a", "idle", { unseen: true })], "b"], [[s("a", "idle", { unseen: true })], "a"]])).toEqual([{ id: "a", unseen: false }]);
   });
@@ -84,6 +87,7 @@ describe("Ersa's unseen mark", () => {
     expect(run([[[s("a", "running")]], [[s("a", state)]]], "b")).toEqual([]);
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R37
   it("does not mark a session that stops working because it needs the user", () => {
     const needs = s("a", "waiting_user", { pending: [{ kind: "permission", request_id: "p" }] });
     expect(run([[[s("a", "running")]], [[needs]]], "b")).toEqual([]);

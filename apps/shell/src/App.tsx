@@ -214,13 +214,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     else markRefused.current.add(id);
   };
   // The sessions working in the last list, to tell "idle after working" from plain idle. In memory: a turn that
-  // finishes while Ersa is closed leaves no mark (LAY-SHELL, Open questions), and nor does one that finishes while
-  // Ersa can't reach Core, since what was working then is forgotten.
+  // finishes while Ersa is closed leaves no mark. Kept while Ersa can't reach Core, so a turn that ends meanwhile marks
+  // its session from the first list once connected again (FLOW-ORGANIZE-SESSIONS-R38).
   const working = useRef<ReadonlySet<string>>(new Set());
   const lastShown = useRef(shownId);
   useEffect(() => {
     if (sessions.state !== "ready") {
-      working.current = new Set();
+      // Reaching Core again is a new occasion for a refused mark; what was working is kept (R38).
       markRefused.current.clear();
       return;
     }

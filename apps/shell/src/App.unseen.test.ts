@@ -48,11 +48,16 @@ function fakeCore({ refuse = false as boolean | number, unseen = [] as string[] 
   }));
   let refusals = refuse === true ? Infinity : refuse === false ? 0 : refuse;
   let onEvent: (event: CoreEvent) => void = () => {};
+  // How many times the window has read the list: a reconnect reads it again.
+  let reads = 0;
   const arranges: unknown[] = [];
   const answers: Partial<Record<Method, (params: never) => unknown>> = {
     "core.status": () => ({ sessions_running: 0, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => [{ id: "alpha", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "git", trusted: true }],
-    "session.list": () => list,
+    "session.list": () => {
+      reads++;
+      return list;
+    },
     "workspace.list": () => [{ id: "w-alpha", project_id: "alpha", kind: "root", path: "D:/code/alpha", vcs_ref: "main", state: "ready" }],
     "backend.list": () => [],
     "settings.get": () => ({}),
@@ -86,10 +91,11 @@ function fakeCore({ refuse = false as boolean | number, unseen = [] as string[] 
     );
   };
   // A session's state changes in Core with no tile sent, as while the window can't reach it.
-  const quietly = (id: string, state: Tile["state"]) => {
-    list = list.map((s) => (s.id === id ? { ...s, state, tile: { state, pending: [] } } : s));
+  // `gone` takes it off the list.
+  const quietly = (id: string, state: Tile["state"] | "gone") => {
+    list = state === "gone" ? list.filter((s) => s.id !== id) : list.map((s) => (s.id === id ? { ...s, state, tile: { state, pending: [] } } : s));
   };
-  return { client, arranges, tile, quietly, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })), unseen: (id: string) => list.find((s) => s.id === id)?.unseen };
+  return { client, arranges, tile, quietly, reads: () => reads, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })), unseen: (id: string) => list.find((s) => s.id === id)?.unseen };
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -182,6 +188,8 @@ describe("Mark as unread and Mark as read on a tile's menu", () => {
 
 describe("the unseen mark across restarts", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R25
+  // verifies: FLOW-ORGANIZE-SESSIONS-R37
+  // verifies: FLOW-ORGANIZE-SESSIONS-R39
   it("keeps Ersa's mark, on a session that went idle after working while not active, through a restart of Ersa", async () => {
     const core = fakeCore();
     await open(core);
@@ -261,18 +269,42 @@ describe("the unseen mark across restarts", () => {
     expect(core.arranges).toHaveLength(2);
   });
 
-  it("leaves no mark on a session that finished its turn while Ersa couldn't reach Core", async () => {
+  /** Core drops while `id` is working, its state changes to `state` meanwhile, and the window attaches again. */
+  async function reconnectAfter(core: ReturnType<typeof fakeCore>, id: string, state: Tile["state"] | "gone") {
+    await core.tile(id, "running");
+    const before = core.reads();
+    await core.drop();
+    core.quietly(id, state);
+    await waitFor(() => expect(core.reads()).toBeGreaterThan(before), { timeout: 5_000 });
+    await settle();
+  }
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R38
+  it("marks a session whose turn ended while Ersa couldn't reach Core, once connected again", async () => {
     const core = fakeCore();
     await open(core);
-    await core.tile("s1", "running");
-    await core.drop();
-    core.quietly("s1", "idle");
-    await waitFor(() => expect(tileOf("Fix the build")).toBeTruthy(), { timeout: 5_000 });
-    await settle();
-    expect(core.arranges).toEqual([]);
-    expect(reads("Fix the build")).toBe(false);
+    await reconnectAfter(core, "s1", "idle");
+    expect(core.arranges).toEqual([{ id: "s1", unseen: true }]);
+    expect(reads("Fix the build")).toBe(true);
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R38
+  it.each(["ended", "error", "disconnected", "gone"] as const)("marks nothing on reconnecting for a session that is %s meanwhile", async (state) => {
+    const core = fakeCore();
+    await open(core);
+    await reconnectAfter(core, "s1", state);
+    expect(core.arranges).toEqual([]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R38
+  it("marks nothing on reconnecting for the active session, whose turn ended meanwhile", async () => {
+    const core = fakeCore();
+    await open(core);
+    await reconnectAfter(core, "s2", "idle");
+    expect(core.arranges).toEqual([]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R37
   it("never marks the active session, though it goes idle after working", async () => {
     const core = fakeCore();
     await open(core);
