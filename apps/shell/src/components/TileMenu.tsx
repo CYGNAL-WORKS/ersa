@@ -1,11 +1,12 @@
 import { Ellipsis } from "lucide-react";
 import { type CSSProperties, type HTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref, useCallback, useEffect, useId, useRef, useState } from "react";
 import { t } from "../catalog";
-import type { Session } from "../protocol/core-api.gen";
+import type { Section, Session } from "../protocol/core-api.gen";
 import { archiveUnavailable } from "../session/archive";
 import { deleteUnavailable } from "../session/deletion";
 import { forkUnavailable } from "../session/fork";
 import type { Sending } from "../session/follow";
+import { type Moving, type SectionsView, sectionsUnavailable } from "../session/sections";
 import { IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
 import { useTitleDraft } from "./SessionTitle";
@@ -37,6 +38,20 @@ interface TilePin {
   /** Pins it when unpinned, unpins it when pinned. */
   onChoose: () => void;
   /** Why Pin or Unpin can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
+/** Move to section ▸ on the menu (FLOW-ORGANIZE-SESSIONS, step 3). */
+interface TileMove {
+  /** The sections to offer, in the order they were made. */
+  sections: readonly Section[];
+  /** The section the session is in, which the submenu marks; undefined for none. */
+  current?: string;
+  /** Moves the session to the section, or to none for null. */
+  onChoose: (sectionId: string | null) => void;
+  /** Shows a new section's heading, its name field taking focus; once named, the session moves into it. */
+  onNew: () => void;
+  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
   unavailable?: string;
 }
 
@@ -72,6 +87,7 @@ export interface TileActions {
   pin?: TilePin;
   mark?: TileMark;
   fork?: TileFork;
+  move?: TileMove;
   archive?: TileArchive;
   remove?: TileDelete;
 }
@@ -86,8 +102,14 @@ export interface TileHandlers {
   onRenameReset?: (id: string) => void;
   /** Pins or unpins a session (FLOW-ORGANIZE-SESSIONS-R01). */
   onPin?: (id: string, pinned: boolean) => void;
-  /** Pins and unpins on their way, and why the last was refused (R15). */
-  pinning?: Readonly<Record<string, Sending>>;
+  /** Moves a session to a section, or to none for null (R03). */
+  onMove?: (id: string, sectionId: string | null) => void;
+  /** Pins, unpins and moves on their way, and why the last was refused (R15). */
+  moving?: Readonly<Record<string, Moving>>;
+  /** The user's sections, which Move to section offers. */
+  sections?: SectionsView;
+  /** Shows a new section's heading for the session to move into once it is named (FLOW-ORGANIZE-SESSIONS, step 3). */
+  onNewSection?: (id: string) => void;
   /** Marks a session unseen or seen (FLOW-ORGANIZE-SESSIONS-R24). */
   onMark?: (id: string, unseen: boolean) => void;
   /** Marks on their way, and why the last was refused. */
@@ -110,10 +132,11 @@ export interface TileHandlers {
 
 /** A session's menu actions, each unavailable with its reason while it can't be used. */
 export function tileActions(s: Session, h: TileHandlers): TileActions {
-  const { onRename, onPin, onMark, onFork, onArchive, onDelete, offline = false } = h;
+  const { onRename, onPin, onMark, onMove, onNewSection, onFork, onArchive, onDelete, offline = false } = h;
   const offlineReason = offline ? t("rail.tile.offlineReason") : undefined;
-  // One pin at a time, so each move in the rail is measured from where the last one left it.
-  const saving = Object.values(h.pinning ?? {}).some((p) => p.state === "sending");
+  // One pin or move at a time, so each move in the rail is measured from where the last one left it.
+  const saving = Object.values(h.moving ?? {}).some((p) => p.state === "sending");
+  const savingReason = saving ? t("rail.tile.savingProgress") : undefined;
   return {
     // Unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one still
     // starting, is refused by Core, and the field says why.
@@ -126,13 +149,21 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
     pin: onPin && {
       pinned: s.pinned,
       onChoose: () => onPin(s.id, !s.pinned),
-      unavailable: offlineReason ?? (saving ? t("rail.tile.savingProgress") : undefined),
+      unavailable: offlineReason ?? savingReason,
     },
     mark: onMark && {
       unseen: s.unseen,
       onChoose: () => onMark(s.id, !s.unseen),
       unavailable: markUnavailable(s, h, offlineReason),
     },
+    move: onMove &&
+      onNewSection && {
+        sections: h.sections?.state === "ready" ? h.sections.sections : [],
+        current: s.section_id,
+        onChoose: (sectionId) => onMove(s.id, sectionId),
+        onNew: () => onNewSection(s.id),
+        unavailable: offlineReason ?? savingReason ?? sectionsUnavailable(h.sections),
+      },
     fork: onFork && { onChoose: () => onFork(s.id), unavailable: forkUnavailable(s, offline, h.forking?.[s.id]) },
     archive: onArchive && {
       onChoose: (archived) => onArchive(s.id, archived),
@@ -159,7 +190,7 @@ function markUnavailable(s: Session, h: TileHandlers, offlineReason: string | un
 export function useTileMenu({
   session,
   title,
-  actions: { rename, pin, mark, fork, archive, remove },
+  actions: { rename, pin, mark, fork, move, archive, remove },
   beforeChevron,
   initialMenu,
   initialDraft,
@@ -170,8 +201,8 @@ export function useTileMenu({
   actions: TileActions;
   /** The tile's More button leaves room for the chevron beside it. */
   beforeChevron?: boolean;
-  /** For the gallery: the menu shown open, and the title being edited with this text. */
-  initialMenu?: boolean;
+  /** For the gallery: the menu shown open, "move" with Move to section's submenu open too, and the title being edited with this text. */
+  initialMenu?: boolean | "move";
   initialDraft?: string;
 }) {
   const root = useRef<HTMLElement>(null);
@@ -182,7 +213,7 @@ export function useTileMenu({
   // The menu: whether it is open, where it sits, where focus went, and what opened it, which takes focus back.
   // Kept as it closes, so the menu fades out where it was.
   const [menu, setMenu] = useState<{ open: boolean; place: MenuPlace; focus: "item" | "menu" | "none"; from: "more" | "tile" }>(
-    { open: initialMenu ?? false, place: { anchor }, focus: "none", from: "more" },
+    { open: !!initialMenu, place: { anchor }, focus: "none", from: "more" },
   );
   const opener = useRef(menu.from);
   opener.current = menu.from;
@@ -257,6 +288,7 @@ export function useTileMenu({
           ...(fork
             ? [{ kind: "item" as const, label: t("rail.tile.forkButton"), unavailable: fork.unavailable, onChoose: fork.onChoose }]
             : []),
+          ...(move ? [moveEntry(move)] : []),
           ...(archive
             ? [
                 {
@@ -337,7 +369,18 @@ export function useTileMenu({
           }
         />
       )}
-      {rename && <Menu label={label} entries={entries} open={menu.open} place={menu.place} focus={menu.focus} inside={insideMenu} onClose={closeMenu} />}
+      {rename && (
+        <Menu
+          label={label}
+          entries={entries}
+          open={menu.open}
+          place={menu.place}
+          focus={menu.focus}
+          inside={insideMenu}
+          onClose={closeMenu}
+          initialSubmenu={initialMenu === "move" ? entries.findIndex((e) => e.kind === "submenu") : undefined}
+        />
+      )}
       {/* A refused title keeps the field open, with the reason beneath. */}
       {editing && refused !== undefined && (
         <p id={`${anchor}-refused`} className="problem session-rename-problem" role="alert">
@@ -348,6 +391,28 @@ export function useTileMenu({
   );
 
   return { root, editing, rootHandlers, titleField, moreAndMenu };
+}
+
+/**
+ * Move to section ▸ (LAY-SHELL, A tile's menu): each section, the current one marked, then "No section", marked when
+ * the session is in none, and, after a rule, "New section…" (docs/design/RAIL.md, Menus). Choosing where the session
+ * already is changes nothing, so it asks Core nothing.
+ */
+function moveEntry(move: TileMove): MenuEntry {
+  const to = (sectionId: string | null) => () => {
+    if (sectionId !== (move.current ?? null)) move.onChoose(sectionId);
+  };
+  return {
+    kind: "submenu",
+    label: t("rail.tile.moveToSectionButton"),
+    unavailable: move.unavailable,
+    entries: [
+      ...move.sections.map((section): MenuEntry => ({ kind: "item", label: section.name, checked: section.id === move.current, onChoose: to(section.id) })),
+      { kind: "item", label: t("rail.tile.noSectionButton"), checked: move.current === undefined, onChoose: to(null) },
+      { kind: "rule" },
+      { kind: "item", label: t("rail.tile.newSectionButton"), onChoose: move.onNew },
+    ],
+  };
 }
 
 /**

@@ -209,6 +209,8 @@ const tree: Parameters<typeof RailTree>[0] = {
     return true;
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
+  onMove: (id, sectionId) => (document.body.dataset.railCall = `move ${id} ${sectionId}`),
+  onNewSection: (id) => (document.body.dataset.railCall = `newSection ${id}`),
   onMark: (id, unseen) => (document.body.dataset.railCall = `mark ${id} ${unseen}`),
   onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
   onDelete: (id) => (document.body.dataset.railCall = `delete ${id}`),
@@ -282,7 +284,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -354,6 +356,17 @@ const sectionedTree: Parameters<typeof RailTree>[0] = {
     },
     onDelete: (id) => (document.body.dataset.railCall = `deleteSection ${id}`),
   },
+};
+
+/** A new section's heading, its field empty (FLOW-ORGANIZE-SESSIONS, step 5). */
+const newSection: NonNullable<Parameters<typeof RailTree>[0]["newSection"]> = {
+  initialDraft: "",
+  onName: async (name) => {
+    document.body.dataset.railCall = `newSection ${name}`;
+    return undefined;
+  },
+  onReset: () => {},
+  onCancel: () => {},
 };
 
 /** A transcript built the way the window builds one: by applying events. */
@@ -839,9 +852,9 @@ const menuParts: MenuEntry[] = [
     current: "Project",
     entries: [
       { kind: "item", label: "Project", checked: true },
-      { kind: "item", label: "Section" },
-      { kind: "item", label: "Date" },
-      { kind: "item", label: "None" },
+      { kind: "item", label: "Section", checked: false },
+      { kind: "item", label: "Date", checked: false },
+      { kind: "item", label: "None", checked: false },
     ],
   },
   { kind: "submenu", label: "Sort by", current: "Date created", entries: [{ kind: "item", label: "Date created", checked: true }] },
@@ -1130,6 +1143,19 @@ const entries: Entry[] = [
       ],
       ["Section not deleted", <RailTree {...sectionedTree} sectionHandlers={{ ...sectionedTree.sectionHandlers, removing: { x1: { state: "failed", message: "the database is locked" } } }} />],
       ["Sections not read", <RailTree {...sectionedTree} sections={{ state: "error", message: "the database is locked" }} />],
+      ["Tile menu, Move to section", room(<RailTree {...sectionedTree} initialMoveMenu="s1" />)],
+      ["Tile menu, Move to section while sections are read", room(<RailTree {...sectionedTree} sections={{ state: "loading" }} initialTileMenu="s1" />)],
+      ["New section", <RailTree {...sectionedTree} newSection={newSection} />],
+      ["New section, named", <RailTree {...sectionedTree} newSection={{ ...newSection, initialDraft: "Reviews" }} />],
+      ["New section, being made", <RailTree {...sectionedTree} newSection={{ ...newSection, initialDraft: "Reviews", creating: { state: "sending" } }} />],
+      [
+        "New section, refused",
+        <RailTree
+          {...sectionedTree}
+          newSection={{ ...newSection, initialDraft: "Reviews ".repeat(29), creating: { state: "failed", message: "a section's name can have at most 200 characters" } }}
+        />,
+      ],
+      ["Move refused", <RailTree {...sectionedTree} moving={{ s1: { state: "failed", message: "the database is locked", change: "section" } }} />],
       ["Grouped by none", <RailTree {...pinnedTree} groupBy="none" />],
       ["Sorted by name", <RailTree {...pinnedTree} groupBy="none" sortBy="name" />],
       ["No active sessions", <RailTree {...tree} sessions={{ state: "ready", sessions: treeSessions.map((s) => ({ ...s, archived: true })) }} />],
@@ -1140,14 +1166,14 @@ const entries: Entry[] = [
         <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />,
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
-      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" moving={{ p2: { state: "sending", change: "pin" } }} />)],
       ["Tile menu, while a mark is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" marking={{ p2: { state: "sending" } }} />)],
       ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
         <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: t("errors.refusal.noFinishedReplyError") } }} />,
       ],
-      ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Pin refused", <RailTree {...pairOnly} moving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError"), change: "pin" } }} />],
       ["Mark as unread refused", <RailTree {...pairOnly} marking={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Mark as read refused", <RailTree {...unseenPair} marking={{ p1: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],

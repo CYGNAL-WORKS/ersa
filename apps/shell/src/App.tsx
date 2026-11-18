@@ -30,9 +30,9 @@ import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
 import { type Attached, attached, sendable, unreadable, waitingName } from "./session/attachments";
 import { type Follower, type SendProgress, type SessionView, type Sending, type WaitingHere, follow, progressOf, waitingOf } from "./session/follow";
+import { type Moving, sectionsUnavailable, useSections } from "./session/sections";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
-import { useSections } from "./session/sections";
 import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
@@ -179,19 +179,20 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // A change to a session's arrangement (FLOW-ORGANIZE-SESSIONS): Core stores it and answers with the session as
   // listed, and the rail shows the fields changed once Core has them. A refusal leaves the session as Core has it and
-  // says why beneath its tile until the next try (R15). `track` holds the changes on their way and the refusals.
-  // Resolves whether Core took it.
+  // says why beneath its tile until the next try (R15). `track` holds the changes on their way and the refusals, each
+  // with `tag`, such as which change it was. Resolves whether Core took it.
   type Arrange = Omit<SessionArrangeParams, "id">;
-  const arrangeSession = async (track: Dispatch<SetStateAction<Record<string, Sending>>>, id: string, fields: Arrange): Promise<boolean> => {
-    track((t) => ({ ...t, [id]: { state: "sending" } }));
+  const arrangeSession = async <T extends object>(track: Dispatch<SetStateAction<Record<string, Sending & T>>>, id: string, fields: Arrange, tag: T): Promise<boolean> => {
+    track((t) => ({ ...t, [id]: { state: "sending", ...tag } }));
     try {
       const arranged = await client.call("session.arrange", { id, ...fields });
       track(({ [id]: _, ...rest }) => rest);
+      // In no section, Core lists the session with no `section_id`, so the field is taken out.
       const keys = Object.keys(fields) as (keyof Arrange & keyof Session)[];
       connection.current?.changed(id, Object.fromEntries(keys.map((k) => [k, arranged[k]])));
       return true;
     } catch (error) {
-      track((t) => ({ ...t, [id]: { state: "failed", message: describeError(error) } }));
+      track((t) => ({ ...t, [id]: { state: "failed", message: describeError(error), ...tag } }));
       return false;
     }
   };
@@ -208,7 +209,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const markRefused = useRef(new Set<string>());
   const markUnseen = async (id: string, unseen: boolean) => {
     markSending.current.add(id);
-    const taken = await arrangeSession(setMarking, id, { unseen });
+    const taken = await arrangeSession(setMarking, id, { unseen }, {});
     markSending.current.delete(id);
     if (taken) markRefused.current.delete(id);
     else markRefused.current.add(id);
@@ -498,10 +499,45 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   };
   const resetChange = (id: string) => changesOf(id, refusalSeen);
 
-  // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
-  // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
-  const [pinning, setPinning] = useState<Record<string, Sending>>({});
-  const pin = (id: string, pinned: boolean) => arrangeSession(setPinning, id, { pinned });
+  // Pin, Unpin and Move to section on a tile (FLOW-ORGANIZE-SESSIONS-R01, R03): Core stores the pin and the section,
+  // and the rail moves the tile once Core has them. A refusal leaves the tile where Core has it and says why beneath
+  // it until the next try (R15).
+  const [moving, setMoving] = useState<Record<string, Moving>>({});
+  const pin = (id: string, pinned: boolean) => void arrangeSession<Pick<Moving, "change">>(setMoving, id, { pinned }, { change: "pin" });
+  // Moving a pinned session to a section unpins it in the same change, so the move shows; to no section, the pin
+  // stays (R22). A move into a section being made reads the pin as listed when its name was entered: the session's
+  // Pin and Unpin wait while Core makes it (`movingShown`), so the pin can't change in this window meanwhile.
+  const moveToSection = (id: string, sectionId: string | null) => {
+    const pinned = sessions.state === "ready" && sessions.sessions.some((s) => s.id === id && s.pinned);
+    const fields = sectionId !== null && pinned ? { section_id: sectionId, pinned: false } : { section_id: sectionId };
+    void arrangeSession<Pick<Moving, "change">>(setMoving, id, fields, { change: "section" });
+  };
+  // A new section's heading, while it is shown with its name field: from the arrange menu, or from a session's Move
+  // to section, which moves that session into it once named (FLOW-ORGANIZE-SESSIONS, steps 3 and 5). Sections are
+  // seen only grouped by section, so choosing it under another grouping switches to grouping by section (R36).
+  // `opener` is what the menu gave focus back to as New section was chosen (More, the tile, or the arrange button),
+  // which takes it again when nothing is made.
+  const [newSection, setNewSection] = useState<{ for?: string; opener?: HTMLElement }>();
+  const startNewSection = (forSession?: string) => {
+    sections.createReset();
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+    setNewSection({ for: forSession, opener });
+    if (arrangement.groupBy !== "section") arrange(choicePatch({ groupBy: "section" }));
+  };
+  // A section being made for a session counts as that session's change on its way, so Pin, Unpin and Move to section
+  // wait for it, one at a time, and its move is measured from where it is (R22).
+  const movingShown: Record<string, Moving> =
+    newSection?.for !== undefined && sections.creating?.state === "sending" ? { ...moving, [newSection.for]: { state: "sending", change: "section" } } : moving;
+  // Grouped by anything else, as when Core refused the switch, the heading has nowhere to show, so it goes.
+  if (newSection && arrangement.groupBy !== "section") setNewSection(undefined);
+  const nameNewSection = async (name: string) => {
+    const section = await sections.create(name);
+    if (!section) return undefined;
+    const forSession = newSection?.for;
+    setNewSection(undefined);
+    if (forSession !== undefined) moveToSection(forSession, section.id);
+    return section;
+  };
 
   // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
   // archives it, and keeps its pin and section either way. The list is read again to show the change; archiving the
@@ -836,6 +872,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             onGroupBy: (groupBy) => arrange(choicePatch({ groupBy })),
             onSortBy: (sortBy) => arrange(choicePatch({ sortBy })),
             onShow: (show) => arrange(choicePatch({ show })),
+            onNewSection: () => startNewSection(),
+            newSectionUnavailable: sectionsUnavailable(sections.view),
             onReset: () => arrange(RESET_PATCH),
             onAllSessions: () => dispatch({ type: "allSessions" }),
           }}
@@ -852,7 +890,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               now={today}
               arrangeProblem={arrangeProblem}
               sessions={railWaits && railSessions.state === "ready" ? { state: "loading" } : railSessions}
-              sections={sections.view}
               sectionHandlers={{
                 onRename: sections.rename,
                 renaming: sections.renaming,
@@ -860,6 +897,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                 onDelete: (id) => void sections.remove(id),
                 removing: sections.removing,
               }}
+              newSection={newSection && { ...newSection, creating: sections.creating, onName: nameNewSection, onReset: sections.createReset, onCancel: () => setNewSection(undefined) }}
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
@@ -870,7 +908,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               collapsed={collapsed}
               onToggle={toggleGroup}
               onPin={pin}
-              pinning={pinning}
+              onMove={moveToSection}
+              moving={movingShown}
+              sections={sections.view}
+              onNewSection={startNewSection}
               onMark={markUnseen}
               marking={marking}
               onRename={rename}
@@ -923,7 +964,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               }}
               onNewSession={() => dispatch({ type: "newSession" })}
               onPin={pin}
-              pinning={pinning}
+              onMove={moveToSection}
+              moving={movingShown}
+              sections={sections.view}
+              onNewSection={startNewSection}
               onMark={markUnseen}
               marking={marking}
               activeId={shownId}
