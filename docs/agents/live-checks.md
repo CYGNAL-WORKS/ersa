@@ -22,6 +22,7 @@ Put it in `apps/shell/live/<name>.live.ts`, and import `test` and `expect` from 
 - `answerDialog(answer)`: answers the next system dialog the Interface opens, with a path, a list of paths, or `null` for Cancel. Call it before the step that opens the dialog, and await it afterward: it resolves with the command and the options the Interface asked for. A dialog that opens with no answer waiting fails the test.
 - `drop(paths, onto?)`: drops files and folders on the window, over the center of the `onto` locator, as a drop from File Explorer arrives (drag-enter, drag-over, then drag-drop).
 - `shot(name)`: saves a numbered screenshot. Take one after each step a reviewer should see.
+- `closeWindow()`: closes the window as its close button does. `windowShown()` says whether it is on screen, read from Windows' own window list, since a hidden window's page still reports itself visible. `running()` says whether the Shell and Core both still run.
 
 Core starts the stand-in backend for sessions by default: it starts and takes messages without calling a model. For the real Claude Code, signed in as you on this machine, add `test.use({ backend: "claude" })` to the file; its screenshots can't be published (below).
 

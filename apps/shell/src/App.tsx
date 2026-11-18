@@ -105,9 +105,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [workspaces, setWorkspaces] = useState<Record<string, Workspace>>({});
   const [workspaceReads, setWorkspaceReads] = useState<Record<string, string | null>>({});
   const [trusting, setTrusting] = useState<Record<string, Sending>>({});
-  // The workspaces of each project whose trust the user withdrew here, as they were then. A session running
-  // in one of them keeps the configuration it started with.
-  const [withdrawn, setWithdrawn] = useState<Record<string, string[]>>({});
+  // The projects whose trust the user withdrew in this window, by id. Kept for the life of the Interface, which
+  // closing the window hides rather than ends (FLOW-CLOSE-AND-QUIT-R01), and never saved.
+  const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(new Set());
   const [adding, setAdding] = useState<Sending>();
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
@@ -675,27 +675,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       await client.call("project.set_trust", { id: project.id, trusted });
       setTrusting(({ [project.id]: _, ...rest }) => rest);
       connection.current?.reload("projects");
-      // Trust is read when a session starts, so withdrawing it leaves running sessions as they are. Best
-      // effort: trust is already withdrawn, so a failed lookup only leaves the note out.
-      if (!trusted) {
-        const listed = await client.call("workspace.list", { project_id: project.id }).catch(() => []);
-        setWithdrawn((w) => ({ ...w, [project.id]: listed.map((ws) => ws.id) }));
-      }
+      // Ersa's withdrawal leaves the backend's own record of the folder's trust (ADR 0028), so the heading says
+      // so while the project stays untrusted (FLOW-NEW-SESSION-R40, R41).
+      if (!trusted) setWithdrawn((w) => new Set(w).add(project.id));
     } catch (error) {
       setTrusting((s) => ({ ...s, [project.id]: { state: "failed", message: describeError(error) } }));
     }
   };
 
-  // Said beneath an untrusted project while a session from before the withdrawal still runs; derived on each
-  // render, so it goes once those sessions stop or the project is trusted again. A session's state arrives
-  // with its tile (`session.tile`), so that is the state read.
-  const keepingTrust: string[] = [];
-  if (projects.state === "ready" && sessions.state === "ready") {
-    const live = sessions.sessions.filter((s) => s.tile.state !== "ended" && s.tile.state !== "error");
-    for (const p of projects.projects) {
-      if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) keepingTrust.push(p.id);
-    }
-  }
+  // Said beneath a project whose trust the user withdrew here, while Core still lists it untrusted: trusted
+  // again from anywhere, the note no longer applies.
+  const backendTrusts = projects.state === "ready" ? projects.projects.filter((p) => !p.trusted && withdrawn.has(p.id)).map((p) => p.id) : [];
   // Why each project's workspaces could not be read; and whether some project's are still being read, in which
   // case a session the rail cannot place yet waits rather than sit at the end.
   const workspaceErrors: Record<string, string> = {};
@@ -834,7 +824,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               offline={view.phase !== "connected"}
               onSetTrust={setTrust}
               trusting={trusting}
-              keepingTrust={keepingTrust}
+              backendTrusts={backendTrusts}
               localHost={hello?.host.id}
               hostNames={hostNames}
               backends={backends}

@@ -14,4 +14,16 @@ fn main() {
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("the Tauri build step failed");
+    // The tests that run Tauri's mock runtime (tests/close_and_quit.rs) link
+    // Windows' common controls, whose version 6 only a manifest asks for;
+    // without it the test binary cannot start. The Tauri build step above
+    // embeds one in the executable only.
+    let target = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    if target == "windows" && env == "msvc" {
+        println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
+        println!(
+            "cargo:rustc-link-arg-tests=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
+        );
+    }
 }

@@ -63,6 +63,9 @@ libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+# Tauri's mock runtime, which runs the Shell's window-event handler with no
+# window (`tauri::test`).
+tauri = { version = "2", features = ["tray-icon", "test"] }
 # A paused clock, so the bridge's tests wait minutes in no time.
 tokio = { version = "1", features = ["test-util"] }
 
