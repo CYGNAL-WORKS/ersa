@@ -531,13 +531,20 @@ struct Presented {
     /// (PROTO-CORE-API-R71).
     recorded: ersa_adapter::RecordedSettings,
     reported: settings::Reported,
+    /// RFC 3339: for a session that is not live, the time of the latest
+    /// conversation entry in its record; for a live one, the `ts` of its
+    /// latest `turn.completed` since it went live, else what its record gave
+    /// when it went live. Held in memory only: Core stores no last activity
+    /// (PROTO-CORE-API-R75).
+    last_activity_at: Option<String>,
 }
 
 impl Presented {
-    /// Takes what the session's record says, and answers whether the title
-    /// or the date created changed. Every tile carries both as presented, so
-    /// the ones presented until now are the ones the last tile carried, and
-    /// a change is sent to every window (PROTO-CORE-API-R103, R106).
+    /// Takes what the session's record says, and answers whether the title,
+    /// the date created or the last activity changed. Every tile carries
+    /// them as presented, so the ones presented until now are the ones the
+    /// last tile carried, and a change is sent to every window
+    /// (PROTO-CORE-API-R59, R103, R106).
     fn take_summary(&mut self, summary: RecordSummary, live: bool, session: &str) -> bool {
         let retitled = summary.title.is_some() && summary.title != self.title;
         if summary.title.is_some() {
@@ -548,6 +555,21 @@ impl Presented {
         // last reported (PROTO-CORE-API-R71).
         if !live {
             self.reported = settings::Reported::default();
+        }
+        // A live session's last activity is its turns' ends from when it went
+        // live; the record's is what it was until then (PROTO-CORE-API-R75).
+        // A time not in Core's own form would not sort with the rest.
+        let mut reactive = false;
+        if !live {
+            let at = summary.last_activity_at.filter(|at| {
+                let usable = is_rfc3339(at);
+                if !usable {
+                    tracing::warn!(session, last_activity_at = %at, "the session record's latest time is not RFC 3339; not used");
+                }
+                usable
+            });
+            reactive = at != self.last_activity_at;
+            self.last_activity_at = at;
         }
         // The record's wrapper is the backend's and changes between
         // versions: a time that is not RFC 3339 is not used.
@@ -562,7 +584,7 @@ impl Presented {
             }
             None => {}
         }
-        retitled || redated
+        retitled || redated || reactive
     }
 }
 
@@ -741,6 +763,7 @@ impl Handle {
                 created_at,
                 recorded: Default::default(),
                 reported: Default::default(),
+                last_activity_at: None,
             }),
             hub: Mutex::default(),
             raw: Mutex::default(),
@@ -881,7 +904,7 @@ impl Handle {
             pinned: row.pinned,
             section_id: row.section_id,
             unseen: row.unseen,
-            last_activity_at: row.last_activity_at,
+            last_activity_at: presented.last_activity_at,
             deleting: row.deleting,
             tile,
         }
@@ -1109,6 +1132,43 @@ impl SessionManager {
 
     fn live(&self, id: &str) -> Result<Arc<Live>, SessionError> {
         self.handle(id)?.live().ok_or_else(not_running)
+    }
+
+    /// Reads again the record of every session that is not live, for
+    /// `session.list`: work done outside Ersa shows the next time the rail
+    /// lists sessions, its last activity among it (PROTO-CORE-API-R75,
+    /// FLOW-ORGANIZE-SESSIONS). The adapter keeps each summary by the
+    /// record's state, so a record that has not changed is not read again.
+    /// Read side by side and never waited on past a bound, as at startup: a
+    /// file system that stopped answering leaves those sessions as they were.
+    pub async fn reread_records(&self, transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>) {
+        let mut summaries = tokio::task::JoinSet::new();
+        for handle in self.handles() {
+            // A live session's last activity follows its turns, and its
+            // record is read again when it ends.
+            if handle.live().is_some() {
+                continue;
+            }
+            let Some(row) = handle.stored_row() else {
+                continue;
+            };
+            if row.backend_session_id.is_none() || row.deleting.is_some() {
+                continue;
+            }
+            let (Some(adapter), Some(transport)) =
+                (self.adapter(&row.backend), transport_for(&row.host_id))
+            else {
+                continue;
+            };
+            let (store, tiles) = (self.store.clone(), self.tiles.clone());
+            summaries.spawn(async move {
+                read_summary(&store, &handle, &tiles, adapter, transport, row).await;
+            });
+        }
+        let all = async { while summaries.join_next().await.is_some() {} };
+        if tokio::time::timeout(STARTUP_SUMMARIES, all).await.is_err() {
+            tracing::warn!("reading the sessions' records for the list took too long");
+        }
     }
 
     /// Every session, oldest first.
@@ -3093,31 +3153,16 @@ async fn run_pipeline(pipeline: Pipeline) {
                 }
             }
         }
-        // When a turn ends, its time is the session's last activity, and
-        // only then (PROTO-CORE-API-R37). Stored before the turn's end is
-        // published, as the backend's id is, so a client that saw it end
-        // finds the time in `session.list`.
-        let ended = events
-            .iter()
-            .rev()
-            .find_map(|envelope| match envelope.event {
-                Event::TurnCompleted(_) => Some(envelope.ts.clone()),
-                _ => None,
-            });
+        // A live session's last activity is the `ts` of its latest
+        // `turn.completed`, whatever the outcome; of several in one batch,
+        // the last (PROTO-CORE-API-R75). Held in memory only, and set before
+        // the turn's end is published, so a client that saw it end finds
+        // the time in `session.list`.
         let mut activity_changed = false;
-        if let Some(at) = ended {
-            match store
-                .set_session_last_activity(handle.id.clone(), at.clone())
-                .await
-            {
-                Ok(()) => {
-                    let change = RowChange::LastActivity(at);
-                    handle.admission.wrote(&handle.id, change);
-                    activity_changed = true;
-                }
-                Err(e) => {
-                    tracing::error!(session = %handle.id, error = %e, "could not record when a turn ended");
-                }
+        for envelope in &events {
+            if let Event::TurnCompleted(_) = envelope.event {
+                lock(&handle.presented).last_activity_at = Some(envelope.ts.clone());
+                activity_changed = true;
             }
         }
         publish(&mut lock(&handle.hub), &handle.id, &events);
@@ -3189,17 +3234,16 @@ fn send_current_tile(tiles: &TileHub, handle: &Handle) {
 /// which every tile carries as `session.list` has them. None is sent for a
 /// session that is gone.
 fn send_tile(tiles: &TileHub, handle: &Handle, tile: &Tile) {
-    let Some(row) = handle.stored_row() else {
+    if handle.stored_row().is_none() {
         return;
-    };
-    let last_activity_at = row.last_activity_at;
+    }
     let presented = lock(&handle.presented).clone();
     // Every tile carries the title and the date created, so a coalesced
     // tile never loses a change to either (PROTO-CORE-API-R83, R105).
     let params = SessionTileParams {
         session_id: handle.id.clone(),
         tile: tile.clone(),
-        last_activity_at,
+        last_activity_at: presented.last_activity_at,
         title: presented.title,
         created_at: presented.created_at,
     };
@@ -3411,15 +3455,56 @@ mod tests {
             created_at: "2026-11-15T09:00:00.000Z".into(),
             recorded: Default::default(),
             reported: Default::default(),
+            last_activity_at: None,
         };
         let summary = || RecordSummary {
             title: Some("Same".into()),
             created_at: Some("2026-11-01T00:00:00.000Z".into()),
             settings: Default::default(),
+            last_activity_at: None,
         };
         assert!(presented.take_summary(summary(), false, "s-1"));
         assert_eq!(presented.created_at, "2026-11-01T00:00:00.000Z");
         assert!(!presented.take_summary(summary(), false, "s-1"));
+    }
+
+    /// A session that is not live takes its record's last activity, a new
+    /// one asking for a tile and one gone from the record leaving none; a
+    /// live one keeps what it has, its turns' ends; a time not in Core's
+    /// form is not used.
+    // verifies: PROTO-CORE-API-R75
+    #[test]
+    fn the_record_gives_the_last_activity_only_of_a_session_that_is_not_live() {
+        let mut presented = Presented {
+            title: None,
+            created_at: "2026-11-01T00:00:00.000Z".into(),
+            recorded: Default::default(),
+            reported: Default::default(),
+            last_activity_at: None,
+        };
+        let summary = |at: Option<&str>| RecordSummary {
+            created_at: Some("2026-11-01T00:00:00.000Z".into()),
+            last_activity_at: at.map(String::from),
+            ..Default::default()
+        };
+        let at = |p: &Presented| p.last_activity_at.clone();
+        assert!(presented.take_summary(summary(Some("2026-11-02T00:00:00.000Z")), false, "s"));
+        assert_eq!(at(&presented).as_deref(), Some("2026-11-02T00:00:00.000Z"));
+        assert!(!presented.take_summary(summary(Some("2026-11-02T00:00:00.000Z")), false, "s"));
+
+        // Live, it keeps its own: the `ts` of its latest turn's end.
+        presented.last_activity_at = Some("2026-11-18T12:00:00.000Z".into());
+        assert!(!presented.take_summary(summary(Some("2026-11-03T00:00:00.000Z")), true, "s"));
+        assert_eq!(at(&presented).as_deref(), Some("2026-11-18T12:00:00.000Z"));
+
+        // Not live again, the record's, though it is older than the turn's end.
+        assert!(presented.take_summary(summary(Some("2026-11-03T00:00:00.000Z")), false, "s"));
+        assert_eq!(at(&presented).as_deref(), Some("2026-11-03T00:00:00.000Z"));
+        assert!(presented.take_summary(summary(Some("yesterday")), false, "s"));
+        assert_eq!(at(&presented), None);
+        presented.last_activity_at = Some("2026-11-03T00:00:00.000Z".into());
+        assert!(presented.take_summary(summary(None), false, "s"));
+        assert_eq!(at(&presented), None);
     }
 
     fn subscriber() -> Subscriber {
@@ -3666,7 +3751,6 @@ mod tests {
             deleting: None,
             pinned: false,
             section_id: None,
-            last_activity_at: None,
             forked_from: None,
             forked_through: None,
             model_at: None,
@@ -4494,7 +4578,6 @@ mod tests {
                 deleting: None,
                 pinned: false,
                 section_id: None,
-                last_activity_at: None,
                 forked_from: None,
                 forked_through: None,
                 model_at: None,

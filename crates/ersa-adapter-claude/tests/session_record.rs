@@ -975,6 +975,123 @@ fn the_recorded_session_lists_under_its_custom_title() {
     );
 }
 
+/// The last activity a listing reports for a record of `lines`.
+fn last_activity_of(lines: Vec<String>) -> Option<String> {
+    let home = home_with(&[(SESSION_A, lines)]);
+    list_sessions(home.path(), CWD).unwrap().sessions[0]
+        .last_activity_at
+        .clone()
+}
+
+/// `value` with a `timestamp` of `at` added.
+fn at(value: Value, at: &str) -> String {
+    let mut value = value;
+    value["timestamp"] = json!(at);
+    value.to_string()
+}
+
+/// A session's last activity is the `timestamp` of the latest `user` or
+/// `assistant` entry in the tail, by time rather than by place in the file,
+/// and never another kind of entry's, however late.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R42
+#[test]
+fn last_activity_is_the_latest_user_or_assistant_entry_in_the_tail() {
+    let first = at(prompt("u1", None, "First"), "2026-11-01T10:00:00.000Z");
+    let answer = at(
+        reply("a1", "u1", "m1", "Answer"),
+        "2026-11-01T10:00:05.500Z",
+    );
+    // Written later in the file, stamped earlier: not the latest.
+    let early = at(prompt("u0", None, "Early"), "2026-11-01T09:00:00.000Z");
+    // Later entries of other kinds are not conversation.
+    let title = at(
+        json!({"type": "custom-title", "customTitle": "T", "sessionId": SESSION_A}),
+        "2026-11-02T00:00:00.000Z",
+    );
+    let last = at(
+        json!({"type": "last-prompt", "lastPrompt": "First", "sessionId": SESSION_A}),
+        "2026-11-02T00:00:01.000Z",
+    );
+    let system = at(
+        json!({"type": "system", "subtype": "turn_duration", "uuid": "s1"}),
+        "2026-11-02T00:00:02.000Z",
+    );
+    assert_eq!(
+        last_activity_of(vec![
+            first.clone(),
+            answer.clone(),
+            early,
+            title,
+            last,
+            system
+        ])
+        .as_deref(),
+        Some("2026-11-01T10:00:05.500Z")
+    );
+    // A tool result is a `user` entry too.
+    let result = at(
+        json!({"type": "user", "uuid": "t1", "message": {"role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]}}),
+        "2026-11-01T10:00:09.000Z",
+    );
+    assert_eq!(
+        last_activity_of(vec![first.clone(), answer.clone(), result]).as_deref(),
+        Some("2026-11-01T10:00:09.000Z")
+    );
+    // A record with no conversation entry has none.
+    assert_eq!(
+        last_activity_of(vec![entry("custom-title", "customTitle", "Only a title")]),
+        None
+    );
+
+    // Only the tail is read: a conversation entry only the head holds is
+    // not the last activity, whatever its time.
+    let mut lines = vec![at(
+        prompt("u9", None, "Late, at the start"),
+        "2026-12-01T00:00:00.000Z",
+    )];
+    lines.extend(filler(200));
+    lines.push(answer);
+    assert_eq!(
+        last_activity_of(lines).as_deref(),
+        Some("2026-11-01T10:00:05.500Z")
+    );
+}
+
+/// The recorded session's last activity is its latest `user` or
+/// `assistant` entry's time, though an entry of another kind follows them.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R42
+#[test]
+fn the_recorded_session_s_last_activity_is_its_latest_conversation_entry() {
+    let record = fixtures_root().join("2.1.316/record/01-session-resume.jsonl");
+    let text = fs::read_to_string(record).unwrap();
+    let entries: Vec<Value> = text
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let id = entries
+        .iter()
+        .find_map(|e| e["sessionId"].as_str().map(String::from))
+        .unwrap();
+    // The fixture's times are all in one zone and form, so as text they
+    // sort as times.
+    let conversation = entries
+        .iter()
+        .filter(|e| matches!(e["type"].as_str(), Some("user" | "assistant")))
+        .filter_map(|e| e["timestamp"].as_str().map(String::from))
+        .max()
+        .expect("the fixture has turns");
+    // A later entry of another kind, as the CLI appends after a turn.
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    lines.push(at(
+        json!({"type": "custom-title", "customTitle": "Later", "sessionId": id}),
+        "2099-01-01T00:00:00.000Z",
+    ));
+    let home = home_with(&[(id.as_str(), lines)]);
+    let listed = list_sessions(home.path(), CWD).unwrap().sessions;
+    assert_eq!(listed[0].last_activity_at, Some(conversation));
+}
+
 #[test]
 fn listing_skips_what_is_not_a_record_and_orders_newest_first() {
     let home = home_with(&[

@@ -687,8 +687,6 @@ pub enum RowChange {
     Mode(String),
     /// The backend's own id for the session.
     BackendId(String),
-    /// When the session's latest turn ended.
-    LastActivity(String),
     /// A value Core gave the backend, and when.
     Requested {
         setting: Setting,
@@ -1740,7 +1738,6 @@ fn write(row: &mut SessionRow, change: RowChange) {
         RowChange::Deleting(deleting) => row.deleting = Some(deleting),
         RowChange::Mode(mode) => row.mode = Some(mode),
         RowChange::BackendId(id) => row.backend_session_id = Some(id),
-        RowChange::LastActivity(at) => row.last_activity_at = Some(at),
         RowChange::Requested { setting, value, at } => {
             let (stored, stored_at) = match setting {
                 Setting::Model => (&mut row.model, &mut row.model_at),
