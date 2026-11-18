@@ -177,7 +177,7 @@ describe("a tile while its session is being deleted (LAY-SHELL, Being deleted)",
 describe("a tile while a fork of its session is on its way (FLOW-FORK-SESSION, step 2)", () => {
   it("reads Forking with the starting arc in ink-muted over a state with no mark of its own", () => {
     for (const state of ["idle", "ended"] as const) {
-      const view = tileOf(session({ state }), {}, true);
+      const view = tileOf(session({ state }), {}, { forking: true });
       expect(view.phrase).toBe("Forking…");
       expect(view.mark).toBe("starting");
       expect(view.tone).toBe("muted");
@@ -185,8 +185,28 @@ describe("a tile while a fork of its session is on its way (FLOW-FORK-SESSION, s
   });
 
   it("keeps a state that has a mark, since the original keeps its state (step 4)", () => {
-    expect(tileOf(session({ state: "running" }), {}, true).mark).toBe("working");
-    expect(tileOf(session({ state: "error" }), {}, true).phrase).toBe("Error");
-    expect(tileOf(session({ pending: [question] }), {}, true).mark).toBe("needsYou");
+    expect(tileOf(session({ state: "running" }), {}, { forking: true }).mark).toBe("working");
+    expect(tileOf(session({ state: "error" }), {}, { forking: true }).phrase).toBe("Error");
+    expect(tileOf(session({ pending: [question] }), {}, { forking: true }).mark).toBe("needsYou");
+  });
+});
+
+describe("an unseen session's title (LAY-SHELL, Unseen; docs/design/RAIL.md, A tile: the title)", () => {
+  it.each(["idle", "waiting_user", "ended"] as const)("reads strong and never muted when %s, though that state rests a title", (state) => {
+    const view = tileOf(session({ state }, { unseen: true }));
+    expect([view.titleUnseen, view.titleMuted]).toEqual([true, false]);
+  });
+
+  it("reads strong on an archived session, whose title otherwise reads muted", () => {
+    expect(tileOf(session({ state: "ended" }, { archived: true, unseen: true }))).toMatchObject({ titleUnseen: true, titleMuted: false, mark: "archived" });
+  });
+
+  it("never reads unseen on the active session, even in the render that makes it active", () => {
+    const view = tileOf(session({ state: "idle" }, { unseen: true }), {}, { active: true });
+    expect([view.titleUnseen, view.titleMuted]).toEqual([false, true]);
+  });
+
+  it("reads as its state says when Core doesn't report it unseen", () => {
+    expect(tileOf(session({ state: "idle" }))).toMatchObject({ titleUnseen: false, titleMuted: true });
   });
 });

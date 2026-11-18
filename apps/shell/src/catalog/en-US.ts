@@ -122,6 +122,14 @@ export const enUS = {
       // Followed by Core's reason, beneath the tile.
       pinError: "Ersa can't pin this session.",
       unpinError: "Ersa can't unpin this session.",
+      // After Pin: Mark as unread on a session that isn't unseen, Mark as read on one that is (FLOW-ORGANIZE-SESSIONS-R24).
+      markUnreadButton: "Mark as unread",
+      markReadButton: "Mark as read",
+      // Beneath Mark as unread on the active session.
+      markUnreadActiveReason: "Available once you open another session",
+      // Beneath the tile, before Core's reason, when Core refuses.
+      markUnreadError: "Ersa can't mark this session as unread.",
+      markReadError: "Ersa can't mark this session as read.",
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",

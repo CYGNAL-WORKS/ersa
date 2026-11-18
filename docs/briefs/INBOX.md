@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-18 LAY-SHELL: `docs/design/RAIL.md` mutes an archived tile's title and draws an unseen one at the heading weight in `ink`, but doesn't say which wins on an archived session marked unread (Mark as unread is offered on archived tiles). The Interface lets unseen win, as it already does over an idle or ended title, so the mark the user chose shows.
 
 ## Resolved recently (optional, trimmed in planning passes)
