@@ -43,7 +43,7 @@ export const enUS = {
       sortByButton: "Sort by",
       showButton: "Show",
       resetButton: "Reset to defaults",
-      allSessionsButton: "All sessions",
+      viewAllButton: "View all",
       groupByProjectButton: "Project",
       groupByDateButton: "Date",
       groupByNoneButton: "None",
@@ -94,8 +94,9 @@ export const enUS = {
       savingProgress: "Saving…",
       trustError: "Ersa can't change this project's trust.",
       workspacesError: "Ersa can't read this project's workspaces.",
-      // Beneath a project whose trust was withdrawn while sessions that started trusted still run.
-      keepTrust: "Running sessions keep their current settings until they are stopped.",
+      // Beneath a project whose trust the user withdrew in Ersa. A backend that was told of the trust keeps its own
+      // record of it (ADR 0028), but one may never have been told, so it says "may".
+      backendTrustNote: "Claude Code may still trust this folder when you use it outside Ersa.",
     },
     foot: {
       attachedLabel: "Attached to {label}",

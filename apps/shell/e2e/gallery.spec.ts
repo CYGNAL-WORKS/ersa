@@ -617,3 +617,30 @@ test("a working glyph breathes, a new chevron breathes once, and both hold still
   const still = await animations();
   expect([still.glyph.split(" ")[0], still.chevron.split(" ")[0], still.mark.split(" ")[0]]).toEqual(["none", "none", "none"]);
 });
+
+// A project heading (docs/design/RAIL.md): the note after a withdrawal of trust starts where the project's name does,
+// and an expanded, trusted heading keeps no empty place toward its trailing edge that would cut its name shorter.
+test("a heading's trust note starts at its name, and an expanded trusted heading has no empty status, in both themes", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const figure = (theme: string, label: string) =>
+    page.locator(`[data-theme="${theme}"] [data-component="RailTree"] figure`).filter({ has: page.locator("figcaption", { hasText: new RegExp(`^${label}$`) }) });
+  // The project's own heading, past the Pinned group's, which is drawn closed.
+  const statusShown = (theme: string, label: string) =>
+    figure(theme, label).locator(".rail-project:not(.rail-pinned *) .rail-heading-status").first().evaluate((el) => getComputedStyle(el).display !== "none");
+  for (const theme of ["light", "dark"]) {
+    for (const label of ["Trust withdrawn", "Trust withdrawn, collapsed"]) {
+      const withdrawn = figure(theme, label).locator(".rail-project:has(.rail-project-note[data-open])");
+      const name = await withdrawn.locator(".rail-heading-name").first().evaluate((el) => el.getBoundingClientRect().left);
+      const text = await withdrawn.locator(".rail-project-note-text").first().evaluate((el) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return range.getBoundingClientRect().left;
+      });
+      expect(Math.abs(text - name), `${label} in ${theme}`).toBeLessThan(1);
+      // Not trusted, its status holds "Not trusted".
+      expect(await statusShown(theme, label), `${label} in ${theme}`).toBe(true);
+    }
+    expect(await statusShown(theme, "Saving trust"), `expanded and trusted in ${theme}`).toBe(false);
+    expect(await statusShown(theme, "Collapsed"), `collapsed in ${theme}`).toBe(true);
+  }
+});

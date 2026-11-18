@@ -36,8 +36,8 @@ interface RailTreeProps extends TileHandlers {
   onSetTrust?: (project: Project, trusted: boolean) => void;
   /** Trust being changed, by project id, and why it could not be. */
   trusting?: Readonly<Record<string, Sending>>;
-  /** The projects whose trust was withdrawn while sessions that started trusted still run, which keep it. */
-  keepingTrust?: readonly string[];
+  /** The projects whose trust the user withdrew in Ersa, which Claude Code may still trust (FLOW-NEW-SESSION-R40). */
+  backendTrusts?: readonly string[];
   /** The local machine's host id: a project on any other host is named with its host. */
   localHost?: string;
   /** Each host's name, by id; a host not listed is named by its id. */
@@ -428,7 +428,7 @@ function ProjectGroup({
   onNewSession,
   onSetTrust,
   trusting = {},
-  keepingTrust = [],
+  backendTrusts = [],
   workspaceErrors = {},
   localHost,
   hostNames,
@@ -540,10 +540,8 @@ function ProjectGroup({
           onDismiss={closeQuestion}
         />
       )}
-      {/* Always there, so a screen reader announces the text when it appears. */}
-      <p className="rail-project-note" role="status">
-        {saving ? t("rail.heading.savingProgress") : keepingTrust.includes(project.id) ? t("rail.heading.keepTrust") : ""}
-      </p>
+      {/* Always there, so a screen reader announces the text when it appears; it opens to hold the text. */}
+      <ProjectNote>{saving ? t("rail.heading.savingProgress") : backendTrusts.includes(project.id) ? t("rail.heading.backendTrustNote") : ""}</ProjectNote>
       {trust?.state === "failed" && <Problem lead={t("rail.heading.trustError")} reason={trust.message} />}
       {workspaceErrors[project.id] !== undefined && <Problem lead={t("rail.heading.workspacesError")} reason={workspaceErrors[project.id] ?? ""} />}
       {/* The tiles slide closed and open in this frame; folded away, they take no focus and are not read. */}
@@ -624,6 +622,20 @@ function GroupToggle({
         </span>
       </button>
     </h3>
+  );
+}
+
+/**
+ * What changing trust says beneath a project's heading (docs/design/RAIL.md, A project heading): it opens, growing and
+ * fading in, while it has something to say, and takes no room while it has nothing.
+ */
+function ProjectNote({ children }: { children: string }) {
+  return (
+    <div className="rail-project-note" data-open={children ? "" : undefined}>
+      <p className="rail-project-note-text" role="status">
+        {children}
+      </p>
+    </div>
   );
 }
 

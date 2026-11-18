@@ -88,9 +88,9 @@ Show
 
 Reset to defaults
 
-### `rail.arrange.allSessionsButton`
+### `rail.arrange.viewAllButton`
 
-All sessions
+View all
 
 ### `rail.arrange.groupByProjectButton`
 
@@ -234,9 +234,9 @@ Ersa can't change this project's trust.
 
 Ersa can't read this project's workspaces.
 
-### `rail.heading.keepTrust`
+### `rail.heading.backendTrustNote`
 
-Running sessions keep their current settings until they are stopped.
+Claude Code may still trust this folder when you use it outside Ersa.
 
 ### `rail.foot.attachedLabel`
 
