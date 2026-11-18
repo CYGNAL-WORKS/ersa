@@ -77,8 +77,9 @@ function fakeCore({ refuse = false as boolean | number, unseen = [] as string[] 
     },
   };
   // A session's tile changes as Core reports it, its title kept.
-  const tile = (id: string, state: Tile["state"]) => {
-    list = list.map((s) => (s.id === id ? { ...s, state, tile: { state, pending: [] } } : s));
+  // `tokens` makes each tile differ, as a working session's do.
+  const tile = (id: string, state: Tile["state"], tokens?: number) => {
+    list = list.map((s) => (s.id === id ? { ...s, state, tile: { state, pending: [], context_tokens: tokens } } : s));
     const s = list.find((x) => x.id === id) as Session;
     return act(() =>
       onEvent({ kind: "notification", method: "session.tile", params: { session_id: id, title: s.title, created_at: s.created_at, tile: s.tile } } as CoreEvent),
@@ -232,6 +233,55 @@ describe("the unseen mark across restarts", () => {
     await settle();
     expect(core.unseen("s1")).toBe(false);
     expect(rail().textContent).not.toContain("Ersa can't mark this session");
+  });
+
+  it("asks Core no more after a refusal while nothing calls for it anew, so its note stays", async () => {
+    const core = fakeCore({ refuse: true });
+    await open(core);
+    await core.tile("s1", "running");
+    await core.tile("s1", "idle");
+    await settle();
+    expect(core.arranges).toEqual([{ id: "s1", unseen: true }]);
+    // Other sessions' tiles bring new lists; none asks again, and the note stays.
+    for (const state of ["running", "idle", "running"] as const) await core.tile("s2", state);
+    await settle();
+    expect(core.arranges).toHaveLength(1);
+    expect(rail().textContent).toContain("Ersa can't mark this session as unread.");
+    // Another turn in it, ending while not active, is a new occasion: asked once more.
+    await core.tile("s1", "running");
+    await core.tile("s1", "running");
+    await core.tile("s1", "idle");
+    await settle();
+    expect(core.arranges).toEqual([
+      { id: "s1", unseen: true },
+      { id: "s1", unseen: true },
+    ]);
+  });
+
+  it("asks again only as the session starts working, not on every tile while it works, when Core keeps refusing", async () => {
+    const core = fakeCore({ refuse: true, unseen: ["s1"] });
+    await open(core);
+    fireEvent.click(tileOf("Fix the build"));
+    await settle();
+    for (const tokens of [1, 2, 3, 4]) {
+      await core.tile("s1", "running", tokens * 1000);
+      await settle();
+    }
+    expect(core.arranges).toEqual([
+      { id: "s1", unseen: false },
+      { id: "s1", unseen: false },
+    ]);
+  });
+
+  it("asks again once Ersa reaches Core again after losing it", async () => {
+    const core = fakeCore({ refuse: 1, unseen: ["s1"] });
+    await open(core);
+    fireEvent.click(tileOf("Fix the build"));
+    await settle();
+    expect(core.unseen("s1")).toBe(true);
+    await core.drop();
+    await waitFor(() => expect(core.unseen("s1")).toBe(false), { timeout: 5_000 });
+    expect(core.arranges).toHaveLength(2);
   });
 
   it("leaves no mark on a session that finished its turn while Ersa couldn't reach Core", async () => {
