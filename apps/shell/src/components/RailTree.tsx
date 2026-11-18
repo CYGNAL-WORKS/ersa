@@ -109,8 +109,9 @@ interface RailTreeProps extends TileHandlers {
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };
   initialMenu?: string;
   initialAsking?: string;
-  /** For the gallery: the session whose tile menu is open, and a tile's title being edited. */
+  /** For the gallery: the session whose tile menu is open, with Move to section's submenu open too for `initialMoveMenu`, and a tile's title being edited. */
   initialTileMenu?: string;
+  initialMoveMenu?: string;
   initialTileDraft?: { id: string; draft: string };
 }
 
@@ -261,7 +262,6 @@ export function RailTree(props: RailTreeProps) {
   // A session waiting to move into a new section moves one change at a time too: while another is on its way, the
   // field reads busy and Enter waits.
   const newSectionSaving = newSection?.for !== undefined && Object.values(moving ?? {}).some((m) => m.state === "sending");
-  // A new section's heading goes where Core will put the section: after every section, before "No section".
   const draftHeading = newSection && <NewSectionHeading key="new-section" draft={newSection} saving={newSectionSaving} />;
   const deleted = useSectionDeletedFocus(root, tree.groups.map((g) => g.key), props.sectionHandlers?.removing);
   // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
@@ -317,7 +317,7 @@ export function RailTree(props: RailTreeProps) {
               onChevron={onChevron}
               {...actionsOf(s)}
               forking={props.forking?.[s.id]?.state === "sending"}
-              initialMenu={initialTileMenu === s.id}
+              initialMenu={props.initialMoveMenu === s.id ? "move" : initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
@@ -376,12 +376,11 @@ export function RailTree(props: RailTreeProps) {
                 </GroupTiles>
               </div>
             </li>
-            {tree.groups.map((group) => {
+            {withNewSection(tree.groups, draftHeading, (group) => {
               const closed = folded(group.key, group.sessions);
               const held = group.sessions.length > 0 && tiles(group.sessions);
               if (group.kind === "date" || group.kind === "no_section")
-                return [
-                  group.kind === "no_section" && draftHeading,
+                return (
                   <PlainGroup
                     key={group.key}
                     name={group.kind === "date" ? t(DATE_NAMES[group.key]) : t("rail.group.noSectionHeading")}
@@ -391,8 +390,8 @@ export function RailTree(props: RailTreeProps) {
                     toggle={closed.toggle}
                   >
                     {held}
-                  </PlainGroup>,
-                ];
+                  </PlainGroup>
+                );
               if (group.kind === "section")
                 return (
                   <SectionGroup
@@ -420,7 +419,6 @@ export function RailTree(props: RailTreeProps) {
                 </ProjectGroup>
               );
             })}
-            {!tree.groups.some((g) => g.kind === "no_section") && draftHeading}
           </ul>
         )}
         {looseShown && loose.length > 0 && tiles(loose)}
@@ -468,6 +466,17 @@ function movesInPlace(list: HTMLUListElement | null): void {
     return node;
   };
   list.appendChild = <T extends Node>(node: T): T => list.insertBefore(node, null);
+}
+
+/**
+ * The groups drawn, with a new section's heading where Core will put the section: after every section, before "No
+ * section". All in one list, so the heading keeps its field and what is typed in it when "No section" comes or goes.
+ */
+function withNewSection<G extends { kind: string }>(groups: readonly G[], heading: ReactNode, draw: (group: G) => ReactNode): ReactNode[] {
+  const drawn = groups.map(draw);
+  if (!heading) return drawn;
+  const at = groups.findIndex((g) => g.kind === "no_section");
+  return at < 0 ? [...drawn, heading] : [...drawn.slice(0, at), heading, ...drawn.slice(at)];
 }
 
 /** Each date group's heading (FLOW-ORGANIZE-SESSIONS-R07). */
