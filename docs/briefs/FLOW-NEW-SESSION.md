@@ -56,7 +56,9 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R37**: For a project whose version control has a workspace adapter, the new-session screen's session controls shall show, after the project chip, a checkbox labeled Worktree that says it gives the session an isolated copy of the repository; it shall be checked while a new isolated workspace is chosen and unchecked while the root workspace is, and changing it shall choose the other.
 - **FLOW-NEW-SESSION-R38**: With Worktree checked, R04 shall create the isolated workspace naming no base, so that Core makes it from the repository's default branch, or, when the repository has none, from the checked-out commit (PROTO-CORE-API-R19), and Ersa shall read no branches for it.
 - **FLOW-NEW-SESSION-R39**: A session's controls shall show the Worktree checkbox unavailable, checked for a session in an isolated workspace and unchecked for one in the root workspace; it shall also be unavailable while the first message is on its way.
-- **FLOW-NEW-SESSION-R31**: When the user withdraws trust from a project, a note beneath the project's heading shall say, for as long as the window stays open, that the backend's own tools keep trusting the folder.
+- ~~**FLOW-NEW-SESSION-R31**~~: retired 2026-11-18 (the backend's tools may never have learned of the trust, and closing the window only hides it), replaced by R40 and R41.
+- **FLOW-NEW-SESSION-R40**: When the user withdraws trust from a project, a note beneath the project's heading shall say that Claude Code may still trust the folder when the user works there outside Ersa.
+- **FLOW-NEW-SESSION-R41**: The note shall stay until the project is trusted again, and shall not be shown again when Ersa starts anew.
 
 ## Verification
 
@@ -64,10 +66,11 @@ The replay server refuses every request that would create or change a session (P
 
 ## Built so far
 
-New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A Worktree checkbox chooses between a new isolated workspace, made from the default branch, and the project folder (R37 to R39). Values chosen on the screen survive a change of project (R32). Under a running session the session controls name its model by the user's choice (R33) and change its model, effort and permission mode (R30, R34, R35). A host whose backend listing fails says that detection failed (R11). The screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
+New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A Worktree checkbox chooses between a new isolated workspace, made from the default branch, and the project folder (R37 to R39). Values chosen on the screen survive a change of project (R32). Under a running session the session controls name its model by the user's choice (R33) and change its model, effort and permission mode (R30, R34, R35). A host whose backend listing fails says that detection failed (R11). Withdrawing a project's trust leaves a note beneath its heading until it is trusted again (R40, R41). The screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
 
 ## Open questions
 
+- What the note after a withdrawal says once a second backend keeps a folder trust of its own. Today it names Claude Code.
 - The mode control (a named preset, milestone M3) and where it sits among the session controls.
 - Which session a reopened window shows when several were running.
 - How the user picks a folder on a remote host, which the system's folder dialog cannot browse (FLOW-REMOTE-SESSION).
@@ -76,6 +79,7 @@ New session shows the new-session screen and creates nothing until the first mes
 
 ## Changes
 
+- 2026-11-18: from #316 inbox: the note after a withdrawal names Claude Code and says it may still trust the folder outside Ersa, since a backend learns of a project's trust only when a session starts there while it is trusted, and may hold a trust of its own that Ersa never gave. It shows after every withdrawal: Ersa does not track what the backend's own record holds. It stays until the project is trusted again and is not kept when Ersa starts anew; closing the window, which only hides it, leaves the note. FLOW-NEW-SESSION-R31 retired; R40 and R41 added. This refines the owner's decision of 2026-11-09 (that withdrawing trust says the backend's own tools keep it) without reversing it.
 - 2026-11-15: from #412 inbox, by the owner's finding of 2026-11-15 on the new-session screen: a Worktree checkbox, as Claude Desktop's row has, replaces the workspace chip and its base-branch picker; a new isolated workspace always starts from the default branch. FLOW-NEW-SESSION-R21, R28 and R29 retired; R37 to R39 added; R02 and R06 reworded for the checkbox, meaning unchanged.
 - 2026-11-15: from #411 inbox, by the owner's findings of 2026-11-15 on the new-session screen: the default model choice reads Default with the model it stands for when the backend says which listed model that is, and keeps the backend's own label otherwise (R36). The one-line box and the chips that show their value alone are look, in `docs/design/COMPOSER.md`, and carry no requirement ID. FLOW-NEW-SESSION-R36 added; R33 unchanged.
 - 2026-11-15: from #406 inbox: a refused change's line belongs to its session and survives switching away and back (R34); a running session's chips are unavailable while Ersa can't reach the sessions (R35); COMPOSER.md gives a failed backend listing its status line and chip; Built so far says R11, R30, R32 and R33 are built. FLOW-NEW-SESSION-R34 and R35 added; R30 unchanged.

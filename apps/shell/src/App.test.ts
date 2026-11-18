@@ -1848,7 +1848,7 @@ describe("a refused send App's composer says", () => {
   });
 });
 
-// Withdrawing trust from a project's heading (FLOW-NEW-SESSION-R31), against a fake Core that keeps each project's trust.
+// Withdrawing trust from a project's heading (FLOW-NEW-SESSION-R40, R41), against a fake Core that keeps each project's trust.
 describe("withdrawing trust", () => {
   const note = "Claude Code may still trust this folder when you use it outside Ersa.";
   /** The note beneath a project's heading, empty when it says nothing. */
@@ -1861,7 +1861,8 @@ describe("withdrawing trust", () => {
     await settle();
   }
 
-  // verifies: FLOW-NEW-SESSION-R31
+  // verifies: FLOW-NEW-SESSION-R40
+  // verifies: FLOW-NEW-SESSION-R41
   it("says beneath the heading that the backend's own tools keep trusting the folder, with no session running, until trusted again", async () => {
     const trusted = new Map(projects.map((p) => [p.id, true]));
     const core = fakeCore({
@@ -1897,7 +1898,7 @@ describe("withdrawing trust", () => {
     expect(noteOf("alpha")).toBe("");
   });
 
-  // verifies: FLOW-NEW-SESSION-R31
+  // verifies: FLOW-NEW-SESSION-R40
   it("says nothing when Core refuses the withdrawal", async () => {
     const core = fakeCore({
       "project.set_trust": () => {
