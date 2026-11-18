@@ -18,7 +18,6 @@ export function MenuButton({
   entries,
   className,
   unavailable = false,
-  force,
   initialOpen,
   initialSubmenu,
 }: {
@@ -30,8 +29,6 @@ export function MenuButton({
   entries: MenuEntry[];
   className?: string;
   unavailable?: boolean;
-  /** For the gallery: a pointer or keyboard state without one. */
-  force?: "hover" | "focus" | "pressed";
   /** For the gallery: the menu open, taking no focus, and one of its submenus open by index. */
   initialOpen?: boolean;
   initialSubmenu?: number;
@@ -65,7 +62,6 @@ export function MenuButton({
         icon={icon}
         size="icon-sm"
         label={label}
-        force={force}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-disabled={unavailable || undefined}
