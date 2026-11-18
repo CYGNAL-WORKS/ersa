@@ -4078,11 +4078,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let manager = Arc::new(gated_manager(dir.path(), &adapter));
         store_gated(&manager).await;
-        let (name, key) = ("Later".to_string(), "later".to_string());
-        let section = manager.store.insert_section(name, key).await.unwrap().id;
-        manager.admission.report(Report::SectionStored {
-            section: section.clone(),
-        });
+        let admission = Arc::clone(&manager.admission);
+        let section = manager
+            .store
+            .insert_section("Later".into(), move |section| {
+                admission.report(Report::SectionStored {
+                    section: section.id.clone(),
+                });
+            })
+            .await
+            .unwrap()
+            .id;
         let into = |manager: Arc<SessionManager>, section: String| {
             tokio::spawn(async move {
                 let section = Some(Some(section));
