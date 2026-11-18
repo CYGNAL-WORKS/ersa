@@ -214,6 +214,7 @@ describe("the rail's tree grouped by section", () => {
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R04
+  // verifies: FLOW-ORGANIZE-SESSIONS-R32
   it("shows every section whatever the filter, and No section only while it holds a session", () => {
     const sessions = [sectioned(session("a1", "w-ersa", at(1)), "alpha"), { ...session("old", "w-ersa", at(2)), archived: true }];
     expect(byGroup(arranged(sessions, "active"))).toEqual([
