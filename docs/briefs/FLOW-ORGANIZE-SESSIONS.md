@@ -33,7 +33,9 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 - **Groups by date** are Today, Yesterday, Previous 7 days and Older, by when the session was created, in the user's local time, so a session never changes group as it works; only the passing of days moves it, and a fork moves to its original's date once it has its own record. Yesterday is the calendar day before today, Previous 7 days the six before that (2 to 7 days back), and Older anything earlier; a session created later than now, by a clock set wrong, is in Today.
 - **Sections in other groupings.** Sections are seen only when grouping by section. Choosing New section, from either menu, while grouping by something else switches the grouping to Section so the new heading is in view.
-- **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
+- **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost. Keyboard focus goes to the heading that followed it, else the one before it, else New session (R33).
+- **"No section"** shows only while it holds a tile, as a date group does (R32).
+- **Sections that can't be read.** Grouped by section, the rail says it can't read the sections, with the reason, and shows the sessions as when grouped by none; while they are first read it says it is loading. A later read that fails keeps what the rail shows (R34, R35).
 - **A name already taken, too long or holding a control character.** Making a section with exactly the name of another gives the existing section, as Claude Desktop's does (`claude-desktop/sections-2026-11-09.txt`): nothing new appears, and a session being moved goes there. Names that differ only in case are different sections. Renaming a section to exactly another's name is refused. A name has at most 200 characters, and runs of spacing in it become one space as in a session's title (PROTO-CORE-API, Sections); a name holding a control character other than spacing is refused. The name field says why it refused and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins.
@@ -74,6 +76,11 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R28**: A menu opened at the pointer that is no larger than the window shall lie wholly inside the window.
 - **FLOW-ORGANIZE-SESSIONS-R29**: A menu opened at the pointer shall have its top-left corner at the press where it fits there; on an axis where it does not, it shall open the other way from the press, and where it fits neither way it shall sit against the window's left or top edge.
 - **FLOW-ORGANIZE-SESSIONS-R30**: A menu opened at the pointer shall be placed again when its size or the window's changes.
+- **FLOW-ORGANIZE-SESSIONS-R32**: When grouping by section, Ersa shall show the "No section" heading only while it holds a tile.
+- **FLOW-ORGANIZE-SESSIONS-R33**: When a section is deleted from its heading's menu, keyboard focus shall go to the section or "No section" heading that followed it when Delete was chosen, else to the one before it, else to New session.
+- **FLOW-ORGANIZE-SESSIONS-R34**: When grouping by section and the sections cannot be read, Ersa shall say so with the reason and show the sessions as when grouping by none.
+- **FLOW-ORGANIZE-SESSIONS-R35**: While the sections are first being read under grouping by section, the rail's tree shall say it is loading.
+- **FLOW-ORGANIZE-SESSIONS-R36**: When the user chooses New section while grouping by anything but section, Ersa shall switch the grouping to Section.
 
 ## Out of scope
 
@@ -87,6 +94,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-18: from #326 inbox: "No section" shows only while it holds a tile (FLOW-ORGANIZE-SESSIONS-R32); deleting a section from its heading passes keyboard focus on (R33); sections that can't be read, and sections being read, have their words (R34, R35). The switch to grouping by Section on New section, stated under Variations, gets an ID for the ticket that builds New section (R36). R31 is taken by #337's pass. No requirement retired.
 - 2026-11-18: from #290 inbox: a menu opened at the pointer stays inside the window, opening the other way from the press where it has no room, as a desktop's menus do, and is placed again when it or the window changes size (FLOW-ORGANIZE-SESSIONS-R28 to R30 added). `RAIL.md` (Menus) holds the rule.
 - 2026-11-15: from #413 inbox: a corrected date created reaches the rail on `session.tile` (PROTO-CORE-API-R105, R106), which is how R07, R09 and R10 hold without a reread of the list; until those are built it shows at the next read of the list. No requirement IDs changed.
 - 2026-11-14: from the triage of #289: a section name holding a control character other than spacing is refused, as Core does (PROTO-CORE-API-R60), and the edge case says so. R27 added. The 2026-11-07 line named PROTO-CORE-API-R61, the rule on case, and now names R60 alone.

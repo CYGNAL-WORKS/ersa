@@ -332,6 +332,30 @@ const pinnedTree: Parameters<typeof RailTree>[0] = {
   sessions: { state: "ready", sessions: treeSessions.map((s) => (s.id === "s1" || s.id === "s4" ? { ...s, pinned: true } : s)) },
 };
 
+/**
+ * The tree grouped by section (FLOW-ORGANIZE-SESSIONS-R04): "Docs" holds two sessions, "Later", made after it, holds
+ * none, and the rest are in no section. Rename and Delete keep their last call on the page, as the headings' do.
+ */
+const sectionedTree: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  groupBy: "section",
+  sessions: { state: "ready", sessions: treeSessions.map((s) => (s.id === "s1" || s.id === "s3" ? { ...s, section_id: "x1" } : s)) },
+  sections: {
+    state: "ready",
+    sections: [
+      { id: "x1", name: "Docs", created_at: "2026-11-01T09:00:00Z" },
+      { id: "x2", name: "Later", created_at: "2026-11-02T09:00:00Z" },
+    ],
+  },
+  sectionHandlers: {
+    onRename: async (id, name) => {
+      document.body.dataset.railCall = `renameSection ${id} ${name}`;
+      return true;
+    },
+    onDelete: (id) => (document.body.dataset.railCall = `deleteSection ${id}`),
+  },
+};
+
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
   return events
@@ -1084,6 +1108,23 @@ const entries: Entry[] = [
       ["Tile menu, archived", room(<RailTree {...archivedPair} initialTileMenu="a1" />)],
       ["Grouped by date", <RailTree {...datedTree} />],
       ["Grouped by date, collapsed", <RailTree {...datedTree} collapsed={new Set(["yesterday"])} />],
+      ["Grouped by section", <RailTree {...sectionedTree} />],
+      ["Grouped by section, collapsed", <RailTree {...sectionedTree} collapsed={new Set(["x1", "no_section"])} />],
+      ["Section heading, pointer over it", <RailTree {...sectionedTree} forceHeading={{ id: "x1", state: "hover" }} />],
+      ["Section heading, keyboard focus", <RailTree {...sectionedTree} forceHeading={{ id: "x1", state: "focus" }} />],
+      ["Section More", room(<RailTree {...sectionedTree} initialSectionMenu="x1" />)],
+      ["Section More, while deleting", room(<RailTree {...sectionedTree} initialSectionMenu="x1" sectionHandlers={{ ...sectionedTree.sectionHandlers, removing: { x1: { state: "sending" } } }} />)],
+      ["Renaming a section", <RailTree {...sectionedTree} initialSectionDraft={{ id: "x2", draft: "Later this week" }} />],
+      [
+        "Renaming a section, refused",
+        <RailTree
+          {...sectionedTree}
+          initialSectionDraft={{ id: "x2", draft: "Docs" }}
+          sectionHandlers={{ ...sectionedTree.sectionHandlers, renaming: { x2: { state: "failed", message: "another section is named Docs" } } }}
+        />,
+      ],
+      ["Section not deleted", <RailTree {...sectionedTree} sectionHandlers={{ ...sectionedTree.sectionHandlers, removing: { x1: { state: "failed", message: "the database is locked" } } }} />],
+      ["Sections not read", <RailTree {...sectionedTree} sections={{ state: "error", message: "the database is locked" }} />],
       ["Grouped by none", <RailTree {...pinnedTree} groupBy="none" />],
       ["Sorted by name", <RailTree {...pinnedTree} groupBy="none" sortBy="name" />],
       ["No active sessions", <RailTree {...tree} sessions={{ state: "ready", sessions: treeSessions.map((s) => ({ ...s, archived: true })) }} />],

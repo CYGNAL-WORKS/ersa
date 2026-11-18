@@ -11,4 +11,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 - [ ] 2026-11-18 LAY-SHELL: `docs/design/RAIL.md` mutes an archived tile's title and draws an unseen one at the heading weight in `ink`, but doesn't say which wins on an archived session marked unread (Mark as unread is offered on archived tiles). The Interface lets unseen win, as it already does over an idle or ended title, so the mark the user chose shows.
 - [ ] 2026-11-18 LAY-SHELL: Open questions asks whether a turn that finishes while Ersa can't reach Core should leave its session unseen. Now that the mark is stored in Core and survives restarts, the Interface answers no: it forgets what was working when it loses Core, so a reconnect marks nothing (as a turn that finishes while Ersa is closed marks nothing). The open question can close with that answer, or say otherwise.
 
+
 ## Resolved recently (optional, trimmed in planning passes)
