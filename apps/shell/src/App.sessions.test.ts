@@ -56,6 +56,7 @@ function fakeCore(more: Partial<Record<Method, (params: never) => unknown>> = {}
     "project.list": () => [{ id: "alpha", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "git", trusted: true }],
     "session.list": () => list,
     "workspace.list": () => workspaces,
+    "section.list": () => [],
     "backend.list": () => [],
     "settings.get": () => ({}),
     "session.subscribe": () => ({ view: "v1", last_seq: 0 }),
@@ -227,7 +228,7 @@ describe("the sessions page", () => {
       fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
       return items;
     };
-    expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "Mark as unread", "RenameF2", "Fork", "Archive", "Delete…"]);
+    expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "Mark as unread", "RenameF2", "Fork", "Move to section", "Archive", "Delete…"]);
   });
 
   it("shows the mark a tile shows, named, and the host when it is not this machine", async () => {

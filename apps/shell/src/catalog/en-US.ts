@@ -42,6 +42,8 @@ export const enUS = {
       groupByButton: "Group by",
       sortByButton: "Sort by",
       showButton: "Show",
+      // Shows a new section's heading with its name field (FLOW-ORGANIZE-SESSIONS, step 5).
+      newSectionButton: "New section",
       resetButton: "Reset to defaults",
       viewAllButton: "View all",
       groupByProjectButton: "Project",
@@ -92,7 +94,7 @@ export const enUS = {
       renameButton: "Rename",
       // Deleting a section asks nothing, since no session is lost, so it has no ellipsis.
       deleteButton: "Delete",
-      // The name field's label for assistive technology, while renaming.
+      // The name field's label for assistive technology, while renaming or naming a new section.
       nameLabel: "Section name",
       // Followed by Core's reason, beneath the heading.
       deleteError: "Ersa can't delete this section.",
@@ -145,6 +147,13 @@ export const enUS = {
       // Beneath the tile, before Core's reason, when Core refuses.
       markUnreadError: "Ersa can't mark this session as unread.",
       markReadError: "Ersa can't mark this session as read.",
+      // Move to section ▸ and its submenu (FLOW-ORGANIZE-SESSIONS, step 3). New section… asks for a name, so it ends in
+      // an ellipsis.
+      moveToSectionButton: "Move to section",
+      noSectionButton: "No section",
+      newSectionButton: "New section…",
+      // Followed by Core's reason, beneath the tile.
+      moveError: "Ersa can't move this session.",
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
