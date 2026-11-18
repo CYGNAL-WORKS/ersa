@@ -36,7 +36,7 @@ interface RailTreeProps extends TileHandlers {
   onSetTrust?: (project: Project, trusted: boolean) => void;
   /** Trust being changed, by project id, and why it could not be. */
   trusting?: Readonly<Record<string, Sending>>;
-  /** The projects whose trust the user withdrew in Ersa, which the backend's own tools keep trusting. */
+  /** The projects whose trust the user withdrew in Ersa, which Claude Code may still trust (FLOW-NEW-SESSION-R40). */
   backendTrusts?: readonly string[];
   /** The local machine's host id: a project on any other host is named with its host. */
   localHost?: string;
