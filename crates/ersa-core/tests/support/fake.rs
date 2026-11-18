@@ -100,6 +100,8 @@ pub struct Stats {
     pub record_renames: AtomicUsize,
     /// How many times Core asked the backend for a folder's records.
     pub listings: AtomicUsize,
+    /// How many times Core asked the backend for a record's summary.
+    pub summaries: AtomicUsize,
     /// For every time Core asked whether another process has a session
     /// open: the backend's id for it, and how many record renames had
     /// been written by then.
@@ -326,6 +328,9 @@ pub struct FakeAdapter {
     /// Held by a test to hold every folder listing, once read, until it
     /// lets go.
     pub list_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Held by a test to hold every record summary, once read, until it
+    /// lets go, as a slow file system would.
+    pub summary_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Where the fake files its records, shared like [`Records`].
@@ -374,6 +379,7 @@ impl FakeAdapter {
             recorded_settings: Arc::default(),
             filed: Arc::default(),
             list_gate: Arc::default(),
+            summary_gate: Arc::default(),
         }
     }
 
@@ -745,35 +751,12 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<Option<RecordSummary>, AdapterError> {
-        let records = self.records.lock().unwrap();
-        let Some(record) = records.get(backend_session_id) else {
-            return Ok(None);
-        };
-        let title = record.iter().rev().find_map(title_of).or_else(|| {
-            record.iter().rev().find_map(|e| match &e.event {
-                Event::UserMessage(user) => Some(user.text.clone()),
-                _ => None,
-            })
-        });
-        // The conversation is its prompts and replies; its times are all in
-        // one form, so as text they sort as times.
-        let last_activity_at = record
-            .iter()
-            .filter(|e| matches!(e.event, Event::UserMessage(_) | Event::AssistantText(_)))
-            .filter_map(|e| e.ts.clone())
-            .max();
-        Ok(Some(RecordSummary {
-            title,
-            last_activity_at,
-            created_at: record.iter().find_map(|e| e.ts.clone()),
-            settings: self
-                .recorded_settings
-                .lock()
-                .unwrap()
-                .get(backend_session_id)
-                .map(|settings| settings.latest.clone())
-                .unwrap_or_default(),
-        }))
+        self.stats.summaries.fetch_add(1, Ordering::SeqCst);
+        let summary = self.summary_of(backend_session_id);
+        // Read, then held: the record may have grown by the time it is
+        // answered, as on a slow file system.
+        let _held = self.summary_gate.lock().await;
+        Ok(summary)
     }
 
     async fn record_settings(
@@ -790,6 +773,40 @@ impl Adapter for FakeAdapter {
             .get(backend_session_id)
             .cloned()
             .unwrap_or_default())
+    }
+}
+
+impl FakeAdapter {
+    /// What the record of `backend_session_id` says of the session; `None`
+    /// when there is no record.
+    fn summary_of(&self, backend_session_id: &str) -> Option<RecordSummary> {
+        let records = self.records.lock().unwrap();
+        let record = records.get(backend_session_id)?;
+        let title = record.iter().rev().find_map(title_of).or_else(|| {
+            record.iter().rev().find_map(|e| match &e.event {
+                Event::UserMessage(user) => Some(user.text.clone()),
+                _ => None,
+            })
+        });
+        // The conversation is its prompts and replies; its times are all in
+        // one form, so as text they sort as times.
+        let last_activity_at = record
+            .iter()
+            .filter(|e| matches!(e.event, Event::UserMessage(_) | Event::AssistantText(_)))
+            .filter_map(|e| e.ts.clone())
+            .max();
+        Some(RecordSummary {
+            title,
+            last_activity_at,
+            created_at: record.iter().find_map(|e| e.ts.clone()),
+            settings: self
+                .recorded_settings
+                .lock()
+                .unwrap()
+                .get(backend_session_id)
+                .map(|settings| settings.latest.clone())
+                .unwrap_or_default(),
+        })
     }
 }
 

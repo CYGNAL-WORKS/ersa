@@ -7,6 +7,7 @@
 mod support;
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use ersa_core::Adapter;
 use serde_json::{Value, json};
@@ -609,6 +610,81 @@ async fn last_activity_comes_from_the_turns_while_live_and_from_the_record_other
     assert_eq!(
         last_activity(&session_row(&mut client, &id).await),
         Some(ended.last().unwrap()["ts"].clone())
+    );
+}
+
+/// A record read that began while the session was not live, and lands
+/// after it went live and a turn of it ended, leaves that turn's time: a
+/// live session's last activity is its latest `turn.completed`.
+// verifies: PROTO-CORE-API-R75
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_read_that_outlasts_going_live_leaves_the_turn_s_end() {
+    let records = fake::Records::default();
+    let adapter = FakeAdapter::with_records(Arc::clone(&records));
+    let (gate, stats) = (
+        Arc::clone(&adapter.summary_gate),
+        Arc::clone(&adapter.stats),
+    );
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
+    let id = new_session(&mut client, &workspace_id).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.events_until("assistant.text").await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    until_last_activity(&mut client, &id, Some(RECORDED_REPLY_AT)).await;
+
+    // A list reads the record, slowly: it is held once read.
+    let held = gate.lock().await;
+    let before = stats.summaries.load(Ordering::SeqCst);
+    let mut lister = core.client().await;
+    let listing = lister.request("session.list", json!({})).await;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while stats.summaries.load(Ordering::SeqCst) == before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the list reads the record within 10 s");
+
+    // Meanwhile the session goes live and a turn of it ends.
+    client.result("session.resume", json!({ "id": id })).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "finish" }))
+        .await;
+    let tile = client
+        .notification_where(|n| {
+            let params = &n["params"];
+            n["method"] == "session.tile"
+                && params["session_id"] == id
+                && params["last_activity_at"].is_string()
+                && params["last_activity_at"] != RECORDED_REPLY_AT
+        })
+        .await;
+    let ended = tile["params"]["last_activity_at"].clone();
+
+    // The read lands: the turn's end stands.
+    drop(held);
+    let listed = lister.response(listing).await;
+    let row = listed["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .cloned()
+        .unwrap();
+    assert_eq!(row["last_activity_at"], ended);
+    assert_eq!(
+        session_row(&mut client, &id).await["last_activity_at"],
+        ended
     );
 }
 
