@@ -116,6 +116,36 @@ describe("connect", () => {
     expect(activity()).toBe("2026-11-01T14:00:00.000Z");
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R31
+  it("moves a tile for its session's first last activity or a later one, never for an earlier one", async () => {
+    const other: Session = { ...session, id: "s0", created_at: "2026-11-02T00:00:00Z", last_activity_at: "2026-11-03T00:00:00.000Z" };
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => Promise.resolve([session, other]) });
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v));
+    await settle();
+    const shown = () => {
+      const view = seen.at(-1);
+      if (view?.phase !== "connected" || view.sessions.state !== "ready") return undefined;
+      const sessions = view.sessions.sessions;
+      const order = treeOf([], {}, sessions, { groupBy: "none", sortBy: "last_activity", show: "all", now: new Date() }).loose.map((s) => s.id);
+      return { order, s1: sessions.find((s) => s.id === "s1")?.last_activity_at };
+    };
+    const tile = (last_activity_at?: string) =>
+      notify({ method: "session.tile", params: { created_at: session.created_at, session_id: "s1", tile: session.tile, ...(last_activity_at ? { last_activity_at } : {}) } });
+
+    // Its first, taken as it comes, though earlier than the date created standing in for it (a fork's first record time).
+    tile("2026-10-31T00:00:00.000Z");
+    expect(shown()).toEqual({ order: ["s0", "s1"], s1: "2026-10-31T00:00:00.000Z" });
+    // A later one moves it.
+    tile("2026-11-04T00:00:00.000Z");
+    expect(shown()).toEqual({ order: ["s1", "s0"], s1: "2026-11-04T00:00:00.000Z" });
+    // An earlier one, as a stopped session's record gives, moves nothing; nor does none.
+    tile("2026-11-02T12:00:00.000Z");
+    expect(shown()).toEqual({ order: ["s1", "s0"], s1: "2026-11-04T00:00:00.000Z" });
+    tile();
+    expect(shown()).toEqual({ order: ["s1", "s0"], s1: "2026-11-04T00:00:00.000Z" });
+  });
+
   // verifies: PROTO-CORE-API-R105
   // verifies: PROTO-CORE-API-R106
   it("takes a session's date created from its tile, so it moves date group and place with no list read", async () => {
