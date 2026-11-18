@@ -330,6 +330,26 @@ Ersa can't pin this session.
 
 Ersa can't unpin this session.
 
+### `rail.tile.markUnreadButton`
+
+Mark as unread
+
+### `rail.tile.markReadButton`
+
+Mark as read
+
+### `rail.tile.markUnreadActiveReason`
+
+Available once you open another session
+
+### `rail.tile.markUnreadError`
+
+Ersa can't mark this session as unread.
+
+### `rail.tile.markReadError`
+
+Ersa can't mark this session as read.
+
 ### `rail.tile.moveToSectionButton`
 
 Move to section
