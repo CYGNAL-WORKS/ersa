@@ -527,6 +527,16 @@ describe("New section", () => {
     expect(document.activeElement).toBe(within(tileOf("Tidy the docs").closest("li")!).getByRole("button", { name: "More for Tidy the docs" }));
   });
 
+  it("gives focus to the heading of the collapsed group the regroup put the tile in, when nothing is made", async () => {
+    // No section was collapsed when last grouped by section; the rail is grouped by project now.
+    await start({ "settings.get": () => ({ rail: { group_by: "project", collapsed: { section: ["no_section"] } } }) });
+    await moveTo("Tidy the docs", "New section…");
+    expect(headings()).toEqual(["Work", "Errands", "Later", "field", "No section"]);
+    fireEvent.keyDown(nameField()!, { key: "Escape" });
+    await settle();
+    expect(document.activeElement).toBe(heading("No section")?.querySelector(".rail-heading-toggle"));
+  });
+
   it("is unavailable, saying why, while the sections can't be read", async () => {
     await start({ "section.list": () => Promise.reject({ kind: "unavailable", message: "the database is locked" }) });
     fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
