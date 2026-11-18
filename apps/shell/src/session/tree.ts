@@ -2,7 +2,7 @@
 // rail; FLOW-ORGANIZE-SESSIONS): the pinned sessions, the groups with headings, and the sessions under none. The
 // component only draws this.
 
-import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import type { Project, Section, Session, Workspace } from "../protocol/core-api.gen";
 import { newestFirst, timeOf } from "./controls";
 import { DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "./arrangement";
 import { wantTone } from "./tile";
@@ -11,9 +11,17 @@ import { wantTone } from "./tile";
 export type DateKey = "today" | "yesterday" | "previous_7_days" | "older";
 export const DATE_KEYS: readonly DateKey[] = ["today", "yesterday", "previous_7_days", "older"];
 
-/** A group with a heading, after the Pinned group: a project, or a date group. Its `key` is its collapsed-group key. */
+/** "No section"'s key, also its key among the collapsed groups (PROTO-CORE-API, Settings). */
+export const NO_SECTION_KEY = "no_section" as const;
+
+/**
+ * A group with a heading, after the Pinned group: a project, a section, "No section", or a date group. Its `key` is
+ * its collapsed-group key: a project's or section's id, `no_section`, or a date group's key.
+ */
 export type Group =
   | { kind: "project"; key: string; project: Project; sessions: Session[] }
+  | { kind: "section"; key: string; section: Section; sessions: Session[] }
+  | { kind: "no_section"; key: typeof NO_SECTION_KEY; sessions: Session[] }
   | { kind: "date"; key: DateKey; sessions: Session[] };
 
 export interface Tree {
@@ -35,6 +43,8 @@ export interface TreeArrangement {
   show: Show;
   /** Now, whose local date the date groups count from. */
   now: Date;
+  /** The sections, as Core lists them, in the order they were made: the groups when grouping by section. */
+  sections?: readonly Section[];
 }
 
 /**
@@ -43,18 +53,23 @@ export interface TreeArrangement {
  * workspace is not known, or whose workspace's project is not listed, is loose, so a session is never missing from
  * the rail. While showing active sessions every project has its group, empty or not; otherwise only projects with
  * sessions shown (LAY-SHELL, Projects). Grouped by date, each is in its date group (R07), and only groups with
- * sessions are there. Pinning changes none of this: unpinned, a session is back where it belongs.
+ * sessions are there. Grouped by section, every section has its group, empty or not and whatever the filter, in
+ * the order Core lists them, which is the order they were made; then "No section", while it holds a session, for one
+ * in none or in a section Core no longer lists (R04). Pinning changes none of this: unpinned, a session is back where
+ * it belongs.
  */
 export function treeOf(
   projects: readonly Project[],
   workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
   sessions: readonly Session[],
-  { groupBy, sortBy, show, now }: TreeArrangement = { ...DEFAULT_ARRANGEMENT, now: new Date() },
+  { groupBy, sortBy, show, now, sections = [] }: TreeArrangement = { ...DEFAULT_ARRANGEMENT, now: new Date() },
 ): Tree {
   const pinned: Session[] = [];
   const loose: Session[] = [];
   const byProject = new Map<string, Session[]>(projects.map((p) => [p.id, []]));
   const byDate = new Map<DateKey, Session[]>(DATE_KEYS.map((k) => [k, []]));
+  const bySection = new Map<string, Session[]>(sections.map((section) => [section.id, []]));
+  const inNone: Session[] = [];
   for (const s of sortedBy(sessions, sortBy)) {
     if (!shows(show, s)) continue;
     if (s.pinned) {
@@ -63,6 +78,10 @@ export function treeOf(
     }
     if (groupBy === "date") {
       byDate.get(dateGroupOf(s.created_at, now))?.push(s);
+      continue;
+    }
+    if (groupBy === "section") {
+      (bySection.get(s.section_id ?? "") ?? inNone).push(s);
       continue;
     }
     const projectId = groupBy === "project" ? workspaces[s.workspace_id]?.project_id : undefined;
@@ -77,7 +96,12 @@ export function treeOf(
           .filter((g) => show === "active" || g.sessions.length > 0)
       : groupBy === "date"
         ? DATE_KEYS.map((key) => ({ kind: "date" as const, key, sessions: byDate.get(key) ?? [] })).filter((g) => g.sessions.length > 0)
-        : [];
+        : groupBy === "section"
+          ? [
+              ...sections.map((section) => ({ kind: "section" as const, key: section.id, section, sessions: bySection.get(section.id) ?? [] })),
+              ...(inNone.length > 0 ? [{ kind: "no_section" as const, key: NO_SECTION_KEY as typeof NO_SECTION_KEY, sessions: inNone }] : []),
+            ]
+          : [];
   return { pinned, groups, loose };
 }
 
