@@ -209,6 +209,8 @@ const tree: Parameters<typeof RailTree>[0] = {
     return true;
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
+  onMove: (id, sectionId) => (document.body.dataset.railCall = `move ${id} ${sectionId}`),
+  onNewSection: (id) => (document.body.dataset.railCall = `newSection ${id}`),
   onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
   onDelete: (id) => (document.body.dataset.railCall = `delete ${id}`),
   localHost: "local",
@@ -346,6 +348,17 @@ const sectionedTree: Parameters<typeof RailTree>[0] = {
     },
     onDelete: (id) => (document.body.dataset.railCall = `deleteSection ${id}`),
   },
+};
+
+/** A new section's heading, its field empty (FLOW-ORGANIZE-SESSIONS, step 5). */
+const newSection: NonNullable<Parameters<typeof RailTree>[0]["newSection"]> = {
+  initialDraft: "",
+  onName: async (name) => {
+    document.body.dataset.railCall = `newSection ${name}`;
+    return undefined;
+  },
+  onReset: () => {},
+  onCancel: () => {},
 };
 
 /** A transcript built the way the window builds one: by applying events. */
@@ -1114,6 +1127,19 @@ const entries: Entry[] = [
       ],
       ["Section not deleted", <RailTree {...sectionedTree} sectionHandlers={{ ...sectionedTree.sectionHandlers, removing: { x1: { state: "failed", message: "the database is locked" } } }} />],
       ["Sections not read", <RailTree {...sectionedTree} sections={{ state: "error", message: "the database is locked" }} />],
+      ["Tile menu, Move to section", room(<RailTree {...sectionedTree} initialMoveMenu="s1" />)],
+      ["Tile menu, Move to section while sections are read", room(<RailTree {...sectionedTree} sections={{ state: "loading" }} initialTileMenu="s1" />)],
+      ["New section", <RailTree {...sectionedTree} newSection={newSection} />],
+      ["New section, named", <RailTree {...sectionedTree} newSection={{ ...newSection, initialDraft: "Reviews" }} />],
+      ["New section, being made", <RailTree {...sectionedTree} newSection={{ ...newSection, initialDraft: "Reviews", creating: { state: "sending" } }} />],
+      [
+        "New section, refused",
+        <RailTree
+          {...sectionedTree}
+          newSection={{ ...newSection, initialDraft: "Reviews\u0007", creating: { state: "failed", message: "a section's name is one line, without control characters" } }}
+        />,
+      ],
+      ["Move refused", <RailTree {...sectionedTree} moving={{ s1: { state: "failed", message: "the database is locked", change: "section" } }} />],
       ["Grouped by none", <RailTree {...pinnedTree} groupBy="none" />],
       ["Sorted by name", <RailTree {...pinnedTree} groupBy="none" sortBy="name" />],
       ["No active sessions", <RailTree {...tree} sessions={{ state: "ready", sessions: treeSessions.map((s) => ({ ...s, archived: true })) }} />],

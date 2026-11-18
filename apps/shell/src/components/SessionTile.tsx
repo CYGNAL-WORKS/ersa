@@ -68,8 +68,8 @@ export function SessionTile({
   /** Its shelf is open: the shelf's tone, which the chevron and the want take, and the shelf's element id. */
   shelf?: { tone: "accent" | "caution"; domId: string };
   onChevron?: (id: string) => void;
-  /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
-  initialMenu?: boolean;
+  /** For the gallery: the tile's menu shown open, "move" with Move to section's submenu open too, and the title being edited with this text. */
+  initialMenu?: boolean | "move";
   initialDraft?: string;
   /** A fork of this session is on its way: it says so in place of its state. */
   forking?: boolean;

@@ -1,14 +1,15 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { expect, otherWindow, test } from "./harness";
+import { expect, test } from "./harness";
 
-// Grouping by section in the running window (#326; FLOW-ORGANIZE-SESSIONS-R04, R05), on the stand-in backend: every
-// section Core has shows, empty or not, in the order made, then No section; a heading's Rename works in place; Delete
-// asks nothing and keeps every session, under No section. This window has no way to make a section yet (#332), so
-// another window, as Core sees one, makes them.
-test("grouped by section, a heading renames in place and deletes keeping its sessions", async ({ ersa }) => {
+// Sections in the running window, on the stand-in backend (FLOW-ORGANIZE-SESSIONS, steps 3 and 5): a tile's Move to
+// section ▸ New section… groups the rail by section and makes the section with the session in it; the arrange menu's
+// New section makes an empty one; Move to section moves the session between them. Every section shows, empty or not,
+// in the order made, then No section; a heading's Rename works in place; Delete asks nothing and keeps every session,
+// under No section.
+test("sections made from the window, a heading renames in place and deletes keeping its sessions", async ({ ersa }) => {
   test.setTimeout(180_000);
-  const { page, label } = ersa;
+  const { page } = ersa;
   const folder = path.join(ersa.dir, "sections-check");
   mkdirSync(folder);
   const rail = page.getByRole("navigation", { name: "Rail" });
@@ -28,20 +29,47 @@ test("grouped by section, a heading renames in place and deletes keeping its ses
   const tile = rail.locator("[data-session-id]").first();
   await expect(tile).toBeVisible({ timeout: 60_000 });
   const id = await tile.getAttribute("data-session-id");
-
-  const docs = (await otherWindow(label, "section.create", { name: "Docs" })) as { id: string };
-  await otherWindow(label, "section.create", { name: "Later" });
-  await otherWindow(label, "session.arrange", { id, section_id: docs.id });
-  // The window reads the sections as it connects.
-  await page.reload();
-
-  await rail.getByRole("button", { name: "Arrange sessions" }).click();
-  await page.getByRole("menuitem", { name: /^Group by/ }).click();
-  await page.getByRole("menuitemradio", { name: "Section" }).click();
   const names = rail.locator(".rail-projects > .rail-project .rail-heading-name");
+  const nameField = rail.getByRole("textbox", { name: "Section name" });
+  const moveTo = async (item: string) => {
+    await tile.hover();
+    await tile.getByRole("button", { name: /^More for / }).click();
+    await page.getByRole("menuitem", { name: "Move to section" }).click();
+    await page.getByRole(item === "New section…" ? "menuitem" : "menuitemradio", { name: item }).click();
+  };
+
+  // Grouped by project, a tile's New section… groups by section and shows the new heading's empty field.
+  await moveTo("New section…");
+  await expect(nameField).toBeFocused();
+  await expect(nameField).toHaveValue("");
+  await settled();
+  await ersa.shot("new-section-field");
+  await nameField.fill("Docs");
+  await nameField.press("Enter");
+  await expect(names).toHaveText(["Docs"]);
+  await expect(rail.locator(".rail-projects > .rail-project", { hasText: "Docs" }).locator(`[data-session-id="${id}"]`)).toBeVisible();
+
+  // The arrange menu's New section makes an empty one, after the others.
+  await rail.getByRole("button", { name: "Arrange sessions" }).click();
+  await page.getByRole("menuitem", { name: "New section" }).click();
+  await expect(nameField).toBeFocused();
+  await nameField.fill("Later");
+  await nameField.press("Enter");
   await expect(names).toHaveText(["Docs", "Later"]);
   await settled();
   await ersa.shot("grouped-by-section");
+
+  // Move to section shows where the session is, and moves it.
+  await tile.hover();
+  await tile.getByRole("button", { name: /^More for / }).click();
+  await page.getByRole("menuitem", { name: "Move to section" }).click();
+  await expect(page.getByRole("menuitemradio", { name: "Docs" })).toHaveAttribute("aria-checked", "true");
+  await settled();
+  await ersa.shot("move-to-section");
+  await page.getByRole("menuitemradio", { name: "Later" }).click();
+  await expect(rail.locator(".rail-projects > .rail-project", { hasText: "Later" }).locator(`[data-session-id="${id}"]`)).toBeVisible();
+  await moveTo("Docs");
+  await expect(rail.locator(".rail-projects > .rail-project", { hasText: "Docs" }).locator(`[data-session-id="${id}"]`)).toBeVisible();
 
   // Rename, in place: the heading's name becomes a field; Enter saves the name Core keeps.
   const later = rail.locator(".rail-heading", { hasText: "Later" });

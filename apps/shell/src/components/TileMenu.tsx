@@ -180,8 +180,8 @@ export function useTileMenu({
   actions: TileActions;
   /** The tile's More button leaves room for the chevron beside it. */
   beforeChevron?: boolean;
-  /** For the gallery: the menu shown open, and the title being edited with this text. */
-  initialMenu?: boolean;
+  /** For the gallery: the menu shown open, "move" with Move to section's submenu open too, and the title being edited with this text. */
+  initialMenu?: boolean | "move";
   initialDraft?: string;
 }) {
   const root = useRef<HTMLElement>(null);
@@ -192,7 +192,7 @@ export function useTileMenu({
   // The menu: whether it is open, where it sits, where focus went, and what opened it, which takes focus back.
   // Kept as it closes, so the menu fades out where it was.
   const [menu, setMenu] = useState<{ open: boolean; place: MenuPlace; focus: "item" | "menu" | "none"; from: "more" | "tile" }>(
-    { open: initialMenu ?? false, place: { anchor }, focus: "none", from: "more" },
+    { open: !!initialMenu, place: { anchor }, focus: "none", from: "more" },
   );
   const opener = useRef(menu.from);
   opener.current = menu.from;
@@ -338,7 +338,18 @@ export function useTileMenu({
           }
         />
       )}
-      {rename && <Menu label={label} entries={entries} open={menu.open} place={menu.place} focus={menu.focus} inside={insideMenu} onClose={closeMenu} />}
+      {rename && (
+        <Menu
+          label={label}
+          entries={entries}
+          open={menu.open}
+          place={menu.place}
+          focus={menu.focus}
+          inside={insideMenu}
+          onClose={closeMenu}
+          initialSubmenu={initialMenu === "move" ? entries.findIndex((e) => e.kind === "submenu") : undefined}
+        />
+      )}
       {/* A refused title keeps the field open, with the reason beneath. */}
       {editing && refused !== undefined && (
         <p id={`${anchor}-refused`} className="problem session-rename-problem" role="alert">
