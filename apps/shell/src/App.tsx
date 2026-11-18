@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
@@ -12,7 +12,7 @@ import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScre
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { SessionsPage } from "./components/SessionsPage";
-import { noneUnseen, unseenAfter } from "./session/unseen";
+import { unseenWrites } from "./session/unseen";
 import { RailTop } from "./components/RailTop";
 import { RailTree } from "./components/RailTree";
 import { foldedAway } from "./components/useLeavingFocus";
@@ -21,7 +21,7 @@ import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
-import type { BackendInfo, Project, Session, Workspace } from "./protocol/core-api.gen";
+import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
@@ -172,15 +172,69 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     }
   }, [activeId, sessions]);
 
-  // The unseen sessions (LAY-SHELL, Unseen), worked out afresh from each list Core reports and each change of the
-  // active session. Kept in memory only: nothing survives the window closing.
   const shownId = composing ? undefined : activeId;
   // As it is when an archive answers, which may be after the user chose another session.
   const shownNow = useRef(shownId);
   shownNow.current = shownId;
-  const [unseen, setUnseen] = useState(noneUnseen);
+
+  // A change to a session's arrangement (FLOW-ORGANIZE-SESSIONS): Core stores it and answers with the session as
+  // listed, and the rail shows the fields changed once Core has them. A refusal leaves the session as Core has it and
+  // says why beneath its tile until the next try (R15). `track` holds the changes on their way and the refusals.
+  // Resolves whether Core took it.
+  type Arrange = Omit<SessionArrangeParams, "id">;
+  const arrangeSession = async (track: Dispatch<SetStateAction<Record<string, Sending>>>, id: string, fields: Arrange): Promise<boolean> => {
+    track((t) => ({ ...t, [id]: { state: "sending" } }));
+    try {
+      const arranged = await client.call("session.arrange", { id, ...fields });
+      track(({ [id]: _, ...rest }) => rest);
+      const keys = Object.keys(fields) as (keyof Arrange & keyof Session)[];
+      connection.current?.changed(id, Object.fromEntries(keys.map((k) => [k, arranged[k]])));
+      return true;
+    } catch (error) {
+      track((t) => ({ ...t, [id]: { state: "failed", message: describeError(error) } }));
+      return false;
+    }
+  };
+
+  // The unseen mark (FLOW-ORGANIZE-SESSIONS, Unseen), which Core stores so it survives a restart of Ersa and of Core
+  // (R25). Ersa's own mark and Mark as unread or read (R24) both go through `markUnseen`. While one is on its way Ersa
+  // sends no other for that session, so a list read before Core answered can't send it twice. One Core refused is
+  // not sent again from the lists that follow, so its note stays (R15), until a new occasion for it: the user opens or
+  // leaves a session, the session works again, Core is reached again, or the user chooses it from the menu.
+  const [marking, setMarking] = useState<Record<string, Sending>>({});
+  // The sessions with a mark on its way now, which a list may be reported before a render shows.
+  const markSending = useRef(new Set<string>());
+  // The sessions whose last mark Core refused.
+  const markRefused = useRef(new Set<string>());
+  const markUnseen = async (id: string, unseen: boolean) => {
+    markSending.current.add(id);
+    const taken = await arrangeSession(setMarking, id, { unseen });
+    markSending.current.delete(id);
+    if (taken) markRefused.current.delete(id);
+    else markRefused.current.add(id);
+  };
+  // The sessions working in the last list, to tell "idle after working" from plain idle. In memory: a turn that
+  // finishes while Ersa is closed leaves no mark. Kept while Ersa can't reach Core, so a turn that ends meanwhile marks
+  // its session from the first list once connected again (FLOW-ORGANIZE-SESSIONS-R38).
+  const working = useRef<ReadonlySet<string>>(new Set());
+  const lastShown = useRef(shownId);
   useEffect(() => {
-    if (sessions.state === "ready") setUnseen((prev) => unseenAfter(prev, sessions.sessions, shownId));
+    if (sessions.state !== "ready") {
+      // Reaching Core again is a new occasion for a refused mark; what was working is kept (R38).
+      markRefused.current.clear();
+      return;
+    }
+    if (lastShown.current !== shownId) {
+      for (const id of [lastShown.current, shownId]) if (id !== undefined) markRefused.current.delete(id);
+      lastShown.current = shownId;
+    }
+    const next = unseenWrites(working.current, sessions.sessions, shownId, markSending.current, markRefused.current);
+    // Only the step into working is a new occasion: a session that keeps working is asked nothing again.
+    for (const id of next.working) if (!working.current.has(id)) markRefused.current.delete(id);
+    working.current = next.working;
+    for (const write of next.writes) void markUnseen(write.id, write.unseen);
+    // markUnseen reads only refs and stable values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessions, shownId]);
 
   useEffect(() => {
@@ -447,16 +501,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
   // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
   const [pinning, setPinning] = useState<Record<string, Sending>>({});
-  const pin = async (id: string, pinned: boolean) => {
-    setPinning((p) => ({ ...p, [id]: { state: "sending" } }));
-    try {
-      const arranged = await client.call("session.arrange", { id, pinned });
-      setPinning(({ [id]: _, ...rest }) => rest);
-      connection.current?.changed(id, { pinned: arranged.pinned });
-    } catch (error) {
-      setPinning((p) => ({ ...p, [id]: { state: "failed", message: describeError(error) } }));
-    }
-  };
+  const pin = (id: string, pinned: boolean) => arrangeSession(setPinning, id, { pinned });
 
   // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
   // archives it, and keeps its pin and section either way. The list is read again to show the change; archiving the
@@ -826,6 +871,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onToggle={toggleGroup}
               onPin={pin}
               pinning={pinning}
+              onMark={markUnseen}
+              marking={marking}
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
@@ -841,7 +888,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               localHost={hello?.host.id}
               hostNames={hostNames}
               backends={backends}
-              unseen={unseen.ids}
               shelf={shelfOpen}
               onChevron={chevron}
               onCloseShelf={closeShelf}
@@ -878,6 +924,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onNewSession={() => dispatch({ type: "newSession" })}
               onPin={pin}
               pinning={pinning}
+              onMark={markUnseen}
+              marking={marking}
+              activeId={shownId}
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
