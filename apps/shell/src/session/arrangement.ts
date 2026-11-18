@@ -5,14 +5,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** How the rail groups the sessions after the Pinned group. Grouping by section comes with sections. */
-export type GroupBy = "project" | "date" | "none";
+/** How the rail groups the sessions after the Pinned group, named as `rail.group_by` names it. */
+export type GroupBy = "project" | "section" | "date" | "none";
 /** How the tiles are sorted within each group (FLOW-ORGANIZE-SESSIONS-R09), named as `rail.sort_by` names it. */
 export type SortBy = "created" | "last_activity" | "name";
 /** Which sessions the rail shows (FLOW-ORGANIZE-SESSIONS-R11). */
 export type Show = "active" | "archived" | "all";
 
-export const GROUP_BYS: readonly GroupBy[] = ["project", "date", "none"];
+export const GROUP_BYS: readonly GroupBy[] = ["project", "section", "date", "none"];
 export const SORT_BYS: readonly SortBy[] = ["created", "last_activity", "name"];
 export const SHOWS: readonly Show[] = ["active", "archived", "all"];
 
@@ -21,7 +21,7 @@ export interface RailArrangement {
   sortBy: SortBy;
   show: Show;
   /**
-   * The keys of the groups collapsed in each grouping (R12): `pinned`, a project's id, or a date group's key. A
+   * The keys of the groups collapsed in each grouping (R12): `pinned`, a project's or section's id, `no_section`, or a date group's key. A
    * grouping with none collapsed may be absent.
    */
   collapsed: Partial<Record<GroupBy, readonly string[]>>;

@@ -16,7 +16,7 @@ A tile, a group heading, a menu item and an icon button are controls without an 
 
 ## A group heading
 
-A project heading is drawn below; the other headings are the same row with less in it. **Pinned** leads with a pin icon at `size-icon-sm` in `ink-faint` after the chevron. **A section heading** names the section and, under the pointer or keyboard focus, shows More alone at the trailing edge; renaming turns its name into a field in place, `size-control-sm` high so the heading keeps its height, `ui-small` at the heading weight on `surface`, `radius-md`, with a `line` edge that turns `accent` while focused. **A date heading** and "No section" have no actions. Grouped by none, the tiles after the Pinned group have no heading.
+A project heading is drawn below; the other headings are the same row with less in it. **Pinned** leads with a pin icon at `size-icon-sm` in `ink-faint` after the chevron. **A section heading** names the section and, under the pointer or keyboard focus, shows More alone at the trailing edge; renaming turns its name into a field in place, `size-control-sm` high so the heading keeps its height, `ui-small` at the heading weight on `surface`, `radius-md`, with a `line` edge that turns `accent` while focused. **A date heading** and "No section" have no actions. A section heading deleted from its menu passes keyboard focus to the section or "No section" heading that followed it, else the one before it, else New session. Grouped by none, the tiles after the Pinned group have no heading.
 
 ## A project heading
 

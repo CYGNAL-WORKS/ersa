@@ -96,6 +96,10 @@ View all
 
 Project
 
+### `rail.arrange.groupBySectionButton`
+
+Section
+
 ### `rail.arrange.groupByDateButton`
 
 Date
@@ -152,6 +156,10 @@ Ersa can't read your projects.
 
 Ersa can't read your sessions.
 
+### `rail.tree.sectionsError`
+
+Ersa can't read your sections.
+
 ### `rail.tree.arrangeReadError`
 
 Ersa can't read how you arranged the rail.
@@ -195,6 +203,30 @@ Previous 7 days
 ### `rail.group.olderHeading`
 
 Older
+
+### `rail.group.noSectionHeading`
+
+No section
+
+### `rail.section.moreLabel`
+
+More for {section}
+
+### `rail.section.renameButton`
+
+Rename
+
+### `rail.section.deleteButton`
+
+Delete
+
+### `rail.section.nameLabel`
+
+Section name
+
+### `rail.section.deleteError`
+
+Ersa can't delete this section.
 
 ### `rail.heading.newSessionLabel`
 
