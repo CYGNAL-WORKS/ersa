@@ -755,8 +755,16 @@ impl Adapter for FakeAdapter {
                 _ => None,
             })
         });
+        // The conversation is its prompts and replies; its times are all in
+        // one form, so as text they sort as times.
+        let last_activity_at = record
+            .iter()
+            .filter(|e| matches!(e.event, Event::UserMessage(_) | Event::AssistantText(_)))
+            .filter_map(|e| e.ts.clone())
+            .max();
         Ok(Some(RecordSummary {
             title,
+            last_activity_at,
             created_at: record.iter().find_map(|e| e.ts.clone()),
             settings: self
                 .recorded_settings

@@ -640,6 +640,7 @@ impl Adapter for ClaudeAdapter {
             title: summary.title,
             created_at: summary.created_at,
             settings: summary.settings,
+            last_activity_at: summary.last_activity_at,
         }))
     }
 

@@ -199,7 +199,6 @@ impl SessionManager {
             deleting: None,
             pinned: false,
             section_id: None,
-            last_activity_at: None,
             forked_from: None,
             forked_through: None,
             started_elsewhere: true,
