@@ -45,7 +45,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0009_session_fork.sql"),
     include_str!("persistence/0010_session_requested_at.sql"),
     include_str!("persistence/0011_session_started_elsewhere.sql"),
-    include_str!("persistence/0012_section_names_exact.sql"),
+    include_str!("persistence/0012_session_unseen.sql"),
+    include_str!("persistence/0013_section_names_exact.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -833,6 +834,8 @@ mod tests {
                 "permission_mode_at",
                 // Migration 11's.
                 "started_elsewhere",
+                // Migration 12's.
+                "unseen",
             ]
         );
     }
@@ -1073,16 +1076,16 @@ mod tests {
         assert!(ts.ends_with('Z') && ts.as_bytes()[19] == b'.', "{ts}");
     }
 
-    /// Migration 12 makes the key of every section made before it its exact
+    /// Migration 13 makes the key of every section made before it its exact
     /// name, so after it another case of an old name is another section, and
     /// the old name itself still finds its section.
     // verifies: PROTO-CORE-API-R76
     #[tokio::test]
-    async fn migration_12_compares_the_names_of_existing_sections_exactly() {
+    async fn migration_13_compares_the_names_of_existing_sections_exactly() {
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("ersa.db");
-        // The database as it stood before migration 12.
-        let conn = database_at(&path, 11);
+        // The database as it stood before migration 13.
+        let conn = database_at(&path, 12);
         conn.execute_batch("INSERT INTO sections VALUES ('sec-old', 'Work', 'work', 't');")
             .expect("old section");
         drop(conn);
