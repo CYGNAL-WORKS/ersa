@@ -1,12 +1,12 @@
 import { SlidersHorizontal } from "lucide-react";
-import { type CSSProperties, useCallback, useId, useRef, useState } from "react";
 import { t } from "../catalog";
 import { type ArrangeChoices, GROUP_BYS, type GroupBy, SHOWS, SORT_BYS, type Show, type SortBy } from "../session/arrangement";
-import { IconButton } from "./Icon";
-import { Menu, type MenuClose, type MenuEntry } from "./Menu";
+import type { MenuEntry } from "./Menu";
+import { MenuButton } from "./MenuButton";
 
 const GROUP_BY_NAMES = {
   project: "rail.arrange.groupByProjectButton",
+  section: "rail.arrange.groupBySectionButton",
   date: "rail.arrange.groupByDateButton",
   none: "rail.arrange.groupByNoneButton",
 } as const satisfies Record<GroupBy, string>;
@@ -75,44 +75,15 @@ export function ArrangeButton({
   initialOpen?: boolean;
   initialSubmenu?: number;
 }) {
-  // The menu, while open: where focus went as it opened (RAIL.md, Menus). The gallery's open menu takes none.
-  const [menu, setMenu] = useState<"item" | "menu" | "none" | undefined>(initialOpen ? "none" : undefined);
-  // Unavailable while open, as when Ersa loses Core, the menu closes for good rather than open again with it.
-  if (disabled && menu && !initialOpen) setMenu(undefined);
-  const button = useRef<HTMLButtonElement>(null);
-  // The menu floats above the rail in the top layer, anchored to the button by this name.
-  const anchor = `--rail-arrange-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  // Closing the menu returns focus to the button, unless a press elsewhere put it there.
-  const close = useCallback((how: MenuClose) => {
-    setMenu(undefined);
-    if (how !== "away") button.current?.focus({ preventScroll: true });
-  }, []);
-  const inside = useCallback(() => [button.current], []);
   return (
-    <>
-      <IconButton
-        ref={button}
-        className="rail-arrange"
-        icon={SlidersHorizontal}
-        size="icon-sm"
-        label={t("rail.arrange.label")}
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={!!menu}
-        style={{ anchorName: anchor } as CSSProperties}
-        // A click the keyboard made (Enter or Space) has no pointer presses to count.
-        onClick={(event) => setMenu(menu ? undefined : event.detail === 0 ? "item" : "menu")}
-      />
-      <Menu
-        label={t("rail.arrange.label")}
-        entries={arrangeEntries(arrangement, actions)}
-        open={menu !== undefined}
-        place={{ anchor }}
-        focus={menu}
-        inside={inside}
-        onClose={close}
-        initialSubmenu={initialSubmenu}
-      />
-    </>
+    <MenuButton
+      className="rail-arrange"
+      icon={SlidersHorizontal}
+      label={t("rail.arrange.label")}
+      entries={arrangeEntries(arrangement, actions)}
+      unavailable={disabled}
+      initialOpen={initialOpen}
+      initialSubmenu={initialSubmenu}
+    />
   );
 }

@@ -16,7 +16,7 @@
 import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createWriteStream, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -363,6 +363,34 @@ async function endTree(child: ChildProcess) {
  */
 function ended(child: ChildProcess): boolean {
   return child.pid === undefined || child.exitCode !== null || child.signalCode !== null;
+}
+
+/** Another window, as Core sees one: a second connection to the test's Core that sends one request after the handshake. */
+export async function otherWindow(label: string, method: string, params: unknown): Promise<unknown> {
+  const pipe = corePipe(label);
+  if (!pipe) throw new Error(`no pipe for ${label}`);
+  const socket = connect(pipe);
+  const send = (id: number, m: string, p: unknown) => socket.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: m, params: p })}\n`);
+  return new Promise((resolve, reject) => {
+    let buffered = "";
+    socket.on("error", reject);
+    socket.on("data", (chunk) => {
+      buffered += chunk.toString("utf8");
+      let end: number;
+      while ((end = buffered.indexOf("\n")) >= 0) {
+        const line = JSON.parse(buffered.slice(0, end));
+        buffered = buffered.slice(end + 1);
+        if (line.id === 1) send(2, method, params);
+        if (line.id === 2) {
+          socket.end();
+          if (line.error) reject(new Error(JSON.stringify(line.error)));
+          else resolve(line.result);
+        }
+      }
+    });
+    // Any version Core speaks will do for one request, so a check outlives a version bump.
+    send(1, "core.hello", { client: "live-check", client_version: "0", api_versions: Array.from({ length: 32 }, (_, i) => i + 1) });
+  });
 }
 
 /** The pipe Core serves `label` on, if it does: `ersa-core-<user SID>-<label>` (PROTO-CORE-API, Transport and framing). */
