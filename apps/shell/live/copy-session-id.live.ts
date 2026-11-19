@@ -2,7 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// Copy session ID and a session whose folder is gone, in the running window (#340; FLOW-RESUME-SESSION-R07, R03,
+// Copy session ID and a session whose folder is gone, in the running window (#340; FLOW-RESUME-SESSION-R15, R16, R03,
 // PROTO-CORE-API-R80), with the stand-in backend: the tile's menu copies the id Core lists, and writing to a stopped
 // session whose folder was deleted says so in the catalog's words and keeps the session.
 test("Copy session ID copies the listed id, and writing to a session whose folder is gone says so and keeps it", async ({ ersa }) => {

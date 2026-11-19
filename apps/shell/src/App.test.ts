@@ -950,7 +950,7 @@ describe("a tile's menu, and renaming on the tile", () => {
     return written;
   }
 
-  // verifies: FLOW-RESUME-SESSION-R07
+  // verifies: FLOW-RESUME-SESSION-R16
   it("copies the backend's id for the session with Copy session ID, after Move to section and before Archive", async () => {
     const written = stubClipboard();
     const core = await open({ "session.list": () => titled.map((s, i) => (i === 0 ? { ...s, backend_session_id: "9f2c4e1a-backend" } : s)) });
@@ -968,7 +968,7 @@ describe("a tile's menu, and renaming on the tile", () => {
     expect(core.calls.slice(asked)).toEqual([]);
   });
 
-  // verifies: FLOW-RESUME-SESSION-R07
+  // verifies: FLOW-RESUME-SESSION-R16
   it("shows Copy session ID unavailable, saying why, until the backend has reported the id", async () => {
     const written = stubClipboard();
     await open();
