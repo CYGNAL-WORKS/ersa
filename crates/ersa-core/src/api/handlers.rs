@@ -14,12 +14,12 @@ use ersa_protocol::core_api::{
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
 
-use super::{After, Answer, ApiError, ConnectionState};
+use super::{After, Answer, ApiError, ConnectionState, lock};
 use crate::admission::{self, Command, Refusal, Replaced, Report};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
 use crate::settings;
-use crate::state::Core;
+use crate::state::{Core, Inspection};
 use crate::workspace::{self, VcsError};
 
 // -- Core ----------------------------------------------------------------
@@ -249,6 +249,11 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
 
 /// The project on the host whose folder is `params.path`, compared as
 /// `project.add` compares folders, or `None` (PROTO-CORE-API-R27).
+///
+/// A find of a folder whose inspection for an earlier find is still under
+/// way, past that find's limit too, joins it rather than start another: a
+/// user retrying a folder on a share that stopped answering holds one
+/// thread for it, not one per try.
 pub(super) async fn project_find(
     core: &Core,
     params: ProjectFindParams,
@@ -256,29 +261,65 @@ pub(super) async fn project_find(
     if core.store.host(params.host_id.clone()).await?.is_none() {
         return Err(ApiError::not_found(format!("no host {}", params.host_id)));
     }
-    let raw = params.path.clone();
-    // A folder that cannot be opened is no project: `project.add` would
-    // refuse it, so it matches none, even one added there before it went.
-    let key = inspect(core, &params.path, move || {
-        let raw = absolute(&raw)?;
-        Ok(platform::canonicalize(Path::new(raw))
-            .ok()
-            .map(|p| platform::folder_key(&p)))
-    })
-    .await?;
-    let Some(key) = key else {
+    let subject = (params.host_id.clone(), params.path.trim().to_string());
+    // Joined, or put in the map for later finds to join. The inspection is
+    // started only once the map is unlocked, since its end takes the lock.
+    let (answer, to_start) = {
+        let mut finding = lock(&core.finding);
+        match finding.get(&subject) {
+            Some(under_way) => (under_way.clone(), None),
+            None => {
+                let (done, answer) = tokio::sync::watch::channel(None);
+                finding.insert(subject.clone(), answer.clone());
+                (answer, Some(done))
+            }
+        }
+    };
+    if let Some(done) = to_start {
+        // Only this inspection takes its entry out, once, when it ends,
+        // however it ends: a failure to start it included.
+        let finished = {
+            let finding = Arc::clone(&core.finding);
+            move || {
+                lock(&finding).remove(&subject);
+            }
+        };
+        // A folder that cannot be opened is no project: `project.add`
+        // would refuse it, so it matches none, even one added there before
+        // it went.
+        let raw = params.path.clone();
+        let inspection = move || {
+            let raw = absolute(&raw)?;
+            Ok(platform::canonicalize(Path::new(raw))
+                .ok()
+                .map(|p| platform::folder_key(&p)))
+        };
+        start_inspection(core, &params.path, inspection, done, finished)?;
+    }
+    let Some(key) = answer_of(core, &params.path, answer).await? else {
         return Ok(None);
     };
     Ok(core.store.project_at(params.host_id, key).await?)
 }
 
-/// Runs `inspection` of the folder the user named at `raw`, on a thread of
-/// its own since file system calls block, and gives it
-/// [`crate::CoreConfig::folder_inspection_limit`]: a folder on a share that
-/// stopped answering never answers. Past the limit the answer is
-/// `permission` (PROTO-CORE-API-R93). A hung file system call cannot be
-/// called off, so its thread is left to finish, and since nothing waits for
-/// its result any more, nothing comes of it when it does.
+/// Runs `inspection` of the folder the user named at `raw` and waits for
+/// it, as [`start_inspection`] and [`answer_of`] say.
+async fn inspect<T: Clone + Send + Sync + 'static>(
+    core: &Core,
+    raw: &str,
+    inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let (done, answer) = tokio::sync::watch::channel(None);
+    start_inspection(core, raw, inspection, done, || {})?;
+    answer_of(core, raw, answer).await
+}
+
+/// Starts `inspection` of the folder the user named at `raw`, on a thread
+/// of its own since file system calls block, to answer through `done`.
+/// `finished` is called once, when the thread ends, or here when no thread
+/// was started. A hung file system call cannot be called off, so its
+/// thread is left to finish, and since nothing waits for its result any
+/// more, nothing comes of it when it does.
 ///
 /// The thread is a plain one, not one of Tokio's blocking pool: that pool
 /// also runs every database call, so threads stuck on a dead share there
@@ -287,41 +328,80 @@ pub(super) async fn project_find(
 /// [`crate::state::FOLDER_INSPECTIONS`] until the call returns; with none
 /// free, so many folders are not answering that the answer is
 /// `permission` at once.
-async fn inspect<T: Send + 'static>(
+fn start_inspection<T: Send + Sync + 'static>(
     core: &Core,
     raw: &str,
     inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
-) -> Result<T, ApiError> {
+    done: tokio::sync::watch::Sender<Option<Result<T, ApiError>>>,
+    finished: impl FnOnce() + Send + 'static,
+) -> Result<(), ApiError> {
+    // Calls `finished` on every way out: dropped here on a refusal, or by
+    // the thread as it ends.
+    let finished = OnDrop(Some(finished));
     let place = Arc::clone(&core.folder_inspections)
         .try_acquire_owned()
         .map_err(|_| {
             ApiError::new(
                 ersa_protocol::core_api::ErrorKind::Permission,
                 format!(
-                    "{} was not inspected: too many folders asked about are not answering;                      try again once they do",
+                    "{} was not inspected: too many folders asked about are not answering; \
+                     try again once they do",
                     raw.trim()
                 ),
             )
         })?;
-    let gate = core.config.inspect_gate.clone();
+    let gate = core.config.folder_gate.clone();
     let runtime = tokio::runtime::Handle::current();
-    let (done, answer) = tokio::sync::oneshot::channel();
     std::thread::Builder::new()
         .name("folder inspection".into())
         .spawn(move || {
+            // Dropped in reverse order: the place, then `finished`, so a
+            // later request finds the inspection gone only once its place
+            // is free.
+            let _finished = finished;
+            let _place = place;
             // In tests, the folder that does not answer.
             if let Some(gate) = gate {
                 runtime.block_on(gate.stop());
             }
-            // Fails only when the request stopped waiting: nothing to do.
-            let _ = done.send(inspection());
-            // Only now, however long the call took, is the place free.
-            drop(place);
+            // `send_replace`, since every request may have stopped waiting:
+            // nothing to do then.
+            done.send_replace(Some(inspection()));
         })
         .map_err(|e| ApiError::internal(format!("could not start the folder inspection: {e}")))?;
-    match tokio::time::timeout(core.config.folder_inspection_limit, answer).await {
-        // The thread ended without an answer: the inspection panicked.
-        Ok(answer) => answer.map_err(|_| ApiError::internal("inspecting the folder panicked"))?,
+    Ok(())
+}
+
+/// Calls the function it holds when dropped, a panic's unwinding included.
+struct OnDrop<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f();
+        }
+    }
+}
+
+/// Waits for `answer`, the inspection of the folder the user named at
+/// `raw`, for [`crate::CoreConfig::folder_inspection_limit`] from now: a
+/// folder on a share that stopped answering never answers. Past the limit
+/// the answer is `permission` (PROTO-CORE-API-R93).
+async fn answer_of<T: Clone>(
+    core: &Core,
+    raw: &str,
+    mut answer: Inspection<T>,
+) -> Result<T, ApiError> {
+    let limit = core.config.folder_inspection_limit;
+    match tokio::time::timeout(limit, answer.wait_for(Option::is_some)).await {
+        Ok(Ok(answered)) => answered
+            .clone()
+            .unwrap_or_else(|| Err(ApiError::internal("the folder inspection had no answer"))),
+        // The inspection ended without an answer: it panicked, or its
+        // thread could not be started for the request it was started for.
+        Ok(Err(_)) => Err(ApiError::internal(
+            "the folder inspection ended without an answer",
+        )),
         Err(_) => Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::Permission,
             format!(
@@ -344,6 +424,7 @@ fn absolute(raw: &str) -> Result<&str, ApiError> {
 }
 
 /// A folder about to become a project.
+#[derive(Clone)]
 struct Folder {
     /// Canonical: absolute, links and `..` resolved, the stored letter case.
     path: String,
@@ -678,21 +759,16 @@ async fn resolve_base(
                 ApiError::invalid_params(format!("git cannot resolve base {base} to a commit"))
             });
     }
-    let default = workspace::git_default_branch(transport, repo).await?;
-    let revision = match &default {
-        Some(name) => format!("refs/heads/{name}"),
-        None => "HEAD".to_string(),
-    };
+    // Finding the default branch and resolving it share one limit.
+    let (revision, commit) = workspace::git_default_commit(transport, repo).await?;
     // Nothing the caller gave can be wrong here, so a failure is git's: a
     // repository with no commit yet, or a branch deleted in between.
-    workspace::git_resolve_commit(transport, repo, &revision)
-        .await?
-        .ok_or_else(|| {
-            ApiError::new(
-                ersa_protocol::core_api::ErrorKind::VcsError,
-                format!("the repository has no commit to start from at {revision}"),
-            )
-        })
+    commit.ok_or_else(|| {
+        ApiError::new(
+            ersa_protocol::core_api::ErrorKind::VcsError,
+            format!("the repository has no commit to start from at {revision}"),
+        )
+    })
 }
 
 pub(super) async fn workspace_remove(

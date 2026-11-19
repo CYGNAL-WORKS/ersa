@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
-use ersa_core::Adapter;
+use ersa_core::{Adapter, Gate};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records};
 use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
@@ -737,8 +737,166 @@ async fn a_record_deletion_given_up_on_deletes_nothing_later() {
     assert_eq!(backend_ids(&fake.records).len(), 1, "the record is kept");
     assert_eq!(fake.stats.record_deletes.load(Ordering::SeqCst), 0);
 
-    client.result("session.delete", json!({ "id": id })).await;
+    deleted_once_let_go(&mut client, json!({ "id": id })).await;
     assert!(backend_ids(&fake.records).is_empty());
+    assert!(listed(&mut client, &id).await.is_none());
+}
+
+/// Retries `session.delete` with `params` while it answers `busy`, which it
+/// does until the call a delete gave up on has ended and let go of its
+/// claim; fails unless it then succeeds. A busy refusal changes nothing.
+async fn deleted_once_let_go(client: &mut Client, params: Value) {
+    let started = std::time::Instant::now();
+    loop {
+        let answer = client.call("session.delete", params.clone()).await;
+        if answer.get("result").is_some() {
+            return;
+        }
+        let error = &answer["error"];
+        assert_eq!(error["data"]["detail"], "busy", "{answer}");
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the claim was never let go: {answer}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A delete that gave up on a record deletion that never returns keeps its
+/// claim until the deletion has ended: however often the user tries again
+/// meanwhile, each try is refused `busy` and no second deletion begins, so
+/// the stuck one stays the only one. Once it ends, trying again deletes the
+/// record.
+// verifies: PROTO-CORE-API-R107
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_while_a_record_deletion_is_stuck_begin_no_second_one() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let core = start_with_adapters(
+        tempdir(),
+        |config| config.record_deletion_limit = Duration::from_millis(200),
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let root = root(&mut client, &project).await;
+    let id = idle_session(&mut client, &root).await;
+
+    let stalled = fake.delete_gate.lock().await;
+    let error = client.error("session.delete", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "internal", "{error}");
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+
+    for _ in 0..3 {
+        let error = client.error("session.delete", json!({ "id": id })).await;
+        assert_eq!(kind(&error), "invalid_state", "{error}");
+        assert_eq!(error["data"]["detail"], "busy", "{error}");
+    }
+    let calls = &fake.stats.record_deletion_calls;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    drop(stalled);
+    deleted_once_let_go(&mut client, json!({ "id": id })).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(backend_ids(&fake.records).is_empty());
+    assert!(listed(&mut client, &id).await.is_none());
+}
+
+/// Lets every stop at the gate go when the test ends, passed or failed: a
+/// try left parked there on a blocking thread would keep the test's runtime
+/// from shutting down, so a failing test would hang instead of failing.
+struct LetGo(Arc<Gate>);
+
+impl Drop for LetGo {
+    fn drop(&mut self) {
+        for _ in 0..16 {
+            self.0.go();
+        }
+    }
+}
+
+/// Waits until a request stops at `gate`, failing instead of hanging.
+async fn reached(gate: &Gate) {
+    tokio::time::timeout(Duration::from_secs(60), gate.reached())
+        .await
+        .expect("Core reached the gate in time");
+}
+
+/// A delete that gave up on a try at its workspace's folder that never
+/// returns keeps its claim until the try has ended: each try again
+/// meanwhile is refused `busy` and starts no second removal beside the
+/// stuck one. The stuck try, called off, deletes nothing when it returns;
+/// trying again then removes the folder.
+// verifies: PROTO-CORE-API-R107
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_while_a_folder_removal_is_stuck_begin_no_second_one() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let core = start_with_adapters(
+        tempdir(),
+        {
+            let gate = Arc::clone(&gate);
+            move |config| {
+                config.folder_gate = Some(gate);
+                config.folder_removal_limit = Duration::from_millis(200);
+            }
+        },
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    // The project's folder is inspected at the gate too.
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let add = client
+        .request(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
+        )
+        .await;
+    reached(&gate).await;
+    gate.go();
+    let project = client.response(add).await["result"].clone();
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    // git loses its record of the worktree, as a failed removal on Windows
+    // can leave it, so the delete removes the folder as a folder.
+    let name = folder.file_name().unwrap();
+    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+
+    let shown = token(&mut client, &workspace).await;
+    let delete = client
+        .request("session.delete", json!({ "id": id, "token": shown }))
+        .await;
+    reached(&gate).await;
+    let answer = client.response(delete).await;
+    assert_eq!(kind(&answer["error"]), "vcs_error", "{answer}");
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+
+    for _ in 0..3 {
+        let shown = token(&mut client, &workspace).await;
+        let error = client
+            .error("session.delete", json!({ "id": id, "token": shown }))
+            .await;
+        assert_eq!(kind(&error), "invalid_state", "{error}");
+        assert_eq!(error["data"]["detail"], "busy", "{error}");
+    }
+
+    // The stuck try returns, and the try again that follows goes through.
+    gate.go();
+    gate.go();
+    let shown = token(&mut client, &workspace).await;
+    deleted_once_let_go(&mut client, json!({ "id": id, "token": shown })).await;
+    assert!(!folder.exists());
     assert!(listed(&mut client, &id).await.is_none());
 }
 

@@ -11,16 +11,18 @@
 //! only passed on to the user.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{CallOff, CallOffOnDrop, ProcessSpec, Removal, Transport, remove_tree};
 
 use crate::platform;
+use crate::state::Gate;
 use crate::transport::{self, Output, RunError};
 
 /// How long one git command may take. Creating a worktree checks out the
 /// whole tree, which takes a while for a large repository.
-const GIT_TIMEOUT: Duration = Duration::from_secs(300);
+pub const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How long a quick question to git may take: listing branches, resolving a
 /// base. The Interface waits on these while the user picks, so a repository
@@ -99,13 +101,32 @@ pub async fn git_worktree_add(
     check(output, "git worktree add failed")
 }
 
+/// What a workspace made without a base starts from in the repository at
+/// `repo`: the revision naming its default branch ([`default_branch`]), or
+/// `HEAD` on a detached checkout with none, and the commit that revision
+/// names, `None` when it names none (a repository with no commit yet). All
+/// of it, three git calls at most, is given [`GIT_QUERY_TIMEOUT`] together.
+pub async fn git_default_commit(
+    transport: &dyn Transport,
+    repo: &str,
+) -> Result<(String, Option<String>), VcsError> {
+    let deadline = deadline();
+    let revision = match default_branch(transport, repo, deadline).await? {
+        Some(name) => format!("refs/heads/{name}"),
+        None => "HEAD".to_string(),
+    };
+    let commit = resolve_commit(transport, repo, &revision, deadline).await?;
+    Ok((revision, commit))
+}
+
 /// The default branch of the repository at `repo`: the local branch
 /// `origin/HEAD` points at, else `main`, else `master`, else the
 /// checked-out branch. None on a detached checkout with none of those.
-/// One git call, given [`GIT_QUERY_TIMEOUT`].
-pub async fn git_default_branch(
+/// One git call, which must answer by `deadline`.
+async fn default_branch(
     transport: &dyn Transport,
     repo: &str,
+    deadline: Deadline,
 ) -> Result<Option<String>, VcsError> {
     // Each line is `<ref>:<* if checked out>:<target if a symbolic ref>`.
     // A ref name can never contain `:`, so the split is unambiguous. The
@@ -117,7 +138,7 @@ pub async fn git_default_branch(
         "refs/heads",
         "refs/remotes/origin/HEAD",
     ];
-    let output = query(transport, repo, &args, deadline()).await?;
+    let output = query(transport, repo, &args, deadline).await?;
     let output = checked(output, "git could not list the branches")?;
     Ok(pick_default_branch(&output.stdout))
 }
@@ -171,10 +192,19 @@ pub async fn git_resolve_commit(
     repo: &str,
     revision: &str,
 ) -> Result<Option<String>, VcsError> {
+    resolve_commit(transport, repo, revision, deadline()).await
+}
+
+/// [`git_resolve_commit`], answering by `deadline`.
+async fn resolve_commit(
+    transport: &dyn Transport,
+    repo: &str,
+    revision: &str,
+    deadline: Deadline,
+) -> Result<Option<String>, VcsError> {
     // `^{commit}` peels a tag to the commit it tags and refuses anything
     // that is not a commit (a tree, a blob).
     let peeled = format!("{revision}^{{commit}}");
-    let deadline = deadline();
     let args = ["rev-parse", "--verify", "--quiet", &peeled];
     let output = query(transport, repo, &args, deadline).await?;
     let failed = || VcsError::Failed {
@@ -1139,16 +1169,20 @@ where
 /// worktree is refused, as `workspace.remove` refuses it. Safe to run
 /// again after it failed part way: a folder already gone is pruned, and a
 /// branch already gone is not kept.
+///
+/// `tries` says how each try at a folder git no longer lists runs
+/// ([`remove_folder`]).
 pub async fn git_worktree_delete(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
     branch: &str,
+    tries: FolderTries,
 ) -> Result<bool, VcsError> {
     match git_worktree_remove(transport, repo, path, true, false).await {
         Ok(()) => {}
         Err(VcsError::NotListed { .. }) => {
-            remove_folder(path).await?;
+            remove_folder(path, &tries).await?;
             let pruned = git(transport, repo, &["worktree", "prune"]).await?;
             check(pruned, "git worktree prune failed")?;
         }
@@ -1224,29 +1258,58 @@ pub async fn git_worktree_gone(
     Ok(!exists)
 }
 
+/// How [`git_worktree_delete`]'s tries at a workspace's folder run.
+#[derive(Clone)]
+pub struct FolderTries {
+    /// Kept by each try on its thread until the thread returns, which a
+    /// file system call that hangs delays past the answer: a delete's
+    /// claim, so nothing begins a second removal beside one still stuck.
+    pub held: Arc<dyn std::any::Any + Send + Sync>,
+    /// How long each try may take: [`GIT_TIMEOUT`], as a git call has,
+    /// except in tests that let it run out.
+    pub limit: Duration,
+    /// Where each try stops, on its thread before it touches the folder,
+    /// until a test lets it go ([`crate::CoreConfig::folder_gate`]).
+    pub gate: Option<Arc<Gate>>,
+}
+
+impl FolderTries {
+    /// Tries that hold `held`, each given [`GIT_TIMEOUT`].
+    pub fn holding(held: Arc<dyn std::any::Any + Send + Sync>) -> FolderTries {
+        FolderTries {
+            held,
+            limit: GIT_TIMEOUT,
+            gate: None,
+        }
+    }
+}
+
 /// Deletes the folder at `path` and everything in it, retried while files
 /// are busy, as worktree removal is. A link inside is removed, never
 /// followed. A folder already gone is not an error. Each try is a blocking
-/// job under [`FILE_SYSTEM`]'s cap, given [`GIT_TIMEOUT`] as a git call is,
-/// so a folder on a drive that stops answering fails the delete rather than
-/// hold it for ever.
-async fn remove_folder(path: &str) -> Result<(), VcsError> {
-    remove_folder_within(path, GIT_TIMEOUT).await
-}
-
-/// [`remove_folder`], each try given `limit`. Once Core gives up on a try,
-/// at its deadline or because the request was dropped, the try begins no
-/// further deletion (PROTO-CORE-API-R91): it asks before each one.
-async fn remove_folder_within(path: &str, limit: Duration) -> Result<(), VcsError> {
+/// job under [`FILE_SYSTEM`]'s cap, given `tries.limit`, so a folder on a
+/// drive that stops answering fails the delete rather than hold it for
+/// ever, and keeps `tries.held` until its thread returns. Once Core gives
+/// up on a try, at its deadline or because the request was dropped, the try
+/// begins no further deletion (PROTO-CORE-API-R91): it asks before each one.
+async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> {
     let call_off = CallOff::default();
     let _called_off_on_return = CallOffOnDrop(call_off.clone());
     let call_off = &call_off;
+    let runtime = &tokio::runtime::Handle::current();
     retried(
         || async move {
             let folder = std::path::PathBuf::from(path);
             let call_off = call_off.clone();
-            let deadline = Deadline::after(limit);
+            let (held, gate) = (Arc::clone(&tries.held), tries.gate.clone());
+            let runtime = runtime.clone();
+            let deadline = Deadline::after(tries.limit);
             blocking(deadline, "deleting the workspace's folder", move |at| {
+                let _held = held;
+                // In tests, the folder that does not answer.
+                if let Some(gate) = gate {
+                    runtime.block_on(gate.stop());
+                }
                 let stop = || call_off.is_called_off() || std::time::Instant::now() >= at;
                 match remove_tree(&folder, &stop) {
                     Ok(Removal::Removed) => Ok(Ok(())),
@@ -1486,7 +1549,36 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn finding_the_default_branch_gives_git_ten_seconds() {
         let started = tokio::time::Instant::now();
-        let result = git_default_branch(&hanging_git(), "repo").await;
+        let result = git_default_commit(&hanging_git(), "repo").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
+    /// Finding the default branch and resolving it share one limit, so a
+    /// repository slow to list its branches does not get a second ten
+    /// seconds to resolve one.
+    // verifies: PROTO-CORE-API-R109
+    #[tokio::test(start_paused = true)]
+    async fn finding_and_resolving_the_default_branch_get_ten_seconds_together() {
+        /// The first git lists `main` after six seconds; the next never answers.
+        struct SlowThenHanging(std::sync::atomic::AtomicUsize);
+        #[ersa_adapter::async_trait]
+        impl Transport for SlowThenHanging {
+            async fn spawn(
+                &self,
+                spec: ProcessSpec,
+            ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+                if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    let listing = ersa_adapter::fake::FakeTransport::new(["refs/heads/main:*:"]);
+                    return listing.spawn(spec).await;
+                }
+                hanging_git().spawn(spec).await
+            }
+        }
+        let transport = SlowThenHanging(Default::default());
+        let started = tokio::time::Instant::now();
+        let result = git_default_commit(&transport, "repo").await;
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 2);
         timed_out_at_ten_seconds(result, started);
     }
 
@@ -1601,7 +1693,11 @@ mod tests {
             .build()
             .unwrap();
         let path = folder.display().to_string();
-        let result = runtime.block_on(remove_folder_within(&path, Duration::ZERO));
+        let tries = FolderTries {
+            limit: Duration::ZERO,
+            ..FolderTries::holding(Arc::new(()))
+        };
+        let result = runtime.block_on(remove_folder(&path, &tries));
         drop(runtime);
         let Err(VcsError::Failed { message, .. }) = result else {
             panic!("{result:?}");
@@ -1613,6 +1709,55 @@ mod tests {
         for name in files {
             assert!(folder.join(name).exists(), "{name}");
         }
+    }
+
+    /// A try at a folder whose file system call hangs past its limit keeps
+    /// what it holds, a delete's claim, until the call returns, so a retry
+    /// meanwhile is refused rather than start a second removal beside it
+    /// (PROTO-CORE-API-R107).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_folder_removal_that_hangs_keeps_its_hold_until_its_thread_returns() {
+        let _one_at_a_time = CAP_TESTS.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("workspace");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("a.txt"), "a").unwrap();
+        let held = Arc::new(());
+        // A folder the file system does not answer for until told to.
+        let gate = Arc::new(Gate::default());
+        // Lets the try go however the test ends: a try left parked would
+        // keep the runtime from shutting down, so a failure would hang.
+        struct LetGo(Arc<Gate>);
+        impl Drop for LetGo {
+            fn drop(&mut self) {
+                self.0.go();
+            }
+        }
+        let let_go = LetGo(Arc::clone(&gate));
+        let tries = FolderTries {
+            held: Arc::clone(&held) as _,
+            limit: Duration::from_millis(50),
+            gate: Some(Arc::clone(&gate)),
+        };
+        let path = folder.display().to_string();
+        let result = remove_folder(&path, &tries).await;
+        drop(tries);
+        let Err(VcsError::Failed { message, .. }) = &result else {
+            panic!("{result:?}");
+        };
+        assert!(message.contains("did not finish"), "{message}");
+        // Answered, and the stuck try still holds it.
+        gate.reached().await;
+        assert_eq!(Arc::strong_count(&held), 2);
+        drop(let_go);
+        // Its thread returns, and only then lets go, having deleted nothing:
+        // Core had called it off.
+        let waited = std::time::Instant::now();
+        while Arc::strong_count(&held) > 1 && waited.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(Arc::strong_count(&held), 1);
+        assert!(folder.join("a.txt").exists());
     }
 
     // No requirement names the cap: it keeps a folder that hangs from
