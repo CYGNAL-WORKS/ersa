@@ -266,6 +266,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+  // An answer Core took whose decision never came may be lost with the old connection (FLOW-APPROVE-PERMISSION-R32).
+  useEffect(() => {
+    if (link !== undefined) sending.attached();
+  }, [sending, link]);
 
   // The shelf is never open for the active session (FLOW-APPROVE-PERMISSION-R26): making its session active, by
   // any way, closes it at once, and so does its session having nothing left to ask.
@@ -743,13 +747,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     try {
       const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
-      connection.current?.reload("projects");
-      // The folder's sessions started in the backend's own tools are listed now (FLOW-RESUME-SESSION-R12).
-      connection.current?.reload("sessions");
       return project;
     } catch (error) {
       setAdding({ state: "failed", message: describeError(error) });
       return undefined;
+    } finally {
+      // Read again either way: an add that timed out may have finished in Core all the same.
+      connection.current?.reload("projects");
+      // The folder's sessions started in the backend's own tools are listed now (FLOW-RESUME-SESSION-R12).
+      connection.current?.reload("sessions");
     }
   };
 
@@ -821,6 +827,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     listed && listedProject ? { session: listed, project: listedProject } : away && keptControls.current?.session.id === shown?.id ? keptControls.current : undefined;
   const controlsWorkspace = controlsFor && workspaces[controlsFor.session.workspace_id];
   const sessionControls = controlsFor && controlsWorkspace && sessionShown(controlsFor.session, controlsWorkspace, backends[controlsFor.session.host_id] ?? []);
+  // Whether the shown session is archived, as last listed: after a reconnect, until the sessions are listed again,
+  // an archived session keeps its note in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02). While Ersa can't
+  // reach Core the composer shows instead, saying so and unavailable (FLOW-SEND-MESSAGE-R06).
+  const kept = keptControls.current?.session;
+  const archived = listed ? listed.archived : !away && shown !== undefined && kept?.id === shown.id && kept.archived;
   const used = listed && contextUsed(listed.tile);
   const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
 
@@ -1007,7 +1018,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
-            {listed?.archived ? (
+            {archived ? (
               // An archived session opens read-only: a note with Resume in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02).
               <ArchivedNote onResume={() => void resume(shown.id)} resuming={resuming[shown.id]} />
             ) : (

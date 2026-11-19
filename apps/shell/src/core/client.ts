@@ -106,6 +106,15 @@ export function stoppedBeforeSent(error: unknown): boolean {
   return data?.kind === "invalid_state" && data.reason === "send_stopped";
 }
 
+/**
+ * Whether a call was sent and got no answer: it reached Core's queue, then timed out or lost its connection, so Core
+ * may have acted on it (FLOW-SEND-MESSAGE-R15).
+ */
+export function unanswered(error: unknown): boolean {
+  const bridge = error as BridgeError | undefined;
+  return bridge?.kind === "unavailable" && bridge.sent === true;
+}
+
 /** A readable message for anything a client call rejected with: a refusal Core names in the catalog's words. */
 export function describeError(error: unknown): string {
   const words = refusalWords(refusalOf(error));

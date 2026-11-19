@@ -269,6 +269,9 @@ export const enUS = {
       ownWordsPlaceholder: "Answer in your own words",
       // Followed by Core's reason, beneath.
       answerRefusedError: "Your answer wasn't accepted.",
+      // An answer sent that got no answer in time, or whose connection changed before Core said it was applied: never
+      // said to have failed, as a message whose delivery is unknown (FLOW-SEND-MESSAGE-R15).
+      answerUnknownNote: "Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.",
       reconnectingNote: "Reconnecting to Core…",
     },
   },
