@@ -578,6 +578,7 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Question open", sessionView(questionAsked)],
   ["Question answer on its way", sessionView(questionAsked), { rq: { state: "sending", decision: "decline" } }],
   ["Question answer refused", sessionView(questionAsked), { rq: { state: "failed", message: refusal } }],
+  ["Question answer unknown", sessionView(questionAsked), { rq: { state: "unknown" } }],
   ["Question while Core is away", sessionView(questionAsked, { stream: { state: "offline" } })],
   ["Question answered", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [{ id: "q1", value: "o2", own_words: false }], declined: false, answered_by: "user" }])],
   ["Question declined", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [], declined: true, answered_by: "user" }])],
@@ -941,6 +942,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A question in the user's own words", { state: "question", requestId: "rq", questions: [wordsQuestion] }],
   ["A question's answer on its way", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "sending", decision: { answers: [] } } }],
   ["A question's answer refused", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["A question's answer Ersa can't tell reached the agent", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "unknown" } }],
   ["A question while Ersa reconnects", { state: "question", requestId: "rq", questions: [singleQuestion] }, { live: false }],
   ["Loading", { state: "loading" }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
@@ -1187,6 +1189,8 @@ const entries: Entry[] = [
           renaming={{ p2: { state: "failed", message: "Claude Code has no record of this session any more." } }}
         />,
       ],
+      // Ersa lost Core while the field was open: the draft stays, and Enter saves nothing.
+      ["Renaming on the tile while Ersa can't reach Core", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} offline />],
     ],
   },
   {

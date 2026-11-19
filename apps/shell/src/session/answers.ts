@@ -4,7 +4,10 @@
 // refused, by session, and the shelf and the transcript both read it.
 
 import type { Envelope, QuestionAnswered } from "../protocol/agent-events.gen";
-import { type BridgeError, type CoreClient, type Params, describeError } from "../core/client";
+import { type CoreClient, type Params, describeError, unanswered } from "../core/client";
+
+/** One answer's key: a session's id and a request's id, which neither contains a newline. */
+const keyOf = (id: string, requestId: string) => `${id}\n${requestId}`;
 
 /** What the user chose: Allow, Deny, or allowing with one of the request's suggestions, by its index. */
 export type Decision = "allow" | "deny" | { suggestion: number };
@@ -52,6 +55,8 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
   // What is on its way, kept here as well as in the window's state, so a second choice before React renders the
   // first is still refused.
   const onItsWay = new Set<string>();
+  // The answers Core took whose decision or answer has not arrived, by key, with their session and request.
+  const taken = new Map<string, [string, string]>();
   // `onlyHeld`: change the answer only while one is recorded, so a refusal that comes after the decision arrived
   // leaves nothing behind.
   const set = (id: string, requestId: string, answer: Answer | undefined, onlyHeld = false) =>
@@ -68,13 +73,18 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
 
   // One answer at a time to a request, kept on its way until Core's event for it arrives.
   const send = (id: string, requestId: string, decision: Decision | Reply, call: () => Promise<unknown>) => {
-    const key = `${id}\n${requestId}`;
+    const key = keyOf(id, requestId);
     if (onItsWay.has(key)) return;
     onItsWay.add(key);
+    taken.delete(key);
     set(id, requestId, { state: "sending", decision });
     call().then(
-      // Core took it; it stays on its way until its event arrives, so the answers stay unavailable.
-      () => onItsWay.delete(key),
+      // Core took it; it stays on its way until its event arrives or the connection changes (attached), so the
+      // answers stay unavailable.
+      () => {
+        onItsWay.delete(key);
+        taken.set(key, [id, requestId]);
+      },
       (error) => {
         onItsWay.delete(key);
         set(id, requestId, afterRejection(error), true);
@@ -92,23 +102,11 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
     },
 
     attached() {
-      change((answers) => {
-        let next = answers;
-        for (const [id, session] of Object.entries(answers)) {
-          for (const [requestId, answer] of Object.entries(session)) {
-            // A call still on its way settles by itself, as unknown if it was lost with the old connection.
-            if (answer.state !== "sending" || onItsWay.has(`${id}
-${requestId}`)) continue;
-            const { [requestId]: _, ...rest } = next[id] ?? {};
-            next = { ...next, [id]: rest };
-            if (Object.keys(rest).length === 0) {
-              const { [id]: _gone, ...others } = next;
-              next = others;
-            }
-          }
-        }
-        return next;
-      });
+      // Answers Core took whose decision never came: no longer on their way, so their answers are offered again.
+      for (const [key, [id, requestId]] of taken) {
+        taken.delete(key);
+        set(id, requestId, undefined);
+      }
     },
 
     receive(envelope) {
@@ -116,6 +114,7 @@ ${requestId}`)) continue;
       const { session_id: id, event } = envelope as { session_id?: unknown; event?: { type?: unknown; request_id?: unknown } };
       const settles = event?.type === "permission.decided" || event?.type === "question.answered";
       if (typeof id === "string" && settles && typeof event.request_id === "string") {
+        taken.delete(keyOf(id, event.request_id));
         set(id, event.request_id, undefined);
       }
     },
@@ -128,7 +127,6 @@ ${requestId}`)) continue;
  * the answers offered again: Core's refusal, or a call that never reached Core.
  */
 function afterRejection(error: unknown): Answer {
-  const bridge = error as BridgeError | undefined;
-  if (bridge?.kind === "unavailable" && bridge.sent) return { state: "unknown" };
+  if (unanswered(error)) return { state: "unknown" };
   return { state: "failed", message: describeError(error) };
 }
