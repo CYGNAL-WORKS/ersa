@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Envelope, QuestionAsked } from "../protocol/agent-events.gen";
-import type { Reply } from "../session/answers";
+import type { Answer, Reply } from "../session/answers";
 import type { ShelfShows } from "../session/shelf";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import { Shelf } from "./Shelf";
@@ -34,12 +34,13 @@ const asked: Envelope = {
 
 type Sent = [string, Reply][];
 
-function inShelf(sent: Sent, live = true) {
+function inShelf(sent: Sent, live = true, answers?: Readonly<Record<string, Answer>>) {
   render(
     createElement(Shelf, {
       tile: { title: "Fix the build" },
       shows: { state: "question", requestId: "r1", questions },
       live,
+      answers,
       onDecide: () => {},
       onAnswer: (requestId: string, reply: Reply) => sent.push([requestId, reply]),
     }),
@@ -47,11 +48,12 @@ function inShelf(sent: Sent, live = true) {
   return screen.getByRole("dialog");
 }
 
-function inTranscript(sent: Sent) {
+function inTranscript(sent: Sent, answers?: Readonly<Record<string, Answer>>) {
   render(
     createElement(Transcript, {
       title: "Fix the build",
       view: { id: "s1", transcript: apply(emptyTranscript, asked), stream: { state: "live" } },
+      answers,
       onDecide: () => {},
       onAnswer: (requestId: string, reply: Reply) => sent.push([requestId, reply]),
     }),
@@ -194,5 +196,19 @@ describe("the transcript's question card once answered", () => {
     };
     expect(card(true)).toContain("Question, declined");
     expect(card(false)).toContain("Question, answered");
+  });
+});
+
+describe("a question's answer Ersa can't tell reached the agent", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R19
+  it.each([
+    ["the shelf", () => inShelf([], true, { r1: { state: "unknown" } })],
+    ["the transcript's question card", () => inTranscript([], { r1: { state: "unknown" } })],
+  ])("isn't said to be refused on %s, and its answers are offered again", (_where, show) => {
+    const surface = show();
+    expect(within(surface).queryByText("Your answer wasn't accepted.")).toBeNull();
+    const note = within(surface).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.");
+    expect(note.getAttribute("role")).toBe("status");
+    expect((within(surface).getByRole("button", { name: "Decline" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
