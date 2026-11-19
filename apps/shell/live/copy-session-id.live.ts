@@ -36,7 +36,8 @@ test("Copy session ID copies the listed id, and writing to a session whose folde
   });
   const tile = rail.locator(".session").first();
   await tile.hover();
-  await tile.getByRole("button", { name: /^More for / }).click();
+  // More sits beside the tile's button, not in it.
+  await rail.getByRole("button", { name: /^More for / }).first().click();
   const item = page.getByRole("menuitem", { name: /^Copy session ID/ });
   await expect(item).toBeVisible();
   await expect(item).not.toHaveAttribute("aria-disabled", "true", { timeout: 30_000 });
