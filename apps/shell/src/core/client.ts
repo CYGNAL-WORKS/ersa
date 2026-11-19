@@ -59,8 +59,7 @@ export function refusalOf(error: unknown): ErrorData | undefined {
 
 type Reason = NonNullable<ErrorData["reason"]>;
 
-// The catalog's words for each refusal reason the Interface knows (PROTO-CORE-API-R80). `folder_gone` has none yet:
-// its words, and where they show, come with the ticket for Copy session ID; until then it reads as Core's message.
+// The catalog's words for each refusal reason the Interface knows (PROTO-CORE-API-R80).
 const REFUSAL_WORDS: Partial<Record<Reason, () => string>> = {
   session_busy: () => t("errors.refusal.sessionBusyError"),
   session_deleting: () => t("errors.refusal.sessionDeletingError"),
@@ -73,6 +72,7 @@ const REFUSAL_WORDS: Partial<Record<Reason, () => string>> = {
   open_unknown: () => t("errors.refusal.openUnknownError"),
   no_finished_reply: () => t("errors.refusal.noFinishedReplyError"),
   backend_cannot_fork: () => t("errors.refusal.backendCannotForkError"),
+  folder_gone: () => t("errors.refusal.folderGoneError"),
 };
 
 // Process ids as Core lists them for `open_elsewhere`: decimal numbers separated by a comma and a space (R87).

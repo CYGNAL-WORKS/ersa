@@ -24,7 +24,7 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 3. The user writes to it and sends. Ersa starts the backend again with the session's backend id, in the session's folder, and the message goes as the first turn of the resumed session, in the same record. The composer says the backend is starting meanwhile (`FLOW-SEND-MESSAGE`).
 4. On an archived session, Resume on the archived note unarchives the session and resumes it, with no message.
 5. A project's sessions include those the backend recorded in the project's folder or in any of its workspaces' folders, started in the backend's own tools included. They sit in the rail like any other, and resume the same way, in the folder they ran in. A session the backend's own list hides is left out, as Claude Code's hides the runs its SDK made with no one at the keyboard (PROTO-CLAUDE-CODE-STREAM-R79).
-6. From a tile's menu, Copy session ID copies the backend's id for the session, so the user can resume it in the backend's own tools.
+6. From a tile's menu, Copy session ID copies the backend's id for the session, so the user can resume it in the backend's own tools. Core holds the id from when it chose it, for a backend that starts a session under an id Core chooses (Claude Code: at the session's creation or fork), else from when the backend names the session or the adapter lists its record. For Claude Code the id names a record only from the session's first message (PROTO-CLAUDE-CODE-STREAM, Invocation): until then the backend's own tools find nothing under it, a fork included, though Ersa shows the fork's conversation from its original's record.
 
 ## Variations and errors
 
@@ -47,7 +47,7 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 - ~~**FLOW-RESUME-SESSION-R04**~~: retired 2026-11-15 (sessions the backend's own list hides are left out), replaced by R12.
 - **FLOW-RESUME-SESSION-R05**: A session started in the backend's own tools shall keep the same Ersa id across `session.list` calls and Core restarts, so that its arrangement (pinned, section, archived, unseen) is kept.
 - **FLOW-RESUME-SESSION-R06**: When the backend's record of a session started in the backend's own tools is gone, `session.list` shall leave the session out from then on.
-- **FLOW-RESUME-SESSION-R07**: `session.list` shall carry each session's `backend_session_id` once the backend has reported it, and the tile's menu shall offer Copy session ID, which puts it on the clipboard.
+- ~~**FLOW-RESUME-SESSION-R07**~~: retired 2026-11-19 (an id Core chose is the session's before the backend reports it, and the list and the menu were one statement), replaced by R15 and R16.
 - **FLOW-RESUME-SESSION-R08**: When Core starts and finds a session that was live when it last stopped, the session's transcript shall end with its `session.ended` (PROTO-AGENT-EVENTS, Core's lifecycle facts), and the session shall be stopped and resumable.
 - ~~**FLOW-RESUME-SESSION-R09**~~: retired 2026-11-15 (one Core is running holds the removal back), replaced by R13 and R14.
 - **FLOW-RESUME-SESSION-R10**: When a resume, by `session.resume` or by a send, names a fork that has no record of its own, Core shall fork the fork's original again as `session.fork` does, refusing the resume with `session.fork`'s answer whenever `session.fork` of the original would be refused and holding sends to the original until the fork's backend is ready.
@@ -55,10 +55,12 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 - **FLOW-RESUME-SESSION-R12**: `session.list` shall include, for each project, every session the backend's adapter lists for the project's folder and for each of its workspaces' folders, those started in the backend's own tools included, each in the workspace whose folder it ran in, counting only records whose own working folder is that folder.
 - **FLOW-RESUME-SESSION-R13**: Sessions started in the backend's own tools that Core is not running shall not hold back removing their workspace or project: Core shall forget them, leaving their records.
 - **FLOW-RESUME-SESSION-R14**: While Core runs a session started in the backend's own tools, `workspace.remove` of its workspace and `project.remove` of its project shall be refused with `invalid_state`.
+- **FLOW-RESUME-SESSION-R15**: `session.list` shall carry each session's `backend_session_id` from when Core holds one for it.
+- **FLOW-RESUME-SESSION-R16**: Copy session ID, in a tile's menu, shall put the session's `backend_session_id` on the clipboard, and be unavailable, with why, while the list carries none.
 
 ## Built so far
 
-Core resumes a stopped session on `session.resume` and on a send to it (R01, R02), refuses when its folder is gone (R03), ends the transcript of a session that was live when Core last stopped (R08), and resumes a fork that has no record of its own by forking its original again (R10, R11). A resumed session starts with the model, effort and permission mode Core last asked for, or with the record's latest once a later turn ran with others (PROTO-CORE-API-R71, R98, R99). `session.list` holds the sessions started in the backend's own tools, under ids that last, and removing a workspace or project forgets them (R05, R06, R12 to R14). Still to build is Copy session ID (R07).
+Core resumes a stopped session on `session.resume` and on a send to it (R01, R02), refuses when its folder is gone (R03), ends the transcript of a session that was live when Core last stopped (R08), and resumes a fork that has no record of its own by forking its original again (R10, R11). A resumed session starts with the model, effort and permission mode Core last asked for, or with the record's latest once a later turn ran with others (PROTO-CORE-API-R71, R98, R99). `session.list` holds the sessions started in the backend's own tools, under ids that last, and removing a workspace or project forgets them (R05, R06, R12 to R14). `session.list` carries each session's backend id, and the tile's menu copies it (R15, R16).
 
 ## Out of scope
 
@@ -68,10 +70,12 @@ Core resumes a stopped session on `session.resume` and on a send to it (R01, R02
 
 ## Open questions
 
+- Whether Copy session ID should wait until the session has a record of its own. Today a fork's id is copied from the fork's creation, though the backend's own tools find nothing under it until the fork's first message.
 - Whether a transcript that is open when its session resumes shows turns taken in the backend's own tools since it was opened; today they show when the session is next opened (PROTO-AGENT-EVENTS, Open questions).
 
 ## Changes
 
+- 2026-11-19: from #340 inbox: the id Core chose for a session is the session's from when Core chose it, since the backend runs the session under it and later reports the same one, so `session.list` carries it from when Core holds it, not from when the backend reports it. It names a record only from the first message, so until then the backend's own tools find nothing under it; for a fork, which shows a conversation meanwhile, whether Copy session ID should wait is an open question. FLOW-RESUME-SESSION-R07 retired; R15 (the list) and R16 (the menu) added.
 - 2026-11-15: from #328 inbox: sessions the backend's own list hides are left out of `session.list` (FLOW-RESUME-SESSION-R04 retired for R12; the Claude Code rule is PROTO-CLAUDE-CODE-STREAM-R79); a session started in the backend's own tools that Core is running holds back removing its workspace or project (R09 retired for R13 and R14); and such a session counts as using its workspace when another session there is deleted, so the delete leaves the files.
 - 2026-11-15: from #354 inbox: a fork with no record of its own whose original Core no longer lists is started from the original's record with no conditions to check, and the backend says what is wrong when it cannot (FLOW-RESUME-SESSION-R11 added). Ersa asks the backend rather than refusing on its own account, since a forgotten original's record may still be there. R10 is built and unchanged.
 - 2026-11-14: from #393 inbox: Built so far says a resumed session starts with the record's newer values. No requirement IDs changed.
