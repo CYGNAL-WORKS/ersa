@@ -131,6 +131,7 @@ describe("the shelf", () => {
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R19
+  // verifies: FLOW-APPROVE-PERMISSION-R33
   it("says why Core refused an answer, and offers the answers again", () => {
     const html = draw({ state: "permission", request }, { answer: { state: "failed", message: "the session has ended" } });
     expect(html).toContain('<div class="answers-refused" role="alert"><p class="problem">Your answer wasn&#x27;t accepted.</p><p class="answers-reason">the session has ended</p></div>');

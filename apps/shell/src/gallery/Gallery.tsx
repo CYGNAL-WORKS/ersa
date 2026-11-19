@@ -573,10 +573,12 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Permission with suggestions", sessionView(withSuggestions)],
   ["Permission sending", sessionView(asked), { r1: { state: "sending", decision: "allow" } }],
   ["Permission refused", sessionView(asked), { r1: { state: "failed", message: refusal } }],
+  ["Permission answer unknown", sessionView(asked), { r1: { state: "unknown" } }],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Question open", sessionView(questionAsked)],
   ["Question answer on its way", sessionView(questionAsked), { rq: { state: "sending", decision: "decline" } }],
   ["Question answer refused", sessionView(questionAsked), { rq: { state: "failed", message: refusal } }],
+  ["Question answer unknown", sessionView(questionAsked), { rq: { state: "unknown" } }],
   ["Question while Core is away", sessionView(questionAsked, { stream: { state: "offline" } })],
   ["Question answered", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [{ id: "q1", value: "o2", own_words: false }], declined: false, answered_by: "user" }])],
   ["Question declined", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [], declined: true, answered_by: "user" }])],
@@ -940,6 +942,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A question in the user's own words", { state: "question", requestId: "rq", questions: [wordsQuestion] }],
   ["A question's answer on its way", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "sending", decision: { answers: [] } } }],
   ["A question's answer refused", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["A question's answer Ersa can't tell reached the agent", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "unknown" } }],
   ["A question while Ersa reconnects", { state: "question", requestId: "rq", questions: [singleQuestion] }, { live: false }],
   ["Loading", { state: "loading" }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
@@ -949,6 +952,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["Keyboard focus on the shelf itself", { state: "permission", request: shelfRequest }, { focus: true }],
   ["An answer on its way", { state: "permission", request: shelfRequest }, { answer: { state: "sending", decision: "allow" } }],
   ["An answer refused", { state: "permission", request: shelfRequest }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["An answer Ersa can't tell reached the agent", { state: "permission", request: shelfRequest }, { answer: { state: "unknown" } }],
   ["While Ersa reconnects", { state: "permission", request: shelfRequest }, { live: false }],
   ["Risen to fit a short window", { state: "permission", request: shelfRequest }, { short: true }],
 ];
@@ -1185,6 +1189,8 @@ const entries: Entry[] = [
           renaming={{ p2: { state: "failed", message: "Claude Code has no record of this session any more." } }}
         />,
       ],
+      // Ersa lost Core while the field was open: the draft stays, and Enter saves nothing.
+      ["Renaming on the tile while Ersa can't reach Core", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} offline />],
     ],
   },
   {

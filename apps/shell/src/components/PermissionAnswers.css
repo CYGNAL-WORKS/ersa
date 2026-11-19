@@ -43,6 +43,14 @@
   color: var(--color-ink-muted);
 }
 
+/* An answer Ersa can't tell reached the agent: its glyph on the note's first line, as a problem's is. */
+.answers-unknown {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+}
+
 .answers-reason {
   margin-inline-start: calc(var(--size-glyph) + var(--space-sm));
   font-size: var(--type-ui-small-size);

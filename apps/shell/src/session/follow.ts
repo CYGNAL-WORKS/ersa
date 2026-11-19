@@ -8,7 +8,7 @@
 import type { Envelope } from "../protocol/agent-events.gen";
 import type { Attachment, SessionSendProgressNotification } from "../protocol/core-api.gen";
 import { hasSeq } from "../core/checks";
-import { type BridgeError, type CoreClient, describeError, refusalOf, stoppedBeforeSent } from "../core/client";
+import { type CoreClient, describeError, refusalOf, stoppedBeforeSent, unanswered } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
@@ -41,8 +41,7 @@ export function progressOf(notification: SessionSendProgressNotification): SendP
  * Core, as one too large to write, was not sent.
  */
 export function sendFailure(error: unknown): Exclude<Sending, { state: "sending" }> {
-  const bridge = error as BridgeError | undefined;
-  if (bridge?.kind === "unavailable" && bridge.sent) return { state: "unknown" };
+  if (unanswered(error)) return { state: "unknown" };
   const data = refusalOf(error);
   if (data?.kind === "delivery_unknown") return { state: "unknown" };
   const index = data?.kind === "attachment_refused" && Number.isInteger(data.index) ? data.index : undefined;
