@@ -895,12 +895,12 @@ async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
     assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
 }
 
-/// `session.list` carries the backend's id for a session only once the
-/// backend has reported it, so Copy session ID copies what the backend's own
-/// tools resume by, and it stays listed once the session stops.
+/// A backend that names a session itself, as the fake does: Core holds no id
+/// for it until the backend names it on its stream, and lists none until
+/// then; from then on the list carries that id, also once the session stops.
 // verifies: FLOW-RESUME-SESSION-R15
 #[tokio::test(flavor = "multi_thread")]
-async fn the_list_carries_the_backend_session_id_once_the_backend_reports_it() {
+async fn the_list_carries_a_self_named_session_id_from_when_the_backend_names_it() {
     let records = Records::default();
     let fake = FakeAdapter::with_records(Arc::clone(&records));
     let start_gate = Arc::clone(&fake.start_gate);
