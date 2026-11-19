@@ -212,7 +212,7 @@ describe("an answer after Core drops or a call times out", () => {
     return screen.getByRole("dialog", { name: /^Request from / });
   };
 
-  // verifies: FLOW-APPROVE-PERMISSION-R19
+  // verifies: FLOW-APPROVE-PERMISSION-R31
   it("doesn't say an answer that got no answer in time was refused, and offers the answers again", async () => {
     const core = fakeCore(undefined, { decide: () => Promise.reject({ kind: "unavailable", message: "Ersa got no answer in time.", sent: true }) });
     const shelf = await open(core);
@@ -225,7 +225,7 @@ describe("an answer after Core drops or a call times out", () => {
     expect(within(shelf).getByRole("button", { name: "Deny" })).toHaveProperty("disabled", false);
   });
 
-  // verifies: FLOW-APPROVE-PERMISSION-R18
+  // verifies: FLOW-APPROVE-PERMISSION-R32
   it("offers the answers again once Ersa reaches Core again and the request is still pending", async () => {
     // Core takes the answer, then goes before its decision arrives.
     const core = fakeCore(undefined, { decide: () => Promise.resolve({}) });

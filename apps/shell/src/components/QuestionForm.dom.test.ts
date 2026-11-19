@@ -200,7 +200,7 @@ describe("the transcript's question card once answered", () => {
 });
 
 describe("a question's answer Ersa can't tell reached the agent", () => {
-  // verifies: FLOW-APPROVE-PERMISSION-R19
+  // verifies: FLOW-APPROVE-PERMISSION-R31
   it.each([
     ["the shelf", () => inShelf([], true, { r1: { state: "unknown" } })],
     ["the transcript's question card", () => inTranscript([], { r1: { state: "unknown" } })],

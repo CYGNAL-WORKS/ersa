@@ -266,7 +266,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
-  // An answer Core took whose decision never came may be lost with the old connection (FLOW-APPROVE-PERMISSION-R18).
+  // An answer Core took whose decision never came may be lost with the old connection (FLOW-APPROVE-PERMISSION-R32).
   useEffect(() => {
     if (link !== undefined) sending.attached();
   }, [sending, link]);
