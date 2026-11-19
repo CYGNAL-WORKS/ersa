@@ -213,3 +213,13 @@ describe("a question's answer Ersa can't tell reached the agent", () => {
     expect((within(surface).getByRole("button", { name: "Decline" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe("a question's answer Ersa can't tell reached the agent, while Ersa can't reach Core", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R31
+  it("says only that Ersa is reconnecting, with the answers unavailable", () => {
+    const surface = inShelf([], false, { r1: { state: "unknown" } });
+    expect(within(surface).queryByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.")).toBeNull();
+    expect(within(surface).getByText("Reconnecting to Core…")).toBeTruthy();
+    expect((within(surface).getByRole("button", { name: "Decline" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});

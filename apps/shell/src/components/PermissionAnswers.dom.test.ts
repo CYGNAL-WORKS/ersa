@@ -80,3 +80,13 @@ describe("an answer Ersa can't tell reached the agent, on the transcript's permi
     expect(decided).toEqual([["r1", "deny"]]);
   });
 });
+
+describe("an answer Ersa can't tell reached the agent, while Ersa can't reach Core", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R31
+  it("says only that Ersa is reconnecting, with the answers unavailable", () => {
+    render(createElement(PermissionAnswers, { request, answer: { state: "unknown" }, live: false, onDecide: () => {} }));
+    expect(screen.queryByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Reconnecting to Core…");
+    expect((screen.getByRole("button", { name: "Allow" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
