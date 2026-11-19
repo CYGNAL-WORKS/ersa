@@ -14,7 +14,7 @@ use ersa_protocol::core_api::{
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
 
-use super::{After, Answer, ApiError, ConnectionState};
+use super::{After, Answer, ApiError, ConnectionState, lock};
 use crate::admission::{self, Command, Refusal, Replaced, Report};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
@@ -262,52 +262,44 @@ pub(super) async fn project_find(
         return Err(ApiError::not_found(format!("no host {}", params.host_id)));
     }
     let subject = (params.host_id.clone(), params.path.trim().to_string());
-    let answer = {
+    // Joined, or put in the map for later finds to join. The inspection is
+    // started only once the map is unlocked, since its end takes the lock.
+    let (answer, to_start) = {
         let mut finding = lock(&core.finding);
         match finding.get(&subject) {
-            Some(under_way) => under_way.clone(),
+            Some(under_way) => (under_way.clone(), None),
             None => {
-                // Taken out when the inspection ends, however it ends. The
-                // map stays locked until the entry is in, so it cannot be
-                // taken out before it is put in.
-                let finished = {
-                    let finding = Arc::clone(&core.finding);
-                    let subject = subject.clone();
-                    move || {
-                        lock(&finding).remove(&subject);
-                    }
-                };
-                // A folder that cannot be opened is no project: `project.add`
-                // would refuse it, so it matches none, even one added there
-                // before it went.
-                let raw = params.path.clone();
-                let started = start_inspection(
-                    core,
-                    &params.path,
-                    move || {
-                        let raw = absolute(&raw)?;
-                        Ok(platform::canonicalize(Path::new(raw))
-                            .ok()
-                            .map(|p| platform::folder_key(&p)))
-                    },
-                    finished,
-                )?;
-                finding.insert(subject, started.clone());
-                started
+                let (done, answer) = tokio::sync::watch::channel(None);
+                finding.insert(subject.clone(), answer.clone());
+                (answer, Some(done))
             }
         }
     };
+    if let Some(done) = to_start {
+        // Only this inspection takes its entry out, once, when it ends,
+        // however it ends: a failure to start it included.
+        let finished = {
+            let finding = Arc::clone(&core.finding);
+            move || {
+                lock(&finding).remove(&subject);
+            }
+        };
+        // A folder that cannot be opened is no project: `project.add`
+        // would refuse it, so it matches none, even one added there before
+        // it went.
+        let raw = params.path.clone();
+        let inspection = move || {
+            let raw = absolute(&raw)?;
+            Ok(platform::canonicalize(Path::new(raw))
+                .ok()
+                .map(|p| platform::folder_key(&p)))
+        };
+        start_inspection(core, &params.path, inspection, done, finished)?;
+    }
     let Some(key) = answer_of(core, &params.path, answer).await? else {
         return Ok(None);
     };
     Ok(core.store.project_at(params.host_id, key).await?)
-}
-
-/// Locks `mutex`, whose holders never panic while holding it.
-fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Runs `inspection` of the folder the user named at `raw` and waits for
@@ -317,15 +309,17 @@ async fn inspect<T: Clone + Send + Sync + 'static>(
     raw: &str,
     inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
-    let answer = start_inspection(core, raw, inspection, || {})?;
+    let (done, answer) = tokio::sync::watch::channel(None);
+    start_inspection(core, raw, inspection, done, || {})?;
     answer_of(core, raw, answer).await
 }
 
 /// Starts `inspection` of the folder the user named at `raw`, on a thread
-/// of its own since file system calls block, and calls `finished` on that
-/// thread once the inspection has answered, or panicked. A hung file system
-/// call cannot be called off, so its thread is left to finish, and since
-/// nothing waits for its result any more, nothing comes of it when it does.
+/// of its own since file system calls block, to answer through `done`.
+/// `finished` is called once, when the thread ends, or here when no thread
+/// was started. A hung file system call cannot be called off, so its
+/// thread is left to finish, and since nothing waits for its result any
+/// more, nothing comes of it when it does.
 ///
 /// The thread is a plain one, not one of Tokio's blocking pool: that pool
 /// also runs every database call, so threads stuck on a dead share there
@@ -338,8 +332,12 @@ fn start_inspection<T: Send + Sync + 'static>(
     core: &Core,
     raw: &str,
     inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+    done: tokio::sync::watch::Sender<Option<Result<T, ApiError>>>,
     finished: impl FnOnce() + Send + 'static,
-) -> Result<Inspection<T>, ApiError> {
+) -> Result<(), ApiError> {
+    // Calls `finished` on every way out: dropped here on a refusal, or by
+    // the thread as it ends.
+    let finished = OnDrop(Some(finished));
     let place = Arc::clone(&core.folder_inspections)
         .try_acquire_owned()
         .map_err(|_| {
@@ -352,10 +350,8 @@ fn start_inspection<T: Send + Sync + 'static>(
                 ),
             )
         })?;
-    let gate = core.config.inspect_gate.clone();
+    let gate = core.config.folder_gate.clone();
     let runtime = tokio::runtime::Handle::current();
-    let (done, answer) = tokio::sync::watch::channel(None);
-    let finished = OnDrop(Some(finished));
     std::thread::Builder::new()
         .name("folder inspection".into())
         .spawn(move || {
@@ -373,7 +369,7 @@ fn start_inspection<T: Send + Sync + 'static>(
             done.send_replace(Some(inspection()));
         })
         .map_err(|e| ApiError::internal(format!("could not start the folder inspection: {e}")))?;
-    Ok(answer)
+    Ok(())
 }
 
 /// Calls the function it holds when dropped, a panic's unwinding included.
@@ -401,8 +397,11 @@ async fn answer_of<T: Clone>(
         Ok(Ok(answered)) => answered
             .clone()
             .unwrap_or_else(|| Err(ApiError::internal("the folder inspection had no answer"))),
-        // The thread ended without an answer: the inspection panicked.
-        Ok(Err(_)) => Err(ApiError::internal("inspecting the folder panicked")),
+        // The inspection ended without an answer: it panicked, or its
+        // thread could not be started for the request it was started for.
+        Ok(Err(_)) => Err(ApiError::internal(
+            "the folder inspection ended without an answer",
+        )),
         Err(_) => Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::Permission,
             format!(

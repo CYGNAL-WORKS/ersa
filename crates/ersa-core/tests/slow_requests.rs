@@ -75,7 +75,7 @@ async fn start(
         tempdir(),
         move |config| {
             config.command_transport = Some(CommandTransport(transport));
-            config.inspect_gate = Some(gate);
+            config.folder_gate = Some(gate);
             configure(config);
         },
         adapters,
