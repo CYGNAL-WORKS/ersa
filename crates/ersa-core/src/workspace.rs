@@ -99,13 +99,32 @@ pub async fn git_worktree_add(
     check(output, "git worktree add failed")
 }
 
+/// What a workspace made without a base starts from in the repository at
+/// `repo`: the revision naming its default branch ([`default_branch`]), or
+/// `HEAD` on a detached checkout with none, and the commit that revision
+/// names, `None` when it names none (a repository with no commit yet). All
+/// of it, three git calls at most, is given [`GIT_QUERY_TIMEOUT`] together.
+pub async fn git_default_commit(
+    transport: &dyn Transport,
+    repo: &str,
+) -> Result<(String, Option<String>), VcsError> {
+    let deadline = deadline();
+    let revision = match default_branch(transport, repo, deadline).await? {
+        Some(name) => format!("refs/heads/{name}"),
+        None => "HEAD".to_string(),
+    };
+    let commit = resolve_commit(transport, repo, &revision, deadline).await?;
+    Ok((revision, commit))
+}
+
 /// The default branch of the repository at `repo`: the local branch
 /// `origin/HEAD` points at, else `main`, else `master`, else the
 /// checked-out branch. None on a detached checkout with none of those.
-/// One git call, given [`GIT_QUERY_TIMEOUT`].
-pub async fn git_default_branch(
+/// One git call, which must answer by `deadline`.
+async fn default_branch(
     transport: &dyn Transport,
     repo: &str,
+    deadline: Deadline,
 ) -> Result<Option<String>, VcsError> {
     // Each line is `<ref>:<* if checked out>:<target if a symbolic ref>`.
     // A ref name can never contain `:`, so the split is unambiguous. The
@@ -117,7 +136,7 @@ pub async fn git_default_branch(
         "refs/heads",
         "refs/remotes/origin/HEAD",
     ];
-    let output = query(transport, repo, &args, deadline()).await?;
+    let output = query(transport, repo, &args, deadline).await?;
     let output = checked(output, "git could not list the branches")?;
     Ok(pick_default_branch(&output.stdout))
 }
@@ -171,10 +190,19 @@ pub async fn git_resolve_commit(
     repo: &str,
     revision: &str,
 ) -> Result<Option<String>, VcsError> {
+    resolve_commit(transport, repo, revision, deadline()).await
+}
+
+/// [`git_resolve_commit`], answering by `deadline`.
+async fn resolve_commit(
+    transport: &dyn Transport,
+    repo: &str,
+    revision: &str,
+    deadline: Deadline,
+) -> Result<Option<String>, VcsError> {
     // `^{commit}` peels a tag to the commit it tags and refuses anything
     // that is not a commit (a tree, a blob).
     let peeled = format!("{revision}^{{commit}}");
-    let deadline = deadline();
     let args = ["rev-parse", "--verify", "--quiet", &peeled];
     let output = query(transport, repo, &args, deadline).await?;
     let failed = || VcsError::Failed {
@@ -1486,7 +1514,36 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn finding_the_default_branch_gives_git_ten_seconds() {
         let started = tokio::time::Instant::now();
-        let result = git_default_branch(&hanging_git(), "repo").await;
+        let result = git_default_commit(&hanging_git(), "repo").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
+    /// Finding the default branch and resolving it share one limit, so a
+    /// repository slow to list its branches does not get a second ten
+    /// seconds to resolve one.
+    // verifies: PROTO-CORE-API-R19
+    #[tokio::test(start_paused = true)]
+    async fn finding_and_resolving_the_default_branch_get_ten_seconds_together() {
+        /// The first git lists `main` after six seconds; the next never answers.
+        struct SlowThenHanging(std::sync::atomic::AtomicUsize);
+        #[ersa_adapter::async_trait]
+        impl Transport for SlowThenHanging {
+            async fn spawn(
+                &self,
+                spec: ProcessSpec,
+            ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+                if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    let listing = ersa_adapter::fake::FakeTransport::new(["refs/heads/main:*:"]);
+                    return listing.spawn(spec).await;
+                }
+                hanging_git().spawn(spec).await
+            }
+        }
+        let transport = SlowThenHanging(Default::default());
+        let started = tokio::time::Instant::now();
+        let result = git_default_commit(&transport, "repo").await;
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 2);
         timed_out_at_ten_seconds(result, started);
     }
 

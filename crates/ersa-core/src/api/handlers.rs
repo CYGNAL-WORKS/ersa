@@ -678,21 +678,16 @@ async fn resolve_base(
                 ApiError::invalid_params(format!("git cannot resolve base {base} to a commit"))
             });
     }
-    let default = workspace::git_default_branch(transport, repo).await?;
-    let revision = match &default {
-        Some(name) => format!("refs/heads/{name}"),
-        None => "HEAD".to_string(),
-    };
+    // Finding the default branch and resolving it share one limit.
+    let (revision, commit) = workspace::git_default_commit(transport, repo).await?;
     // Nothing the caller gave can be wrong here, so a failure is git's: a
     // repository with no commit yet, or a branch deleted in between.
-    workspace::git_resolve_commit(transport, repo, &revision)
-        .await?
-        .ok_or_else(|| {
-            ApiError::new(
-                ersa_protocol::core_api::ErrorKind::VcsError,
-                format!("the repository has no commit to start from at {revision}"),
-            )
-        })
+    commit.ok_or_else(|| {
+        ApiError::new(
+            ersa_protocol::core_api::ErrorKind::VcsError,
+            format!("the repository has no commit to start from at {revision}"),
+        )
+    })
 }
 
 pub(super) async fn workspace_remove(
