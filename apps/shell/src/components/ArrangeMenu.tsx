@@ -1,12 +1,12 @@
 import { SlidersHorizontal } from "lucide-react";
-import { type CSSProperties, useCallback, useId, useRef, useState } from "react";
 import { t } from "../catalog";
 import { type ArrangeChoices, GROUP_BYS, type GroupBy, SHOWS, SORT_BYS, type Show, type SortBy } from "../session/arrangement";
-import { IconButton } from "./Icon";
-import { Menu, type MenuClose, type MenuEntry } from "./Menu";
+import type { MenuEntry } from "./Menu";
+import { MenuButton } from "./MenuButton";
 
 const GROUP_BY_NAMES = {
   project: "rail.arrange.groupByProjectButton",
+  section: "rail.arrange.groupBySectionButton",
   date: "rail.arrange.groupByDateButton",
   none: "rail.arrange.groupByNoneButton",
 } as const satisfies Record<GroupBy, string>;
@@ -26,6 +26,10 @@ export interface ArrangeActions {
   onGroupBy: (groupBy: GroupBy) => void;
   onSortBy: (sortBy: SortBy) => void;
   onShow: (show: Show) => void;
+  /** Shows a new section's heading with its name field, grouping by section first (FLOW-ORGANIZE-SESSIONS, step 5; R36). */
+  onNewSection: () => void;
+  /** Why New section can't be used now, such as the sections not being read; given, it shows unavailable with this. */
+  newSectionUnavailable?: string;
   onReset: () => void;
   /** Shows the sessions page (FLOW-ORGANIZE-SESSIONS, step 9). */
   onAllSessions: () => void;
@@ -43,8 +47,7 @@ function choice<C>(label: string, values: readonly C[], chosen: C, name: (value:
 
 /**
  * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸, Sort by ▸ and Show ▸, each naming its current
- * choice and its submenu marking it, then Reset to defaults and View all apart. New section goes in the group with
- * Reset, as it is built.
+ * choice and its submenu marking it, then New section, Reset to defaults and View all apart.
  */
 export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActions): MenuEntry[] {
   return [
@@ -52,6 +55,7 @@ export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActi
     choice(t("rail.arrange.sortByButton"), SORT_BYS, arrangement.sortBy, (s) => t(SORT_BY_NAMES[s]), actions.onSortBy),
     choice(t("rail.arrange.showButton"), SHOWS, arrangement.show, (s) => t(SHOW_NAMES[s]), actions.onShow),
     { kind: "rule" },
+    { kind: "item", label: t("rail.arrange.newSectionButton"), unavailable: actions.newSectionUnavailable, onChoose: actions.onNewSection },
     { kind: "item", label: t("rail.arrange.resetButton"), onChoose: actions.onReset },
     { kind: "item", label: t("rail.arrange.viewAllButton"), onChoose: actions.onAllSessions },
   ];
@@ -75,44 +79,15 @@ export function ArrangeButton({
   initialOpen?: boolean;
   initialSubmenu?: number;
 }) {
-  // The menu, while open: where focus went as it opened (RAIL.md, Menus). The gallery's open menu takes none.
-  const [menu, setMenu] = useState<"item" | "menu" | "none" | undefined>(initialOpen ? "none" : undefined);
-  // Unavailable while open, as when Ersa loses Core, the menu closes for good rather than open again with it.
-  if (disabled && menu && !initialOpen) setMenu(undefined);
-  const button = useRef<HTMLButtonElement>(null);
-  // The menu floats above the rail in the top layer, anchored to the button by this name.
-  const anchor = `--rail-arrange-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  // Closing the menu returns focus to the button, unless a press elsewhere put it there.
-  const close = useCallback((how: MenuClose) => {
-    setMenu(undefined);
-    if (how !== "away") button.current?.focus({ preventScroll: true });
-  }, []);
-  const inside = useCallback(() => [button.current], []);
   return (
-    <>
-      <IconButton
-        ref={button}
-        className="rail-arrange"
-        icon={SlidersHorizontal}
-        size="icon-sm"
-        label={t("rail.arrange.label")}
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={!!menu}
-        style={{ anchorName: anchor } as CSSProperties}
-        // A click the keyboard made (Enter or Space) has no pointer presses to count.
-        onClick={(event) => setMenu(menu ? undefined : event.detail === 0 ? "item" : "menu")}
-      />
-      <Menu
-        label={t("rail.arrange.label")}
-        entries={arrangeEntries(arrangement, actions)}
-        open={menu !== undefined}
-        place={{ anchor }}
-        focus={menu}
-        inside={inside}
-        onClose={close}
-        initialSubmenu={initialSubmenu}
-      />
-    </>
+    <MenuButton
+      className="rail-arrange"
+      icon={SlidersHorizontal}
+      label={t("rail.arrange.label")}
+      entries={arrangeEntries(arrangement, actions)}
+      unavailable={disabled}
+      initialOpen={initialOpen}
+      initialSubmenu={initialSubmenu}
+    />
   );
 }

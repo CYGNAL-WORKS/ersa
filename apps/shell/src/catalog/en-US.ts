@@ -42,9 +42,12 @@ export const enUS = {
       groupByButton: "Group by",
       sortByButton: "Sort by",
       showButton: "Show",
+      // Shows a new section's heading with its name field (FLOW-ORGANIZE-SESSIONS, step 5).
+      newSectionButton: "New section",
       resetButton: "Reset to defaults",
       viewAllButton: "View all",
       groupByProjectButton: "Project",
+      groupBySectionButton: "Section",
       groupByDateButton: "Date",
       groupByNoneButton: "None",
       sortByCreatedButton: "Date created",
@@ -64,6 +67,7 @@ export const enUS = {
       noProjectsHint: "Choose a folder in New session to start.",
       projectsError: "Ersa can't read your projects.",
       sessionsError: "Ersa can't read your sessions.",
+      sectionsError: "Ersa can't read your sections.",
       // The arrangement could not be read, so the rail is arranged by the defaults; or a change could not be saved and was undone.
       arrangeReadError: "Ersa can't read how you arranged the rail.",
       arrangeSaveError: "Ersa couldn't save that change to the rail.",
@@ -81,6 +85,19 @@ export const enUS = {
       yesterdayHeading: "Yesterday",
       previous7DaysHeading: "Previous 7 days",
       olderHeading: "Older",
+      // Grouped by section, the sessions in none, after every section (FLOW-ORGANIZE-SESSIONS-R04).
+      noSectionHeading: "No section",
+    },
+    // A section heading's More menu (docs/design/RAIL.md, A group heading) and renaming in place.
+    section: {
+      moreLabel: "More for {section}",
+      renameButton: "Rename",
+      // Deleting a section asks nothing, since no session is lost, so it has no ellipsis.
+      deleteButton: "Delete",
+      // The name field's label for assistive technology, while renaming or naming a new section.
+      nameLabel: "Section name",
+      // Followed by Core's reason, beneath the heading.
+      deleteError: "Ersa can't delete this section.",
     },
     // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
     heading: {
@@ -122,6 +139,21 @@ export const enUS = {
       // Followed by Core's reason, beneath the tile.
       pinError: "Ersa can't pin this session.",
       unpinError: "Ersa can't unpin this session.",
+      // After Pin: Mark as unread on a session that isn't unseen, Mark as read on one that is (FLOW-ORGANIZE-SESSIONS-R24).
+      markUnreadButton: "Mark as unread",
+      markReadButton: "Mark as read",
+      // Beneath Mark as unread on the active session.
+      markUnreadActiveReason: "Available once you open another session",
+      // Beneath the tile, before Core's reason, when Core refuses.
+      markUnreadError: "Ersa can't mark this session as unread.",
+      markReadError: "Ersa can't mark this session as read.",
+      // Move to section ▸ and its submenu (FLOW-ORGANIZE-SESSIONS, step 3). New section… asks for a name, so it ends in
+      // an ellipsis.
+      moveToSectionButton: "Move to section",
+      noSectionButton: "No section",
+      newSectionButton: "New section…",
+      // Followed by Core's reason, beneath the tile.
+      moveError: "Ersa can't move this session.",
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
