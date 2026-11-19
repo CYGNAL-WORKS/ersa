@@ -1932,11 +1932,16 @@ impl SessionManager {
     /// dropped, the adapter begins no further deletion, so a record the user
     /// was told is kept is not deleted later. Calling off one that finished
     /// changes nothing.
+    ///
+    /// `held` is kept until the adapter's call has ended, however long that
+    /// is after this returns: a delete's claim, so nothing begins a second
+    /// deletion beside one still stuck.
     pub async fn delete_record(
         &self,
         id: &str,
         transport: Arc<dyn Transport>,
         limit: Duration,
+        held: impl Send + 'static,
     ) -> Result<RecordDeletion, SessionError> {
         let row = self.row(id)?;
         let Some(backend_id) = row.backend_session_id else {
@@ -1947,6 +1952,7 @@ impl SessionManager {
         let call_off = CallOff::default();
         let _called_off_on_return = CallOffOnDrop(call_off.clone());
         within(limit, "the session's record was not deleted", async move {
+            let _held = held;
             adapter
                 .delete_record(transport, &cwd, &backend_id, &call_off)
                 .await
