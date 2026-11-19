@@ -207,6 +207,25 @@ describe("adding a project from the new-session screen", () => {
     expect(after.lastIndexOf("session.list")).toBeGreaterThan(after.indexOf("project.add"));
   });
 
+  it("lists the projects again when an add got no answer in time, so one Core added after all joins the rail", async () => {
+    const known = [project("alpha")];
+    const core = await screenWith(known, fakeShell("D:/clones/stranger"), {
+      "project.list": () => known,
+      // Core adds the project, but its answer comes too late: the request timed out.
+      "project.add": (params: { host_id: string; path: string; trusted: boolean }) => {
+        known.push({ id: "p-new", host_id: params.host_id, path: params.path, name: "stranger", vcs: "git", trusted: params.trusted });
+        throw { kind: "unavailable", message: "Ersa got no answer in time.", sent: true };
+      },
+    });
+    await addFromChip();
+    const before = methods(core).filter((m) => m === "project.list").length;
+    fireEvent.click(within(screen.getByRole("region", { name: "Trust stranger?" })).getByRole("button", { name: "Trust" }));
+    await settle();
+    await settle();
+    expect(methods(core).filter((m) => m === "project.list").length).toBe(before + 1);
+    expect(within(screen.getByRole("navigation", { name: "Rail" })).getByRole("button", { name: /^stranger/ })).toBeTruthy();
+  });
+
   // verifies: FLOW-NEW-SESSION-R27
   it("opens the folder dialog from Add project…, asks about trust for a new folder, then adds it trusted and chooses it", async () => {
     const shell = fakeShell("D:/clones/stranger");
@@ -1086,6 +1105,32 @@ describe("archiving a session from its tile, and an archived session read-only",
     expect(composerBox()).toBeNull();
     expect(screen.getByText("This session is archived. Resume it to send a message.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+  it("keeps the note in place of the composer after a reconnect, until the sessions are listed again", async () => {
+    const list = { current: titled() };
+    // After the reconnect, the list is slow to answer.
+    let hold = false;
+    const core = fakeCore({ "session.list": () => (hold ? new Promise(() => {}) : list.current) }, { reattach: true });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    list.current = titled({ s2: true });
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s9", tile: { state: "idle", pending: [] }, created_at: "2026-11-03T09:00:00Z" } } as CoreEvent);
+    await settle();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+
+    hold = true;
+    const lists = () => callsOf(core, "session.list").length;
+    const before = lists();
+    core.drop();
+    // Ersa attaches again after its reconnect delay and asks for the sessions, which have not answered.
+    for (let turn = 0; turn < 200 && lists() === before; turn++) await act(() => new Promise((r) => setTimeout(r, 20)));
+    await settle();
+    expect(lists()).toBeGreaterThan(before);
+    expect(composerBox()).toBeNull();
+    expect(screen.getByText("This session is archived. Resume it to send a message.")).toBeTruthy();
   });
 
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
