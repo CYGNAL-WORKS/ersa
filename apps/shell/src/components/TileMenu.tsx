@@ -73,7 +73,7 @@ interface TileArchive {
   unavailable?: string;
 }
 
-/** An item that does one thing when chosen: Fork (FLOW-FORK-SESSION, steps 1 and 2) or Copy session ID (FLOW-RESUME-SESSION-R07). */
+/** An item that does one thing when chosen: Fork (FLOW-FORK-SESSION, steps 1 and 2) or Copy session ID (FLOW-RESUME-SESSION-R16). */
 interface TileItem {
   /** Fork starts the fork, which becomes the active session (FLOW-FORK-SESSION-R04); Copy session ID puts the backend's id on the clipboard. */
   onChoose: () => void;

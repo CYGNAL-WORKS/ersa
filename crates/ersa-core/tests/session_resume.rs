@@ -898,7 +898,7 @@ async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
 /// `session.list` carries the backend's id for a session only once the
 /// backend has reported it, so Copy session ID copies what the backend's own
 /// tools resume by, and it stays listed once the session stops.
-// verifies: FLOW-RESUME-SESSION-R07
+// verifies: FLOW-RESUME-SESSION-R15
 #[tokio::test(flavor = "multi_thread")]
 async fn the_list_carries_the_backend_session_id_once_the_backend_reports_it() {
     let records = Records::default();
