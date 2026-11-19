@@ -664,6 +664,10 @@ Answer in your own words
 
 Your answer wasn't accepted.
 
+### `rail.shelf.answerUnknownNote`
+
+Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.
+
 ### `rail.shelf.reconnectingNote`
 
 Reconnecting to Core…
