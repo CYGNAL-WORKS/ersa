@@ -74,7 +74,6 @@ fn row(id: &str, workspace: &str, found: bool) -> SessionRow {
         deleting: None,
         pinned: false,
         section_id: None,
-        last_activity_at: None,
         forked_from: None,
         forked_through: None,
         started_elsewhere: found,
@@ -749,7 +748,6 @@ fn writes(_session: &str) -> Vec<RowChange> {
         RowChange::Deleting(Deleting::Running),
         RowChange::Mode("plan".into()),
         RowChange::BackendId("b-1".into()),
-        RowChange::LastActivity("2026-11-16T10:00:00Z".into()),
         RowChange::Requested {
             setting: Setting::Effort,
             value: "high".into(),
@@ -884,8 +882,6 @@ fn each_write_changes_the_row_it_names_and_no_other() {
     expected.mode = Some("plan".into());
     wrote(&mut state, "s1", RowChange::BackendId("b-1".into()));
     expected.backend_session_id = Some("b-1".into());
-    wrote(&mut state, "s1", RowChange::LastActivity("t1".into()));
-    expected.last_activity_at = Some("t1".into());
     assert_eq!(state.row("s1"), Some(&expected));
 
     // Each value Core gave the backend, with its own time.
@@ -3231,7 +3227,6 @@ fn read_by_a_send(change: &RowChange) -> bool {
         RowChange::Arranged { .. }
         | RowChange::Mode(_)
         | RowChange::BackendId(_)
-        | RowChange::LastActivity(_)
         | RowChange::Requested { .. }
         | RowChange::ForkLinkCleared => false,
     }

@@ -47,6 +47,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0011_session_started_elsewhere.sql"),
     include_str!("persistence/0012_session_unseen.sql"),
     include_str!("persistence/0013_section_names_exact.sql"),
+    include_str!("persistence/0014_session_last_activity_dropped.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -824,7 +825,7 @@ mod tests {
                 // Migration 8's.
                 "pinned",
                 "section_id",
-                "last_activity_at",
+                // Migration 8's `last_activity_at` is gone with migration 14.
                 // Migration 9's.
                 "forked_from",
                 "forked_through",
@@ -1096,5 +1097,43 @@ mod tests {
         let other = store.insert_section("work".into(), |_| {}).await.unwrap();
         assert_ne!(other.id, "sec-old");
         assert_eq!(other.name, "work");
+    }
+
+    /// Migration 14 drops the last activity Core stored, keeping each
+    /// session: Core stores no last activity (PROTO-CORE-API-R75).
+    // verifies: PROTO-CORE-API-R75
+    #[tokio::test]
+    async fn migration_14_drops_the_stored_last_activity_and_keeps_the_sessions() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        // The database as it stood before migration 14.
+        let conn = database_at(&path, 13);
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects (id, host_id, path, path_key, name, vcs, created_at)
+                 VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');
+             INSERT INTO workspaces (id, project_id, kind, path, vcs_ref, state, created_at)
+                 VALUES ('w', 'p', 'root', '/r', '', 'ready', 't');
+             INSERT INTO sessions (id, workspace_id, host_id, backend, backend_session_id,
+                                   last_activity_at)
+                 VALUES ('s-1', 'w', 'local', 'claude-code', 'b-1', '2026-11-01T00:00:00Z');",
+        )
+        .expect("old rows");
+        drop(conn);
+
+        let store = Store::open(&path).expect("migrates");
+        let rows = store.sessions().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].backend_session_id.as_deref(), Some("b-1"));
+        drop(store);
+        let conn = Connection::open(&path).unwrap();
+        let stored: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'last_activity_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, 0, "no last activity is stored");
     }
 }

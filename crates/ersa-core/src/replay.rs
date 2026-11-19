@@ -235,7 +235,6 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         deleting: None,
         pinned: false,
         section_id: None,
-        last_activity_at: None,
         forked_from: None,
         forked_through: None,
         // A replay gives no backend anything that outlives it.
