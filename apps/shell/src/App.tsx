@@ -266,6 +266,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+  // An answer Core took whose decision never came may be lost with the old connection (FLOW-APPROVE-PERMISSION-R18).
+  useEffect(() => {
+    if (link !== undefined) sending.attached();
+  }, [sending, link]);
 
   // The shelf is never open for the active session (FLOW-APPROVE-PERMISSION-R26): making its session active, by
   // any way, closes it at once, and so does its session having nothing left to ask.

@@ -61,7 +61,10 @@ const requested = envelope(request, 0);
  * A Core with two sessions: s1 waits on `pending` (one permission request unless given), and s2 is the newest, so
  * it is active at launch.
  */
-function fakeCore(pending: Session["tile"]["pending"] = [{ kind: "permission", request_id: "r1" }]) {
+function fakeCore(
+  pending: Session["tile"]["pending"] = [{ kind: "permission", request_id: "r1" }],
+  { decide = () => new Promise(() => {}) }: { decide?: () => Promise<unknown> } = {},
+) {
   let onEvent: (event: CoreEvent) => void = () => {};
   const calls: { method: Method; params: unknown }[] = [];
   const answers: Partial<Record<Method, (params: never) => unknown>> = {
@@ -84,8 +87,8 @@ function fakeCore(pending: Session["tile"]["pending"] = [{ kind: "permission", r
     },
     call: (method, params) => {
       calls.push({ method, params });
-      // An answer stays on its way: Core never answers it here.
-      if (method === "session.decide_permission") return new Promise(() => {}) as never;
+      // An answer stays on its way unless given: Core never answers it here.
+      if (method === "session.decide_permission") return decide() as never;
       const answer = answers[method];
       return (answer ? Promise.resolve(answer(params as never)) : Promise.reject({ kind: "unavailable", message: `no answer for ${method}` })) as never;
     },
@@ -95,7 +98,9 @@ function fakeCore(pending: Session["tile"]["pending"] = [{ kind: "permission", r
     act(() => {
       for (const event of events.length > 0 ? events : [requested]) onEvent({ kind: "notification", method: "session.event", params: { event } } as CoreEvent);
     });
-  return { client, calls, send };
+  // The connection drops; Ersa attaches again by itself.
+  const drop = () => act(() => onEvent({ kind: "lost", reason: "gone" }));
+  return { client, calls, send, drop };
 }
 
 /** Lets every answer the fake gave settle, and the renders they cause. */
@@ -193,6 +198,51 @@ describe("answering from the shelf", () => {
     expect(within(card).getByRole("button", { name: "Allow" })).toHaveProperty("disabled", true);
     expect(within(card).getByRole("button", { name: "Deny" })).toHaveProperty("disabled", true);
     expect(core.calls.filter((c) => c.method === "session.decide_permission")).toHaveLength(1);
+  });
+});
+
+describe("an answer after Core drops or a call times out", () => {
+  const open = async (core: ReturnType<typeof fakeCore>) => {
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /^Request from / }));
+    await settle();
+    await core.send();
+    return screen.getByRole("dialog", { name: /^Request from / });
+  };
+
+  // verifies: FLOW-APPROVE-PERMISSION-R19
+  it("doesn't say an answer that got no answer in time was refused, and offers the answers again", async () => {
+    const core = fakeCore(undefined, { decide: () => Promise.reject({ kind: "unavailable", message: "Ersa got no answer in time.", sent: true }) });
+    const shelf = await open(core);
+    fireEvent.click(within(shelf).getByRole("button", { name: "Allow" }));
+    await settle();
+    expect(within(shelf).queryByText("Your answer wasn't accepted.")).toBeNull();
+    expect(within(shelf).queryByText("Ersa got no answer in time.")).toBeNull();
+    expect(within(shelf).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.").getAttribute("role")).toBe("status");
+    expect(within(shelf).getByRole("button", { name: "Allow" })).toHaveProperty("disabled", false);
+    expect(within(shelf).getByRole("button", { name: "Deny" })).toHaveProperty("disabled", false);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R18
+  it("offers the answers again once Ersa reaches Core again and the request is still pending", async () => {
+    // Core takes the answer, then goes before its decision arrives.
+    const core = fakeCore(undefined, { decide: () => Promise.resolve({}) });
+    const shelf = await open(core);
+    fireEvent.click(within(shelf).getByRole("button", { name: "Allow" }));
+    await settle();
+    expect(within(shelf).getByRole("button", { name: "Allow" })).toHaveProperty("disabled", true);
+    core.drop();
+    expect(screen.queryByRole("button", { name: /^Request from / })).toBeNull();
+    // Ersa attaches again after its reconnect delay, and Core lists the request still pending; the shelf stays open.
+    for (let turn = 0; turn < 200 && !screen.queryByRole("button", { name: /^Request from / }); turn++) await act(() => new Promise((r) => setTimeout(r, 20)));
+    await settle();
+    await settle();
+    await core.send();
+    const again = screen.getByRole("dialog", { name: /^Request from / });
+    expect(within(again).getByRole("button", { name: "Allow" })).toHaveProperty("disabled", false);
+    expect(within(again).getByRole("button", { name: "Deny" })).toHaveProperty("disabled", false);
   });
 });
 
