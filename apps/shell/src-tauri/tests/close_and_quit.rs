@@ -24,7 +24,7 @@ use common::{
 };
 use ersa_shell::bridge::{self, LinkEvent};
 use ersa_shell::instance::{self, Instance};
-use ersa_shell::launch::{self, CoreLocation, How};
+use ersa_shell::launch::{CoreLocation, How};
 use ersa_shell::process::CoreProcess;
 use ersa_shell::quit::{self, QUIT_LIMIT, Stopped};
 use ersa_shell::startup::{Build, Core, startup};
@@ -428,7 +428,17 @@ async fn helper_wedged_core() {
     tokio::time::sleep(Duration::from_secs(600)).await;
 }
 
-/// A Shell that launches Core, says `launched`, and waits to be killed.
+/// A Shell that launches Core, completes the handshake with it, says
+/// `launched`, and waits to be killed.
+///
+/// The handshake comes first because a launch returns once the endpoint
+/// takes a connection, and Core claims its endpoint before it opens the
+/// database and runs its migrations; it answers only after them. On a busy
+/// machine (the hosted Windows runner) those took over five seconds, longer
+/// than the liveness probe waits, so a Shell killed straight after the launch
+/// left a Core that was alive but not yet answering, and the test read that
+/// as a death (#145). A Shell that has finished attaching is also the crash
+/// FLOW-CLOSE-AND-QUIT-R07 describes: one that dies while Core serves it.
 #[tokio::test]
 #[ignore = "a helper process for a_shell_that_exits_without_quit_leaves_core_serving"]
 async fn helper_shell_then_crash() {
@@ -437,7 +447,8 @@ async fn helper_shell_then_crash() {
     }
     let location =
         location_from_json(&std::env::var("ERSA_QUIT_TEST_LOCATION").expect("a location"));
-    let (_stream, how) = launch::attach_or_launch(&location).await.expect("launch");
+    // The link stays open until the kill, as a crashed Shell's would.
+    let (_link, how, _events) = open(&location).await;
     assert_eq!(how, How::Launched);
     println!("launched");
     tokio::time::sleep(Duration::from_secs(600)).await;
