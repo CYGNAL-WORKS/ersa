@@ -19,7 +19,7 @@ use crate::admission::{self, Command, Refusal, Replaced, Report};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
 use crate::settings;
-use crate::state::Core;
+use crate::state::{Core, Inspection};
 use crate::workspace::{self, VcsError};
 
 // -- Core ----------------------------------------------------------------
@@ -249,6 +249,11 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
 
 /// The project on the host whose folder is `params.path`, compared as
 /// `project.add` compares folders, or `None` (PROTO-CORE-API-R27).
+///
+/// A find of a folder whose inspection for an earlier find is still under
+/// way, past that find's limit too, joins it rather than start another: a
+/// user retrying a folder on a share that stopped answering holds one
+/// thread for it, not one per try.
 pub(super) async fn project_find(
     core: &Core,
     params: ProjectFindParams,
@@ -256,29 +261,71 @@ pub(super) async fn project_find(
     if core.store.host(params.host_id.clone()).await?.is_none() {
         return Err(ApiError::not_found(format!("no host {}", params.host_id)));
     }
-    let raw = params.path.clone();
-    // A folder that cannot be opened is no project: `project.add` would
-    // refuse it, so it matches none, even one added there before it went.
-    let key = inspect(core, &params.path, move || {
-        let raw = absolute(&raw)?;
-        Ok(platform::canonicalize(Path::new(raw))
-            .ok()
-            .map(|p| platform::folder_key(&p)))
-    })
-    .await?;
-    let Some(key) = key else {
+    let subject = (params.host_id.clone(), params.path.trim().to_string());
+    let answer = {
+        let mut finding = lock(&core.finding);
+        match finding.get(&subject) {
+            Some(under_way) => under_way.clone(),
+            None => {
+                // Taken out when the inspection ends, however it ends. The
+                // map stays locked until the entry is in, so it cannot be
+                // taken out before it is put in.
+                let finished = {
+                    let finding = Arc::clone(&core.finding);
+                    let subject = subject.clone();
+                    move || {
+                        lock(&finding).remove(&subject);
+                    }
+                };
+                // A folder that cannot be opened is no project: `project.add`
+                // would refuse it, so it matches none, even one added there
+                // before it went.
+                let raw = params.path.clone();
+                let started = start_inspection(
+                    core,
+                    &params.path,
+                    move || {
+                        let raw = absolute(&raw)?;
+                        Ok(platform::canonicalize(Path::new(raw))
+                            .ok()
+                            .map(|p| platform::folder_key(&p)))
+                    },
+                    finished,
+                )?;
+                finding.insert(subject, started.clone());
+                started
+            }
+        }
+    };
+    let Some(key) = answer_of(core, &params.path, answer).await? else {
         return Ok(None);
     };
     Ok(core.store.project_at(params.host_id, key).await?)
 }
 
-/// Runs `inspection` of the folder the user named at `raw`, on a thread of
-/// its own since file system calls block, and gives it
-/// [`crate::CoreConfig::folder_inspection_limit`]: a folder on a share that
-/// stopped answering never answers. Past the limit the answer is
-/// `permission` (PROTO-CORE-API-R93). A hung file system call cannot be
-/// called off, so its thread is left to finish, and since nothing waits for
-/// its result any more, nothing comes of it when it does.
+/// Locks `mutex`, whose holders never panic while holding it.
+fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Runs `inspection` of the folder the user named at `raw` and waits for
+/// it, as [`start_inspection`] and [`answer_of`] say.
+async fn inspect<T: Clone + Send + Sync + 'static>(
+    core: &Core,
+    raw: &str,
+    inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let answer = start_inspection(core, raw, inspection, || {})?;
+    answer_of(core, raw, answer).await
+}
+
+/// Starts `inspection` of the folder the user named at `raw`, on a thread
+/// of its own since file system calls block, and calls `finished` on that
+/// thread once the inspection has answered, or panicked. A hung file system
+/// call cannot be called off, so its thread is left to finish, and since
+/// nothing waits for its result any more, nothing comes of it when it does.
 ///
 /// The thread is a plain one, not one of Tokio's blocking pool: that pool
 /// also runs every database call, so threads stuck on a dead share there
@@ -287,41 +334,75 @@ pub(super) async fn project_find(
 /// [`crate::state::FOLDER_INSPECTIONS`] until the call returns; with none
 /// free, so many folders are not answering that the answer is
 /// `permission` at once.
-async fn inspect<T: Send + 'static>(
+fn start_inspection<T: Send + Sync + 'static>(
     core: &Core,
     raw: &str,
     inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
-) -> Result<T, ApiError> {
+    finished: impl FnOnce() + Send + 'static,
+) -> Result<Inspection<T>, ApiError> {
     let place = Arc::clone(&core.folder_inspections)
         .try_acquire_owned()
         .map_err(|_| {
             ApiError::new(
                 ersa_protocol::core_api::ErrorKind::Permission,
                 format!(
-                    "{} was not inspected: too many folders asked about are not answering;                      try again once they do",
+                    "{} was not inspected: too many folders asked about are not answering; \
+                     try again once they do",
                     raw.trim()
                 ),
             )
         })?;
     let gate = core.config.inspect_gate.clone();
     let runtime = tokio::runtime::Handle::current();
-    let (done, answer) = tokio::sync::oneshot::channel();
+    let (done, answer) = tokio::sync::watch::channel(None);
+    let finished = OnDrop(Some(finished));
     std::thread::Builder::new()
         .name("folder inspection".into())
         .spawn(move || {
+            // Dropped in reverse order: the place, then `finished`, so a
+            // later request finds the inspection gone only once its place
+            // is free.
+            let _finished = finished;
+            let _place = place;
             // In tests, the folder that does not answer.
             if let Some(gate) = gate {
                 runtime.block_on(gate.stop());
             }
-            // Fails only when the request stopped waiting: nothing to do.
-            let _ = done.send(inspection());
-            // Only now, however long the call took, is the place free.
-            drop(place);
+            // `send_replace`, since every request may have stopped waiting:
+            // nothing to do then.
+            done.send_replace(Some(inspection()));
         })
         .map_err(|e| ApiError::internal(format!("could not start the folder inspection: {e}")))?;
-    match tokio::time::timeout(core.config.folder_inspection_limit, answer).await {
+    Ok(answer)
+}
+
+/// Calls the function it holds when dropped, a panic's unwinding included.
+struct OnDrop<F: FnOnce()>(Option<F>);
+
+impl<F: FnOnce()> Drop for OnDrop<F> {
+    fn drop(&mut self) {
+        if let Some(f) = self.0.take() {
+            f();
+        }
+    }
+}
+
+/// Waits for `answer`, the inspection of the folder the user named at
+/// `raw`, for [`crate::CoreConfig::folder_inspection_limit`] from now: a
+/// folder on a share that stopped answering never answers. Past the limit
+/// the answer is `permission` (PROTO-CORE-API-R93).
+async fn answer_of<T: Clone>(
+    core: &Core,
+    raw: &str,
+    mut answer: Inspection<T>,
+) -> Result<T, ApiError> {
+    let limit = core.config.folder_inspection_limit;
+    match tokio::time::timeout(limit, answer.wait_for(Option::is_some)).await {
+        Ok(Ok(answered)) => answered
+            .clone()
+            .unwrap_or_else(|| Err(ApiError::internal("the folder inspection had no answer"))),
         // The thread ended without an answer: the inspection panicked.
-        Ok(answer) => answer.map_err(|_| ApiError::internal("inspecting the folder panicked"))?,
+        Ok(Err(_)) => Err(ApiError::internal("inspecting the folder panicked")),
         Err(_) => Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::Permission,
             format!(
@@ -344,6 +425,7 @@ fn absolute(raw: &str) -> Result<&str, ApiError> {
 }
 
 /// A folder about to become a project.
+#[derive(Clone)]
 struct Folder {
     /// Canonical: absolute, links and `..` resolved, the stored letter case.
     path: String,
