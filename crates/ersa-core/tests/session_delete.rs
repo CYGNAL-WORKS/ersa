@@ -766,7 +766,8 @@ async fn deleted_once_let_go(client: &mut Client, params: Value) {
 /// claim until the deletion has ended: however often the user tries again
 /// meanwhile, each try is refused `busy` and no second deletion begins, so
 /// the stuck one stays the only one. Once it ends, trying again deletes the
-/// record. No requirement states the claim's hold past the answer (inbox).
+/// record.
+// verifies: PROTO-CORE-API-R107
 #[tokio::test(flavor = "multi_thread")]
 async fn retries_while_a_record_deletion_is_stuck_begin_no_second_one() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -829,8 +830,8 @@ async fn reached(gate: &Gate) {
 /// returns keeps its claim until the try has ended: each try again
 /// meanwhile is refused `busy` and starts no second removal beside the
 /// stuck one. The stuck try, called off, deletes nothing when it returns;
-/// trying again then removes the folder. No requirement states the claim's
-/// hold past the answer (inbox).
+/// trying again then removes the folder.
+// verifies: PROTO-CORE-API-R107
 #[tokio::test(flavor = "multi_thread")]
 async fn retries_while_a_folder_removal_is_stuck_begin_no_second_one() {
     let fake = Arc::new(FakeAdapter::new(1));
