@@ -22,12 +22,15 @@
 //! failure marks the delete failed, and a new `session.delete` with a fresh
 //! token finishes it.
 
+use std::sync::Arc;
+
 use ersa_adapter::{OpenElsewhere, RecordDeletion};
 use ersa_protocol::core_api::{
     ErrorReason, SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind,
 };
 
 use super::{ApiError, handlers};
+use crate::admission::UnderWay;
 use crate::sessions::SessionError;
 use crate::state::Core;
 use crate::workspace;
@@ -59,9 +62,13 @@ pub(super) async fn delete(
         .session_transport_for(&row.host_id)
         .ok_or_else(|| handlers::unreachable_host(&row.host_id))?;
 
-    // (1) Held to the end of this function: every way out lets go of it,
-    // which ends the delete in admission and releases the workspace.
-    let _deleting = core.sessions.hold_for_delete(&id).await?;
+    // (1) Held to the end of this function, and by each call of steps 5
+    // and 6 until that call has ended, however long after this request
+    // gave up on it: the last holder to let go ends the delete in
+    // admission and releases the workspace. So a try again while a call
+    // Core gave up on is still stuck is refused `busy`, and never begins a
+    // second one beside it.
+    let deleting = Arc::new(core.sessions.hold_for_delete(&id).await?);
     // Refused while it starts or works. Checked once the workspace is held,
     // so a send that arrives after it is refused `busy` and one that
     // arrived before is seen here; the refusal lets go, having changed
@@ -103,7 +110,8 @@ pub(super) async fn delete(
     let files = core.sessions.mark_deleting(&id, files).await?;
 
     // (5) to (7). A failure from here on leaves the session marked failed.
-    match finish(core, &id, &workspace, files, session_transport).await {
+    let held = Arc::clone(&deleting);
+    match finish(core, &id, &workspace, files, session_transport, held).await {
         Ok(result) => Ok(result),
         Err(e) => {
             if let Err(mark) = core.sessions.mark_delete_failed(&id).await {
@@ -114,13 +122,15 @@ pub(super) async fn delete(
     }
 }
 
-/// Steps 5 to 7: the files, the record, and the rows.
+/// Steps 5 to 7: the files, the record, and the rows. `held` is the
+/// delete's claim, which each call of steps 5 and 6 keeps until it ends.
 async fn finish(
     core: &Core,
     id: &str,
     workspace: &Workspace,
     files: bool,
-    session_transport: std::sync::Arc<dyn ersa_adapter::Transport>,
+    session_transport: Arc<dyn ersa_adapter::Transport>,
+    held: Arc<UnderWay>,
 ) -> Result<SessionDeleteResult, ApiError> {
     let mut branch_kept = false;
     if files {
@@ -133,6 +143,11 @@ async fn finish(
             &project.path,
             &workspace.path,
             &workspace.vcs_ref,
+            workspace::FolderTries {
+                held: Arc::clone(&held) as _,
+                limit: core.config.folder_removal_limit,
+                gate: core.config.folder_gate.clone(),
+            },
         )
         .await;
         branch_kept = deleted?;
@@ -140,7 +155,7 @@ async fn finish(
     let limit = core.config.record_deletion_limit;
     match core
         .sessions
-        .delete_record(id, session_transport, limit)
+        .delete_record(id, session_transport, limit, held)
         .await
     {
         Ok(RecordDeletion::Deleted) => {}
