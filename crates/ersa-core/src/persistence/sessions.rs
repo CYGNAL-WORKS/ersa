@@ -54,9 +54,6 @@ pub struct SessionRow {
     /// to the column's default; a fork starts in its original's section.
     pub pinned: bool,
     pub section_id: Option<String>,
-    /// RFC 3339: when the session's latest turn ended, `None` until one has
-    /// (PROTO-CORE-API-R37).
-    pub last_activity_at: Option<String>,
     /// For a fork: the backend's id for the session it copies, whose record
     /// holds the fork's conversation until the backend writes one of its own,
     /// and the last message of that conversation.
@@ -75,7 +72,7 @@ pub struct SessionRow {
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
      s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
-     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through,      s.model_at, s.effort_at, s.permission_mode_at, s.started_elsewhere, s.unseen";
+     s.pinned, s.section_id, s.forked_from, s.forked_through, s.model_at, s.effort_at, s.permission_mode_at, s.started_elsewhere, s.unseen";
 
 impl Store {
     /// Records a new session. Whether its workspace takes one is admission's
@@ -278,18 +275,6 @@ impl Store {
         .await
     }
 
-    /// Records when the session's latest turn ended (PROTO-CORE-API-R37).
-    pub async fn set_session_last_activity(&self, id: String, at: String) -> Result<()> {
-        self.call(move |conn| {
-            conn.execute(
-                "UPDATE sessions SET last_activity_at = ?2 WHERE id = ?1",
-                params![id, at],
-            )?;
-            Ok(())
-        })
-        .await
-    }
-
     /// The ids of a workspace's sessions that are not marked deleting,
     /// sorted: those `workspace.changes` counts.
     pub async fn sessions_counted_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
@@ -462,13 +447,12 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         },
         pinned: row.get(12)?,
         section_id: row.get(13)?,
-        last_activity_at: row.get(14)?,
-        forked_from: row.get(15)?,
-        forked_through: row.get(16)?,
-        model_at: row.get(17)?,
-        effort_at: row.get(18)?,
-        permission_mode_at: row.get(19)?,
-        started_elsewhere: row.get(20)?,
-        unseen: row.get(21)?,
+        forked_from: row.get(14)?,
+        forked_through: row.get(15)?,
+        model_at: row.get(16)?,
+        effort_at: row.get(17)?,
+        permission_mode_at: row.get(18)?,
+        started_elsewhere: row.get(19)?,
+        unseen: row.get(20)?,
     })
 }
