@@ -125,6 +125,19 @@ describe("answering a permission request", () => {
     expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "allow" } } });
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R31
+  it("lets an unknown answer go once its request is no longer pending, with no second answer", async () => {
+    const unanswered: BridgeError = { kind: "unavailable", message: "Ersa got no answer in time.", sent: true };
+    const { sending, calls, answers } = setup(() => Promise.reject(unanswered));
+    sending.decide("s", "r1", "allow");
+    await settle();
+    expect(answers()).toEqual({ s: { r1: { state: "unknown" } } });
+    // Core applied it after all, or the backend settled it: its decision arrives, and nothing is left to say.
+    sending.receive(decided("s", "r1"));
+    expect(answers()).toEqual({});
+    expect(calls).toHaveLength(1);
+  });
+
   it("keeps nothing of a refusal that comes after the decision arrived", async () => {
     let refuse: (error: unknown) => void = () => {};
     const { sending, answers } = setup(() => new Promise((_, reject) => (refuse = reject)));
