@@ -11,16 +11,18 @@
 //! only passed on to the user.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{CallOff, CallOffOnDrop, ProcessSpec, Removal, Transport, remove_tree};
 
 use crate::platform;
+use crate::state::Gate;
 use crate::transport::{self, Output, RunError};
 
 /// How long one git command may take. Creating a worktree checks out the
 /// whole tree, which takes a while for a large repository.
-const GIT_TIMEOUT: Duration = Duration::from_secs(300);
+pub const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// How long a quick question to git may take: listing branches, resolving a
 /// base. The Interface waits on these while the user picks, so a repository
@@ -1168,19 +1170,19 @@ where
 /// again after it failed part way: a folder already gone is pruned, and a
 /// branch already gone is not kept.
 ///
-/// `held` is kept by each try at the folder until its thread returns, past
-/// the answer too ([`remove_folder`]).
+/// `tries` says how each try at a folder git no longer lists runs
+/// ([`remove_folder`]).
 pub async fn git_worktree_delete(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
     branch: &str,
-    held: impl Clone + Send + 'static,
+    tries: FolderTries,
 ) -> Result<bool, VcsError> {
     match git_worktree_remove(transport, repo, path, true, false).await {
         Ok(()) => {}
         Err(VcsError::NotListed { .. }) => {
-            remove_folder(path, held).await?;
+            remove_folder(path, &tries).await?;
             let pruned = git(transport, repo, &["worktree", "prune"]).await?;
             check(pruned, "git worktree prune failed")?;
         }
@@ -1256,47 +1258,60 @@ pub async fn git_worktree_gone(
     Ok(!exists)
 }
 
+/// How [`git_worktree_delete`]'s tries at a workspace's folder run.
+#[derive(Clone)]
+pub struct FolderTries {
+    /// Kept by each try on its thread until the thread returns, which a
+    /// file system call that hangs delays past the answer: a delete's
+    /// claim, so nothing begins a second removal beside one still stuck.
+    pub held: Arc<dyn std::any::Any + Send + Sync>,
+    /// How long each try may take: [`GIT_TIMEOUT`], as a git call has,
+    /// except in tests that let it run out.
+    pub limit: Duration,
+    /// Where each try stops, on its thread before it touches the folder,
+    /// until a test lets it go ([`crate::CoreConfig::folder_gate`]).
+    pub gate: Option<Arc<Gate>>,
+}
+
+impl FolderTries {
+    /// Tries that hold `held`, each given [`GIT_TIMEOUT`].
+    pub fn holding(held: Arc<dyn std::any::Any + Send + Sync>) -> FolderTries {
+        FolderTries {
+            held,
+            limit: GIT_TIMEOUT,
+            gate: None,
+        }
+    }
+}
+
 /// Deletes the folder at `path` and everything in it, retried while files
 /// are busy, as worktree removal is. A link inside is removed, never
 /// followed. A folder already gone is not an error. Each try is a blocking
-/// job under [`FILE_SYSTEM`]'s cap, given [`GIT_TIMEOUT`] as a git call is,
-/// so a folder on a drive that stops answering fails the delete rather than
-/// hold it for ever.
-///
-/// Each try keeps `held` on its thread until the thread returns, which a
-/// file system call that hangs delays past the answer: a delete's claim, so
-/// nothing begins a second removal beside one still stuck.
-async fn remove_folder(path: &str, held: impl Clone + Send + 'static) -> Result<(), VcsError> {
-    remove_folder_within(path, GIT_TIMEOUT, held, remove_tree).await
-}
-
-/// [`remove_folder`], each try given `limit` and deleting with `remove`
-/// ([`remove_tree`], except in tests). Once Core gives up on a try, at its
-/// deadline or because the request was dropped, the try begins no further
-/// deletion (PROTO-CORE-API-R91): it asks before each one.
-async fn remove_folder_within(
-    path: &str,
-    limit: Duration,
-    held: impl Clone + Send + 'static,
-    remove: impl Fn(&std::path::Path, &dyn Fn() -> bool) -> std::io::Result<Removal>
-    + Clone
-    + Send
-    + 'static,
-) -> Result<(), VcsError> {
+/// job under [`FILE_SYSTEM`]'s cap, given `tries.limit`, so a folder on a
+/// drive that stops answering fails the delete rather than hold it for
+/// ever, and keeps `tries.held` until its thread returns. Once Core gives
+/// up on a try, at its deadline or because the request was dropped, the try
+/// begins no further deletion (PROTO-CORE-API-R91): it asks before each one.
+async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> {
     let call_off = CallOff::default();
     let _called_off_on_return = CallOffOnDrop(call_off.clone());
     let call_off = &call_off;
-    let (held, remove) = (&held, &remove);
+    let runtime = &tokio::runtime::Handle::current();
     retried(
         || async move {
             let folder = std::path::PathBuf::from(path);
             let call_off = call_off.clone();
-            let (held, remove) = (held.clone(), remove.clone());
-            let deadline = Deadline::after(limit);
+            let (held, gate) = (Arc::clone(&tries.held), tries.gate.clone());
+            let runtime = runtime.clone();
+            let deadline = Deadline::after(tries.limit);
             blocking(deadline, "deleting the workspace's folder", move |at| {
                 let _held = held;
+                // In tests, the folder that does not answer.
+                if let Some(gate) = gate {
+                    runtime.block_on(gate.stop());
+                }
                 let stop = || call_off.is_called_off() || std::time::Instant::now() >= at;
-                match remove(&folder, &stop) {
+                match remove_tree(&folder, &stop) {
                     Ok(Removal::Removed) => Ok(Ok(())),
                     Ok(Removal::CalledOff) => Err(Halt::Expired),
                     // Busy files are worth another try.
@@ -1678,7 +1693,11 @@ mod tests {
             .build()
             .unwrap();
         let path = folder.display().to_string();
-        let result = runtime.block_on(remove_folder_within(&path, Duration::ZERO, (), remove_tree));
+        let tries = FolderTries {
+            limit: Duration::ZERO,
+            ..FolderTries::holding(Arc::new(()))
+        };
+        let result = runtime.block_on(remove_folder(&path, &tries));
         drop(runtime);
         let Err(VcsError::Failed { message, .. }) = result else {
             panic!("{result:?}");
@@ -1696,38 +1715,49 @@ mod tests {
     /// what it holds, a delete's claim, until the call returns, so a retry
     /// meanwhile is refused rather than start a second removal beside it.
     /// No requirement states the claim's hold past the answer (inbox).
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_folder_removal_that_hangs_keeps_its_hold_until_its_thread_returns() {
         let _one_at_a_time = CAP_TESTS.lock().await;
-        let held = std::sync::Arc::new(());
-        // A removal the file system does not answer until told to.
-        let (answer, hung) = std::sync::mpsc::channel::<()>();
-        let hung = std::sync::Arc::new(std::sync::Mutex::new(hung));
-        let remove = move |_: &std::path::Path, _: &dyn Fn() -> bool| {
-            let _ = hung.lock().unwrap().recv();
-            Ok(Removal::Removed)
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("workspace");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("a.txt"), "a").unwrap();
+        let held = Arc::new(());
+        // A folder the file system does not answer for until told to.
+        let gate = Arc::new(Gate::default());
+        // Lets the try go however the test ends: a try left parked would
+        // keep the runtime from shutting down, so a failure would hang.
+        struct LetGo(Arc<Gate>);
+        impl Drop for LetGo {
+            fn drop(&mut self) {
+                self.0.go();
+            }
+        }
+        let let_go = LetGo(Arc::clone(&gate));
+        let tries = FolderTries {
+            held: Arc::clone(&held) as _,
+            limit: Duration::from_millis(50),
+            gate: Some(Arc::clone(&gate)),
         };
-        let result = remove_folder_within(
-            "folder",
-            Duration::from_millis(50),
-            std::sync::Arc::clone(&held),
-            remove,
-        )
-        .await;
+        let path = folder.display().to_string();
+        let result = remove_folder(&path, &tries).await;
+        drop(tries);
         let Err(VcsError::Failed { message, .. }) = &result else {
             panic!("{result:?}");
         };
         assert!(message.contains("did not finish"), "{message}");
         // Answered, and the stuck try still holds it.
-        assert_eq!(std::sync::Arc::strong_count(&held), 2);
-        answer.send(()).unwrap();
-        // Its thread returns, and only then lets go.
+        gate.reached().await;
+        assert_eq!(Arc::strong_count(&held), 2);
+        drop(let_go);
+        // Its thread returns, and only then lets go, having deleted nothing:
+        // Core had called it off.
         let waited = std::time::Instant::now();
-        while std::sync::Arc::strong_count(&held) > 1 && waited.elapsed() < Duration::from_secs(10)
-        {
+        while Arc::strong_count(&held) > 1 && waited.elapsed() < Duration::from_secs(10) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert_eq!(std::sync::Arc::strong_count(&held), 1);
+        assert_eq!(Arc::strong_count(&held), 1);
+        assert!(folder.join("a.txt").exists());
     }
 
     // No requirement names the cap: it keeps a folder that hangs from
