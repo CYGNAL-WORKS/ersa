@@ -4,7 +4,7 @@
 // refused, by session, and the shelf and the transcript both read it.
 
 import type { Envelope, QuestionAnswered } from "../protocol/agent-events.gen";
-import { type CoreClient, type Params, describeError } from "../core/client";
+import { type BridgeError, type CoreClient, type Params, describeError } from "../core/client";
 
 /** What the user chose: Allow, Deny, or allowing with one of the request's suggestions, by its index. */
 export type Decision = "allow" | "deny" | { suggestion: number };
@@ -12,8 +12,11 @@ export type Decision = "allow" | "deny" | { suggestion: number };
 /** What the user gave a question: an answer to every question in it (R16), or Decline (R28). */
 export type Reply = { answers: QuestionAnswered["answers"] } | "decline";
 
-/** An answer on its way, or refused with Core's reason; once its decision or answer arrives as an event, it is gone. */
-export type Answer = { state: "sending"; decision: Decision | Reply } | { state: "failed"; message: string };
+/**
+ * An answer on its way, not taken with why, or unknown: sent, but the call got no answer, so Ersa can't tell whether
+ * Core applied it. Once its decision or answer arrives as an event, it is gone.
+ */
+export type Answer = { state: "sending"; decision: Decision | Reply } | { state: "failed"; message: string } | { state: "unknown" };
 
 /** Answers by session id, then by request id. */
 export type Answers = Readonly<Record<string, Readonly<Record<string, Answer>>>>;
@@ -37,6 +40,12 @@ export interface Answering {
   answer(id: string, requestId: string, reply: Reply): void;
   /** An event Core sent: a decision or a question's answer settles the answer that was on its way. */
   receive(envelope: Envelope): void;
+  /**
+   * A new connection to Core: an answer Core took whose decision never arrived is no longer held on its way, so a
+   * request still pending can be answered again (R18). If Core applied it, the events read on the new connection
+   * bring its decision, and the request is no longer shown.
+   */
+  attached(): void;
 }
 
 export function answering(client: CoreClient, change: (update: (answers: Answers) => Answers) => void): Answering {
@@ -68,8 +77,7 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
       () => onItsWay.delete(key),
       (error) => {
         onItsWay.delete(key);
-        // Refused: say why, and offer the answers again (R19).
-        set(id, requestId, { state: "failed", message: describeError(error) }, true);
+        set(id, requestId, afterRejection(error), true);
       },
     );
   };
@@ -83,6 +91,26 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
       send(id, requestId, reply, () => client.call("session.answer_question", answerParams(id, requestId, reply)));
     },
 
+    attached() {
+      change((answers) => {
+        let next = answers;
+        for (const [id, session] of Object.entries(answers)) {
+          for (const [requestId, answer] of Object.entries(session)) {
+            // A call still on its way settles by itself, as unknown if it was lost with the old connection.
+            if (answer.state !== "sending" || onItsWay.has(`${id}
+${requestId}`)) continue;
+            const { [requestId]: _, ...rest } = next[id] ?? {};
+            next = { ...next, [id]: rest };
+            if (Object.keys(rest).length === 0) {
+              const { [id]: _gone, ...others } = next;
+              next = others;
+            }
+          }
+        }
+        return next;
+      });
+    },
+
     receive(envelope) {
       // Read defensively: the follower checks events, and this only looks for a decision's or an answer's ids.
       const { session_id: id, event } = envelope as { session_id?: unknown; event?: { type?: unknown; request_id?: unknown } };
@@ -92,4 +120,15 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
       }
     },
   };
+}
+
+/**
+ * What a rejected answer leaves: unknown when the call was sent and got no answer (it timed out, or the connection
+ * closed), since Core may have applied it, so it is never said to be refused (R19); otherwise not taken, with why, and
+ * the answers offered again: Core's refusal, or a call that never reached Core.
+ */
+function afterRejection(error: unknown): Answer {
+  const bridge = error as BridgeError | undefined;
+  if (bridge?.kind === "unavailable" && bridge.sent) return { state: "unknown" };
+  return { state: "failed", message: describeError(error) };
 }

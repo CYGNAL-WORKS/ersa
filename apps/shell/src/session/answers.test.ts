@@ -79,6 +79,52 @@ describe("answering a permission request", () => {
     expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "deny" } } });
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R19
+  it("counts an answer that got no answer after it was sent as unknown, not refused, and takes another", async () => {
+    const unanswered: BridgeError = { kind: "unavailable", message: "Ersa got no answer in time.", sent: true };
+    let fail = true;
+    const { sending, calls, answers } = setup(() => (fail ? Promise.reject(unanswered) : new Promise(() => {})));
+    sending.decide("s", "r1", "allow");
+    await settle();
+    // Core may have applied it: nothing says it was refused, and the bridge's words are not shown.
+    expect(answers()).toEqual({ s: { r1: { state: "unknown" } } });
+    fail = false;
+    sending.decide("s", "r1", "deny");
+    expect(calls).toHaveLength(2);
+    expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "deny" } } });
+    // Applied after all: its decision settles it.
+    sending.receive(decided("s", "r1"));
+    expect(answers()).toEqual({});
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R19
+  it("says why an answer that never reached Core wasn't taken, and offers the answers again", async () => {
+    const notSent: BridgeError = { kind: "unavailable", message: "The request is too large to send." };
+    const { sending, answers } = setup(() => Promise.reject(notSent));
+    sending.decide("s", "r1", "allow");
+    await settle();
+    expect(answers()).toEqual({ s: { r1: { state: "failed", message: "The request is too large to send." } } });
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R18
+  it("lets an answer Core took be sent again on a new connection, should its request still be pending", async () => {
+    let take = true;
+    const { sending, calls, answers } = setup(() => (take ? Promise.resolve({}) : new Promise(() => {})));
+    sending.decide("s", "r1", "allow");
+    await settle();
+    expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "allow" } } });
+    // The connection changes before its decision arrives: the answers are offered again, saying nothing, since the
+    // events read on the new connection bring the decision if Core applied it.
+    sending.attached();
+    expect(answers()).toEqual({});
+    take = false;
+    sending.decide("s", "r1", "allow");
+    expect(calls).toHaveLength(2);
+    // One still on its way when the connection comes back is left on its way.
+    sending.attached();
+    expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "allow" } } });
+  });
+
   it("keeps nothing of a refusal that comes after the decision arrived", async () => {
     let refuse: (error: unknown) => void = () => {};
     const { sending, answers } = setup(() => new Promise((_, reject) => (refuse = reject)));
