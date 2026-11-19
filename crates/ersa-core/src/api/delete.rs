@@ -143,7 +143,11 @@ async fn finish(
             &project.path,
             &workspace.path,
             &workspace.vcs_ref,
-            Arc::clone(&held),
+            workspace::FolderTries {
+                held: Arc::clone(&held) as _,
+                limit: core.config.folder_removal_limit,
+                gate: core.config.folder_gate.clone(),
+            },
         )
         .await;
         branch_kept = deleted?;
