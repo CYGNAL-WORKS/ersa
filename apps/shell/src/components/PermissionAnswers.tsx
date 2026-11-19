@@ -53,6 +53,11 @@ export function PermissionAnswers({ request, answer, live, reconnectingNote = tr
           {t("rail.shelf.reconnectingNote")}
         </p>
       )}
+      {live && answer?.state === "unknown" && (
+        <p className="answers-note" role="status">
+          {t("rail.shelf.answerUnknownNote")}
+        </p>
+      )}
       {live && answer?.state === "failed" && (
         <div className="answers-refused" role="alert">
           <p className="problem">{t("rail.shelf.answerRefusedError")}</p>
