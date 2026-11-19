@@ -143,6 +143,7 @@ async fn finish(
             &project.path,
             &workspace.path,
             &workspace.vcs_ref,
+            Arc::clone(&held),
         )
         .await;
         branch_kept = deleted?;

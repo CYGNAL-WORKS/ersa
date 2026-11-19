@@ -421,6 +421,9 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         &project.path,
         &workspace.path,
         &workspace.vcs_ref,
+        // The removal's operation ends with what happened, reported below,
+        // so a try left stuck holds nothing of it.
+        (),
     )
     .await;
     let removed = match deleted {
