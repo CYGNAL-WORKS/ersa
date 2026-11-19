@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 // A permission request's answers in a DOM: what each one decides.
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { PermissionRequested } from "../protocol/agent-events.gen";
+import type { Envelope, PermissionRequested } from "../protocol/agent-events.gen";
 import type { Decision } from "../session/answers";
+import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import { PermissionAnswers } from "./PermissionAnswers";
+import { Transcript } from "./Transcript";
 
 const request: PermissionRequested = {
   type: "permission.requested",
@@ -42,5 +44,49 @@ describe("a permission request's answers", () => {
     const suggestion = screen.getByRole("button", { name: label });
     expect(suggestion.textContent).toBe(label);
     expect(suggestion.hasAttribute("title")).toBe(false);
+  });
+});
+
+describe("an answer Ersa can't tell reached the agent, on the transcript's permission card", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R31
+  it("isn't said to be refused: the card says Ersa can't tell, and offers the answers again", () => {
+    const asked: Envelope = {
+      v: EVENT_VERSION,
+      session_id: "s1",
+      seq: 0,
+      ts: "2026-11-19T09:00:00Z",
+      source: { backend: "claude-code", backend_version: "2.1.316", input: "live" },
+      event: request,
+    };
+    const decided: [string, Decision][] = [];
+    render(
+      createElement(Transcript, {
+        title: "Fix the build",
+        view: { id: "s1", transcript: apply(emptyTranscript, asked), stream: { state: "live" } },
+        answers: { r1: { state: "unknown" } },
+        onDecide: (requestId: string, decision: Decision) => decided.push([requestId, decision]),
+        onAnswer: () => {},
+      }),
+    );
+    const card = screen.getByRole("region", { name: "Permission: Bash" });
+    expect(within(card).queryByText("Your answer wasn't accepted.")).toBeNull();
+    const note = within(card).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.").closest("p");
+    expect(note?.getAttribute("role")).toBe("status");
+    expect(note?.querySelector('.glyph[data-tone="caution"]')).toBeTruthy();
+    for (const name of ["Allow", "Deny", "Allow pnpm commands"]) {
+      expect((within(card).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false);
+    }
+    fireEvent.click(within(card).getByRole("button", { name: "Deny" }));
+    expect(decided).toEqual([["r1", "deny"]]);
+  });
+});
+
+describe("an answer Ersa can't tell reached the agent, while Ersa can't reach Core", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R31
+  it("says only that Ersa is reconnecting, with the answers unavailable", () => {
+    render(createElement(PermissionAnswers, { request, answer: { state: "unknown" }, live: false, onDecide: () => {} }));
+    expect(screen.queryByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Reconnecting to Core…");
+    expect((screen.getByRole("button", { name: "Allow" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

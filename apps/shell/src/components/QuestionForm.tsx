@@ -126,6 +126,13 @@ export function QuestionForm({ questions, answer, live, reconnectingNote = true,
             {t("rail.shelf.reconnectingNote")}
           </p>
         )}
+        {live && answer?.state === "unknown" && (
+          // No failure: a caution glyph, as the composer's note for a message (FLOW-APPROVE-PERMISSION-R31).
+          <p className="answers-note answers-unknown" role="status">
+            <span className="glyph" data-tone="caution" aria-hidden="true" />
+            <span>{t("rail.shelf.answerUnknownNote")}</span>
+          </p>
+        )}
         {live && answer?.state === "failed" && (
           <div className="answers-refused" role="alert">
             <p className="problem">{t("rail.shelf.answerRefusedError")}</p>

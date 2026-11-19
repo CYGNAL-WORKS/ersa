@@ -404,6 +404,12 @@ export function useTileMenu({
           {refused}
         </p>
       )}
+      {/* Rename became unavailable while the field was open: the draft stays, and why Enter saves nothing is beneath. */}
+      {editing && refused === undefined && rename?.unavailable !== undefined && (
+        <p className="session-rename-problem session-rename-note" role="status">
+          {rename.unavailable}
+        </p>
+      )}
     </>
   );
 
