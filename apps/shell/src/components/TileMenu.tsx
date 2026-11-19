@@ -73,17 +73,9 @@ interface TileArchive {
   unavailable?: string;
 }
 
-/** Fork on the menu (FLOW-FORK-SESSION, steps 1 and 2). */
-interface TileFork {
-  /** Starts the fork, which becomes the active session (FLOW-FORK-SESSION-R04). */
-  onChoose: () => void;
-  /** Why Fork can't be used now; given, the menu shows it unavailable with this reason (R03). */
-  unavailable?: string;
-}
-
-/** Copy session ID on the menu (FLOW-RESUME-SESSION-R07). */
-interface TileCopyId {
-  /** Puts the backend's id for the session on the clipboard. */
+/** An item that does one thing when chosen: Fork (FLOW-FORK-SESSION, steps 1 and 2) or Copy session ID (FLOW-RESUME-SESSION-R07). */
+interface TileItem {
+  /** Fork starts the fork, which becomes the active session (FLOW-FORK-SESSION-R04); Copy session ID puts the backend's id on the clipboard. */
   onChoose: () => void;
   /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
   unavailable?: string;
@@ -94,9 +86,9 @@ export interface TileActions {
   rename?: TileRename;
   pin?: TilePin;
   mark?: TileMark;
-  fork?: TileFork;
+  fork?: TileItem;
   move?: TileMove;
-  copyId?: TileCopyId;
+  copyId?: TileItem;
   archive?: TileArchive;
   remove?: TileDelete;
 }
@@ -184,8 +176,8 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
 }
 
 // Copy session ID asks Core nothing, so it stays available while Ersa can't reach Core. Before the backend has
-// reported its id for the session, Core lists none, and the item says it comes once the session starts.
-function copyIdAction(s: Session): TileCopyId {
+// reported its id for the session, Core lists none, and the item says so.
+function copyIdAction(s: Session): TileItem {
   const id = s.backend_session_id;
   if (id === undefined) return { onChoose: () => {}, unavailable: t("rail.tile.copySessionIdReason") };
   return {
@@ -308,11 +300,11 @@ export function useTileMenu({
             onChoose: edit,
           },
           ...(fork
-            ? [{ kind: "item" as const, label: t("rail.tile.forkButton"), unavailable: fork.unavailable, onChoose: fork.onChoose }]
+            ? [plainItem(t("rail.tile.forkButton"), fork)]
             : []),
           ...(move ? [moveEntry(move)] : []),
           ...(copyId
-            ? [{ kind: "item" as const, label: t("rail.tile.copySessionIdButton"), unavailable: copyId.unavailable, onChoose: copyId.onChoose }]
+            ? [plainItem(t("rail.tile.copySessionIdButton"), copyId)]
             : []),
           ...(archive
             ? [
@@ -416,6 +408,11 @@ export function useTileMenu({
   );
 
   return { root, editing, rootHandlers, titleField, moreAndMenu };
+}
+
+/** A menu row that does one thing when chosen, unavailable with its reason while it can't. */
+function plainItem(label: string, item: TileItem): MenuEntry {
+  return { kind: "item", label, unavailable: item.unavailable, onChoose: item.onChoose };
 }
 
 /**

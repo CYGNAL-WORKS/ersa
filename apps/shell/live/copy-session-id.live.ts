@@ -44,7 +44,9 @@ test("Copy session ID copies the listed id, and writing to a session whose folde
   await item.click();
   const copied = await page.evaluate(() => (window as unknown as { copied: string[] }).copied);
   expect(copied).toHaveLength(1);
+  // The backend's id, never Ersa's own ("s-…"); the App test holds the exact id.
   expect(copied[0]).toMatch(/\S/);
+  expect(copied[0]).not.toMatch(/^s-/);
 
   // Quit, which stops the session's backend, delete its folder, and write to it after reopening.
   await ersa.restart();

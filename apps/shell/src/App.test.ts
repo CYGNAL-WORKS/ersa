@@ -975,7 +975,7 @@ describe("a tile's menu, and renaming on the tile", () => {
     fireEvent.click(within(rail()).getByRole("button", { name: "More for Write the notes" }));
     const item = screen.getByRole("menuitem", { name: /^Copy session ID/ });
     expect(item.getAttribute("aria-disabled")).toBe("true");
-    expect(item.textContent).toContain("Available once the session starts");
+    expect(item.textContent).toContain("Available once the backend has an ID for this session");
     await act(async () => {
       fireEvent.click(item);
     });
