@@ -110,6 +110,8 @@ pub struct Stats {
     pub messages: Mutex<Vec<OutgoingMessage>>,
     /// Records deleted.
     pub record_deletes: AtomicUsize,
+    /// Record deletions Core began, whether or not they deleted anything.
+    pub record_deletion_calls: AtomicUsize,
     /// Told each time a record deletion ends, deleted, refused or called
     /// off, so a test can wait for one Core gave up on.
     pub record_deletion_ended: tokio::sync::Notify,
@@ -676,6 +678,9 @@ impl Adapter for FakeAdapter {
         backend_session_id: &str,
         call_off: &CallOff,
     ) -> Result<RecordDeletion, AdapterError> {
+        self.stats
+            .record_deletion_calls
+            .fetch_add(1, Ordering::SeqCst);
         drop(self.delete_gate.lock().await);
         self.schedule.point("the record's deletion").await;
         let deletion = if let Some(refused) = self.delete_refusal.lock().unwrap().clone() {

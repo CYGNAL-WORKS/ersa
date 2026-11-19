@@ -1,6 +1,7 @@
 //! The state every request handler shares: the database, the transports, and
 //! what Core knows about its own host.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -47,10 +48,11 @@ pub struct CoreConfig {
     /// of its run. Zero, except in tests that need a request to land while
     /// a run winds down.
     pub wind_down_pause: Duration,
-    /// Where the folder inspection of `project.add` and `project.find`
-    /// stops, on its own thread before it touches the folder, until a test
-    /// lets it go: a folder that does not answer. `None`, except in tests.
-    pub inspect_gate: Option<Arc<Gate>>,
+    /// Where the folder inspection of `project.add` and `project.find`, and
+    /// each try of `session.delete` at a workspace's folder, stops, on its
+    /// own thread before it touches the folder, until a test lets it go: a
+    /// folder that does not answer. `None`, except in tests.
+    pub folder_gate: Option<Arc<Gate>>,
     /// How long the folder inspection of `project.add` and `project.find`
     /// may take before they answer `permission` (PROTO-CORE-API-R93).
     /// [`FOLDER_INSPECTION_LIMIT`], except in tests that let it run out.
@@ -59,6 +61,11 @@ pub struct CoreConfig {
     /// session's record before it gives up and calls the deletion off.
     /// [`RECORD_DELETION_LIMIT`], except in tests that let it run out.
     pub record_deletion_limit: Duration,
+    /// How long each try of `session.delete` at a workspace's folder may
+    /// take before it gives up and calls the try off.
+    /// [`crate::workspace::GIT_TIMEOUT`], as a git call has, except in tests
+    /// that let it run out.
+    pub folder_removal_limit: Duration,
     /// The transport git and backends' version commands run through on the
     /// local host. `None` is the local machine's; tests put one in front
     /// of it that holds a command, as a slow repository or backend would.
@@ -81,7 +88,7 @@ impl std::fmt::Debug for CommandTransport {
 }
 
 /// A point a request stops at in tests until the test lets it go
-/// ([`CoreConfig::inspect_gate`]). Each stop is one [`Gate::reached`]
+/// ([`CoreConfig::folder_gate`]). Each stop is one [`Gate::reached`]
 /// for the test and one [`Gate::go`] from it, in order.
 #[derive(Debug)]
 pub struct Gate {
@@ -161,9 +168,10 @@ impl CoreConfig {
             replay: false,
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
-            inspect_gate: None,
+            folder_gate: None,
             folder_inspection_limit: FOLDER_INSPECTION_LIMIT,
             record_deletion_limit: RECORD_DELETION_LIMIT,
+            folder_removal_limit: crate::workspace::GIT_TIMEOUT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })
@@ -179,6 +187,14 @@ impl CoreConfig {
         self.data_dir.clone()
     }
 }
+
+/// What a folder inspection under way will answer: `None` until it does.
+/// Every request waiting on it holds a receiver; one that stops waiting
+/// leaves the inspection to the others.
+pub(crate) type Inspection<T> = watch::Receiver<Option<Result<T, crate::api::ApiError>>>;
+
+/// `project.find`'s inspections under way, by host and path as asked.
+pub(crate) type Finding = HashMap<(String, String), Inspection<Option<String>>>;
 
 /// Core's shared state. Handlers receive `&Core`; the server holds it in an
 /// `Arc` so every connection task can.
@@ -205,6 +221,10 @@ pub struct Core {
     /// past its time limit too, so folders that never answer take at most
     /// [`FOLDER_INSPECTIONS`] threads, never more.
     pub(crate) folder_inspections: Arc<Semaphore>,
+    /// The inspections `project.find` has under way, by host and path as
+    /// asked, each kept until its file system call returns: a find of the
+    /// same folder meanwhile joins it rather than take another place.
+    pub(crate) finding: Arc<std::sync::Mutex<Finding>>,
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
@@ -243,6 +263,7 @@ impl Core {
             started: Instant::now(),
             local_backends: Mutex::new(None),
             folder_inspections: Arc::new(Semaphore::new(FOLDER_INSPECTIONS)),
+            finding: Arc::default(),
             shutdown: watch::Sender::new(false),
             replay_audience: watch::Sender::new(false),
         }
