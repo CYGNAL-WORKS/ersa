@@ -969,7 +969,7 @@ describe("a tile's menu, and renaming on the tile", () => {
   });
 
   // verifies: FLOW-RESUME-SESSION-R16
-  it("shows Copy session ID unavailable, saying why, until the backend has reported the id", async () => {
+  it("shows Copy session ID unavailable, saying why, while Core lists no id", async () => {
     const written = stubClipboard();
     await open();
     fireEvent.click(within(rail()).getByRole("button", { name: "More for Write the notes" }));

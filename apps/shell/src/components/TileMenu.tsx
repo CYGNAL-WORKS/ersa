@@ -175,8 +175,8 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
   };
 }
 
-// Copy session ID asks Core nothing, so it stays available while Ersa can't reach Core. Before the backend has
-// reported its id for the session, Core lists none, and the item says so.
+// Copy session ID asks Core nothing, so it stays available while Ersa can't reach Core. While Core lists no
+// id for the session, the item is unavailable and says why (FLOW-RESUME-SESSION-R16).
 function copyIdAction(s: Session): TileItem {
   const id = s.backend_session_id;
   if (id === undefined) return { onChoose: () => {}, unavailable: t("rail.tile.copySessionIdReason") };

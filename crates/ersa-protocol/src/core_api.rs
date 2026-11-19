@@ -560,8 +560,8 @@ pub struct WorkspaceChanges {
 #[serde(deny_unknown_fields)]
 pub struct Session {
     pub id: String,
-    /// The session's id in its backend; absent until the backend has
-    /// reported it.
+    /// The session's id in its backend; absent until Core holds the
+    /// backend's id for the session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_session_id: Option<String>,
     pub workspace_id: String,
