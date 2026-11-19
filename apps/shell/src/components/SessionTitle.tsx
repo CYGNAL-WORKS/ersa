@@ -90,7 +90,8 @@ export function useTitleDraft({
     onReset?.();
   };
   const save = async () => {
-    if (draft === undefined || busy) return;
+    // Renaming can't be used now, as when Core dropped while the field was open: nothing is sent, and the draft stays.
+    if (draft === undefined || busy || disabled) return;
     const next = renameTo(draft, title, untitled);
     if (next === undefined) {
       // A blank title is not saved; an unchanged one needs no saving.
