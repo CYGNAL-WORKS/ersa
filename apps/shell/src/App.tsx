@@ -747,13 +747,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     try {
       const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
-      connection.current?.reload("projects");
-      // The folder's sessions started in the backend's own tools are listed now (FLOW-RESUME-SESSION-R12).
-      connection.current?.reload("sessions");
       return project;
     } catch (error) {
       setAdding({ state: "failed", message: describeError(error) });
       return undefined;
+    } finally {
+      // Read again either way: an add that timed out may have finished in Core all the same.
+      connection.current?.reload("projects");
+      // The folder's sessions started in the backend's own tools are listed now (FLOW-RESUME-SESSION-R12).
+      connection.current?.reload("sessions");
     }
   };
 
@@ -825,6 +827,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     listed && listedProject ? { session: listed, project: listedProject } : away && keptControls.current?.session.id === shown?.id ? keptControls.current : undefined;
   const controlsWorkspace = controlsFor && workspaces[controlsFor.session.workspace_id];
   const sessionControls = controlsFor && controlsWorkspace && sessionShown(controlsFor.session, controlsWorkspace, backends[controlsFor.session.host_id] ?? []);
+  // Whether the shown session is archived, as last listed: after a reconnect, until the sessions are listed again,
+  // an archived session keeps its note in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02). While Ersa can't
+  // reach Core the composer shows instead, saying so and unavailable (FLOW-SEND-MESSAGE-R06).
+  const lastArchived = useRef<{ id: string; archived: boolean }>(undefined);
+  if (listed) lastArchived.current = { id: listed.id, archived: listed.archived };
+  const kept = lastArchived.current;
+  const archived = listed ? listed.archived : !away && shown !== undefined && kept?.id === shown.id && kept.archived;
   const used = listed && contextUsed(listed.tile);
   const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
 
@@ -1011,7 +1020,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
-            {listed?.archived ? (
+            {archived ? (
               // An archived session opens read-only: a note with Resume in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02).
               <ArchivedNote onResume={() => void resume(shown.id)} resuming={resuming[shown.id]} />
             ) : (
