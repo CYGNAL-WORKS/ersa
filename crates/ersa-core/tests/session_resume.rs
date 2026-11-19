@@ -930,7 +930,10 @@ async fn the_list_carries_the_backend_session_id_once_the_backend_reports_it() {
         if row.get("backend_session_id").is_some() {
             break row;
         }
-        assert!(tokio::time::Instant::now() < deadline, "no id listed: {row:#}");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no id listed: {row:#}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     };
     let backend_id = only_record(&records);
