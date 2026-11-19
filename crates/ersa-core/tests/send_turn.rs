@@ -34,7 +34,16 @@ async fn start_fake(
 }
 
 /// A running session of the fake backend that has had one turn; its id.
-async fn running_session(core: &TestCore, client: &mut Client) -> String {
+///
+/// Set up on a connection of its own, which the test then leaves. The
+/// `session.send_progress` of that first turn's send are per session, not
+/// per send, and reach a connection late (only the latest per session is
+/// kept for it), so on the test's connection they could pass for the
+/// reports the test waits on. A connection opened after the send's answer
+/// gets none of them: its reports begin when it says hello.
+async fn running_session(core: &TestCore) -> String {
+    let mut setup = core.client().await;
+    let client = &mut setup;
     let workspace_id = workspace(client, core.dir.path()).await;
     let id = client
         .result(
@@ -74,8 +83,15 @@ async fn reports_until_answer(
 }
 
 /// The reports start at once, say `checking` first, and come at least every
-/// 5 seconds until the answer.
-fn assert_reported_throughout(sent: Instant, answered: Instant, reports: &[(String, Instant)]) {
+/// 5 seconds until the answer, which came no sooner than `HELD` after
+/// `holding`: a moment before the test asked for what holds the send, so
+/// the wait inside Core cannot have begun before it.
+fn assert_reported_throughout(
+    holding: Instant,
+    sent: Instant,
+    answered: Instant,
+    reports: &[(String, Instant)],
+) {
     let (first_phase, first) = reports.first().expect("a report while the send waited");
     assert_eq!(first_phase, "checking", "{reports:?}");
     assert!(
@@ -96,9 +112,9 @@ fn assert_reported_throughout(sent: Instant, answered: Instant, reports: &[(Stri
         );
     }
     assert!(
-        answered.duration_since(sent) >= HELD,
-        "the send was not held: answered after {:?}",
-        answered.duration_since(sent)
+        answered.duration_since(holding) >= HELD,
+        "the send was not held: answered {:?} after what holds it was asked for",
+        answered.duration_since(holding)
     );
 }
 
@@ -108,9 +124,10 @@ fn assert_reported_throughout(sent: Instant, answered: Instant, reports: &[(Stri
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_behind_an_earlier_request_reports_checking() {
     let core = start_fake(FakeAdapter::slow_stop(HELD), |_| {}).await;
+    let id = running_session(&core).await;
     let mut client = core.client().await;
-    let id = running_session(&core, &mut client).await;
 
+    let holding = Instant::now();
     client.request("session.stop", json!({ "id": id })).await;
     let sent = Instant::now();
     let send = client
@@ -118,7 +135,7 @@ async fn a_send_behind_an_earlier_request_reports_checking() {
         .await;
     let (answer, answered, reports) = reports_until_answer(&mut client, send, &id).await;
     assert!(answer.get("result").is_some(), "{answer:#}");
-    assert_reported_throughout(sent, answered, &reports);
+    assert_reported_throughout(holding, sent, answered, &reports);
 }
 
 /// A send waiting its turn while another connection's send has the
@@ -129,8 +146,11 @@ async fn a_send_behind_an_earlier_request_reports_checking() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_waiting_send_reports_at_once_when_the_send_ahead_of_it_ends() {
     let core = start_fake(FakeAdapter::slow_stop(HELD), |_| {}).await;
+    let id = running_session(&core).await;
+    // Every report this connection reads is one of the sends below: the
+    // interrupt must find the send ahead handed over, or it cancels that
+    // send instead (PROTO-CORE-API-R86).
     let mut client = core.client().await;
-    let id = running_session(&core, &mut client).await;
     let reports = |phase: &'static str| {
         let id = id.clone();
         move |line: &Value| {
@@ -179,15 +199,20 @@ async fn a_waiting_send_reports_at_once_when_the_send_ahead_of_it_ends() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_waiting_for_a_run_winding_down_reports_checking() {
     let core = start_fake(FakeAdapter::new(1), |config| config.wind_down_pause = HELD).await;
-    let mut client = core.client().await;
-    let id = running_session(&core, &mut client).await;
-    client
+    let id = running_session(&core).await;
+    // The run ends on a connection the test then leaves, as in
+    // `running_session`: the `exit` send's reports are not this send's.
+    let mut setup = core.client().await;
+    setup
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
-    client
+    // The wind-down begins once the backend has exited, after this.
+    let holding = Instant::now();
+    setup
         .result("session.send", json!({ "id": id, "text": "exit" }))
         .await;
-    client.events_until("session.ended").await;
+    setup.events_until("session.ended").await;
+    let mut client = core.client().await;
 
     let sent = Instant::now();
     let send = client
@@ -195,5 +220,5 @@ async fn a_send_waiting_for_a_run_winding_down_reports_checking() {
         .await;
     let (answer, answered, reports) = reports_until_answer(&mut client, send, &id).await;
     assert!(answer.get("result").is_some(), "{answer:#}");
-    assert_reported_throughout(sent, answered, &reports);
+    assert_reported_throughout(holding, sent, answered, &reports);
 }
