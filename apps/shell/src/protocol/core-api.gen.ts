@@ -1018,7 +1018,7 @@ export interface WorkspaceChanges {
 export interface Session {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1256,7 +1256,7 @@ export interface WorkspaceChangesResult {
 export interface Session1 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1313,7 +1313,7 @@ export interface Session1 {
 export interface Session2 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1370,7 +1370,7 @@ export interface Session2 {
 export interface Session3 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1427,7 +1427,7 @@ export interface Session3 {
 export interface Session4 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1484,7 +1484,7 @@ export interface Session4 {
 export interface Session5 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1541,7 +1541,7 @@ export interface Session5 {
 export interface Session6 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1598,7 +1598,7 @@ export interface Session6 {
 export interface Session7 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1655,7 +1655,7 @@ export interface Session7 {
 export interface Session8 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1729,7 +1729,7 @@ export interface SessionSendResult {
 export interface Session9 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1811,7 +1811,7 @@ export interface AttachmentInspectResult {
 export interface Session10 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1868,7 +1868,7 @@ export interface Session10 {
 export interface Session11 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1925,7 +1925,7 @@ export interface Session11 {
 export interface Session12 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -1982,7 +1982,7 @@ export interface Session12 {
 export interface Session13 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -2039,7 +2039,7 @@ export interface Session13 {
 export interface Session14 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -2096,7 +2096,7 @@ export interface Session14 {
 export interface Session15 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;
@@ -2153,7 +2153,7 @@ export interface Session15 {
 export interface Session16 {
   id: Id;
   /**
-   * The session's id in its backend; absent until the backend has reported it.
+   * The session's id in its backend; absent until Core holds the backend's id for the session.
    */
   backend_session_id?: string;
   workspace_id: Id;

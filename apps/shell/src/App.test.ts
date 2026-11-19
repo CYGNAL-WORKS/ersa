@@ -958,6 +958,48 @@ describe("a tile's menu, and renaming on the tile", () => {
     const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
     expect(reason?.textContent).toContain("has not named this session yet");
   });
+
+  // A stand-in clipboard: a test never touches the real one.
+  function stubClipboard(): string[] {
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (text: string) => (written.push(text), Promise.resolve()) },
+    });
+    return written;
+  }
+
+  // verifies: FLOW-RESUME-SESSION-R16
+  it("copies the backend's id for the session with Copy session ID, after Move to section and before Archive", async () => {
+    const written = stubClipboard();
+    const core = await open({ "session.list": () => titled.map((s, i) => (i === 0 ? { ...s, backend_session_id: "9f2c4e1a-backend" } : s)) });
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    const labels = screen.getAllByRole("menuitem").map((item) => item.firstChild?.textContent);
+    expect(labels.indexOf("Copy session ID")).toBe(labels.indexOf("Move to section") + 1);
+    expect(labels.indexOf("Archive")).toBe(labels.indexOf("Copy session ID") + 1);
+    const asked = core.calls.length;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Copy session ID/ }));
+    });
+    expect(written).toEqual(["9f2c4e1a-backend"]);
+    // Choosing it closes the menu, and asks Core nothing.
+    expect(screen.queryByRole("menu", { name: "More for Fix the build" })).toBeNull();
+    expect(core.calls.slice(asked)).toEqual([]);
+  });
+
+  // verifies: FLOW-RESUME-SESSION-R16
+  it("shows Copy session ID unavailable, saying why, while Core lists no id", async () => {
+    const written = stubClipboard();
+    await open();
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Write the notes" }));
+    const item = screen.getByRole("menuitem", { name: /^Copy session ID/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Available once the backend has an ID for this session");
+    await act(async () => {
+      fireEvent.click(item);
+    });
+    expect(written).toEqual([]);
+  });
 });
 
 // Archiving and unarchiving (FLOW-ARCHIVE-DELETE-SESSION, steps 1 to 3), against a fake Core whose list changes as
@@ -1155,6 +1197,21 @@ describe("archiving a session from its tile, and an archived session read-only",
     const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
     expect(alert?.textContent).toContain("Ersa can't resume this session.");
     expect(alert?.textContent).toContain("milestone M1");
+    expect(composerBox()).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  // verifies: PROTO-CORE-API-R80
+  it("says above the note that the session's folder is gone when Core refuses the resume for it", async () => {
+    await archivedWhileOpen({
+      "session.resume": () => {
+        throw { kind: "rpc", error: { code: -32000, message: "session.resume: the session's folder no longer exists", data: { kind: "invalid_state", reason: "folder_gone" } } };
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await settle();
+    const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
+    expect(alert?.textContent).toBe("Ersa can't resume this session. This session's folder no longer exists. Put the folder back, then try again.");
     expect(composerBox()).toBeNull();
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
   });
@@ -1884,6 +1941,14 @@ describe("a refused send App's composer says", () => {
   it("says a refusal with a reason in the catalog's words, not Core's message", async () => {
     const line = await sendRefused(refuseWith("session.send: another connection is sending to session s2", "send_in_progress"));
     expect(line).toBe("A message is already on its way to this session from another window. Try again once it's sent.");
+  });
+
+  // verifies: PROTO-CORE-API-R80
+  it("says the session's folder is gone in the catalog's words, and keeps the session and the message", async () => {
+    const line = await sendRefused(refuseWith("session.send: the session's folder D:\gone no longer exists", "folder_gone"));
+    expect(line).toBe("This session's folder no longer exists. Put the folder back, then try again.");
+    expect(words().value).toBe("Fix the build");
+    expect(screen.getByRole("navigation", { name: "Rail" }).querySelectorAll(".session").length).toBe(sessions.length);
   });
 
   // Core's side of a failed start carrying no reason is PROTO-CORE-API-R88, verified in Core's tests.

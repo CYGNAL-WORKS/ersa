@@ -167,6 +167,10 @@ export const enUS = {
       offlineReason: "Available once Ersa reaches your sessions",
       // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
       deleteButton: "Delete…",
+      // Puts the backend's id for the session on the clipboard, to resume it in the backend's own tools
+      // (FLOW-RESUME-SESSION-R16), and why it can't be chosen while Core lists no id.
+      copySessionIdButton: "Copy session ID",
+      copySessionIdReason: "Available once the backend has an ID for this session",
       // Archive or Unarchive, by whether the session is archived (FLOW-ARCHIVE-DELETE-SESSION).
       archiveButton: "Archive",
       unarchiveButton: "Unarchive",
@@ -532,6 +536,9 @@ export const enUS = {
       openUnknownError: "Ersa can't tell whether another program has this session open. Close any that might, then try again.",
       noFinishedReplyError: "This session can be forked once a reply finishes.",
       backendCannotForkError: "This session's backend can't fork sessions. Updating the backend may help.",
+      // A session whose folder was deleted or moved, or whose workspace was removed. It keeps its history and its place,
+      // and Core checks the folder again on each try (FLOW-RESUME-SESSION-R03).
+      folderGoneError: "This session's folder no longer exists. Put the folder back, then try again.",
     },
   },
 } as const satisfies Section;
