@@ -830,9 +830,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Whether the shown session is archived, as last listed: after a reconnect, until the sessions are listed again,
   // an archived session keeps its note in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02). While Ersa can't
   // reach Core the composer shows instead, saying so and unavailable (FLOW-SEND-MESSAGE-R06).
-  const lastArchived = useRef<{ id: string; archived: boolean }>(undefined);
-  if (listed) lastArchived.current = { id: listed.id, archived: listed.archived };
-  const kept = lastArchived.current;
+  const kept = keptControls.current?.session;
   const archived = listed ? listed.archived : !away && shown !== undefined && kept?.id === shown.id && kept.archived;
   const used = listed && contextUsed(listed.tile);
   const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
