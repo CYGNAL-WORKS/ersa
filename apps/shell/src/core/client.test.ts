@@ -30,7 +30,7 @@ const refused = (reason: string, detail?: string) => ({
 });
 
 describe("describeError over a refusal with a reason", () => {
-  // Every reason the Interface knows, with the catalog's words for it. `folder_gone`'s words are #340's.
+  // Every reason the Interface knows, with the catalog's words for it.
   const known = [
     ["session_busy", "errors.refusal.sessionBusyError"],
     ["session_deleting", "errors.refusal.sessionDeletingError"],

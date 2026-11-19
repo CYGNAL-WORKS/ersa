@@ -404,7 +404,7 @@ Copy session ID
 
 ### `rail.tile.copySessionIdReason`
 
-Available once the session starts
+Available once the backend has an ID for this session
 
 ### `rail.tile.archiveButton`
 
