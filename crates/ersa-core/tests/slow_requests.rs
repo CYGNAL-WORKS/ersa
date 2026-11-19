@@ -320,8 +320,10 @@ async fn folders_that_never_answer_hold_a_bounded_number_of_threads() {
     let (core, mut client) = start(&stall, &gate, |c| c.folder_inspection_limit = SHORT).await;
     let folder = core.dir.path();
 
-    for _ in 0..FOLDER_INSPECTIONS {
-        let params = folder_params("project.find", folder);
+    // Each a folder of its own: asking about one folder again joins the
+    // inspection under way.
+    for n in 0..FOLDER_INSPECTIONS {
+        let params = folder_params("project.find", &folder.join(n.to_string()));
         let slow = client.request("project.find", params).await;
         reached(&gate).await;
         let answer = client.response(slow).await;
@@ -342,6 +344,49 @@ async fn folders_that_never_answer_hold_a_bounded_number_of_threads() {
         );
     }
     assert_eq!(client.result("project.list", json!({})).await, json!([]));
+}
+
+/// Asking `project.find` again about a folder that does not answer joins
+/// the inspection still under way rather than start another: however often
+/// the user retries, the folder holds one thread and one place, and another
+/// folder is still inspected. Each retry answers `permission` after its own
+/// limit. No requirement states the joining; R100's cap is what it keeps
+/// free.
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_of_project_find_for_a_folder_that_never_answers_hold_one_thread() {
+    let (stall, gate, _let_go) = stops();
+    let (core, mut client) = start(&stall, &gate, |c| c.folder_inspection_limit = SHORT).await;
+    let stuck = core.dir.path().join("stuck");
+    let params = || folder_params("project.find", &stuck);
+
+    let first = client.request("project.find", params()).await;
+    reached(&gate).await;
+    let answer = client.response(first).await;
+    assert_eq!(kind(&answer["error"]), "permission", "{answer}");
+    // As many retries as there are places: started afresh, they would hold
+    // every one.
+    for _ in 1..FOLDER_INSPECTIONS {
+        let answer = client.call("project.find", params()).await;
+        let error = &answer["error"];
+        assert_eq!(kind(error), "permission", "{answer}");
+        assert!(
+            error["message"]
+                .as_str()
+                .unwrap()
+                .contains("did not answer in time"),
+            "{answer}"
+        );
+    }
+
+    // Another folder still gets a place, and its inspection starts.
+    let other = core.dir.path().join("other");
+    let other = client
+        .request("project.find", folder_params("project.find", &other))
+        .await;
+    reached(&gate).await;
+    let answer = client.response(other).await;
+    let message = answer["error"]["message"].as_str().unwrap_or_default();
+    assert!(message.contains("did not answer in time"), "{answer}");
 }
 
 /// Core gives the inspection 10 seconds unless a test says otherwise; the

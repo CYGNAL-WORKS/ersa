@@ -1,6 +1,7 @@
 //! The state every request handler shares: the database, the transports, and
 //! what Core knows about its own host.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -180,6 +181,11 @@ impl CoreConfig {
     }
 }
 
+/// What a folder inspection under way will answer: `None` until it does.
+/// Every request waiting on it holds a receiver; one that stops waiting
+/// leaves the inspection to the others.
+pub(crate) type Inspection<T> = watch::Receiver<Option<Result<T, crate::api::ApiError>>>;
+
 /// Core's shared state. Handlers receive `&Core`; the server holds it in an
 /// `Arc` so every connection task can.
 pub struct Core {
@@ -205,6 +211,11 @@ pub struct Core {
     /// past its time limit too, so folders that never answer take at most
     /// [`FOLDER_INSPECTIONS`] threads, never more.
     pub(crate) folder_inspections: Arc<Semaphore>,
+    /// The inspections `project.find` has under way, by host and path as
+    /// asked, each kept until its file system call returns: a find of the
+    /// same folder meanwhile joins it rather than take another place.
+    pub(crate) finding:
+        Arc<std::sync::Mutex<HashMap<(String, String), Inspection<Option<String>>>>>,
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
@@ -243,6 +254,7 @@ impl Core {
             started: Instant::now(),
             local_backends: Mutex::new(None),
             folder_inspections: Arc::new(Semaphore::new(FOLDER_INSPECTIONS)),
+            finding: Arc::default(),
             shutdown: watch::Sender::new(false),
             replay_audience: watch::Sender::new(false),
         }
