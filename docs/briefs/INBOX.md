@@ -8,7 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-19 FLOW-APPROVE-PERMISSION: R19 covers only Core refusing an answer; no requirement says what the shelf and the transcript's card show for an answer sent that got no answer (a timeout, or the connection closed after it was queued), when Core may have applied it, and docs/design/RAIL.md's shelf notes don't list it. Built meanwhile (#377), as FLOW-SEND-MESSAGE-R15 does for a message: it is never said to be refused; the answers are offered again with a note, "Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.", until the request's decision arrives or the user answers again. An answer that never reached Core still shows as not accepted, with why.
 
 
 ## Resolved recently (optional, trimmed in planning passes)

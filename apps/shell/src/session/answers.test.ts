@@ -79,7 +79,7 @@ describe("answering a permission request", () => {
     expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "deny" } } });
   });
 
-  // verifies: FLOW-APPROVE-PERMISSION-R19
+  // verifies: FLOW-APPROVE-PERMISSION-R31
   it("counts an answer that got no answer after it was sent as unknown, not refused, and takes another", async () => {
     const unanswered: BridgeError = { kind: "unavailable", message: "Ersa got no answer in time.", sent: true };
     let fail = true;
@@ -97,7 +97,7 @@ describe("answering a permission request", () => {
     expect(answers()).toEqual({});
   });
 
-  // verifies: FLOW-APPROVE-PERMISSION-R19
+  // verifies: FLOW-APPROVE-PERMISSION-R33
   it("says why an answer that never reached Core wasn't taken, and offers the answers again", async () => {
     const notSent: BridgeError = { kind: "unavailable", message: "The request is too large to send." };
     const { sending, answers } = setup(() => Promise.reject(notSent));
@@ -106,7 +106,7 @@ describe("answering a permission request", () => {
     expect(answers()).toEqual({ s: { r1: { state: "failed", message: "The request is too large to send." } } });
   });
 
-  // verifies: FLOW-APPROVE-PERMISSION-R18
+  // verifies: FLOW-APPROVE-PERMISSION-R32
   it("lets an answer Core took be sent again on a new connection, should its request still be pending", async () => {
     let take = true;
     const { sending, calls, answers } = setup(() => (take ? Promise.resolve({}) : new Promise(() => {})));
