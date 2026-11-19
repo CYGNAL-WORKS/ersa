@@ -228,7 +228,7 @@ describe("the sessions page", () => {
       fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
       return items;
     };
-    expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "Mark as unread", "RenameF2", "Fork", "Move to section", "Copy session IDAvailable once the session starts", "Archive", "Delete…"]);
+    expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "Mark as unread", "RenameF2", "Fork", "Move to section", "Copy session IDAvailable once the backend has an ID for this session", "Archive", "Delete…"]);
   });
 
   it("shows the mark a tile shows, named, and the host when it is not this machine", async () => {
