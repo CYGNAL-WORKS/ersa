@@ -45,7 +45,7 @@ export interface Answering {
   receive(envelope: Envelope): void;
   /**
    * A new connection to Core: an answer Core took whose decision never arrived is no longer held on its way, so a
-   * request still pending can be answered again (R18). If Core applied it, the events read on the new connection
+   * request still pending can be answered again (R32). If Core applied it, the events read on the new connection
    * bring its decision, and the request is no longer shown.
    */
   attached(): void;
@@ -123,7 +123,7 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
 
 /**
  * What a rejected answer leaves: unknown when the call was sent and got no answer (it timed out, or the connection
- * closed), since Core may have applied it, so it is never said to be refused (R19); otherwise not taken, with why, and
+ * closed), since Core may have applied it, so it is never said to be refused (R31); otherwise not taken, with why (R19, R33), and
  * the answers offered again: Core's refusal, or a call that never reached Core.
  */
 function afterRejection(error: unknown): Answer {

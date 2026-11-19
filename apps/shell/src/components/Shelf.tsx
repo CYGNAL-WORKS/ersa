@@ -22,7 +22,7 @@ interface ShelfProps {
   shows: ShelfShows;
   /** Reads the session's events again after reading them failed (R21). */
   onRetry?: () => void;
-  /** The session's answers on their way or refused, by request id (R18, R19). */
+  /** The session's answers on their way, refused or unknown, by request id (R18, R19, R31, R33). */
   answers?: Readonly<Record<string, Answer>>;
   /** Whether answers can reach Core now (R20). */
   live: boolean;
