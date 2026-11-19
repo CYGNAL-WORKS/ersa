@@ -40,6 +40,11 @@ pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError
     core.sessions
         .find_elsewhere(|host| core.session_transport_for(host))
         .await?;
+    // Turns taken outside Ersa show in the list, by each record
+    // (PROTO-CORE-API-R75).
+    core.sessions
+        .reread_records(|host| core.session_transport_for(host))
+        .await;
     Ok(core.sessions.list())
 }
 
@@ -180,7 +185,6 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         deleting: None,
         pinned: false,
         section_id: None,
-        last_activity_at: None,
         forked_from: None,
         forked_through: None,
     };
@@ -340,7 +344,6 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         deleting: None,
         pinned: false,
         section_id: original.section_id,
-        last_activity_at: None,
         forked_from: Some(backend_id.clone()),
         forked_through: beginning
             .record

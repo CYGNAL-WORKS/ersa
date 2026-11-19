@@ -666,7 +666,7 @@ describe("arranging the rail", () => {
     expect(tiles()).toEqual(["s3", "s1", "s2"]);
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  // verifies: FLOW-ORGANIZE-SESSIONS-R31
   it("moves a tile sorted by last activity when Core reports a new one, and not as the session's tile changes", async () => {
     const quiet = { ...session("s1", "alpha", "2026-11-01T09:00:00Z"), last_activity_at: "2026-11-01T12:00:00.000Z" };
     const core = await open({ "session.list": () => [quiet, session("s2", "alpha", "2026-11-01T10:00:00Z")], "settings.get": () => ({ rail: { sort_by: "last_activity" } }) });

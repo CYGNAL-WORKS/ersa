@@ -187,7 +187,8 @@ pub trait Adapter: Send + Sync {
     }
 
     /// What the backend's session record says of the session as a whole: its
-    /// title and when it began. Read without reading the whole record, since
+    /// title, when it began, its settings and its last activity
+    /// ([`RecordSummary`]). Read without reading the whole record, since
     /// Core asks for every session it lists. `None` when the session has no
     /// record, which is also the default.
     async fn summarize_record(
@@ -423,6 +424,10 @@ pub struct RecordSummary {
     /// those of the turns after its own request with
     /// [`RecordedSettings::since`].
     pub settings: RecordedSettings,
+    /// When the session last had a turn: RFC 3339, the time of the latest
+    /// conversation entry in the part of the record read, as the record
+    /// gives it; `None` when that part holds none (PROTO-CORE-API-R75).
+    pub last_activity_at: Option<String>,
 }
 
 /// What a session's record says of its model, effort and permission mode,

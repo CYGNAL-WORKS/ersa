@@ -624,8 +624,9 @@ impl Adapter for ClaudeAdapter {
             .collect())
     }
 
-    /// The record's title and first time, from its head and tail
-    /// (PROTO-CLAUDE-CODE-STREAM-R16), read from this machine's files.
+    /// The record's title, first time, settings and last activity, from its
+    /// head and tail (PROTO-CLAUDE-CODE-STREAM-R16, R42), read from this
+    /// machine's files.
     async fn summarize_record(
         &self,
         _transport: Arc<dyn Transport>,
@@ -640,6 +641,7 @@ impl Adapter for ClaudeAdapter {
             title: summary.title,
             created_at: summary.created_at,
             settings: summary.settings,
+            last_activity_at: summary.last_activity_at,
         }))
     }
 

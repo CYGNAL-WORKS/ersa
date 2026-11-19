@@ -22,16 +22,25 @@ export type SessionsView =
   | { state: "error"; message: string }
   | { state: "unavailable" };
 
+/** The last activity to show, given the one shown and a new report: a session's first is taken as it
+ * comes, and after that only a later one, so a tile never moves back (FLOW-ORGANIZE-SESSIONS-R31). Core's
+ * times are RFC 3339 UTC, which sort as text the way they sort as times. */
+function laterActivity(shown: string | undefined, reported: string | undefined): string | undefined {
+  if (reported === undefined) return shown;
+  if (shown === undefined) return reported;
+  return reported > shown ? reported : shown;
+}
+
 /**
  * A list read before a turn's end carries an older last activity than the tile that reported it, so the newer stays
- * and the tile doesn't slide back (FLOW-ORGANIZE-SESSIONS-R10). Core writes these times at one width, so text orders them.
+ * and the tile doesn't slide back (FLOW-ORGANIZE-SESSIONS-R31). Core writes these times at one width, so text orders them.
  */
 function keepingActivity(listed: Session[], shown: SessionsView): Session[] {
   if (shown.state !== "ready") return listed;
   const known = new Map(shown.sessions.map((s) => [s.id, s.last_activity_at]));
   return listed.map((s) => {
-    const at = known.get(s.id);
-    return at !== undefined && (s.last_activity_at === undefined || at > s.last_activity_at) ? { ...s, last_activity_at: at } : s;
+    const at = laterActivity(known.get(s.id), s.last_activity_at);
+    return at === s.last_activity_at ? s : { ...s, last_activity_at: at };
   });
 }
 
@@ -185,9 +194,10 @@ export function connect(
                     ...view,
                     sessions: {
                       state: "ready",
-                      // Every tile carries the last activity once a turn has ended, and that is how the rail
-                      // hears of a new one (FLOW-ORGANIZE-SESSIONS-R10). Core never clears it, so one that
-                      // comes without keeps what was listed. Every tile carries the session's current title, absent
+                      // A tile carries the session's last activity as Core lists it, and that is how the rail
+                      // hears of a new one. Core may report an earlier one (a stopped session's record time) or
+                      // none (a record with no conversation left), but the rail moves a tile only for its first
+                      // or a later one, so it keeps the later of the two (FLOW-ORGANIZE-SESSIONS-R31). Every tile carries the session's current title, absent
                       // while it has none (PROTO-CORE-API-R83), so the rail, the header and the sessions page show a
                       // rename or a generated name from it, with no list read (PROTO-CORE-API-R84). Every tile carries the
                       // date created (PROTO-CORE-API-R105), corrected when Core reads the record (R106), so the rail groups
@@ -198,7 +208,7 @@ export function connect(
                         return {
                           ...rest,
                           tile,
-                          last_activity_at: last_activity_at ?? s.last_activity_at,
+                          last_activity_at: laterActivity(s.last_activity_at, last_activity_at),
                           created_at: typeof created_at === "string" ? created_at : s.created_at,
                           ...(title === undefined ? {} : { title }),
                         };
