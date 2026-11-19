@@ -737,7 +737,70 @@ async fn a_record_deletion_given_up_on_deletes_nothing_later() {
     assert_eq!(backend_ids(&fake.records).len(), 1, "the record is kept");
     assert_eq!(fake.stats.record_deletes.load(Ordering::SeqCst), 0);
 
-    client.result("session.delete", json!({ "id": id })).await;
+    deleted_once_let_go(&mut client, json!({ "id": id })).await;
+    assert!(backend_ids(&fake.records).is_empty());
+    assert!(listed(&mut client, &id).await.is_none());
+}
+
+/// Retries `session.delete` with `params` while it answers `busy`, which it
+/// does until the call a delete gave up on has ended and let go of its
+/// claim; fails unless it then succeeds. A busy refusal changes nothing.
+async fn deleted_once_let_go(client: &mut Client, params: Value) {
+    let started = std::time::Instant::now();
+    loop {
+        let answer = client.call("session.delete", params.clone()).await;
+        if answer.get("result").is_some() {
+            return;
+        }
+        let error = &answer["error"];
+        assert_eq!(error["data"]["detail"], "busy", "{answer}");
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the claim was never let go: {answer}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// A delete that gave up on a record deletion that never returns keeps its
+/// claim until the deletion has ended: however often the user tries again
+/// meanwhile, each try is refused `busy` and no second deletion begins, so
+/// the stuck one stays the only one. Once it ends, trying again deletes the
+/// record. No requirement states the claim's hold past the answer (inbox).
+#[tokio::test(flavor = "multi_thread")]
+async fn retries_while_a_record_deletion_is_stuck_begin_no_second_one() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let core = start_with_adapters(
+        tempdir(),
+        |config| config.record_deletion_limit = Duration::from_millis(200),
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let root = root(&mut client, &project).await;
+    let id = idle_session(&mut client, &root).await;
+
+    let stalled = fake.delete_gate.lock().await;
+    let error = client.error("session.delete", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "internal", "{error}");
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+
+    for _ in 0..3 {
+        let error = client.error("session.delete", json!({ "id": id })).await;
+        assert_eq!(kind(&error), "invalid_state", "{error}");
+        assert_eq!(error["data"]["detail"], "busy", "{error}");
+    }
+    let calls = &fake.stats.record_deletion_calls;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    drop(stalled);
+    deleted_once_let_go(&mut client, json!({ "id": id })).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert!(backend_ids(&fake.records).is_empty());
     assert!(listed(&mut client, &id).await.is_none());
 }
