@@ -1166,7 +1166,7 @@ describe("archiving a session from its tile, and an archived session read-only",
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));
     await settle();
     const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
-    expect(alert?.textContent).toBe("Ersa can't resume this session. This session's folder no longer exists. Its history is kept.");
+    expect(alert?.textContent).toBe("Ersa can't resume this session. This session's folder no longer exists. Put the folder back, then try again.");
     expect(composerBox()).toBeNull();
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
   });
@@ -1901,7 +1901,7 @@ describe("a refused send App's composer says", () => {
   // verifies: PROTO-CORE-API-R80
   it("says the session's folder is gone in the catalog's words, and keeps the session and the message", async () => {
     const line = await sendRefused(refuseWith("session.send: the session's folder D:\gone no longer exists", "folder_gone"));
-    expect(line).toBe("This session's folder no longer exists. Its history is kept.");
+    expect(line).toBe("This session's folder no longer exists. Put the folder back, then try again.");
     expect(words().value).toBe("Fix the build");
     expect(screen.getByRole("navigation", { name: "Rail" }).querySelectorAll(".session").length).toBe(sessions.length);
   });

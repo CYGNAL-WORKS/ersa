@@ -533,8 +533,9 @@ export const enUS = {
       openUnknownError: "Ersa can't tell whether another program has this session open. Close any that might, then try again.",
       noFinishedReplyError: "This session can be forked once a reply finishes.",
       backendCannotForkError: "This session's backend can't fork sessions. Updating the backend may help.",
-      // A session whose folder was deleted or moved, or whose workspace was removed: it keeps its history and its place.
-      folderGoneError: "This session's folder no longer exists. Its history is kept.",
+      // A session whose folder was deleted or moved, or whose workspace was removed. It keeps its history and its place,
+      // and Core checks the folder again on each try (FLOW-RESUME-SESSION-R03).
+      folderGoneError: "This session's folder no longer exists. Put the folder back, then try again.",
     },
   },
 } as const satisfies Section;

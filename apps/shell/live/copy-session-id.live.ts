@@ -55,7 +55,7 @@ test("Copy session ID copies the listed id, and writing to a session whose folde
   const again = page.getByRole("textbox", { name: "Message" });
   await again.fill("Are you still there?");
   await again.press("Enter");
-  await expect(page.locator(".composer-status-line")).toHaveText("This session's folder no longer exists. Its history is kept.", { timeout: 60_000 });
+  await expect(page.locator(".composer-status-line")).toHaveText("This session's folder no longer exists. Put the folder back, then try again.", { timeout: 60_000 });
   // The session stays where it was, with what it said.
   await expect(rail.locator(".session")).toHaveCount(1);
   await expect(page.getByRole("region", { name: "Transcript" }).getByText("Hello there")).toBeVisible();

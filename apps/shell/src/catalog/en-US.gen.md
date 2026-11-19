@@ -1296,4 +1296,4 @@ This session's backend can't fork sessions. Updating the backend may help.
 
 ### `errors.refusal.folderGoneError`
 
-This session's folder no longer exists. Its history is kept.
+This session's folder no longer exists. Put the folder back, then try again.
