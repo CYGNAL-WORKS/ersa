@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "e3a9866fcb876b70958af897a453b6d41f3b1a88-dirty",
+  "ersa_commit": "83a8092b95077d011d0c2c130545d39f4de478f8",
   "notifications": [
     {
       "kind": "notification",
@@ -569,6 +569,7 @@
     {
       "archived": false,
       "backend": "claude-code",
+      "backend_session_id": "0e682e32-24d2-4025-979f-529421dee897",
       "created_at": "2026-01-01T00:00:00Z",
       "host_id": "local",
       "id": "s-replay",
