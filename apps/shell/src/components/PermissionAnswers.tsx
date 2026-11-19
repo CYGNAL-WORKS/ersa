@@ -54,8 +54,10 @@ export function PermissionAnswers({ request, answer, live, reconnectingNote = tr
         </p>
       )}
       {live && answer?.state === "unknown" && (
-        <p className="answers-note" role="status">
-          {t("rail.shelf.answerUnknownNote")}
+        // No failure: a caution glyph, as the composer's note for a message (FLOW-APPROVE-PERMISSION-R31).
+        <p className="answers-note answers-unknown" role="status">
+          <span className="glyph" data-tone="caution" aria-hidden="true" />
+          <span>{t("rail.shelf.answerUnknownNote")}</span>
         </p>
       )}
       {live && answer?.state === "failed" && (

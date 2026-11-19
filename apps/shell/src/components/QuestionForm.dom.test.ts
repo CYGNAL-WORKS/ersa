@@ -207,8 +207,9 @@ describe("a question's answer Ersa can't tell reached the agent", () => {
   ])("isn't said to be refused on %s, and its answers are offered again", (_where, show) => {
     const surface = show();
     expect(within(surface).queryByText("Your answer wasn't accepted.")).toBeNull();
-    const note = within(surface).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.");
-    expect(note.getAttribute("role")).toBe("status");
+    const note = within(surface).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.").closest("p");
+    expect(note?.getAttribute("role")).toBe("status");
+    expect(note?.querySelector('.glyph[data-tone="caution"]')).toBeTruthy();
     expect((within(surface).getByRole("button", { name: "Decline" }) as HTMLButtonElement).disabled).toBe(false);
   });
 });
