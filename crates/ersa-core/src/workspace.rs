@@ -1556,7 +1556,7 @@ mod tests {
     /// Finding the default branch and resolving it share one limit, so a
     /// repository slow to list its branches does not get a second ten
     /// seconds to resolve one.
-    // verifies: PROTO-CORE-API-R19
+    // verifies: PROTO-CORE-API-R109
     #[tokio::test(start_paused = true)]
     async fn finding_and_resolving_the_default_branch_get_ten_seconds_together() {
         /// The first git lists `main` after six seconds; the next never answers.
@@ -1713,8 +1713,8 @@ mod tests {
 
     /// A try at a folder whose file system call hangs past its limit keeps
     /// what it holds, a delete's claim, until the call returns, so a retry
-    /// meanwhile is refused rather than start a second removal beside it.
-    /// No requirement states the claim's hold past the answer (inbox).
+    /// meanwhile is refused rather than start a second removal beside it
+    /// (PROTO-CORE-API-R107).
     #[tokio::test(flavor = "multi_thread")]
     async fn a_folder_removal_that_hangs_keeps_its_hold_until_its_thread_returns() {
         let _one_at_a_time = CAP_TESTS.lock().await;
