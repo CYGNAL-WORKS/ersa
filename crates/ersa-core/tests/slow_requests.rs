@@ -350,8 +350,8 @@ async fn folders_that_never_answer_hold_a_bounded_number_of_threads() {
 /// the inspection still under way rather than start another: however often
 /// the user retries, the folder holds one thread and one place, and another
 /// folder is still inspected. Each retry answers `permission` after its own
-/// limit. No requirement states the joining; R100's cap is what it keeps
-/// free.
+/// limit. R100's cap is what the joining keeps free.
+// verifies: PROTO-CORE-API-R108
 #[tokio::test(flavor = "multi_thread")]
 async fn retries_of_project_find_for_a_folder_that_never_answers_hold_one_thread() {
     let (stall, gate, _let_go) = stops();
