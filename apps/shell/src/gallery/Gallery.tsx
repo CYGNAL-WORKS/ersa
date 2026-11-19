@@ -181,7 +181,7 @@ const everyState: Session[] = (
 
 /**
  * Two tiles, the second of which shows a pointer, keyboard or active state. The first has its backend's id, so its menu
- * offers Copy session ID; the second's backend has not reported one, so the item says why it is unavailable.
+ * offers Copy session ID; Core lists none for the second, so the item says why it is unavailable.
  */
 const pointerPair: Session[] = [
   { ...session("p1", "At rest", "2026-11-01T10:00:00Z", { state: "idle", pending: [], cost_usd_total: 0.82, ...ring }), backend_session_id: "0b5e7c2d-4f1a-4c8e-9d36-a2f0e1b7c943" },
