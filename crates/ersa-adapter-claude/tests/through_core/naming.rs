@@ -508,3 +508,66 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
         "no rename is needed"
     );
 }
+
+/// The `backend_session_id` `session.list` carries for session `id`.
+async fn listed_backend_id(client: &mut Client, id: &str) -> Value {
+    let list = client.result("session.list", json!({})).await;
+    list.as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .expect("the session is listed")["backend_session_id"]
+        .clone()
+}
+
+/// Claude Code starts a session, and a fork, under an id Core chose: Core
+/// holds it from then, so `session.create`'s and `session.fork`'s answers and
+/// `session.list` carry it before any message, and before the CLI has
+/// reported anything.
+// verifies: FLOW-RESUME-SESSION-R15
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_and_a_fork_list_the_id_core_chose_before_any_message() {
+    let stdout = recorded();
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(is("initialize"))
+        .then_stdout([&stdout[0]])
+        .hold_open();
+    let home = tempdir();
+    let core = claude_core(&transport, home.path()).await;
+    let mut client = core.client().await;
+    let created = create(&core, &mut client).await;
+    let id = created["id"].as_str().unwrap().to_string();
+    initialize_sent(&transport).await;
+    let chosen = chosen_id(&transport);
+    assert_eq!(created["backend_session_id"], json!(chosen));
+    assert_eq!(listed_backend_id(&mut client, &id).await, json!(chosen));
+
+    // A fork needs its original's record to copy.
+    client.result("session.stop", json!({ "id": id })).await;
+    let cwd = transport.spawned()[0].cwd.clone().unwrap();
+    write_record(home.path(), &cwd, &chosen);
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while transport.spawned().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork's CLI never started"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let args = transport.spawned()[1].args.clone();
+    let at = args
+        .iter()
+        .position(|a| a == "--session-id")
+        .expect("--session-id");
+    let fork_chosen = args[at + 1].clone();
+    assert_ne!(fork_chosen, chosen);
+    assert_eq!(fork["backend_session_id"], json!(fork_chosen));
+    assert_eq!(
+        listed_backend_id(&mut client, &fork_id).await,
+        json!(fork_chosen)
+    );
+    // The original keeps its own.
+    assert_eq!(listed_backend_id(&mut client, &id).await, json!(chosen));
+}

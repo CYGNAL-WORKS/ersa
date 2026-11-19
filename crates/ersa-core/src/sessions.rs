@@ -893,9 +893,12 @@ impl Handle {
         let listed = settings::listed(&row, &presented.recorded, &presented.reported);
         Session {
             id: row.id,
-            // Filled by the ticket that builds it (PROTO-CORE-API,
-            // Sessions): the backend's id.
-            backend_session_id: None,
+            // The backend's id, so the user can resume the session in the
+            // backend's own tools (FLOW-RESUME-SESSION-R15). The row holds it
+            // only once it is the backend's: one the backend announced, one
+            // its record lists, or one Core chose and handed to a backend that
+            // starts under it (PROTO-CLAUDE-CODE-STREAM-R35).
+            backend_session_id: row.backend_session_id,
             workspace_id: row.workspace_id,
             host_id: row.host_id,
             backend: row.backend,

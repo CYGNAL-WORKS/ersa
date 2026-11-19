@@ -73,11 +73,11 @@ interface TileArchive {
   unavailable?: string;
 }
 
-/** Fork on the menu (FLOW-FORK-SESSION, steps 1 and 2). */
-interface TileFork {
-  /** Starts the fork, which becomes the active session (FLOW-FORK-SESSION-R04). */
+/** An item that does one thing when chosen: Fork (FLOW-FORK-SESSION, steps 1 and 2) or Copy session ID (FLOW-RESUME-SESSION-R16). */
+interface TileItem {
+  /** Fork starts the fork, which becomes the active session (FLOW-FORK-SESSION-R04); Copy session ID puts the backend's id on the clipboard. */
   onChoose: () => void;
-  /** Why Fork can't be used now; given, the menu shows it unavailable with this reason (R03). */
+  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
   unavailable?: string;
 }
 
@@ -86,8 +86,9 @@ export interface TileActions {
   rename?: TileRename;
   pin?: TilePin;
   mark?: TileMark;
-  fork?: TileFork;
+  fork?: TileItem;
   move?: TileMove;
+  copyId?: TileItem;
   archive?: TileArchive;
   remove?: TileDelete;
 }
@@ -165,11 +166,24 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
         unavailable: offlineReason ?? savingReason ?? sectionsUnavailable(h.sections),
       },
     fork: onFork && { onChoose: () => onFork(s.id), unavailable: forkUnavailable(s, offline, h.forking?.[s.id]) },
+    copyId: copyIdAction(s),
     archive: onArchive && {
       onChoose: (archived) => onArchive(s.id, archived),
       unavailable: archiveUnavailable(s, offline, h.archiving?.[s.id]),
     },
     remove: onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline) },
+  };
+}
+
+// Copy session ID asks Core nothing, so it stays available while Ersa can't reach Core. While Core lists no
+// id for the session, the item is unavailable and says why (FLOW-RESUME-SESSION-R16).
+function copyIdAction(s: Session): TileItem {
+  const id = s.backend_session_id;
+  if (id === undefined) return { onChoose: () => {}, unavailable: t("rail.tile.copySessionIdReason") };
+  return {
+    // A write the webview refuses leaves the clipboard as it was; the menu has closed either way, so there is nowhere
+    // to say so, and the user can choose it again.
+    onChoose: () => void navigator.clipboard.writeText(id).catch(() => {}),
   };
 }
 
@@ -190,7 +204,7 @@ function markUnavailable(s: Session, h: TileHandlers, offlineReason: string | un
 export function useTileMenu({
   session,
   title,
-  actions: { rename, pin, mark, fork, move, archive, remove },
+  actions: { rename, pin, mark, fork, move, copyId, archive, remove },
   beforeChevron,
   initialMenu,
   initialDraft,
@@ -286,9 +300,12 @@ export function useTileMenu({
             onChoose: edit,
           },
           ...(fork
-            ? [{ kind: "item" as const, label: t("rail.tile.forkButton"), unavailable: fork.unavailable, onChoose: fork.onChoose }]
+            ? [plainItem(t("rail.tile.forkButton"), fork)]
             : []),
           ...(move ? [moveEntry(move)] : []),
+          ...(copyId
+            ? [plainItem(t("rail.tile.copySessionIdButton"), copyId)]
+            : []),
           ...(archive
             ? [
                 {
@@ -397,6 +414,11 @@ export function useTileMenu({
   );
 
   return { root, editing, rootHandlers, titleField, moreAndMenu };
+}
+
+/** A menu row that does one thing when chosen, unavailable with its reason while it can't. */
+function plainItem(label: string, item: TileItem): MenuEntry {
+  return { kind: "item", label, unavailable: item.unavailable, onChoose: item.onChoose };
 }
 
 /**

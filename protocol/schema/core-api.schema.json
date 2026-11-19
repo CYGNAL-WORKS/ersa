@@ -1950,7 +1950,7 @@
         },
         "backend_session_id": {
           "type": "string",
-          "description": "The session's id in its backend; absent until the backend has reported it."
+          "description": "The session's id in its backend; absent until Core holds the backend's id for the session."
         },
         "workspace_id": {
           "$ref": "#/$defs/id"
