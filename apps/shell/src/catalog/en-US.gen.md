@@ -84,6 +84,10 @@ Sort by
 
 Show
 
+### `rail.arrange.newSectionButton`
+
+New section
+
 ### `rail.arrange.resetButton`
 
 Reset to defaults
@@ -95,6 +99,10 @@ View all
 ### `rail.arrange.groupByProjectButton`
 
 Project
+
+### `rail.arrange.groupBySectionButton`
+
+Section
 
 ### `rail.arrange.groupByDateButton`
 
@@ -152,6 +160,10 @@ Ersa can't read your projects.
 
 Ersa can't read your sessions.
 
+### `rail.tree.sectionsError`
+
+Ersa can't read your sections.
+
 ### `rail.tree.arrangeReadError`
 
 Ersa can't read how you arranged the rail.
@@ -195,6 +207,30 @@ Previous 7 days
 ### `rail.group.olderHeading`
 
 Older
+
+### `rail.group.noSectionHeading`
+
+No section
+
+### `rail.section.moreLabel`
+
+More for {section}
+
+### `rail.section.renameButton`
+
+Rename
+
+### `rail.section.deleteButton`
+
+Delete
+
+### `rail.section.nameLabel`
+
+Section name
+
+### `rail.section.deleteError`
+
+Ersa can't delete this section.
 
 ### `rail.heading.newSessionLabel`
 
@@ -293,6 +329,42 @@ Ersa can't pin this session.
 ### `rail.tile.unpinError`
 
 Ersa can't unpin this session.
+
+### `rail.tile.markUnreadButton`
+
+Mark as unread
+
+### `rail.tile.markReadButton`
+
+Mark as read
+
+### `rail.tile.markUnreadActiveReason`
+
+Available once you open another session
+
+### `rail.tile.markUnreadError`
+
+Ersa can't mark this session as unread.
+
+### `rail.tile.markReadError`
+
+Ersa can't mark this session as read.
+
+### `rail.tile.moveToSectionButton`
+
+Move to section
+
+### `rail.tile.noSectionButton`
+
+No section
+
+### `rail.tile.newSectionButton`
+
+New section…
+
+### `rail.tile.moveError`
+
+Ersa can't move this session.
 
 ### `rail.tile.renameButton`
 

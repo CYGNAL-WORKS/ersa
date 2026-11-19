@@ -44,14 +44,15 @@ export function SessionTile({
   session,
   backends,
   active,
-  unseen,
   force,
   onSelect,
   shelf,
   onChevron,
   rename,
   pin,
+  mark,
   fork,
+  move,
   archive,
   remove,
   initialMenu,
@@ -61,24 +62,23 @@ export function SessionTile({
   session: Session;
   backends?: Backends;
   active: boolean;
-  unseen: boolean;
   force?: ForcedTile["state"];
   onSelect: (id: string) => void;
   /** Its shelf is open: the shelf's tone, which the chevron and the want take, and the shelf's element id. */
   shelf?: { tone: "accent" | "caution"; domId: string };
   onChevron?: (id: string) => void;
-  /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
-  initialMenu?: boolean;
+  /** For the gallery: the tile's menu shown open, "move" with Move to section's submenu open too, and the title being edited with this text. */
+  initialMenu?: boolean | "move";
   initialDraft?: string;
   /** A fork of this session is on its way: it says so in place of its state. */
   forking?: boolean;
 }) {
-  const view = tileOf(session, backends, forking);
+  const view = tileOf(session, backends, { forking, active });
   const needsYou = view.mark === "needsYou";
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({
     session,
     title: view.title,
-    actions: { rename, pin, fork, archive, remove },
+    actions: { rename, pin, mark, fork, move, archive, remove },
     beforeChevron: needsYou,
     initialMenu,
     initialDraft,
@@ -125,7 +125,7 @@ export function SessionTile({
         {editing ? (
           titleField
         ) : (
-          <span className="session-title" data-muted={(view.titleMuted && !unseen) || undefined} data-unseen={unseen || undefined}>
+          <span className="session-title" data-muted={view.titleMuted || undefined} data-unseen={view.titleUnseen || undefined}>
             {view.title}
           </span>
         )}

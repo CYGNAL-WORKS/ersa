@@ -1,39 +1,49 @@
-// Which sessions are unseen (LAY-SHELL, The rail: Unseen; docs/design/RAIL.md, A tile: the title): a session that is
-// not the active one and that Core reports as idle after working, until the user makes it active. The interface
-// keeps this in memory only, so nothing survives the window closing.
+// Ersa's own unseen mark (FLOW-ORGANIZE-SESSIONS, Unseen; LAY-SHELL, Unseen): a session that goes idle after working
+// while it is not the active one becomes unseen, and the mark goes when the user makes it active. Core stores the
+// mark and lists it (PROTO-CORE-API-R78), so it survives a restart of Ersa and of Core (FLOW-ORGANIZE-SESSIONS-R25);
+// this only works out what to tell Core, from each list Core reports. Core never sets the mark by itself.
 
 import type { Session } from "../protocol/core-api.gen";
+import { activityOf } from "./tile";
 
-export interface Unseen {
-  /** The unseen sessions' ids. */
-  ids: ReadonlySet<string>;
-  /** The sessions that were working when Core last reported them, to tell "idle after working" from plain idle. */
-  working: ReadonlySet<string>;
+/** A change of the unseen mark to send to Core with `session.arrange`. */
+export interface UnseenWrite {
+  id: string;
+  unseen: boolean;
 }
 
-export const noneUnseen: Unseen = { ids: new Set(), working: new Set() };
-
-// Working is a running turn with nothing waiting on the user; a session with a pending request needs the user,
-// which its own state says, so it is neither working nor idle here.
-const isWorking = (s: Session) => s.tile.state === "running" && s.tile.pending.length === 0;
-// A string, not the protocol's union: a state this interface doesn't know is never idle, so never marks a session.
-const isIdle = (s: Session) => {
-  const state: string = s.tile.state;
-  return (state === "idle" || state === "waiting_user") && s.tile.pending.length === 0;
-};
-
 /**
- * The unseen sessions after Core reports `sessions` with `activeId` active. A session becomes unseen only when it
- * goes from working to idle while not active; the active session is never unseen, and one that leaves the list is
- * forgotten. Any other change (needing the user, failing, disconnecting, ending) leaves the mark as it was.
+ * What Ersa tells Core after Core reports `sessions` with `activeId` active, given the sessions that were working
+ * in the report before (`working`). A session not active that goes from working to idle is marked unseen, unless it
+ * already is; the active session is marked seen if Core reports it unseen. A session with a change already on its way
+ * (`sending`) gets no other, so a list read before that change answers can't send it twice, and one whose last
+ * change Core refused (`refused`) is asked nothing. Needing the user, failing, disconnecting or ending marks
+ * nothing.
+ *
+ * Returns the sessions working now, for the next report, and the changes to send.
  */
-export function unseenAfter(prev: Unseen, sessions: readonly Session[], activeId: string | undefined): Unseen {
-  const ids = new Set<string>();
-  const working = new Set<string>();
+export function unseenWrites(
+  working: ReadonlySet<string>,
+  sessions: readonly Session[],
+  activeId: string | undefined,
+  sending: ReadonlySet<string>,
+  refused: ReadonlySet<string> = new Set(),
+): { working: ReadonlySet<string>; writes: UnseenWrite[] } {
+  const now = new Set<string>();
+  const writes: UnseenWrite[] = [];
   for (const s of sessions) {
-    if (isWorking(s)) working.add(s.id);
-    if (s.id === activeId) continue;
-    if (prev.ids.has(s.id) || (prev.working.has(s.id) && isIdle(s))) ids.add(s.id);
+    const activity = activityOf(s.tile);
+    if (activity === "working") now.add(s.id);
+    if (sending.has(s.id)) {
+      // Decided once its change has answered: a turn that ended meanwhile still marks it from the next list.
+      if (working.has(s.id)) now.add(s.id);
+      continue;
+    }
+    if (s.id === activeId) {
+      if (s.unseen) writes.push({ id: s.id, unseen: false });
+    } else if (working.has(s.id) && activity === "idle" && !s.unseen) {
+      writes.push({ id: s.id, unseen: true });
+    }
   }
-  return { ids, working };
+  return { working: now, writes: writes.filter((w) => !refused.has(w.id)) };
 }

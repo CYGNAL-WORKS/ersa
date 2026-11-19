@@ -124,6 +124,9 @@
 .session-item:has(> .session[data-force="hover"], > .session[data-force="focus"]) > .session:not([data-needs-you], [data-editing]) .session-mark,
 .session-item:has(> .session-more[aria-expanded="true"]) > .session:not([data-needs-you], [data-editing]) .session-mark {
   opacity: 0;
+  /* A working session's glyph breathes, and an animated element paints above More: given way, it takes no press, so
+     the press reaches More. */
+  pointer-events: none;
 }
 
 .session-more.icon-button[aria-expanded="true"],
