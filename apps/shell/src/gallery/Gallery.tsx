@@ -573,6 +573,7 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Permission with suggestions", sessionView(withSuggestions)],
   ["Permission sending", sessionView(asked), { r1: { state: "sending", decision: "allow" } }],
   ["Permission refused", sessionView(asked), { r1: { state: "failed", message: refusal } }],
+  ["Permission answer unknown", sessionView(asked), { r1: { state: "unknown" } }],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Question open", sessionView(questionAsked)],
   ["Question answer on its way", sessionView(questionAsked), { rq: { state: "sending", decision: "decline" } }],
@@ -949,6 +950,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["Keyboard focus on the shelf itself", { state: "permission", request: shelfRequest }, { focus: true }],
   ["An answer on its way", { state: "permission", request: shelfRequest }, { answer: { state: "sending", decision: "allow" } }],
   ["An answer refused", { state: "permission", request: shelfRequest }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["An answer Ersa can't tell reached the agent", { state: "permission", request: shelfRequest }, { answer: { state: "unknown" } }],
   ["While Ersa reconnects", { state: "permission", request: shelfRequest }, { live: false }],
   ["Risen to fit a short window", { state: "permission", request: shelfRequest }, { short: true }],
 ];
