@@ -894,3 +894,49 @@ async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
     let configs = started(&stats, 2).await;
     assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
 }
+
+/// `session.list` carries the backend's id for a session only once the
+/// backend has reported it, so Copy session ID copies what the backend's own
+/// tools resume by, and it stays listed once the session stops.
+// verifies: FLOW-RESUME-SESSION-R07
+#[tokio::test(flavor = "multi_thread")]
+async fn the_list_carries_the_backend_session_id_once_the_backend_reports_it() {
+    let records = Records::default();
+    let fake = FakeAdapter::with_records(Arc::clone(&records));
+    let start_gate = Arc::clone(&fake.start_gate);
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+
+    // The fake, unlike Claude Code, names a session itself as it starts:
+    // while its start is held, it has reported no id.
+    let held = start_gate.lock().await;
+    let session = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
+        )
+        .await;
+    let id = session["id"].as_str().unwrap().to_string();
+    started(&stats, 1).await;
+    let before = session_row(&mut client, &id).await;
+    assert!(before.get("backend_session_id").is_none(), "{before:#}");
+
+    // Once it has started, it has named the session on its stream.
+    drop(held);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let after = loop {
+        let row = session_row(&mut client, &id).await;
+        if row.get("backend_session_id").is_some() {
+            break row;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no id listed: {row:#}");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    };
+    let backend_id = only_record(&records);
+    assert_eq!(after["backend_session_id"], json!(backend_id));
+
+    client.result("session.stop", json!({ "id": id })).await;
+    let stopped = session_row(&mut client, &id).await;
+    assert_eq!(stopped["backend_session_id"], json!(backend_id));
+}
