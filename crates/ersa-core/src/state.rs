@@ -186,6 +186,9 @@ impl CoreConfig {
 /// leaves the inspection to the others.
 pub(crate) type Inspection<T> = watch::Receiver<Option<Result<T, crate::api::ApiError>>>;
 
+/// `project.find`'s inspections under way, by host and path as asked.
+pub(crate) type Finding = HashMap<(String, String), Inspection<Option<String>>>;
+
 /// Core's shared state. Handlers receive `&Core`; the server holds it in an
 /// `Arc` so every connection task can.
 pub struct Core {
@@ -214,8 +217,7 @@ pub struct Core {
     /// The inspections `project.find` has under way, by host and path as
     /// asked, each kept until its file system call returns: a find of the
     /// same folder meanwhile joins it rather than take another place.
-    pub(crate) finding:
-        Arc<std::sync::Mutex<HashMap<(String, String), Inspection<Option<String>>>>>,
+    pub(crate) finding: Arc<std::sync::Mutex<Finding>>,
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
