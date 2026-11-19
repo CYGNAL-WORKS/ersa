@@ -204,7 +204,7 @@ export function SessionsPage({
                       initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
                     />
                   </ErrorBoundary>
-                  <Refusals session={s} pinning={handlers.pinning} archiving={handlers.archiving} forking={handlers.forking} />
+                  <Refusals session={s} moving={handlers.moving} marking={handlers.marking} archiving={handlers.archiving} forking={handlers.forking} />
                 </li>
               ))}
             </ul>
@@ -242,7 +242,7 @@ function SessionRow({
   /** A fork of this session is on its way: it says so in place of its state. */
   forking?: boolean;
 }) {
-  const view = tileOf(session, backends, forking);
+  const view = tileOf(session, backends, { forking });
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({ session, title: view.title, actions, initialMenu, initialDraft });
   return (
     <>

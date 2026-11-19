@@ -209,6 +209,9 @@ const tree: Parameters<typeof RailTree>[0] = {
     return true;
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
+  onMove: (id, sectionId) => (document.body.dataset.railCall = `move ${id} ${sectionId}`),
+  onNewSection: (id) => (document.body.dataset.railCall = `newSection ${id}`),
+  onMark: (id, unseen) => (document.body.dataset.railCall = `mark ${id} ${unseen}`),
   onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
   onDelete: (id) => (document.body.dataset.railCall = `delete ${id}`),
   localHost: "local",
@@ -245,6 +248,7 @@ const sessionsPage: Parameters<typeof SessionsPage>[0] = {
   onNewSession: () => {},
   onRename: async () => true,
   onPin: () => {},
+  onMark: () => {},
   onArchive: () => {},
   onDelete: () => {},
 };
@@ -280,7 +284,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -291,6 +295,12 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** p1 finished a turn while p2 was active, so Core reports it unseen (LAY-SHELL, Unseen). */
+const unseenPair: Parameters<typeof RailTree>[0] = {
+  ...pairOnly,
+  sessions: { state: "ready", sessions: pointerPair.map((s) => (s.id === "p1" ? { ...s, unseen: true } : s)) },
+  activeId: "p2",
+};
 /** A tile for each backend's mark (issue 399): Claude Code, Copilot, and one Ersa doesn't know. */
 const eachBackend: Parameters<typeof RailTree>[0] = {
   ...ersaOnly,
@@ -322,6 +332,41 @@ const folded = (...ids: string[]) => new Set(ids);
 const pinnedTree: Parameters<typeof RailTree>[0] = {
   ...tree,
   sessions: { state: "ready", sessions: treeSessions.map((s) => (s.id === "s1" || s.id === "s4" ? { ...s, pinned: true } : s)) },
+};
+
+/**
+ * The tree grouped by section (FLOW-ORGANIZE-SESSIONS-R04): "Docs" holds two sessions, "Later", made after it, holds
+ * none, and the rest are in no section. Rename and Delete keep their last call on the page, as the headings' do.
+ */
+const sectionedTree: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  groupBy: "section",
+  sessions: { state: "ready", sessions: treeSessions.map((s) => (s.id === "s1" || s.id === "s3" ? { ...s, section_id: "x1" } : s)) },
+  sections: {
+    state: "ready",
+    sections: [
+      { id: "x1", name: "Docs", created_at: "2026-11-01T09:00:00Z" },
+      { id: "x2", name: "Later", created_at: "2026-11-02T09:00:00Z" },
+    ],
+  },
+  sectionHandlers: {
+    onRename: async (id, name) => {
+      document.body.dataset.railCall = `renameSection ${id} ${name}`;
+      return true;
+    },
+    onDelete: (id) => (document.body.dataset.railCall = `deleteSection ${id}`),
+  },
+};
+
+/** A new section's heading, its field empty (FLOW-ORGANIZE-SESSIONS, step 5). */
+const newSection: NonNullable<Parameters<typeof RailTree>[0]["newSection"]> = {
+  initialDraft: "",
+  onName: async (name) => {
+    document.body.dataset.railCall = `newSection ${name}`;
+    return undefined;
+  },
+  onReset: () => {},
+  onCancel: () => {},
 };
 
 /** A transcript built the way the window builds one: by applying events. */
@@ -807,9 +852,9 @@ const menuParts: MenuEntry[] = [
     current: "Project",
     entries: [
       { kind: "item", label: "Project", checked: true },
-      { kind: "item", label: "Section" },
-      { kind: "item", label: "Date" },
-      { kind: "item", label: "None" },
+      { kind: "item", label: "Section", checked: false },
+      { kind: "item", label: "Date", checked: false },
+      { kind: "item", label: "None", checked: false },
     ],
   },
   { kind: "submenu", label: "Sort by", current: "Date created", entries: [{ kind: "item", label: "Date created", checked: true }] },
@@ -1052,7 +1097,7 @@ const entries: Entry[] = [
       ["Tile, pressed", <RailTree {...pairOnly} force={{ id: "p2", state: "pressed" }} />],
       ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],
       // p1 finished a turn while p2 was active: its title reads strong until it is opened.
-      ["Unseen", <RailTree {...pairOnly} activeId="p2" unseen={new Set(["p1"])} />],
+      ["Unseen", <RailTree {...unseenPair} />],
       ["Active tile", <RailTree {...pairOnly} activeId="p2" />],
       ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
       ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],
@@ -1064,15 +1109,53 @@ const entries: Entry[] = [
       // p2 is working, so Delete is unavailable with its reason; p1 is idle, so it can be deleted.
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       ["Tile menu, Delete available", room(<RailTree {...pairOnly} initialTileMenu="p1" />)],
+      // An unseen session's menu offers Mark as read; the active session's has Mark as unread unavailable, with its reason.
+      ["Tile menu, unseen", room(<RailTree {...unseenPair} initialTileMenu="p1" />)],
+      ["Tile menu, active session", room(<RailTree {...pairOnly} activeId="p2" initialTileMenu="p2" />)],
       // LAY-SHELL, Being deleted: Deleting while Core works on it, and Couldn't delete, whose menu holds Delete… alone.
       ["Being deleted, and a deletion that failed", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: beingDeleted }} initialTileMenu="p2" />)],
       // Renaming, archiving and deleting go through Core, so while Ersa can't reach it all are unavailable, with the reason.
       ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["An archived tile", <RailTree {...archivedPair} />],
       ["An archived tile, pointer over it", <RailTree {...archivedPair} force={{ id: "a1", state: "hover" }} />],
+      // Marked unread: its mark shows over the archived tile's muted title (docs/design/RAIL.md, A tile).
+      [
+        "An archived tile, unseen",
+        <RailTree {...archivedPair} sessions={{ state: "ready", sessions: archivedPair.sessions.state === "ready" ? archivedPair.sessions.sessions.map((s) => (s.id === "a1" ? { ...s, unseen: true } : s)) : [] }} />,
+      ],
       ["Tile menu, archived", room(<RailTree {...archivedPair} initialTileMenu="a1" />)],
       ["Grouped by date", <RailTree {...datedTree} />],
       ["Grouped by date, collapsed", <RailTree {...datedTree} collapsed={new Set(["yesterday"])} />],
+      ["Grouped by section", <RailTree {...sectionedTree} />],
+      ["Grouped by section, collapsed", <RailTree {...sectionedTree} collapsed={new Set(["x1", "no_section"])} />],
+      ["Section heading, pointer over it", <RailTree {...sectionedTree} forceHeading={{ id: "x1", state: "hover" }} />],
+      ["Section heading, keyboard focus", <RailTree {...sectionedTree} forceHeading={{ id: "x1", state: "focus" }} />],
+      ["Section More", room(<RailTree {...sectionedTree} initialSectionMenu="x1" />)],
+      ["Section More, while deleting", room(<RailTree {...sectionedTree} initialSectionMenu="x1" sectionHandlers={{ ...sectionedTree.sectionHandlers, removing: { x1: { state: "sending" } } }} />)],
+      ["Renaming a section", <RailTree {...sectionedTree} initialSectionDraft={{ id: "x2", draft: "Later this week" }} />],
+      [
+        "Renaming a section, refused",
+        <RailTree
+          {...sectionedTree}
+          initialSectionDraft={{ id: "x2", draft: "Docs" }}
+          sectionHandlers={{ ...sectionedTree.sectionHandlers, renaming: { x2: { state: "failed", message: "another section is named Docs" } } }}
+        />,
+      ],
+      ["Section not deleted", <RailTree {...sectionedTree} sectionHandlers={{ ...sectionedTree.sectionHandlers, removing: { x1: { state: "failed", message: "the database is locked" } } }} />],
+      ["Sections not read", <RailTree {...sectionedTree} sections={{ state: "error", message: "the database is locked" }} />],
+      ["Tile menu, Move to section", room(<RailTree {...sectionedTree} initialMoveMenu="s1" />)],
+      ["Tile menu, Move to section while sections are read", room(<RailTree {...sectionedTree} sections={{ state: "loading" }} initialTileMenu="s1" />)],
+      ["New section", <RailTree {...sectionedTree} newSection={newSection} />],
+      ["New section, named", <RailTree {...sectionedTree} newSection={{ ...newSection, initialDraft: "Reviews" }} />],
+      ["New section, being made", <RailTree {...sectionedTree} newSection={{ ...newSection, initialDraft: "Reviews", creating: { state: "sending" } }} />],
+      [
+        "New section, refused",
+        <RailTree
+          {...sectionedTree}
+          newSection={{ ...newSection, initialDraft: "Reviews ".repeat(29), creating: { state: "failed", message: "a section's name can have at most 200 characters" } }}
+        />,
+      ],
+      ["Move refused", <RailTree {...sectionedTree} moving={{ s1: { state: "failed", message: "the database is locked", change: "section" } }} />],
       ["Grouped by none", <RailTree {...pinnedTree} groupBy="none" />],
       ["Sorted by name", <RailTree {...pinnedTree} groupBy="none" sortBy="name" />],
       ["No active sessions", <RailTree {...tree} sessions={{ state: "ready", sessions: treeSessions.map((s) => ({ ...s, archived: true })) }} />],
@@ -1083,13 +1166,16 @@ const entries: Entry[] = [
         <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />,
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
-      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" moving={{ p2: { state: "sending", change: "pin" } }} />)],
+      ["Tile menu, while a mark is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" marking={{ p2: { state: "sending" } }} />)],
       ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
         <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: t("errors.refusal.noFinishedReplyError") } }} />,
       ],
-      ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Pin refused", <RailTree {...pairOnly} moving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError"), change: "pin" } }} />],
+      ["Mark as unread refused", <RailTree {...pairOnly} marking={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
+      ["Mark as read refused", <RailTree {...unseenPair} marking={{ p1: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",

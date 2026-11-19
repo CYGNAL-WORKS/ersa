@@ -20,8 +20,15 @@ describe("the rail's arrangement in Core's settings", () => {
     expect(arrangementOf(settings)).toEqual({ groupBy: "date", sortBy: "last_activity", show: "all", collapsed: { date: ["today", "pinned"], project: ["p1"] } });
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R13
+  it("reads back grouping by section and the sections collapsed in it, No section included", () => {
+    const settings = mergePatch(mergePatch({}, choicePatch({ groupBy: "section" })), collapsePatch("section", ["s1", "no_section"]));
+    expect(settings).toEqual({ rail: { group_by: "section", collapsed: { section: ["s1", "no_section"] } } });
+    expect(arrangementOf(settings)).toEqual({ groupBy: "section", sortBy: "created", show: "active", collapsed: { section: ["s1", "no_section"] } });
+  });
+
   it("reads a value it does not know as the default, since settings are the user's and may hold anything", () => {
-    const odd = { rail: { group_by: "section", show: 3, collapsed: { project: ["p1", 7], date: "today", none: null } } };
+    const odd = { rail: { group_by: "folder", show: 3, collapsed: { project: ["p1", 7], date: "today", none: null } } };
     expect(arrangementOf(odd)).toEqual({ groupBy: "project", sortBy: "created", show: "active", collapsed: { project: ["p1"] } });
     expect(arrangementOf({ rail: "flat" })).toEqual(DEFAULT_ARRANGEMENT);
   });

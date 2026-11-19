@@ -33,7 +33,9 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 - **Groups by date** are Today, Yesterday, Previous 7 days and Older, by when the session was created, in the user's local time, so a session never changes group as it works; only the passing of days moves it, and a fork moves to its original's date once it has its own record. Yesterday is the calendar day before today, Previous 7 days the six before that (2 to 7 days back), and Older anything earlier; a session created later than now, by a clock set wrong, is in Today.
 - **Sections in other groupings.** Sections are seen only when grouping by section. Choosing New section, from either menu, while grouping by something else switches the grouping to Section so the new heading is in view.
-- **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
+- **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost. Keyboard focus goes to the heading that followed it, else the one before it, else New session (R33).
+- **"No section"** shows only while it holds a tile, as a date group does (R32).
+- **Sections that can't be read.** Grouped by section, the rail says it can't read the sections, with the reason, and shows the sessions as when grouped by none; while they are first read it says it is loading. A later read that fails keeps what the rail shows (R34, R35).
 - **A name already taken, too long or holding a control character.** Making a section with exactly the name of another gives the existing section, as Claude Desktop's does (`claude-desktop/sections-2026-11-09.txt`): nothing new appears, and a session being moved goes there. Names that differ only in case are different sections. Renaming a section to exactly another's name is refused. A name has at most 200 characters, and runs of spacing in it become one space as in a session's title (PROTO-CORE-API, Sections); a name holding a control character other than spacing is refused. The name field says why it refused and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins.
@@ -41,6 +43,8 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when its session's last activity gets later: at a turn's end, or when work done outside Ersa shows the next time the rail lists sessions (PROTO-CORE-API-R75). It never moves one while a reply streams or because the session's state changed. A session that stops keeps its place, though its record's time is a little earlier than its last turn's end; the record's time stands once the rail lists sessions anew, after a restart or a lost connection.
 - **Unseen.** A session is unseen when it goes idle after working while not the active one, or when the user chooses Mark as unread; the mark goes when the user makes it active or chooses Mark as read.
+- **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed. Work done outside Ersa counts, and shows the next time the rail lists sessions (PROTO-CORE-API-R75).
+- **Unseen.** A session is unseen when it goes idle after working while not the active one, or when the user chooses Mark as unread; the mark goes when the user makes it active or chooses Mark as read. Ersa remembers which sessions were working while it can't reach Core, so a turn that ends meanwhile marks its session once Ersa is connected again; one that ends while Ersa is not running marks nothing (R37 to R39).
 
 ## Requirements
 
@@ -75,6 +79,14 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R29**: A menu opened at the pointer shall have its top-left corner at the press where it fits there; on an axis where it does not, it shall open the other way from the press, and where it fits neither way it shall sit against the window's left or top edge.
 - **FLOW-ORGANIZE-SESSIONS-R31**: When sorting by last activity, Ersa shall move a tile only when Core reports its session's first last activity, or a later one than the one shown, or a corrected date created for a session with no last activity yet.
 - **FLOW-ORGANIZE-SESSIONS-R30**: A menu opened at the pointer shall be placed again when its size or the window's changes.
+- **FLOW-ORGANIZE-SESSIONS-R32**: When grouping by section, Ersa shall show the "No section" heading only while it holds a tile.
+- **FLOW-ORGANIZE-SESSIONS-R33**: When a section is deleted from its heading's menu, keyboard focus shall go to the section or "No section" heading that followed it when Delete was chosen, else to the one before it, else to New session.
+- **FLOW-ORGANIZE-SESSIONS-R34**: When grouping by section and the sections cannot be read, Ersa shall say so with the reason and show the sessions as when grouping by none.
+- **FLOW-ORGANIZE-SESSIONS-R35**: While the sections are first being read under grouping by section, the rail's tree shall say it is loading.
+- **FLOW-ORGANIZE-SESSIONS-R36**: When the user chooses New section while grouping by anything but section, Ersa shall switch the grouping to Section.
+- **FLOW-ORGANIZE-SESSIONS-R37**: When Core reports as idle, with nothing waiting on the user, a session it last reported as working, and the session is not the active one, Ersa shall mark it unseen.
+- **FLOW-ORGANIZE-SESSIONS-R38**: Ersa shall keep which sessions were working while it cannot reach Core, so that R37 marks a session whose turn ended meanwhile once Ersa is connected again.
+- **FLOW-ORGANIZE-SESSIONS-R39**: When the user makes an unseen session the active one, Ersa shall clear its mark.
 
 ## Out of scope
 
@@ -89,6 +101,8 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 ## Changes
 
 - 2026-11-18: from #337 inbox: Core's last activity for a session changes at a turn's end, when a live session stops (to its record's time, a little earlier) and when work is done outside Ersa (PROTO-CORE-API-R75), so the rule is now the rail's own: a tile moves only for a session's first last activity or a later one, and a stop moves nothing. FLOW-ORGANIZE-SESSIONS-R10 retired; R31 added.
+- 2026-11-18: from #324 inbox: Ersa's own unseen mark gets its requirements (FLOW-ORGANIZE-SESSIONS-R37, R39), and a turn that ends while Ersa can't reach Core marks its session once Ersa is connected again (R38), which closes that half of LAY-SHELL's open question: the mark says a session finished while the user was not looking, whether or not Ersa watched it end. No requirement retired.
+- 2026-11-18: from #326 inbox: "No section" shows only while it holds a tile (FLOW-ORGANIZE-SESSIONS-R32); deleting a section from its heading passes keyboard focus on (R33); sections that can't be read, and sections being read, have their words (R34, R35). The switch to grouping by Section on New section, stated under Variations, gets an ID for the ticket that builds New section (R36). R31 is taken by #337's pass. No requirement retired.
 - 2026-11-18: from #290 inbox: a menu opened at the pointer stays inside the window, opening the other way from the press where it has no room, as a desktop's menus do, and is placed again when it or the window changes size (FLOW-ORGANIZE-SESSIONS-R28 to R30 added). `RAIL.md` (Menus) holds the rule.
 - 2026-11-15: from #413 inbox: a corrected date created reaches the rail on `session.tile` (PROTO-CORE-API-R105, R106), which is how R07, R09 and R10 hold without a reread of the list; until those are built it shows at the next read of the list. No requirement IDs changed.
 - 2026-11-14: from the triage of #289: a section name holding a control character other than spacing is refused, as Core does (PROTO-CORE-API-R60), and the edge case says so. R27 added. The 2026-11-07 line named PROTO-CORE-API-R61, the rule on case, and now names R60 alone.

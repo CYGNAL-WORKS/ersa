@@ -326,7 +326,7 @@ describe("a new session's tile", () => {
       const more: Partial<Parameters<typeof RailTree>[0]> = { projects: { state: "ready", projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, initialMenu: "q", onSetTrust: () => {} };
       const below = session("c", "Below", "2026-11-06T07:00:00Z", undefined, "x");
       const { container, rerender } = render(rail([newer, below], undefined, more));
-      expect(container.querySelector("[data-open] .menu")).not.toBeNull();
+      expect(container.querySelector(".rail-heading .menu")).not.toBeNull();
       rerender(rail([older, newer, below], undefined, more));
       expect(slid.filter((s) => s.slide?.includes("q")).map((s) => s.keyframes)).toEqual([[{ top: "-10px" }, { top: "0" }]]);
       // `top` moves only what is positioned.
@@ -438,11 +438,11 @@ describe("what leaves the rail as it rearranges", () => {
   it("fades out a group's heading when pinning its last session empties it", () => {
     const fix = session("a", "Fix", today);
     const old = session("b", "Old", lastMonth);
-    const { container, rerender } = render(byDate([fix, old], { pinning: {} }));
-    rerender(byDate([fix, old], { pinning: { a: { state: "sending" } } }));
+    const { container, rerender } = render(byDate([fix, old], { moving: {} }));
+    rerender(byDate([fix, old], { moving: { a: { state: "sending", change: "pin" } } }));
     expect(runs).toEqual([]);
     // Core has the pin: the tile moves to Pinned, and Today has nothing left.
-    rerender(byDate([{ ...fix, pinned: true }, old], { pinning: {} }));
+    rerender(byDate([{ ...fix, pinned: true }, old], { moving: {} }));
     expect(fadedOut()).toEqual(["Today"]);
     expect(ghosts(container)).toEqual(["Today"]);
     expect(runs.some((r) => r.slide === "session:a" && JSON.stringify(r.keyframes) !== JSON.stringify(out))).toBe(true);
@@ -452,12 +452,12 @@ describe("what leaves the rail as it rearranges", () => {
     const fix = session("a", "Fix", today);
     const gone = session("c", "Gone", today);
     const old = session("b", "Old", lastMonth);
-    const { container, rerender } = render(byDate([fix, gone, old], { pinning: {} }));
-    rerender(byDate([fix, gone, old], { pinning: { a: { state: "sending" } } }));
+    const { container, rerender } = render(byDate([fix, gone, old], { moving: {} }));
+    rerender(byDate([fix, gone, old], { moving: { a: { state: "sending", change: "pin" } } }));
     // Archived while the pin saves: showing active sessions, its tile goes.
-    rerender(byDate([fix, { ...gone, archived: true }, old], { pinning: { a: { state: "sending" } } }));
+    rerender(byDate([fix, { ...gone, archived: true }, old], { moving: { a: { state: "sending", change: "pin" } } }));
     expect(container.querySelector('[data-session-id="c"]')).toBeNull();
-    rerender(byDate([{ ...fix, pinned: true }, { ...gone, archived: true }, old], { pinning: {} }));
+    rerender(byDate([{ ...fix, pinned: true }, { ...gone, archived: true }, old], { moving: {} }));
     // Only what the pin's own commit took away fades: Today's heading, never the archived tile.
     expect(fadedOut()).toEqual(["Today"]);
     expect(ghosts(container).some((text) => text?.includes("Gone"))).toBe(false);

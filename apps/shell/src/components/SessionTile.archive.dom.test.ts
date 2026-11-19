@@ -30,7 +30,6 @@ function tile(archived: boolean, unavailable?: string) {
     createElement(SessionTile, {
       session: session(archived),
       active: false,
-      unseen: false,
       onSelect: () => {},
       rename: { onSave: async () => true, onReset: () => {} },
       archive: { onChoose, unavailable },
