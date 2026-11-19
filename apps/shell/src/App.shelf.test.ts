@@ -220,7 +220,10 @@ describe("an answer after Core drops or a call times out", () => {
     await settle();
     expect(within(shelf).queryByText("Your answer wasn't accepted.")).toBeNull();
     expect(within(shelf).queryByText("Ersa got no answer in time.")).toBeNull();
-    expect(within(shelf).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.").getAttribute("role")).toBe("status");
+    const note = within(shelf).getByText("Ersa can't tell whether your answer reached the agent. Answer again if this request is still waiting.").closest("p");
+    expect(note?.getAttribute("role")).toBe("status");
+    // No failure: it leads with a caution glyph, not a problem's.
+    expect(note?.querySelector('.glyph[data-tone="caution"]')).toBeTruthy();
     expect(within(shelf).getByRole("button", { name: "Allow" })).toHaveProperty("disabled", false);
     expect(within(shelf).getByRole("button", { name: "Deny" })).toHaveProperty("disabled", false);
   });
