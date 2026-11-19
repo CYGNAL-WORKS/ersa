@@ -398,6 +398,14 @@ Available once Ersa reaches your sessions
 
 Delete…
 
+### `rail.tile.copySessionIdButton`
+
+Copy session ID
+
+### `rail.tile.copySessionIdReason`
+
+Available once the session starts
+
 ### `rail.tile.archiveButton`
 
 Archive
@@ -1285,3 +1293,7 @@ This session can be forked once a reply finishes.
 ### `errors.refusal.backendCannotForkError`
 
 This session's backend can't fork sessions. Updating the backend may help.
+
+### `errors.refusal.folderGoneError`
+
+This session's folder no longer exists. Its history is kept.

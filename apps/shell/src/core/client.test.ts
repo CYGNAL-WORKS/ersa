@@ -43,6 +43,7 @@ describe("describeError over a refusal with a reason", () => {
     ["open_unknown", "errors.refusal.openUnknownError"],
     ["no_finished_reply", "errors.refusal.noFinishedReplyError"],
     ["backend_cannot_fork", "errors.refusal.backendCannotForkError"],
+    ["folder_gone", "errors.refusal.folderGoneError"],
   ] as const;
 
   // verifies: PROTO-CORE-API-R80

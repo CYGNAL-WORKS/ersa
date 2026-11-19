@@ -81,6 +81,14 @@ interface TileFork {
   unavailable?: string;
 }
 
+/** Copy session ID on the menu (FLOW-RESUME-SESSION-R07). */
+interface TileCopyId {
+  /** Puts the backend's id for the session on the clipboard. */
+  onChoose: () => void;
+  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** What a session's menu can do. The menu is there only with `rename`. */
 export interface TileActions {
   rename?: TileRename;
@@ -88,6 +96,7 @@ export interface TileActions {
   mark?: TileMark;
   fork?: TileFork;
   move?: TileMove;
+  copyId?: TileCopyId;
   archive?: TileArchive;
   remove?: TileDelete;
 }
@@ -165,11 +174,24 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
         unavailable: offlineReason ?? savingReason ?? sectionsUnavailable(h.sections),
       },
     fork: onFork && { onChoose: () => onFork(s.id), unavailable: forkUnavailable(s, offline, h.forking?.[s.id]) },
+    copyId: copyIdAction(s),
     archive: onArchive && {
       onChoose: (archived) => onArchive(s.id, archived),
       unavailable: archiveUnavailable(s, offline, h.archiving?.[s.id]),
     },
     remove: onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline) },
+  };
+}
+
+// Copy session ID asks Core nothing, so it stays available while Ersa can't reach Core. Before the backend has
+// reported its id for the session, Core lists none, and the item says it comes once the session starts.
+function copyIdAction(s: Session): TileCopyId {
+  const id = s.backend_session_id;
+  if (id === undefined) return { onChoose: () => {}, unavailable: t("rail.tile.copySessionIdReason") };
+  return {
+    // A write the webview refuses leaves the clipboard as it was; the menu has closed either way, so there is nowhere
+    // to say so, and the user can choose it again.
+    onChoose: () => void navigator.clipboard.writeText(id).catch(() => {}),
   };
 }
 
@@ -190,7 +212,7 @@ function markUnavailable(s: Session, h: TileHandlers, offlineReason: string | un
 export function useTileMenu({
   session,
   title,
-  actions: { rename, pin, mark, fork, move, archive, remove },
+  actions: { rename, pin, mark, fork, move, copyId, archive, remove },
   beforeChevron,
   initialMenu,
   initialDraft,
@@ -289,6 +311,9 @@ export function useTileMenu({
             ? [{ kind: "item" as const, label: t("rail.tile.forkButton"), unavailable: fork.unavailable, onChoose: fork.onChoose }]
             : []),
           ...(move ? [moveEntry(move)] : []),
+          ...(copyId
+            ? [{ kind: "item" as const, label: t("rail.tile.copySessionIdButton"), unavailable: copyId.unavailable, onChoose: copyId.onChoose }]
+            : []),
           ...(archive
             ? [
                 {
