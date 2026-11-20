@@ -393,3 +393,40 @@ describe("a system dialog that fails to open", () => {
     expect(statusLine()).toBeNull();
   });
 });
+
+describe("a system dialog that fails to open, then something newer", () => {
+  const failed = "Ersa couldn't open the dialog to add attachments. Try again.";
+  const chooseFiles = async () => {
+    fireEvent.click(attachButton());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Add files…" }));
+    });
+  };
+  const props = (more: object) =>
+    createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", onAttach: vi.fn().mockRejectedValue(new Error("no dialog")), ...more });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("gives way to a refusal that arrives after it, and shows again once that refusal goes", async () => {
+    const { rerender } = render(props({}));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    const refusedChange = "Ersa can't change the model. The session has ended.";
+    rerender(props({ refusedChange }));
+    expect(statusLine()?.textContent).toBe(refusedChange);
+    expect(statusLine()?.getAttribute("role")).toBe("alert");
+    rerender(props({}));
+    expect(statusLine()?.textContent).toBe(failed);
+    // A refused message that arrives later too.
+    rerender(props({ sending: { state: "failed", message: "The session has ended." } }));
+    expect(statusLine()?.textContent).toBe("The session has ended.");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("is said only while the box is available", async () => {
+    const { rerender } = render(props({}));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    rerender(props({ unavailable: "detecting" }));
+    expect(statusLine()?.textContent).toBe("Detecting the backends on this host…");
+  });
+});
