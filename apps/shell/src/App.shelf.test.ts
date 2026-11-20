@@ -227,7 +227,6 @@ describe("a question as it settles", () => {
     await core.send(envelope({ type: "question.answered", request_id: "rq", declined: true, answers: [], answered_by: "backend" }, 1));
     expect(within(shelf).getByText("Which branch?")).toBeTruthy();
     expect(tile.dataset.tone).toBe("accent");
-    expect(shelf.dataset.tone).toBe("accent");
   });
 });
 

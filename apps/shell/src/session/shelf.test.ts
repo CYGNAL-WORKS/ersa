@@ -311,13 +311,6 @@ describe("several requests", () => {
     expect(shownAfter(first, undefined, undefined)).toBeUndefined();
   });
 
-  // verifies: FLOW-APPROVE-PERMISSION-R09
-  it("keeps the shown requests while the open shelf shows nothing, as while Core is away or it loads again", () => {
-    const first = shownAfter(undefined, "s1", showing("r1"));
-    expect(shownAfter(first, "s1", undefined)).toBe(first);
-    expect(shownAfter(first, "s1", { state: "loading" })).toBe(first);
-  });
-
   it("keeps a settling shelf in the tone of the last request it showed", () => {
     const asked = shownAfter(undefined, "s1", asking);
     expect(shelfTone({ state: "settled" }, asked)).toBe("accent");

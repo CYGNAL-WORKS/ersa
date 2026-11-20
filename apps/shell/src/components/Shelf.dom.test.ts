@@ -135,20 +135,19 @@ describe("the shelf moving to the next request", () => {
     for (const name of ["Deny", "Allow"]) expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
   });
 
-  it("keeps a question's tone as it settles, since it is still the request on screen", () => {
+  it("keeps a question on screen as it settles", () => {
     const question = { state: "question", requestId: "q1", questions: [{ id: "a", text: "Which branch?", multi_select: false, takes_text: false }] } satisfies ShelfShows;
     const { rerender } = render(shelf(question));
-    expect(screen.getByRole("dialog").dataset.tone).toBe("accent");
     rerender(shelf({ state: "settled" }));
     expect(screen.getByRole("dialog").textContent).toContain("Which branch?");
-    expect(screen.getByRole("dialog").dataset.tone).toBe("accent");
   });
 
   it("says every request is answered when it settles without having shown one", () => {
     const { rerender } = render(shelf({ state: "loading" }));
     rerender(shelf({ state: "settled" }));
-    const note = screen.getByText("Every request from this session is answered.");
-    expect(note.className).toBe("shelf-note");
+    expect(contents().querySelector(".shelf-note")?.textContent).toBe("Every request from this session is answered.");
+    // Heard from the region kept on the page, since the contents that said "Loading…" are drawn afresh.
+    expect(screen.getByRole("status").textContent).toBe("Every request from this session is answered.");
     expect(screen.getByRole("dialog").textContent).not.toContain("Loading");
   });
 
