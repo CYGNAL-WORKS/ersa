@@ -13,7 +13,7 @@ adrs: [0011, 0017]
 
 The user writes to the agent in the composer, on the new-session screen and on every session, and can add files, images and folders to a message. A message goes as one turn; from the moment it is sent until the turn ends, the composer's send becomes stop, which cancels a message that hasn't reached the agent and otherwise interrupts the turn. While the agent works, Enter still sends: the message waits in the backend, which takes it into the agent's work at its next step or runs it when the turn ends, as in Claude Desktop, and stop leaves it waiting. When a message can't be sent, the composer says why above the box and keeps the message, so nothing the user wrote is lost. When Ersa can't reach the sessions, the composer says so and waits.
 
-An attachment is a file, an image or a folder that goes with a message. The user adds one from the composer's attach menu (files, images, or a folder, each through the system's dialog), by pasting an image, or by dropping files, images and folders on the box. Attachments sit in the box above the words, each with its name and a detail (an image's or file's size, a text file's line count, or that it is a folder), and each can be removed before sending. An image goes to the backend as an image the agent sees. A file or folder goes as its path, which the agent reads itself; one from outside the session's workspace is copied into the session's scratch folder in the workspace first, so the agent reads it where it works (PROTO-CORE-API, Turns and attachments). The transcript shows a sent message's attachments with it.
+An attachment is a file, an image or a folder that goes with a message. The user adds one from the composer's attach menu (files, images, or a folder, each through the system's dialog), by pasting an image, or by dropping files, images and folders on the box. Attachments sit in the box above the words, each with its name and a detail (an image's or file's size, a text file's line count, or that it is a folder), and each can be removed before sending. A dialog that fails to open is not a cancel: the composer says so above its box, so the user knows to try again (R23). An image goes to the backend as an image the agent sees. A file or folder goes as its path, which the agent reads itself; one from outside the session's workspace is copied into the session's scratch folder in the workspace first, so the agent reads it where it works (PROTO-CORE-API, Turns and attachments). The transcript shows a sent message's attachments with it.
 
 `docs/design/COMPOSER.md` says how the composer looks in each state.
 
@@ -40,6 +40,8 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - **FLOW-SEND-MESSAGE-R19**: While a sent message waits in the backend, the status line above the composer's box shall say so, from the session's `waiting` so that it survives a reload. In the window that sent it, one waiting message shall be named by its first words, or by its first attachment when it has none; otherwise, and when several wait, the line shall say how many.
 - **FLOW-SEND-MESSAGE-R21**: After the user chooses stop, Ersa shall take no further choice of stop until the turn it stops has ended, or, when the stop only canceled a message on its way, until that message is canceled.
 - **FLOW-SEND-MESSAGE-R22**: When the user pastes a clipboard that holds both text and an image, Ersa shall attach the image and paste the text.
+- **FLOW-SEND-MESSAGE-R23**: When the system's dialog for adding an attachment fails to open, the composer shall attach nothing and, while its box is available, say above the box that Ersa couldn't open it, in place of what was said there; it shall stop saying so when the user next chooses an item of the attach menu, attaches something, or sends a message.
+- **FLOW-SEND-MESSAGE-R24**: When, after the dialog failed, a send's outcome becomes one Ersa can't tell, a message is refused or a change to the session is refused, the composer shall stop saying that the dialog failed.
 - **FLOW-SEND-MESSAGE-R20**: When the user chooses stop while a message waits, Ersa shall interrupt only the running turn, and the waiting message shall run next.
 
 ## Verification
@@ -48,7 +50,7 @@ The replay server refuses `session.send` and `session.interrupt` (PROTO-CORE-API
 
 ## Built so far
 
-All of it: sending and stop, attachments, the states above the box, and sending while the agent works with what waits said above the box (R01 to R22).
+All of it: sending and stop, attachments, the states above the box, and sending while the agent works with what waits said above the box (R01 to R24).
 
 ## Open questions
 
@@ -61,6 +63,8 @@ All of it: sending and stop, attachments, the states above the box, and sending 
 
 ## Changes
 
+- 2026-11-20: from #378 inbox (merge review): the failed dialog's line shows in place of a line already there because it answers what the user just did; a refusal or an unknown send that arrives after it is the newer news, and behind a fixed order it was hidden and never announced. It ends the dialog's line (FLOW-SEND-MESSAGE-R24), which does not come back when the newer line goes: bringing it back needed a record of which line was newer, and that record was wrong for two lines of different ages and for a refusal said beside its attachment. R23 reworded before it reached `main`, to say it shows in place of what was said there and only while the box is available; R24 added; no requirement retired.
+- 2026-11-20: from #378 inbox: a system dialog that fails to open was taken for a cancel, so the user saw nothing happen. The composer says above its box that Ersa couldn't open it, until the user next chooses an attach item, attaches something, or sends a message (FLOW-SEND-MESSAGE-R23). `COMPOSER.md` (The status line) gives its row and its place: it answers what the user just did, so it shows before an older line that leaves the box at rest (a send Ersa can't tell the outcome of, a refused message or change, a send on its way), which shows again once it goes; it is the composer's own, not kept for the session, and it is announced as an alert. R23 added; no requirement retired.
 - 2026-11-15: from #404 inbox: stop takes no second choice while the turn it stops winds down, since a late one would stop the waiting message's turn (R21); a paste of text and an image keeps both (R22); the waiting message is named by its first line, cut where the status line ends as other one-line text is, since a name cut to a fixed number of words reads as the whole message; Built so far says the flow is built. FLOW-SEND-MESSAGE-R21 and R22 added.
 - 2026-11-14: from #386 inbox: a waiting message can join the running turn at the agent's next step, so R19 says it waits in the backend, not for the turn to end; what it requires, the status line from `waiting`, is unchanged.
 - 2026-11-09: owner's decision from the audit against Claude Desktop: a message written while the agent works is sent and waits in the backend (R04 retired for R18), says so while it waits (R19), and stays waiting through stop (R20). The open question on queueing is closed.
