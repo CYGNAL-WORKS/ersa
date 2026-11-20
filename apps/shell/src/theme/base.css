@@ -29,6 +29,18 @@ body {
   font-variant-ligatures: none;
 }
 
+/* Heard, not shown: a status region out of the layout and out of sight, still read by assistive technology. The
+   rail's foot says "Reconnected" from one, and the shelf what it moved on to. */
+.heard-only {
+  position: absolute;
+  width: var(--line-hairline);
+  height: var(--line-hairline);
+  margin: 0;
+  overflow: hidden;
+  clip-path: circle(0);
+  white-space: nowrap;
+}
+
 /* A problem stated inline: muted text after a danger glyph, never a filled row. */
 .problem {
   display: grid;
