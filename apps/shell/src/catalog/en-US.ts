@@ -417,6 +417,8 @@ export const enUS = {
       folderButton: "Add a folder…",
       pasteNote: "You can also paste attachments, or drop them on the box.",
       imagesFilterLabel: "Images",
+      // The system's file or folder dialog failed to open, said in the status line.
+      dialogFailedError: "Ersa couldn't open the dialog to add attachments. Try again.",
     },
     // An attachment above the words (docs/design/COMPOSER.md, Attachments; FLOW-SEND-MESSAGE-R09, R17).
     attachment: {
@@ -432,6 +434,7 @@ export const enUS = {
       pastedName: "Pasted image",
       pastedTooLargeError: "This image is larger than 10 MB, the most Ersa sends in one message.",
       pastedUnreadableError: "Ersa couldn't read this image.",
+      togetherTooLargeError: "With the images before it, this is more than 10 MB, the most Ersa sends in one message.",
     },
   },
   newSession: {},
