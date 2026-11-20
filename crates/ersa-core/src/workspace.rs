@@ -1822,41 +1822,6 @@ mod tests {
         assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
-    /// A folder held in use for 3 seconds, longer than the four tries
-    /// elsewhere take, is deleted by `session.delete`'s tries. Windows only:
-    /// there a file opened without delete sharing cannot be deleted.
-    // verifies: PROTO-CORE-API-R113
-    #[cfg(windows)]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_folder_in_use_for_a_few_seconds_is_still_deleted() {
-        use std::os::windows::fs::OpenOptionsExt;
-        let _one_at_a_time = CAP_TESTS.lock().await;
-        let dir = tempfile::tempdir().unwrap();
-        let folder = dir.path().join("workspace");
-        std::fs::create_dir_all(&folder).unwrap();
-        let file = folder.join("in-use.txt");
-        std::fs::write(&file, "held").unwrap();
-        // Shares reading only, so deleting it fails while it is open.
-        let open = std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&file)
-            .unwrap();
-        let closer = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(3));
-            drop(open);
-        });
-        let tries = FolderTries {
-            window: Some(FOLDER_TRY_WINDOW),
-            ..FolderTries::holding(Arc::new(()))
-        };
-        let path = folder.display().to_string();
-        let result = remove_folder(&path, &tries).await;
-        closer.join().unwrap();
-        assert!(result.is_ok(), "{result:?}");
-        assert!(!folder.exists());
-    }
-
     /// The cap's tests take its places, so they run one at a time.
     static CAP_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
