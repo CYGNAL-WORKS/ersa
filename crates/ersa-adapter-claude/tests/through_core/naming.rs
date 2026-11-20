@@ -524,7 +524,6 @@ async fn listed_backend_id(client: &mut Client, id: &str) -> Value {
 /// holds it from then, so `session.create`'s and `session.fork`'s answers and
 /// `session.list` carry it before any message, and before the CLI has
 /// reported anything.
-// verifies: FLOW-RESUME-SESSION-R15
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_and_a_fork_list_the_id_core_chose_before_any_message() {
     let stdout = recorded();
