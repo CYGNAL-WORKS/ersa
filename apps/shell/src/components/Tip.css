@@ -1,6 +1,7 @@
 /* A tooltip: a transient layer of small words floating beside what it explains, anchored to it, shown while the
    pointer rests there or keyboard focus is on it. Each use sets its own anchor, its place and when it shows; this is
-   the look and the fade they share (docs/design/DESIGN.md, Layers). */
+   the look and the fade they share: a floating layer's radius-lg and shadow-transient (docs/design/DESIGN.md, Layers
+   and Shapes). */
 .tip {
   position: fixed;
   position-try-fallbacks: flip-block;
@@ -12,7 +13,7 @@
   line-height: var(--type-ui-small-leading);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-transient);
   pointer-events: none;
   opacity: 0;
