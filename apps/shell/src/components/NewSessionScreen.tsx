@@ -342,9 +342,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
           // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
           statusTaken={asking !== undefined || adding?.state === "failed"}
-          // Nothing is sent while the question about a new folder is open, so no session starts on the project chosen
-          // before it; the words stay the user's to edit.
-          held={asking !== undefined}
+          // Nothing is sent while a picked folder is found, asked about or added, so no session starts in the project
+          // chosen before it (FLOW-NEW-SESSION-R42); the words stay the user's to edit. A failed add frees send again.
+          held={asking !== undefined || adding?.state === "sending"}
           quietFocus={asking !== undefined}
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}

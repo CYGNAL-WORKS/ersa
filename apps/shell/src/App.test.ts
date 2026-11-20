@@ -330,6 +330,80 @@ describe("adding a project from the new-session screen", () => {
     expect(trustQuestion()).toBeNull();
   });
 
+  /** A Core answer that waits until the test settles it. */
+  const later = <T,>() => {
+    let settleWith: (value: T | Promise<never>) => void = () => {};
+    const promise = new Promise<T>((resolve) => (settleWith = resolve));
+    return { promise, resolve: (value: T) => settleWith(value), reject: (error: unknown) => settleWith(Promise.reject(error)) };
+  };
+  const starts = {
+    "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+    "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: params.workspace_id }),
+    "session.send": () => ({ turn: 1 }),
+  };
+  const sendButton = () => screen.getByRole("button", { name: "Send" });
+  /** Enter in the message box, as the user sends; whether a session started shows in Core's calls. */
+  const pressEnter = async () => {
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+  };
+
+  // verifies: FLOW-NEW-SESSION-R42
+  it("sends nothing while a picked folder is being found, before the trust question opens", async () => {
+    const find = later<Project | null>();
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), { ...starts, "project.find": () => find.promise });
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    await addFromChip();
+    expect(trustQuestion()).toBeNull();
+    expect(sendButton().getAttribute("aria-disabled")).toBe("true");
+    await pressEnter();
+    expect(methods(core)).not.toContain("workspace.create");
+    find.resolve(null);
+    await settle();
+    expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R42
+  it("sends nothing after Trust while the folder is being added, and sends again once adding fails", async () => {
+    const add = later<Project>();
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), { ...starts, "project.add": () => add.promise });
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    await addFromChip();
+    fireEvent.click(within(screen.getByRole("region", { name: "Trust stranger?" })).getByRole("button", { name: "Trust" }));
+    await settle();
+    expect(trustQuestion()).toBeNull();
+    expect(sendButton().getAttribute("aria-disabled")).toBe("true");
+    await pressEnter();
+    expect(methods(core)).not.toContain("workspace.create");
+    add.reject({ kind: "invalid_params", message: "Ersa couldn't add the folder." });
+    await settle();
+    await settle();
+    expect(sendButton().getAttribute("aria-disabled")).toBeNull();
+    await pressEnter();
+    expect(methods(core)).toContain("workspace.create");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R43
+  it("opens no folder dialog from Add project or Ctrl+O while the trust question is open or the folder is being added", async () => {
+    const shell = fakeShell("D:/clones/stranger", "D:/clones/other");
+    const add = later<Project>();
+    await screenWith([project("alpha")], shell, { "project.add": () => add.promise });
+    await addFromChip();
+    expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Add project…/ }));
+    fireEvent.keyDown(words(), { key: "o", ctrlKey: true });
+    await settle();
+    expect(shell.pickFolder).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(screen.getByRole("region", { name: "Trust stranger?" })).getByRole("button", { name: "Trust" }));
+    await settle();
+    fireEvent.keyDown(words(), { key: "o", ctrlKey: true });
+    await settle();
+    expect(shell.pickFolder).toHaveBeenCalledTimes(1);
+    expect(trustQuestion()).toBeNull();
+  });
+
   // verifies: FLOW-NEW-SESSION-R27
   it("leaves Add project unavailable, without its shortcut, when there is no folder dialog to open", async () => {
     await screenWith([project("alpha")]);
