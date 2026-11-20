@@ -100,7 +100,32 @@ describe("interface source", () => {
     }
     expect(found).toEqual([]);
   });
+
+  // DESIGN.md, Shapes and Layers: a floating layer, known by its shadow-transient, takes radius-lg corners, never a
+  // control's radius-md (#374: the tooltips had radius-md).
+  it("gives every floating layer radius-lg corners", () => {
+    const found: string[] = [];
+    for (const file of sourceFiles(SRC).filter((f) => f.endsWith(".css"))) {
+      for (const rule of floatingLayers(readFileSync(file, "utf8"))) found.push(`${relative(SRC, file)}: ${rule}`);
+    }
+    expect(found).toEqual([]);
+  });
+
+  it("catches a floating layer with a control's corners", () => {
+    expect(floatingLayers(".tip {\n  border-radius: var(--radius-md);\n  box-shadow: var(--shadow-transient);\n}")).toEqual([".tip"]);
+    expect(floatingLayers(".shelf { border-radius: 0 var(--radius-lg) var(--radius-lg); box-shadow: var(--shadow-transient); }")).toEqual([]);
+    expect(floatingLayers(".button { border-radius: var(--radius-md); }")).toEqual([]);
+  });
 });
+
+/** The selectors of the rules in `text` that cast shadow-transient and name a radius other than radius-lg. */
+function floatingLayers(text: string) {
+  // Innermost blocks only, so a rule inside @media is read on its own.
+  return [...text.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(([, , body]) => body!.includes("var(--shadow-transient)"))
+    .filter(([, , body]) => [...body!.matchAll(/var\(--radius-([\w-]+)\)/g)].some((m) => m[1] !== "lg"))
+    .map(([, selector]) => selector!.replace(/\/\*[\s\S]*?\*\//g, "").trim());
+}
 
 describe("the raw-value check", () => {
   it("has no hairline exception", () => {

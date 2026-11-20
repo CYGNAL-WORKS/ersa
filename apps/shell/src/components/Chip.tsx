@@ -2,6 +2,7 @@ import { ChevronDown, type LucideIcon, ShieldAlert } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { ContextRing } from "./ContextRing";
 import { Icon } from "./Icon";
+import { useOpenSide } from "./openSide";
 import "./Chip.css";
 
 export interface ChipOption {
@@ -80,6 +81,7 @@ export function Chip({ name, icon, value, reads, placeholder, problem, pending, 
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  const side = useOpenSide(list, chip, open);
   const root = useRef<HTMLDivElement>(null);
   const listId = useId();
   // The list is anchored to its chip by this name: beneath it where the window has room, else above (Chip.css).
@@ -225,7 +227,7 @@ export function Chip({ name, icon, value, reads, placeholder, problem, pending, 
         )}
       </button>
       {open && (
-        <ul ref={list} id={listId} className="chip-list" data-wide={wide || undefined} style={{ positionAnchor: anchor } as CSSProperties} role="listbox" aria-label={name} onKeyDown={onListKey}>
+        <ul ref={list} id={listId} className="chip-list" data-side={side} data-wide={wide || undefined} style={{ positionAnchor: anchor } as CSSProperties} role="listbox" aria-label={name} onKeyDown={onListKey}>
           {options.map((option) => (
             <li
               key={option.id}

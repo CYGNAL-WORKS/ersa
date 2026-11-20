@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, test } from "@playwright/test";
 
 // Every component section in the gallery, photographed in both themes. Each is
 // photographed on a page showing it alone, so its baseline depends only on it.
@@ -305,6 +305,67 @@ test("an open chip list floats: a shadow and the floating radius, its options ne
     expect(options.length, theme).toBeGreaterThan(0);
     for (const option of options) expect(option, `an option in ${theme}`).toBe(nested);
   }
+});
+
+/**
+ * Opens the layer `opener` controls, with `opener` at the window's `edge`, and gives back the side the layer says it
+ * opened on, its top as its entrance starts and as it ends, the opener's top, and how many animations it runs.
+ */
+async function entrance(opener: Locator, edge: "start" | "end") {
+  return opener.evaluate(async (el, edge) => {
+    el.scrollIntoView({ block: edge });
+    // A specimen may be drawn open: close it first, so the entrance is this opening's.
+    // React draws each click's outcome once its task is done; the entrance is paused at its start below, however far
+    // it has run by then.
+    const drawn = () => new Promise((resolve) => setTimeout(resolve));
+    if (el.getAttribute("aria-expanded") === "true") {
+      (el as HTMLElement).click();
+      await drawn();
+    }
+    (el as HTMLElement).click();
+    await drawn();
+    const layer = document.getElementById(el.getAttribute("aria-controls") ?? "")!;
+    const runs = layer.getAnimations();
+    const top = () => layer.getBoundingClientRect().top;
+    runs.forEach((a) => {
+      a.pause();
+      a.currentTime = 0;
+    });
+    const start = top();
+    runs.forEach((a) => a.finish());
+    return { side: layer.dataset.side, start, end: top(), opener: el.getBoundingClientRect().top, runs: runs.length };
+  }, edge);
+}
+
+// A chip whose list the window may flip: the gallery holds the lists it shows open on one side.
+const FLIPPABLE_CHIP = ".chip:not(:disabled):not(.gallery-room *):not(.gallery-list-above *)";
+
+// COMPOSER.md, A chip's list and The attach menu (#374): a layer the window flips for want of room still slides
+// toward its place away from what opened it, and with reduced motion it shows at once.
+test("a flipped chip list or attach menu unfolds away from what opened it, and at once with reduced motion", async ({ page }) => {
+  // A short window, so the layers flip.
+  await page.setViewportSize({ width: 1280, height: 400 });
+  await page.goto("/gallery.html?component=Composer&theme=light");
+  // Attach at the window's top: no room above, so its menu opens below it and slides down.
+  const below = await entrance(page.locator(".composer-attach:not(:disabled)").first(), "start");
+  expect(below.side).toBe("below");
+  expect(below.end).toBeGreaterThan(below.opener);
+  expect(below.runs).toBeGreaterThan(0);
+  expect(below.start).toBeLessThan(below.end);
+
+  await page.goto("/gallery.html?component=Chip&theme=light");
+  // A chip far enough down the page to sit at the window's foot: no room beneath, so its list opens above it and slides up.
+  const above = await entrance(page.locator(FLIPPABLE_CHIP).last(), "end");
+  expect(above.side).toBe("above");
+  expect(above.end).toBeLessThan(above.opener);
+  expect(above.runs).toBeGreaterThan(0);
+  expect(above.start).toBeGreaterThan(above.end);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/gallery.html?component=Composer&theme=light");
+  expect((await entrance(page.locator(".composer-attach:not(:disabled)").first(), "start")).runs).toBe(0);
+  await page.goto("/gallery.html?component=Chip&theme=light");
+  expect((await entrance(page.locator(FLIPPABLE_CHIP).last(), "end")).runs).toBe(0);
 });
 
 // A heading's actions from the keyboard (LAY-SHELL, A heading's actions): they show once focus enters the heading,
