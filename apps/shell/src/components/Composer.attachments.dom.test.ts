@@ -437,6 +437,11 @@ describe("a system dialog that fails to open, then something newer", () => {
     expect(statusLine()?.textContent).toBe(failed);
     rerender(props({}));
     expect(statusLine()?.textContent).toBe(failed);
+    // The same refusal again, as after retrying the same change: it is newer, and shows.
+    rerender(props({ refusedChange }));
+    expect(statusLine()?.textContent).toBe(refusedChange);
+    rerender(props({}));
+    expect(statusLine()?.textContent).toBe(failed);
   });
 
   // verifies: FLOW-SEND-MESSAGE-R23
