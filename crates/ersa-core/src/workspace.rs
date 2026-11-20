@@ -37,6 +37,16 @@ const GIT_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOVE_ATTEMPTS: u32 = 4;
 const REMOVE_FIRST_BACKOFF: Duration = Duration::from_millis(250);
 
+/// How long `session.delete` goes on trying a workspace's folder: no try
+/// begins later than this after the first (PROTO-CORE-API-R113). A process
+/// that has just exited, or one reading the session's files, can hold them
+/// for several seconds after the session stops.
+pub const FOLDER_TRY_WINDOW: Duration = Duration::from_secs(30);
+
+/// The longest wait between two of those tries; the waits start at
+/// [`REMOVE_FIRST_BACKOFF`] and double up to this.
+const FOLDER_TRY_LONGEST_WAIT: Duration = Duration::from_secs(2);
+
 /// Why a VCS operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum VcsError {
@@ -1157,6 +1167,39 @@ where
     }
 }
 
+/// As [`retried`], but tries go on until `window` after the first try
+/// began, rather than a fixed number of times (PROTO-CORE-API-R113). The
+/// waits start at [`REMOVE_FIRST_BACKOFF`] and double up to
+/// [`FOLDER_TRY_LONGEST_WAIT`]; a wait that would end past the window is cut
+/// short, so the last try begins at the window's end, never after it.
+async fn retried_within<Try>(
+    window: Duration,
+    mut once: impl FnMut() -> Try,
+    failed: impl FnOnce(String) -> VcsError,
+) -> Result<(), VcsError>
+where
+    Try: std::future::Future<Output = Result<Result<(), String>, VcsError>>,
+{
+    let last_start = tokio::time::Instant::now() + window;
+    let mut backoff = REMOVE_FIRST_BACKOFF;
+    let mut attempt = 1;
+    loop {
+        // `Err` (a try that reached its time limit among them) ends at once.
+        let why = match once().await? {
+            Ok(()) => return Ok(()),
+            Err(why) => why,
+        };
+        let now = tokio::time::Instant::now();
+        if now >= last_start {
+            return Err(failed(why));
+        }
+        tracing::debug!(attempt, %why, "removal failed; retrying");
+        tokio::time::sleep_until((now + backoff).min(last_start)).await;
+        backoff = (backoff * 2).min(FOLDER_TRY_LONGEST_WAIT);
+        attempt += 1;
+    }
+}
+
 /// Deletes an isolated workspace's files for the user's Delete
 /// (PROTO-CORE-API-R35): the git worktree at `path` of the repository at
 /// `repo`, forced, since the user was shown what it held, and then its
@@ -1171,7 +1214,11 @@ where
 /// branch already gone is not kept.
 ///
 /// `tries` says how each try at a folder git no longer lists runs
-/// ([`remove_folder`]).
+/// ([`remove_folder`]). With [`FolderTries::window`] set (`session.delete`),
+/// a git removal that fails after git dropped its record of the worktree
+/// goes on to delete the folder in this same call (PROTO-CORE-API-R112).
+/// Every failure of git's removal is logged as a warning
+/// (PROTO-CORE-API-R114); the caller's span names the session.
 pub async fn git_worktree_delete(
     transport: &dyn Transport,
     repo: &str,
@@ -1179,14 +1226,31 @@ pub async fn git_worktree_delete(
     branch: &str,
     tries: FolderTries,
 ) -> Result<bool, VcsError> {
-    match git_worktree_remove(transport, repo, path, true, false).await {
-        Ok(()) => {}
-        Err(VcsError::NotListed { .. }) => {
-            remove_folder(path, &tries).await?;
-            let pruned = git(transport, repo, &["worktree", "prune"]).await?;
-            check(pruned, "git worktree prune failed")?;
+    let as_folder = match git_worktree_remove(transport, repo, path, true, false).await {
+        Ok(()) => false,
+        Err(VcsError::NotListed { .. }) => true,
+        Err(e) => {
+            tracing::warn!(path, reason = %describe(&e), "git's removal of the worktree failed");
+            // On Windows git can fail on a file in use after deleting its
+            // record of the worktree, leaving the files: its own tries then
+            // fail on a worktree it no longer lists. Only a removal that ran
+            // and failed counts; one that timed out was called off (R91).
+            let gone_from_git = tries.window.is_some()
+                && matches!(e, VcsError::Failed { .. })
+                && matches!(
+                    git_worktree_list(transport, repo).await,
+                    Ok(listed) if find(&listed, path).await.is_none()
+                );
+            if !gone_from_git {
+                return Err(e);
+            }
+            true
         }
-        Err(e) => return Err(e),
+    };
+    if as_folder {
+        remove_folder(path, &tries).await?;
+        let pruned = git(transport, repo, &["worktree", "prune"]).await?;
+        check(pruned, "git worktree prune failed")?;
     }
     if branch.is_empty() {
         return Ok(false);
@@ -1271,6 +1335,12 @@ pub struct FolderTries {
     /// Where each try stops, on its thread before it touches the folder,
     /// until a test lets it go ([`crate::CoreConfig::folder_gate`]).
     pub gate: Option<Arc<Gate>>,
+    /// `session.delete`'s step 5 sets this to how long tries at the folder
+    /// go on ([`FOLDER_TRY_WINDOW`], PROTO-CORE-API-R113), and then a failed
+    /// git removal of a worktree git no longer lists goes on to the folder
+    /// (PROTO-CORE-API-R112). `None` elsewhere (fork cleanup): the folder
+    /// gets [`REMOVE_ATTEMPTS`] tries, and git's failure ends the call.
+    pub window: Option<Duration>,
 }
 
 impl FolderTries {
@@ -1280,6 +1350,7 @@ impl FolderTries {
             held,
             limit: GIT_TIMEOUT,
             gate: None,
+            window: None,
         }
     }
 }
@@ -1297,35 +1368,46 @@ async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> 
     let _called_off_on_return = CallOffOnDrop(call_off.clone());
     let call_off = &call_off;
     let runtime = &tokio::runtime::Handle::current();
-    retried(
-        || async move {
-            let folder = std::path::PathBuf::from(path);
-            let call_off = call_off.clone();
-            let (held, gate) = (Arc::clone(&tries.held), tries.gate.clone());
-            let runtime = runtime.clone();
-            let deadline = Deadline::after(tries.limit);
-            blocking(deadline, "deleting the workspace's folder", move |at| {
-                let _held = held;
-                // In tests, the folder that does not answer.
-                if let Some(gate) = gate {
-                    runtime.block_on(gate.stop());
-                }
-                let stop = || call_off.is_called_off() || std::time::Instant::now() >= at;
-                match remove_tree(&folder, &stop) {
-                    Ok(Removal::Removed) => Ok(Ok(())),
-                    Ok(Removal::CalledOff) => Err(Halt::Expired),
-                    // Busy files are worth another try.
-                    Err(e) => Ok(Err(e.to_string())),
-                }
-            })
-            .await
-        },
-        |stderr| VcsError::Failed {
-            message: format!("the workspace's folder {path} could not be deleted"),
-            stderr,
-        },
-    )
-    .await
+    let once = || async move {
+        let folder = std::path::PathBuf::from(path);
+        let call_off = call_off.clone();
+        let (held, gate) = (Arc::clone(&tries.held), tries.gate.clone());
+        let runtime = runtime.clone();
+        let deadline = Deadline::after(tries.limit);
+        blocking(deadline, "deleting the workspace's folder", move |at| {
+            let _held = held;
+            // In tests, the folder that does not answer.
+            if let Some(gate) = gate {
+                runtime.block_on(gate.stop());
+            }
+            let stop = || call_off.is_called_off() || std::time::Instant::now() >= at;
+            match remove_tree(&folder, &stop) {
+                Ok(Removal::Removed) => Ok(Ok(())),
+                Ok(Removal::CalledOff) => Err(Halt::Expired),
+                // Busy files are worth another try.
+                Err(e) => Ok(Err(e.to_string())),
+            }
+        })
+        .await
+    };
+    let failed = |stderr| VcsError::Failed {
+        message: format!("the workspace's folder {path} could not be deleted"),
+        stderr,
+    };
+    match tries.window {
+        Some(window) => retried_within(window, once, failed).await,
+        None => retried(once, failed).await,
+    }
+}
+
+/// `e` with git's own words, for the diagnostic log.
+fn describe(e: &VcsError) -> String {
+    match e {
+        VcsError::Failed { message, stderr } if !stderr.is_empty() => {
+            format!("{message}: {}", stderr.trim())
+        }
+        _ => e.to_string(),
+    }
 }
 
 /// Whether the worktree at `path` has anything `git worktree remove` would
@@ -1669,6 +1751,112 @@ mod tests {
         assert_eq!(content_digest(&file, std::time::Instant::now()), None);
     }
 
+    /// When each of `retried_within`'s tries began, measured from the first,
+    /// and the error it ended with, for a folder whose every try fails.
+    async fn tries_that_keep_failing(window: Duration) -> (Vec<Duration>, VcsError) {
+        let first = tokio::time::Instant::now();
+        let starts = std::sync::Mutex::new(Vec::new());
+        let result = retried_within(
+            window,
+            || {
+                let count = {
+                    let mut starts = starts.lock().unwrap();
+                    starts.push(first.elapsed());
+                    starts.len()
+                };
+                async move { Ok(Err(format!("in use, try {count}"))) }
+            },
+            |stderr| VcsError::Failed {
+                message: "could not be deleted".into(),
+                stderr,
+            },
+        )
+        .await;
+        (starts.into_inner().unwrap(), result.unwrap_err())
+    }
+
+    /// A folder that stays in use is tried again for 30 seconds from the
+    /// first try, none beginning later, and the delete fails with the last
+    /// try's reason. The clock is paused, so the test does not wait.
+    // verifies: PROTO-CORE-API-R113
+    #[tokio::test(start_paused = true)]
+    async fn tries_at_a_folder_go_on_for_30_seconds_and_no_longer() {
+        let (starts, error) = tries_that_keep_failing(FOLDER_TRY_WINDOW).await;
+        let last = *starts.last().unwrap();
+        assert_eq!(last, Duration::from_secs(30), "{starts:?}");
+        // Waits between them, each at most 2 seconds.
+        for pair in starts.windows(2) {
+            let wait = pair[1] - pair[0];
+            assert!(
+                wait > Duration::ZERO && wait <= Duration::from_secs(2),
+                "{starts:?}"
+            );
+        }
+        let VcsError::Failed { stderr, .. } = error else {
+            panic!("{error:?}");
+        };
+        assert_eq!(stderr, format!("in use, try {}", starts.len()));
+    }
+
+    /// A try that ends in an error rather than a reason to try again, as a
+    /// try that reached its time limit does, is not tried again.
+    // verifies: PROTO-CORE-API-R113
+    #[tokio::test(start_paused = true)]
+    async fn a_try_at_a_folder_that_reached_its_limit_is_not_tried_again() {
+        let tries = std::sync::atomic::AtomicU32::new(0);
+        let result = retried_within(
+            FOLDER_TRY_WINDOW,
+            || {
+                tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async {
+                    Err(VcsError::Failed {
+                        message: "deleting the workspace's folder did not finish".into(),
+                        stderr: String::new(),
+                    })
+                }
+            },
+            |_| unreachable!("the error is the try's own"),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    /// A folder held in use for 3 seconds, longer than the four tries
+    /// elsewhere take, is deleted by `session.delete`'s tries. Windows only:
+    /// there a file opened without delete sharing cannot be deleted.
+    // verifies: PROTO-CORE-API-R113
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_folder_in_use_for_a_few_seconds_is_still_deleted() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let _one_at_a_time = CAP_TESTS.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("workspace");
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("in-use.txt");
+        std::fs::write(&file, "held").unwrap();
+        // Shares reading only, so deleting it fails while it is open.
+        let open = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&file)
+            .unwrap();
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(3));
+            drop(open);
+        });
+        let tries = FolderTries {
+            window: Some(FOLDER_TRY_WINDOW),
+            ..FolderTries::holding(Arc::new(()))
+        };
+        let path = folder.display().to_string();
+        let result = remove_folder(&path, &tries).await;
+        closer.join().unwrap();
+        assert!(result.is_ok(), "{result:?}");
+        assert!(!folder.exists());
+    }
+
     /// The cap's tests take its places, so they run one at a time.
     static CAP_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -1738,6 +1926,7 @@ mod tests {
             held: Arc::clone(&held) as _,
             limit: Duration::from_millis(50),
             gate: Some(Arc::clone(&gate)),
+            window: None,
         };
         let path = folder.display().to_string();
         let result = remove_folder(&path, &tries).await;
