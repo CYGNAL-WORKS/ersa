@@ -3,6 +3,8 @@
 // the replay of a recorded session (2.1.316/07-attachments): a message with an image, a file and a folder, then one of
 // a file alone.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -131,5 +133,23 @@ describe("a message's attachments in the transcript", () => {
     expect(place.style.getPropertyValue("--image-width")).toBe("640px");
     expect(place.style.getPropertyValue("--image-ratio")).toBe("640 / 480");
     expect(Number(place.style.getPropertyValue("--image-aspect"))).toBeCloseTo(640 / 480);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("sets no place from a header stating an absurd size, so the image takes its own size as drawn", () => {
+    // A PNG header stating 1 by 4294967295: a sliver of a place if believed.
+    const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0xff, 0xff, 0xff, 0xff, 8, 6, 0, 0, 0];
+    draw(message([{ kind: "image", media_type: "image/png", data: btoa(String.fromCharCode(...header)) }]));
+    const place = document.querySelector(".attachment-image") as HTMLElement;
+    expect(place.hasAttribute("data-sized")).toBe(false);
+    expect(place.style.getPropertyValue("--image-width")).toBe("");
+    expect(screen.getByRole("img", { name: "Attached image" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("fits a picture whose pixels disagree with its header inside the place, never stretched", () => {
+    const css = readFileSync(join(import.meta.dirname, "Transcript.css"), "utf8");
+    const rule = css.slice(css.indexOf(".attachment-image[data-sized] img {"));
+    expect(rule.slice(0, rule.indexOf("}"))).toMatch(/object-fit: contain;/);
   });
 });

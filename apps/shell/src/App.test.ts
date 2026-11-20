@@ -1710,6 +1710,33 @@ describe("the attachments App gives the composer", () => {
     expect(methods(core)).not.toContain("session.send");
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R07
+  it("says a file or folder dialog that fails to open is not a cancel, logs why, and clears it on the next attach", async () => {
+    const shell = fakeShell();
+    const broken = new Error("dialog plugin: permission denied");
+    shell.pickFiles.mockRejectedValueOnce(broken).mockResolvedValueOnce([]);
+    shell.pickFolder.mockRejectedValueOnce(broken);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "attachment.inspect": inspect });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    const line = () => document.querySelector(".composer-status-line");
+    await choose("Add files…");
+    expect(shown()).toEqual([]);
+    expect(line()?.getAttribute("role")).toBe("alert");
+    expect(line()?.textContent).toBe("Ersa couldn't open the dialog to add attachments. Try again.");
+    expect(line()?.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
+    expect(logged).toHaveBeenCalledWith(broken);
+    // A dialog that opens and is canceled clears it.
+    await choose("Add files…");
+    expect(line()).toBeNull();
+    await choose("Add a folder…");
+    expect(line()?.textContent).toBe("Ersa couldn't open the dialog to add attachments. Try again.");
+    expect(methods(core)).not.toContain("attachment.inspect");
+    logged.mockRestore();
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R10
   // verifies: PROTO-CORE-API-R44
   it("shows a folder Core refuses, as one holding the workspace, as that attachment's refusal and nothing else", async () => {
