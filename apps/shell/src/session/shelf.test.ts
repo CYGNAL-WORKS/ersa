@@ -4,7 +4,7 @@ import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { Session } from "../protocol/core-api.gen";
 import type { SessionView } from "./follow";
 import { follow } from "./follow";
-import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./shelf";
+import { type ShelfShown, type ShelfShows, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./shelf";
 import { sharedSubscriptions } from "./subscriptions";
 import { EVENT_VERSION, apply, emptyTranscript } from "./transcript";
 
@@ -230,7 +230,7 @@ describe("several requests", () => {
     let shown: ShelfShown | undefined;
     return steps.map(([events, waiting]) => {
       const shows = shelfOf(viewOf(events), pending(...waiting), shown?.requests);
-      shown = shownAfter(shown, "s1", shownRequest(shows));
+      shown = shownAfter(shown, "s1", shows);
       return [shownRequest(shows), "place" in shows ? shows.place : undefined];
     });
   }
@@ -299,13 +299,31 @@ describe("several requests", () => {
     expect(shelfOf(viewOf([r1, r2, decided("r1"), decided("r2")]), pending(...both))).toEqual({ state: "settled" });
   });
 
+  const showing = (id: string): ShelfShows => ({ state: "permission", request: permission(id) as Extract<Event, { type: "permission.requested" }> });
+  const asking: ShelfShows = { state: "question", requestId: "rq", questions: [] };
+
   it("keeps the shown requests while the same shelf is open, and starts afresh for another or after closing", () => {
-    const first = shownAfter(undefined, "s1", "r1");
+    const first = shownAfter(undefined, "s1", showing("r1"));
     expect(first?.requests).toEqual(new Set(["r1"]));
-    expect(shownAfter(first, "s1", "r1")).toBe(first);
-    expect(shownAfter(first, "s1", "r2")?.requests).toEqual(new Set(["r1", "r2"]));
-    expect(shownAfter(first, "s2", "r9")).toEqual({ id: "s2", requests: new Set(["r9"]) });
+    expect(shownAfter(first, "s1", showing("r1"))).toBe(first);
+    expect(shownAfter(first, "s1", showing("r2"))?.requests).toEqual(new Set(["r1", "r2"]));
+    expect(shownAfter(first, "s2", showing("r9"))).toEqual({ id: "s2", requests: new Set(["r9"]), tone: "caution" });
     expect(shownAfter(first, undefined, undefined)).toBeUndefined();
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R09
+  it("keeps the shown requests while the open shelf shows nothing, as while Core is away or it loads again", () => {
+    const first = shownAfter(undefined, "s1", showing("r1"));
+    expect(shownAfter(first, "s1", undefined)).toBe(first);
+    expect(shownAfter(first, "s1", { state: "loading" })).toBe(first);
+  });
+
+  it("keeps a settling shelf in the tone of the last request it showed", () => {
+    const asked = shownAfter(undefined, "s1", asking);
+    expect(shelfTone({ state: "settled" }, asked)).toBe("accent");
+    // One it couldn't show is the last on screen too.
+    expect(shelfTone({ state: "settled" }, shownAfter(asked, "s1", { state: "unknown" }))).toBe("caution");
+    expect(shelfTone({ state: "settled" }, shownAfter(undefined, "s1", { state: "loading" }))).toBe("caution");
   });
 });
 

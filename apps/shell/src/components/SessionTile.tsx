@@ -277,7 +277,6 @@ export function TileItem({
     const target = event.target as Element;
     if (!inShelf(target) && !target.classList.contains("session-chevron-button")) return;
     event.preventDefault();
-    focusInShelf.current = true;
     onClose();
   };
   const layer = shown ?? closing;

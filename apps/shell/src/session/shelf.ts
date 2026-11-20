@@ -65,8 +65,14 @@ export type ShelfShows =
   | { state: "permission"; request: PermissionRequested; place?: Place }
   | { state: "question"; requestId: string; questions: QuestionAsked["questions"]; place?: Place };
 
-/** The tone of the shelf and of its tile while open (`docs/design/RAIL.md`, The shelf). */
-export function shelfTone(shows: ShelfShows): "accent" | "caution" {
+export type ShelfTone = "accent" | "caution";
+
+/**
+ * The tone of the shelf and of its tile while open: the shown request's (`docs/design/RAIL.md`, The shelf). Settled,
+ * the shelf still shows the last request it showed, so it keeps that one's tone, which `shown` records.
+ */
+export function shelfTone(shows: ShelfShows, shown?: ShelfShown): ShelfTone {
+  if (shows.state === "settled") return shown?.tone ?? "caution";
   return shows.state === "question" ? "accent" : "caution";
 }
 
@@ -126,21 +132,28 @@ export function shownRequest(shows: ShelfShows): string | undefined {
   return undefined;
 }
 
-/** The requests a session's shelf has shown since it opened, which count toward its place (R09). */
+/** What a session's shelf has shown since it opened. */
 export interface ShelfShown {
   id: string;
+  /** The requests it has shown, which count toward its place (R09). */
   requests: ReadonlySet<string>;
+  /** The tone of the last request it showed, or of one it couldn't show, which it keeps as it settles. */
+  tone?: ShelfTone;
 }
 
 /**
- * The shown requests after the open shelf (`id`) shows `request`: a new shelf starts afresh, and a closed one keeps
- * nothing. Returns `shown` itself when nothing changes.
+ * What the open shelf (`id`) has shown once it shows `shows`: a new shelf starts afresh, and a closed one keeps
+ * nothing. Nothing shown, as while loading or while Core is away, keeps the record. Returns `shown` itself when
+ * nothing changes.
  */
-export function shownAfter(shown: ShelfShown | undefined, id: string | undefined, request: string | undefined): ShelfShown | undefined {
+export function shownAfter(shown: ShelfShown | undefined, id: string | undefined, shows: ShelfShows | undefined): ShelfShown | undefined {
   if (id === undefined) return undefined;
-  const requests = shown?.id === id ? shown.requests : new Set<string>();
-  if (request === undefined || requests.has(request)) return shown?.id === id ? shown : { id, requests };
-  return { id, requests: new Set([...requests, request]) };
+  const last: ShelfShown = shown?.id === id ? shown : { id, requests: new Set() };
+  const request = shows && shownRequest(shows);
+  const shownNow = shows && (request !== undefined || shows.state === "unknown");
+  const tone = shownNow ? shelfTone(shows) : last.tone;
+  if ((request === undefined || last.requests.has(request)) && tone === last.tone) return last;
+  return { id, requests: request === undefined ? last.requests : new Set([...last.requests, request]), tone };
 }
 
 /** The events held start after a gap: Core let go of the session's earliest events. */

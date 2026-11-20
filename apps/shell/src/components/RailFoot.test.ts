@@ -11,7 +11,7 @@ const draw = (view: Parameters<typeof RailFoot>[0]["view"]) => renderToStaticMar
 describe("what the rail's foot tells assistive technology", () => {
   it("keeps an empty status region while all is well, so a problem arriving in it is announced", () => {
     const html = draw({ phase: "connecting" });
-    expect(html).toMatch(/^<div class="rail-foot-unseen" role="status"><\/div>$/);
+    expect(html).toMatch(/^<div class="heard-only" role="status"><\/div>$/);
   });
 
   it("puts the trying-again line and its reason in that status region", () => {
@@ -23,6 +23,6 @@ describe("what the rail's foot tells assistive technology", () => {
     const html = draw({ phase: "failed", message: "The connection closed." });
     expect(html).toMatch(/<div class="rail-foot" role="alert"><p class="problem">Ersa can&#x27;t reach your sessions\.<\/p>.*<button[^>]*>Retry<\/button><\/div>$/);
     // The status region stays, empty.
-    expect(html).toMatch(/^<div class="rail-foot-unseen" role="status"><\/div>/);
+    expect(html).toMatch(/^<div class="heard-only" role="status"><\/div>/);
   });
 });
