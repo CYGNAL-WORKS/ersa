@@ -622,6 +622,7 @@ fn notification_examples() -> Vec<Notification> {
                 last_activity_at: Some("2026-10-31T12:05:00.250Z".into()),
                 title: Some("Rename the module".into()),
                 created_at: "2026-10-31T12:00:00.000Z".into(),
+                backend_session_id: Some("0b5e7c2d-4f1a-4c8e-9d36-a2f0e1b7c943".into()),
             },
         )
         .expect("serialize"),
