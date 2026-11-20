@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-20 FLOW-SEND-MESSAGE-R23 (#378 merge review): COMPOSER.md's status line puts a failed dialog before an unknown send, a refused message and a refused change as a fixed order, but the reason given is that it shows before an older line, and a refusal that arrives after the dialog failed is newer. As written, that later refusal would be hidden and never announced. Built meanwhile: the dialog line shows before the lines already there when it failed; one that arrives later shows instead, and the dialog line shows again once that one goes, until R23's clearing actions.
 
 
 ## Resolved recently (optional, trimmed in planning passes)

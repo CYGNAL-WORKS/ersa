@@ -152,8 +152,15 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
   };
 
   // The system's dialog failed to open (FLOW-SEND-MESSAGE-R23): said in the status line, not taken for a cancel,
-  // until the user next attaches something or sends.
-  const [dialogFailed, setDialogFailed] = useState(false);
+  // until the user next chooses an attach item, attaches something or sends. It shows before the lines that were
+  // already there when it failed, so it holds which those were; a line that comes after it, as a refusal that arrives
+  // later, is newer and shows instead, and the dialog's line shows again once that one goes.
+  const older = JSON.stringify([sending ?? null, refusedChange ?? null]);
+  const olderNow = useRef(older);
+  olderNow.current = older;
+  const [failedOver, setFailedOver] = useState<string>();
+  const setDialogFailed = (failed: boolean) => setFailedOver(failed ? olderNow.current : undefined);
+  const dialogFailed = failedOver === older;
   const add = (more: readonly Attached[]) => {
     if (more.length === 0) return;
     setDialogFailed(false);
