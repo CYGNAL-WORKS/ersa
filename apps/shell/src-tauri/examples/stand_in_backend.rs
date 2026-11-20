@@ -93,7 +93,9 @@ fn write_record() {
     else {
         return;
     };
-    let dir = std::path::Path::new(&home).join("projects").join("stand-in");
+    let dir = std::path::Path::new(&home)
+        .join("projects")
+        .join("stand-in");
     let file = dir.join(format!("{id}.jsonl"));
     if file.exists() {
         return;
@@ -107,8 +109,13 @@ fn write_record() {
         "sessionId": id,
     });
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(file, format!("{line}
-"));
+    let _ = std::fs::write(
+        file,
+        format!(
+            "{line}
+"
+        ),
+    );
 }
 
 /// Writes a `rate_limit_event` line with two usage windows, made up, whose
