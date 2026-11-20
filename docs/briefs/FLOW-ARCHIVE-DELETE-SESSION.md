@@ -31,7 +31,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 ## Variations and errors
 
 - **Resume is refused**, as when the session's folder is gone (FLOW-RESUME-SESSION-R03): the session stays archived and Ersa says why; Unarchive still returns it to its group.
-- **Deleting fails** (the folder is in use, the branch can't be deleted): the session stays in the rail, stopped, its tile saying the deletion failed (`LAY-SHELL`), and Ersa says what failed and offers **Try again**, which asks the question again with what is left, then repeats the deletion from where it stopped. While a step Core gave up on has not ended, Try again is refused and Ersa says something else is changing the session or its folder (PROTO-CORE-API-R107).
+- **Deleting fails** (the folder is still in use after Core has tried it for 30 seconds (PROTO-CORE-API-R113), the branch can't be deleted): the session stays in the rail, stopped, its tile saying the deletion failed (`LAY-SHELL`), and Ersa says what failed and offers **Try again**, which asks the question again with what is left, then repeats the deletion from where it stopped. While a step Core gave up on has not ended, Try again is refused and Ersa says something else is changing the session or its folder (PROTO-CORE-API-R107).
 - **The workspace changed after the question.** On confirm Ersa stops the session, then checks that what would be lost is what the question described; when anything changed, even with the same counts, Ersa asks again, and the session stays stopped.
 - **Ersa stops part way through a delete** (a crash, a restart): when it starts again, a delete the user had confirmed shows as failed and offers Try again; one stopped before the confirmation was checked deleted and marked nothing.
 - **The session can't be stopped**: Ersa says so and deletes nothing.
@@ -62,6 +62,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-20: from #521 inbox: a folder in use fails the delete only after Core has tried it for 30 seconds (PROTO-CORE-API-R113). No requirement IDs changed.
 - 2026-11-19: from #369 inbox: Try again is refused while a step the failed deletion gave up on has not ended (PROTO-CORE-API-R107). No requirement IDs changed.
 - 2026-11-15: from #328 inbox: a session started in the backend's own tools counts as another session using a workspace, so deleting a session there leaves the files. Meaning of R05 unchanged; no requirement IDs changed.
 - 2026-11-14: owner's decision: the delete question names no backend, as Claude Desktop's names no CLI; "deleted for good" already says it is gone from the backend's own tools. No requirement IDs changed.
