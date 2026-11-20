@@ -163,7 +163,7 @@ export const enUS = {
       forkingProgress: "Forking…",
       // Beneath the tile, before Core's reason, when Core refuses or the fork can't be made.
       forkError: "Ersa can't fork this session.",
-      // Why an item that goes through Core, such as Rename, Pin, Archive or Delete, is unavailable.
+      // Why an item that goes through Core, such as Rename, Pin, Archive or Delete, is unavailable; New session too.
       offlineReason: "Available once Ersa reaches your sessions",
       // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
       deleteButton: "Delete…",
