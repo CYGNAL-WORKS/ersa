@@ -80,16 +80,17 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
 });
 
 // The trust question in windows of every height (#218 merge review). Where the room above the box holds its title,
-// folder, answers and the explanation's first line, it is capped to that room and the box stays put; where it does
-// not, it takes its place in the column, the box moves down and a column taller than the window scrolls. Either way
-// the title, folder and answers show together, inside the card and clear of the box, with some of the explanation.
-// The sizes are measured: at 1400x700 the question fits whole above the box, at 1100x540 the cap binds, at 1100x470
-// the room holds all but the explanation's first line, and the rest are short enough for the column.
+// folder, answers and the explanation's first paragraph (the safety check), it is capped to that room and the box
+// stays put; where it does not, it takes its place in the column, the box moves down and a column taller than the
+// window scrolls. Either way the title, folder and answers show together, inside the card and clear of the box, with
+// some of the explanation. The sizes are measured: down to 1100x470 the room above the one-line box holds the
+// question, and the rest are short enough for the column.
 
 /** Opens the trust question for a new folder from the project chip, as a pointer would; the first test covers Ctrl+O. */
-async function askAbout(ersa: { page: Page; dir: string; answerDialog: (path: string) => Promise<unknown> }) {
-  const stranger = path.join(ersa.dir, "stranger");
-  mkdirSync(stranger);
+async function askAbout(ersa: { page: Page; dir: string; answerDialog: (path: string) => Promise<unknown> }, ...within: string[]) {
+  // The folder is named stranger, under any folders `within` names.
+  const stranger = path.join(ersa.dir, ...within, "stranger");
+  mkdirSync(stranger, { recursive: true });
   const screen = ersa.page.getByRole("region", { name: "New session" });
   await screen.getByRole("button", { name: "Project: Choose a folder" }).click();
   const answered = ersa.answerDialog(stranger);
@@ -138,7 +139,7 @@ async function showsWhole(page: Page, question: Locator, stranger: string, box: 
 for (const [width, height, stays] of [
   [1400, 700, true],
   [1100, 540, true],
-  [1100, 470, false],
+  [1100, 470, true],
   [700, 520, false],
   [660, 440, false],
   [640, 400, false],
@@ -179,4 +180,53 @@ test("the trust question fits again as the window shrinks, keeping where a tight
     const cancel = (await question.getByRole("button", { name: "Cancel" }).boundingBox())!;
     expect(cancel.y + cancel.height).toBeLessThanOrEqual(390);
   }).toPass({ timeout: 5_000 });
+});
+
+// A long folder in the smallest window (#375): the question takes its place in the column and is capped to the
+// screen's height, the folder giving up lines and scrolling inside itself rather than pushing the answers out of the
+// card or the folder out of view. The cap is measured from where the card rests, not from where its entrance starts
+// it, so the card reaches the foot of the screen. Narrowed after it opened, the window wraps the folder onto more
+// lines, and the question fits again though the window's height is the same.
+
+/** Long, and still short of Windows' 260-character limit on a path. */
+const deep = ["a-folder-whose-name-runs-on-and-on-0123456789", "another-folder-whose-name-runs-on-and-on-0123456789"];
+
+/** The question is capped in the column, and the card reaches the screen's foot. */
+async function cappedToFoot(question: Locator) {
+  const fit = await question.evaluate((card) => {
+    const screen = card.closest<HTMLElement>(".new-session")!;
+    const foot = screen.getBoundingClientRect().top + screen.clientHeight - parseFloat(getComputedStyle(screen).paddingBottom);
+    const path = card.querySelector<HTMLElement>(".trust-question-path")!;
+    return { tight: screen.dataset.tight !== undefined, folderScrolls: path.scrollHeight > path.clientHeight, bottom: card.getBoundingClientRect().bottom, foot };
+  });
+  expect(fit.tight, "the question takes its place in the column").toBe(true);
+  expect(fit.folderScrolls, "the folder gives up lines").toBe(true);
+  expect(Math.abs(fit.bottom - fit.foot), "the card reaches the foot of the screen").toBeLessThanOrEqual(0.5);
+}
+
+test("the trust question about a long folder fits the smallest window", async ({ ersa }) => {
+  const { page } = ersa;
+  await page.setViewportSize({ width: 640, height: 400 });
+  const { stranger, question, box } = await askAbout(ersa, ...deep);
+  await showsWhole(page, question, stranger, box);
+  await cappedToFoot(question);
+  await ersa.shot("trust-question-long-folder-640x400");
+});
+
+test("the trust question about a long folder fits again when the window is narrowed", async ({ ersa }) => {
+  const { page } = ersa;
+  // Over the room above the box, then narrower only, so the screen's height stays the same.
+  await page.setViewportSize({ width: 1100, height: 540 });
+  const { stranger, question, box } = await askAbout(ersa, ...deep);
+  await showsWhole(page, question, stranger, box);
+  // Narrowed a step at a time, so some steps wrap the folder while nothing else on the screen changes height.
+  for (let width = 1080; width >= 640; width -= 20) {
+    await page.setViewportSize({ width, height: 540 });
+    await expect(async () => {
+      await showsWhole(page, question, stranger, box);
+      // With the window's height to spare, the folder shows whole rather than scrolling under a stale cap.
+      const folder = await question.locator(".trust-question-path").evaluate((path) => ({ shown: path.clientHeight, whole: path.scrollHeight }));
+      expect(folder.shown, `the folder shows whole at ${width}x540`).toBeGreaterThanOrEqual(folder.whole);
+    }).toPass({ timeout: 2_000 });
+  }
 });
