@@ -1035,3 +1035,71 @@ async fn many_inspects_of_one_workspace_at_once_each_judge_where_the_path_lies()
         assert_eq!(ask.await.unwrap(), json!(false));
     }
 }
+
+/// A backend that takes no images is named as such, by path and pasted, and
+/// never as an image larger than "0 bytes at most".
+// verifies: PROTO-CORE-API-R23
+#[tokio::test]
+async fn an_image_for_a_backend_that_takes_none_says_so() {
+    let mut adapter = FakeAdapter::new(1);
+    adapter.image_limits = ersa_adapter::ImageLimits::default();
+    let mut s = setup(adapter).await;
+    let id = s.session().await;
+    let png = file(&s.outside, "shot.png", PNG);
+    for (index, attachments) in [
+        json!([{ "kind": "image", "path": path(&png) }]),
+        json!([
+            { "kind": "file", "path": path(&png) },
+            { "kind": "image", "media_type": "image/png", "data": BASE64.encode(PNG) },
+        ]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let response = s.send(&id, "", attachments).await;
+        let reason = refused_at(&response, index as u64);
+        assert!(
+            reason.contains("this session's backend doesn't take images"),
+            "{reason}"
+        );
+        assert!(!reason.contains("bytes"), "{reason}");
+    }
+    assert!(s.messages().is_empty());
+    assert!(copies(&s.scratch(&id)).is_empty());
+}
+
+/// A repository that ships its own `.ersa/.gitignore`, one that ignores
+/// nothing, still has every copy ignored, and its file is left as it is.
+// verifies: PROTO-CORE-API-R22
+#[tokio::test]
+async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    file(&s.workspace, ".ersa/.gitignore", b"");
+    support::git(&s.workspace, &["add", ".ersa/.gitignore"]);
+    support::git(&s.workspace, &["commit", "--quiet", "-m", "ship .ersa"]);
+    let id = s.session().await;
+    let notes = file(&s.outside, "notes.md", b"# notes\n");
+    file(&s.outside, "dir/a.txt", b"a");
+    let response = s
+        .send(
+            &id,
+            "",
+            json!([
+                { "kind": "file", "path": path(&notes) },
+                { "kind": "folder", "path": path(&s.outside.join("dir")) },
+            ]),
+        )
+        .await;
+    assert!(response.get("result").is_some(), "{response:#}");
+    assert_eq!(copies(&s.scratch(&id)), vec!["1", "2"]);
+    // What `git add -A` would add: nothing under `.ersa/`.
+    let status = support::git(
+        &s.workspace,
+        &["status", "--porcelain", "--untracked-files=all"],
+    );
+    assert!(!status.contains(".ersa"), "{status}");
+    assert_eq!(
+        std::fs::read(s.workspace.join(".ersa").join(".gitignore")).unwrap(),
+        b""
+    );
+}
