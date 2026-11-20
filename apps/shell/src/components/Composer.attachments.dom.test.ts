@@ -394,7 +394,7 @@ describe("a system dialog that fails to open", () => {
   });
 });
 
-describe("a system dialog that fails to open, then something newer", () => {
+describe("a system dialog that fails to open, then a newer line", () => {
   const failed = "Ersa couldn't open the dialog to add attachments. Try again.";
   const chooseFiles = async () => {
     fireEvent.click(attachButton());
@@ -405,41 +405,70 @@ describe("a system dialog that fails to open, then something newer", () => {
   const props = (more: object) =>
     createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", onAttach: vi.fn().mockRejectedValue(new Error("no dialog")), ...more });
 
-  // verifies: FLOW-SEND-MESSAGE-R23
-  it("gives way to a refusal that arrives after it, and shows again once that refusal goes", async () => {
-    const { rerender } = render(props({}));
+  const refusedChange = "Ersa can't change the model. The session has ended.";
+  const unknown = "Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.";
+
+  // verifies: FLOW-SEND-MESSAGE-R24
+  it("ends when a refused change, a refused message or a send Ersa can't tell arrives after it, and does not come back", async () => {
+    const arrivals: [object, string][] = [
+      [{ refusedChange }, refusedChange],
+      [{ sending: { state: "failed", message: "The session has ended." } }, "The session has ended."],
+      [{ sending: { state: "unknown" } }, unknown],
+    ];
+    for (const [arrives, says] of arrivals) {
+      const { rerender, unmount } = render(props({}));
+      await chooseFiles();
+      expect(statusLine()?.textContent).toBe(failed);
+      rerender(props(arrives));
+      expect(statusLine()?.textContent).toBe(says);
+      // Once it goes, nothing is said: the dialog's line is over.
+      rerender(props({}));
+      expect(statusLine()).toBeNull();
+      unmount();
+    }
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R24
+  it("ends for a newer refused change behind an older refused message, which the status line's order then shows", async () => {
+    const older = { sending: { state: "failed", message: "The session has ended." } };
+    const { rerender } = render(props(older));
     await chooseFiles();
     expect(statusLine()?.textContent).toBe(failed);
-    const refusedChange = "Ersa can't change the model. The session has ended.";
-    rerender(props({ refusedChange }));
-    expect(statusLine()?.textContent).toBe(refusedChange);
-    expect(statusLine()?.getAttribute("role")).toBe("alert");
-    rerender(props({}));
-    expect(statusLine()?.textContent).toBe(failed);
-    // A refused message that arrives later too.
-    rerender(props({ sending: { state: "failed", message: "The session has ended." } }));
+    rerender(props({ ...older, refusedChange }));
     expect(statusLine()?.textContent).toBe("The session has ended.");
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R24
+  it("ends for a message refused for an attachment still there, said beside it, leaving the status line empty", async () => {
+    const problem = "This image is larger than this session's backend takes.";
+    const shotRefused: Attached = { ...shot, problem };
+    const { rerender } = render(props({ initialAttachments: [shotRefused] }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    rerender(props({ initialAttachments: [shotRefused], sending: { state: "failed", message: problem, index: 0 } }));
+    expect(statusLine()).toBeNull();
+    expect(shown()).toEqual([`shot.png${problem}`]);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R24
+  it("ends for a refusal that goes and comes back with the same words, as after retrying the same change", async () => {
+    const { rerender } = render(props({ refusedChange }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    // The older refusal going leaves the dialog's line.
+    rerender(props({}));
+    expect(statusLine()?.textContent).toBe(failed);
+    rerender(props({ refusedChange }));
+    expect(statusLine()?.textContent).toBe(refusedChange);
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R23
-  it("stays through a send's progress, its end, and an older refusal going, none of which clears it", async () => {
+  it("stays through a send's progress and its end, none of which clears it", async () => {
     const { rerender } = render(props({ sending: { state: "sending", progress: { phase: "copying", share: 0.25 } } }));
     await chooseFiles();
     expect(statusLine()?.textContent).toBe(failed);
     rerender(props({ sending: { state: "sending", progress: { phase: "copying", share: 0.5 } } }));
     expect(statusLine()?.textContent).toBe(failed);
-    rerender(props({}));
-    expect(statusLine()?.textContent).toBe(failed);
-    // An older refusal, shown when the dialog failed, that then goes.
-    const refusedChange = "Ersa can't change the model. The session has ended.";
-    rerender(props({ refusedChange }));
-    await chooseFiles();
-    expect(statusLine()?.textContent).toBe(failed);
-    rerender(props({}));
-    expect(statusLine()?.textContent).toBe(failed);
-    // The same refusal again, as after retrying the same change: it is newer, and shows.
-    rerender(props({ refusedChange }));
-    expect(statusLine()?.textContent).toBe(refusedChange);
     rerender(props({}));
     expect(statusLine()?.textContent).toBe(failed);
   });

@@ -1,5 +1,5 @@
 import { ArrowUp, Square, X } from "lucide-react";
-import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { ShellControl } from "../core/shell";
 import { type Attached, addAll, overInline, pastedImage, same, willCopy } from "../session/attachments";
@@ -153,27 +153,17 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     setLeaving((now) => new Set(now).add(gone));
   };
 
-  // The system's dialog failed to open (FLOW-SEND-MESSAGE-R23): said in the status line, not taken for a cancel,
-  // until the user next chooses an attach item, attaches something or sends. It shows before the refusals already
-  // shown when it failed. A refusal that arrives after it is newer and shows instead; once it goes, the dialog's line
-  // shows again. Anything else, as a send's progress, an older refusal going, or a send ending, leaves it as it was.
-  const refusals = [sending?.state === "failed" || sending?.state === "unknown" ? JSON.stringify(sending) : undefined, refusedChange];
-  const [failed, setFailed] = useState(false);
-  // For each kind of refusal, whether the one shown arrived after the dialog failed. Marked as each render sees a
-  // refusal appear or change, so one that goes and comes back with the same words is newer too; kept in refs, since
-  // a render that sees the same refusals again changes nothing.
-  const lastRefusals = useRef(refusals);
-  const newer = useRef([false, false]);
-  refusals.forEach((now, at) => {
-    if (now !== undefined && now !== lastRefusals.current[at]) newer.current[at] = true;
-  });
-  lastRefusals.current = refusals;
-  const setDialogFailed = (on: boolean) => {
-    // The refusals shown as it fails are older than it.
-    if (on) newer.current = [false, false];
-    setFailed(on);
-  };
-  const dialogFailed = failed && refusals.every((now, at) => now === undefined || !newer.current[at]);
+  // The system's dialog failed to open (FLOW-SEND-MESSAGE-R23): said in the status line in place of what was said
+  // there, not taken for a cancel, until the user next chooses an attach item, attaches something or sends.
+  const [dialogFailed, setDialogFailed] = useState(false);
+  // A send whose outcome Ersa can't tell, a refused message or a refused change that arrives after it ends it, and it
+  // does not come back when that one goes (R24). Keyed by what each says, so one that goes and returns with the same
+  // words arrives again; a send's progress or its ending well changes neither key. Before paint, so the dialog's line
+  // never shows over the newer one.
+  const sendRefusal = sending?.state === "failed" || sending?.state === "unknown" ? JSON.stringify(sending) : undefined;
+  useLayoutEffect(() => {
+    if (sendRefusal !== undefined || refusedChange !== undefined) setDialogFailed(false);
+  }, [sendRefusal, refusedChange]);
   const add = (more: readonly Attached[]) => {
     if (more.length === 0) return;
     setDialogFailed(false);
@@ -413,8 +403,8 @@ function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked,
     // The rail's foot says the same and is the one that announces it.
     return <p className="composer-status-line">{t(unavailable === "reconnecting" ? "rail.foot.reconnectingError" : "rail.foot.unreachableError")}</p>;
   }
-  // A dialog the user just tried to open answers what they did, so it comes before older lines, which show again once
-  // it goes (R23); only while the box is available, since attach is unavailable otherwise.
+  // A dialog the user just tried to open answers what they did, so it shows in place of a line already there, which
+  // shows again once it goes (R23); only while the box is available. A newer refusal ends it in the composer (R24).
   if (dialogFailed && unavailable === undefined) {
     return (
       <p className="composer-status-line" role="alert">
