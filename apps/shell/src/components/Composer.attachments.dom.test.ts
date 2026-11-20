@@ -314,3 +314,82 @@ describe("a drop over a layer above the box", () => {
     layer.remove();
   });
 });
+
+describe("a system dialog that fails to open", () => {
+  const failed = "Ersa couldn't open the dialog to add attachments. Try again.";
+  // Rejects the first time it is asked, then gives `then` each time after.
+  const failingOnce = (then: Attached[]) => vi.fn<(what: AttachWhat) => Promise<Attached[]>>().mockRejectedValueOnce(new Error("no dialog")).mockResolvedValue(then);
+  const chooseFiles = async () => {
+    fireEvent.click(attachButton());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("menuitem", { name: "Add files…" }));
+    });
+  };
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("is said before an older line, which shows again once the next attach choice clears it", async () => {
+    const refusedChange = "Ersa can't change the model. The session has ended.";
+    render(createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", refusedChange, onAttach: failingOnce([]) }));
+    expect(statusLine()?.textContent).toBe(refusedChange);
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    expect(statusLine()?.getAttribute("role")).toBe("alert");
+    expect(shown()).toEqual([]);
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(refusedChange);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("is said before a refused message, which shows again once the next attach choice clears it", async () => {
+    const sending: Sending = { state: "failed", message: "The session has ended." };
+    render(draw({ sending, initialText: "Look", onAttach: failingOnce([]) }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe("The session has ended.");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("stops being said once a pick attaches something", async () => {
+    const onAttach = failingOnce([notes]);
+    render(draw({ onAttach }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    await chooseFiles();
+    expect(shown()).toEqual(["notes.md212 lines"]);
+    expect(statusLine()).toBeNull();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("stops being said once an image is pasted or a file is dropped", async () => {
+    let emit: (event: DragDrop) => void = () => {};
+    const dragDrop = (handler: (event: DragDrop) => void) => ((emit = handler), () => {});
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 100, right: 400, bottom: 200 } as DOMRect);
+    render(createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", onAttach: vi.fn().mockRejectedValue(new Error("no dialog")), onRead: async () => [notes], dragDrop }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    const png = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+    fireEvent.paste(words(), { clipboardData: { files: [png], getData: () => "" } });
+    await act(async () => {});
+    expect(statusLine()).toBeNull();
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    act(() => emit({ type: "over", x: 50, y: 150 }));
+    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/work/repo/notes.md"] }));
+    expect(shown()).toEqual(["Pasted image3 bytes", "notes.md212 lines"]);
+    expect(statusLine()).toBeNull();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
+  it("stops being said once a message is sent", async () => {
+    const onSend = vi.fn(async () => true);
+    render(draw({ onSend, initialText: "Look", onAttach: vi.fn().mockRejectedValue(new Error("no dialog")) }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    await act(async () => {
+      fireEvent.click(send());
+    });
+    expect(onSend).toHaveBeenCalled();
+    expect(statusLine()).toBeNull();
+  });
+});
