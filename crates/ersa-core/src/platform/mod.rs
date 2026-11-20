@@ -15,7 +15,8 @@
 //!   key under which two spellings of the same folder compare equal.
 //! - [`names_device`]: whether a path names a pipe or a device by its
 //!   name alone (only Windows has such names), for refusing one before
-//!   anything opens it.
+//!   anything opens it; [`open_without_waiting`] opens a file to read
+//!   without waiting on a FIFO that took its place.
 //! - [`ProcessTree`]: a child process and everything it starts, killed as one
 //!   unit (a job object on Windows, a process group elsewhere) and started
 //!   without a console window; [`resolve_program`] finds the file to start,
@@ -37,12 +38,12 @@ mod windows;
 #[cfg(unix)]
 pub use self::unix::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
-    labelled_endpoint, names_device, path_key, resolve_program,
+    labelled_endpoint, names_device, open_without_waiting, path_key, resolve_program,
 };
 #[cfg(windows)]
 pub use self::windows::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
-    labelled_endpoint, names_device, path_key, resolve_program,
+    labelled_endpoint, names_device, open_without_waiting, path_key, resolve_program,
 };
 
 /// The key a project's folder is stored and compared under: its canonical
