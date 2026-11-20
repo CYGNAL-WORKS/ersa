@@ -227,7 +227,7 @@ describe("Delete on a tile", () => {
         return { id: params.id, workspace_deleted: true, branch_kept: false };
       },
       "session.set_archived": (params: { id: string; archived: boolean }) => change(params.id, { archived: params.archived }),
-      "session.set_pinned": (params: { id: string; pinned: boolean }) => change(params.id, { pinned: params.pinned }),
+      "session.arrange": (params: { id: string; pinned: boolean }) => change(params.id, { pinned: params.pinned }),
     });
     fireEvent.click(within(rail()).getByRole("button", { name: /^beta/ }));
     const menuButton = within(rail()).getByRole("button", { name: "More for Fix the build" });
@@ -242,6 +242,7 @@ describe("Delete on a tile", () => {
     }
     await settle();
     await settle();
+    if (how === "pinned") expect(tile(to)?.closest(".rail-pinned")).toBeTruthy();
     // Within that tile: the tile itself, or the More its menu gave focus back to.
     expect(tile(to)?.closest("[data-session-id]")?.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(document.body);
