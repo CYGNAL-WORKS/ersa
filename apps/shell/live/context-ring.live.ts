@@ -116,9 +116,15 @@ test.describe("with Claude Code", () => {
     const stop = composer.getByRole("button", { name: "Stop", exact: true });
     await expect(stop).toBeVisible({ timeout: 120_000 });
 
-    // The session controls' ring reads a share while the turn still works.
-    const ring = page.getByRole("group", { name: "Session controls" }).getByRole("img", { name: /^Context: (less than 1|\d+) percent used$/ });
+    // The tile's ring reads the context alone (LAY-SHELL, Context), so it reads a share while the turn still works.
+    const share = /^Context: (less than 1|\d+) percent used$/;
+    const ring = rail.getByRole("img", { name: share });
     await expect(ring).toBeVisible({ timeout: 60_000 });
+    await expect(stop).toBeVisible();
+    // The session controls' ring reads the nearest limit, which on a real plan is often a usage window rather than a
+    // new session's small context; its list leads with the context's reading whichever it names.
+    await page.getByRole("group", { name: "Session controls" }).getByRole("img").hover();
+    await expect(page.getByRole("tooltip")).toHaveText(/^Context: (less than 1|\d+) percent used/);
     await expect(stop).toBeVisible();
     await ersa.shot("reading-while-working");
 

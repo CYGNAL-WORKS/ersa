@@ -1020,6 +1020,7 @@ const entries: Entry[] = [
       ["Pressed", <RailTop onNewSession={() => {}} arrange={arrange} force="pressed" />],
       ["Keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} force="focus" />],
       ["Before Ersa connects", <RailTop onNewSession={() => {}} arrange={arrange} disabled />],
+      ["Before Ersa connects, keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} disabled force="focus" />],
       ["Arrange menu, open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
       [
         "Arrange menu, Group by open",

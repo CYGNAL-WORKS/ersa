@@ -11,7 +11,7 @@ import { Icon, IconButton } from "./Icon";
 import { Problem, Refusals } from "./RailTree";
 import { type Backends, type ForcedTile, Mark } from "./SessionTile";
 import { SessionRoot, type TileActions, type TileHandlers, tileActions, useTileMenu } from "./TileMenu";
-import { useLeavingFocus } from "./useLeavingFocus";
+import { useFocusRestore } from "./useFocusRestore";
 import "./SessionsPage.css";
 
 const TABS = [
@@ -84,7 +84,7 @@ export function SessionsPage({
 
   const page = useRef<HTMLElement>(null);
   // New session is unavailable while Ersa can't reach Core, when every row goes at once: the chosen tab takes focus then.
-  const leaving = useLeavingFocus(page, (root) => root.querySelector<HTMLElement>(".sessions-page-new:not(:disabled)") ?? root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'));
+  const leaving = useFocusRestore(page, (root) => root.querySelector<HTMLElement>(".sessions-page-new:not(:disabled)") ?? root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'));
 
   // The field takes focus as the user opens it, and the search button as Escape closes it. Moved after the render
   // that swaps one for the other.
@@ -115,7 +115,7 @@ export function SessionsPage({
 
   const rows = sessions.state === "ready" ? pageRows(sessions.sessions, tab, search ?? "") : [];
   return (
-    <section ref={page} className="sessions-page" {...leaving}>
+    <section ref={page} className="sessions-page" {...leaving.handlers}>
       <div className="sessions-page-column">
         <h1 className="sessions-page-heading">{t("rail.sessionsPage.sessionsHeading")}</h1>
         <div className="sessions-page-bar">
