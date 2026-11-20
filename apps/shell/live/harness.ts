@@ -168,6 +168,9 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
         if (backend === "stand-in") {
           coreEnv.ERSA_CLAUDE = bin.standIn;
           coreEnv.ERSA_STAND_IN_ANSWER = "1";
+          // Session records go to the test's own folder, never the owner's: the stand-in writes one with a session's
+          // first message, as the CLI does, and Core reads them from there.
+          coreEnv.CLAUDE_CONFIG_DIR = path.join(dir, "claude");
         } else {
           // Core prefers ERSA_CLAUDE to the `claude` on PATH; one inherited from the caller is not the real CLI.
           delete coreEnv.ERSA_CLAUDE;
