@@ -77,8 +77,10 @@
   border-color: var(--color-line);
 }
 
-/* Unavailable for a moment but still focused: keyboard focus keeps the ink edge, so the user can see where it is. */
-.button[data-variant="primary"][aria-disabled="true"]:focus-visible,
-.button[data-variant="primary"][aria-disabled="true"][data-force="focus"] {
+/* Unavailable for a moment but still focused, either variant: keyboard focus shows as an ink edge, so the user can
+   see where it is, never the accent, which would say it can be acted on. */
+.button[aria-disabled="true"]:focus-visible,
+.button[aria-disabled="true"][data-force="focus"] {
+  color: var(--color-ink-faint);
   border-color: var(--color-ink);
 }
