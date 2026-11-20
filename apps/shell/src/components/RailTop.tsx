@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Plus } from "lucide-react";
 import { t } from "../catalog";
 import { type ArrangeActions, ArrangeButton } from "./ArrangeMenu";
@@ -27,17 +28,32 @@ export function RailTop({
   };
   /** Opens the new-session screen, with no project chosen for it. */
   onNewSession: () => void;
-  /** Ersa has not connected to Core yet. */
+  /** Ersa has not connected to Core yet, or has lost it: New session keeps focus and says why it can't be used. */
   disabled?: boolean;
   /** For the gallery: a pointer or keyboard state without one. */
   force?: "hover" | "focus" | "pressed";
 }) {
+  const reason = useId();
   return (
     <div className="rail-top">
-      <Button className="rail-new-session" onClick={onNewSession} disabled={disabled} force={force}>
+      {/* Unavailable but never disabled, which would drop keyboard focus: it keeps focus and says why, as an item
+          does, while the foot says what is wrong (LAY-SHELL, The foot). */}
+      <Button
+        className="rail-new-session"
+        onClick={() => !disabled && onNewSession()}
+        aria-disabled={disabled || undefined}
+        aria-describedby={disabled ? reason : undefined}
+        force={force}
+      >
         <Icon icon={Plus} />
         {t("rail.top.newSessionButton")}
       </Button>
+      {/* Read as its description, not shown: the foot shows what is wrong. */}
+      {disabled && (
+        <span id={reason} hidden>
+          {t("rail.tile.offlineReason")}
+        </span>
+      )}
       {/* Unavailable, as New session is, until Ersa has connected (LAY-SHELL, The foot). */}
       <ArrangeButton {...arrange} disabled={disabled || arrange.reading} />
     </div>
