@@ -125,6 +125,7 @@ describe("the shelf moving to the next request", () => {
     }
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R34
   it("keeps the last request on screen, its answers unavailable, once it is settled, rather than say it is loading", () => {
     const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests") }));
     rerender(shelf({ state: "settled" }));
@@ -142,6 +143,7 @@ describe("the shelf moving to the next request", () => {
     expect(screen.getByRole("dialog").textContent).toContain("Which branch?");
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R35
   it("says every request is answered when it settles without having shown one", () => {
     const { rerender } = render(shelf({ state: "loading" }));
     rerender(shelf({ state: "settled" }));
