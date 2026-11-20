@@ -1,7 +1,7 @@
 import { type FocusEvent, type RefObject, useLayoutEffect, useRef } from "react";
 
 /** Whether a tile is folded away in a collapsed group, where it takes no focus. */
-export function foldedAway(tile: Element): boolean {
+function foldedAway(tile: Element): boolean {
   return tile.closest(".rail-group-tiles[inert]") !== null;
 }
 
