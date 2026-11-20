@@ -496,15 +496,17 @@ fn copy_all(
 }
 
 /// Makes sure `.ersa/attachments/<session id>/.partial/` are real folders
-/// inside the workspace, never links, that `.ersa/` is ignored by version
-/// control, and that `.partial/` is empty. Returns the session's folder.
+/// inside the workspace, never links, that `.ersa/attachments/` is ignored
+/// by version control (and `.ersa/` too, unless the repository ships its own
+/// `.ersa/.gitignore`), and that `.partial/` is empty. Returns the session's
+/// folder.
 fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<PathBuf, Fail> {
     let ersa = workspace.join(ERSA);
     real_folder(&ersa)?;
     work.step()?;
     // A repository may ship its own `.ersa/.gitignore`, which may ignore
     // less than everything: it is the user's, so it is only made when absent.
-    ignore_everything(&ersa.join(".gitignore"))?;
+    ignore_everything(&ersa.join(".gitignore"), false)?;
     work.step()?;
     let mut folder = ersa;
     for part in [ATTACHMENTS, session_id, PARTIAL] {
@@ -513,8 +515,9 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
         if part == ATTACHMENTS {
             // Core's own ignore file, in Core's own folder, keeps every copy
             // ignored whatever `.ersa/.gitignore` says: git applies a deeper
-            // `.gitignore` over a shallower one.
-            ignore_everything(&folder.join(".gitignore"))?;
+            // `.gitignore` over a shallower one. Being Core's, it is read and
+            // made again when it says anything else.
+            ignore_everything(&folder.join(".gitignore"), true)?;
         }
         work.step()?;
     }
@@ -535,28 +538,42 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
 const IGNORE_ALL: &[u8] = b"*\n";
 
 /// Makes a `.gitignore` at `path` that ignores everything beside it, when
-/// none is there. One already there is left as it is, never rewritten (it
-/// may be a file the repository tracks); one that is not a plain file (a
-/// link, a folder) is refused.
-fn ignore_everything(path: &Path) -> Result<(), Fail> {
+/// none is there; one that is not a plain file (a link, a folder) is
+/// refused. One already there is left as it is, unless Core `owns` it: then
+/// one that says anything else is made again.
+fn ignore_everything(path: &Path, owns: bool) -> Result<(), Fail> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_file() => Ok(()),
-        Ok(_) => Err(Fail::Reason(format!(
-            "{} is not a plain file in the workspace",
-            path.display()
-        ))),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            // `create_new`: never writes through something that appeared
-            // meanwhile.
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)?
-                .write_all(IGNORE_ALL)?;
-            Ok(())
+        Ok(meta) if !meta.file_type().is_file() => {
+            return Err(Fail::Reason(format!(
+                "{} is not a plain file in the workspace",
+                path.display()
+            )));
         }
-        Err(e) => Err(e.into()),
+        Ok(_) if !owns => return Ok(()),
+        Ok(_) => {
+            // Read through `open_file`, so a FIFO swapped in meanwhile never
+            // holds the job.
+            let mut held = Vec::new();
+            open_file(path)?
+                .take(IGNORE_ALL.len() as u64 + 1)
+                .read_to_end(&mut held)?;
+            if held == IGNORE_ALL {
+                return Ok(());
+            }
+            // Removed rather than written over, so nothing put in its place
+            // meanwhile is ever written through.
+            fs::remove_file(path)?;
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
     }
+    // `create_new`: never writes through something that appeared meanwhile.
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?
+        .write_all(IGNORE_ALL)?;
+    Ok(())
 }
 
 /// Opens the file at `path` to read, checked again by what was opened: it
