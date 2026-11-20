@@ -208,6 +208,24 @@ describe("the shelf across a reconnect", () => {
   });
 });
 
+describe("a shelf that has shown no request", () => {
+  it("keeps the tone its tile has with the shelf closed while it loads", async () => {
+    const core = fakeCore([{ kind: "question", request_id: "rq" }]);
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    const chevron = screen.getByRole("button", { name: /^Request from / });
+    expect(chevron.dataset.tone).toBe("accent");
+    // Loading: Core has not answered the subscribe yet, so no request is shown.
+    fireEvent.click(chevron);
+    const shelf = screen.getByRole("dialog", { name: /^Request from / });
+    expect(within(shelf).getByText("Loading…")).toBeTruthy();
+    expect((shelf.closest(".session-item") as HTMLElement).dataset.tone).toBe("accent");
+    expect(chevron.dataset.tone).toBe("accent");
+  });
+});
+
 describe("a question as it settles", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R34
   it("keeps the question's tone on the open tile while the question stays on screen", async () => {
