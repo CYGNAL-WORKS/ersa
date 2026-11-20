@@ -624,13 +624,13 @@ Question
 
 {n} of {m}: {note}
 
-### `rail.shelf.pathLabel`
-
-Path:
-
 ### `rail.shelf.loadingProgress`
 
 Loading…
+
+### `rail.shelf.answeredNote`
+
+Every request from this session is answered.
 
 ### `rail.shelf.readError`
 

@@ -25,7 +25,7 @@ import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } f
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
-import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
+import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
 import { type Attached, attached, sendable, unreadable, waitingName } from "./session/attachments";
@@ -843,14 +843,16 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       shelfShown?.id === shelfSession.id ? shelfShown.requests : undefined,
     );
   // Derived as the shelf renders, so the count is right on the render that shows the next request.
-  const nextShown = shownAfter(shelfShown, shelfSession?.id, shelfShows && shownRequest(shelfShows));
+  // Kept by the shelf the window holds open, not the one drawn: while Core is away nothing is drawn, and the same
+  // shelf counts on from where it was once Core lists its sessions again (R09).
+  const nextShown = shownAfter(shelfShown, shelfId, shelfShows);
   if (nextShown !== shelfShown) setShelfShown(nextShown);
   const shelfOpen = (() => {
     if (!shelfSession || !shelfShows) return undefined;
     const tile = tileOf(shelfSession, backends);
     return {
       id: shelfSession.id,
-      tone: shelfTone(shelfShows),
+      tone: shelfTone(shelfShows, nextShown, shelfSession.tile.pending),
       render: (domId: string) => (
         <Shelf
           id={domId}

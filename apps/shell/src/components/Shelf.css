@@ -33,7 +33,9 @@
   --shelf-join-height: 0;
 }
 
-.shelf[data-tone="accent"] {
+/* In its open tile's tone, so the tile and the shelf are one shape with one tone (docs/design/RAIL.md, The shelf).
+   The tile adds no weight, so keyboard focus's edge below still wins. */
+:where(.session-item[data-tone="accent"]) .shelf {
   --shelf-edge: var(--color-accent);
 }
 
@@ -118,17 +120,6 @@
   to {
     opacity: 0;
   }
-}
-
-/* Heard, not shown: what the shelf moved on to. Kept out of the layout, and out of the gap between its parts. */
-.shelf-said {
-  position: absolute;
-  width: var(--line-hairline);
-  height: var(--line-hairline);
-  margin: 0;
-  overflow: hidden;
-  clip-path: circle(0);
-  white-space: nowrap;
 }
 
 .shelf-heading {
