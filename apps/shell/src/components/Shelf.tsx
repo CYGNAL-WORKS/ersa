@@ -3,7 +3,7 @@ import { t } from "../catalog";
 import type { Answer, Decision, Reply } from "../session/answers";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { Draft } from "../session/questionForm";
-import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
+import { type ShelfShows, shownRequest } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
@@ -12,7 +12,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { QuestionForm } from "./QuestionForm";
 import { Revealed } from "./Revealed";
-import { PermissionInput } from "./Transcript";
+import { BlockedPath, PermissionInput } from "./Transcript";
 import "./Shelf.css";
 
 interface ShelfProps {
@@ -61,6 +61,9 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
     if (request && last.shown && placeOf(request) > placeOf(last.shown)) {
       // What was on screen fades out over the new contents, unless reduced motion is on.
       setNext({ key, said: nextSaid(request), from: reducedMotion() || !last.onScreen ? undefined : last.shown });
+    } else if (shows.state === "settled" && !last.shown) {
+      // Settled before it showed a request: what it now says is heard from the region kept on the page.
+      setNext({ said: t("rail.shelf.answeredNote") });
     } else {
       // Not moving on: nothing fades, and what was last said stays said.
       setNext((n) => n && { said: n.said });
@@ -69,8 +72,9 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
   const moved = next?.key === key;
   const leaving = moved ? next.from : undefined;
   // Settled: the last request, its answers unavailable, until the shelf closes; never a "Loading…" nothing is doing.
+  // Settled before it showed one, it says every request is answered.
   const settled = shows.state === "settled";
-  const display = settled ? last.shown : shows;
+  const display = settled ? (last.shown ?? shows) : shows;
   useMovingOn(root, key, moved);
   const contents = (shown: ShelfShows, done = false) => (
     // A request it can't draw is said here, in the shelf, and leaves the rail as it was.
@@ -93,14 +97,14 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
   return (
     // Focusable, though not in the tab order, so focus can move to the shelf itself: as it opens (R05), as an answer
     // makes the answers unavailable, and as it moves on (R10).
-    <div ref={root} id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
+    <div ref={root} id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })}>
       {/* Kept on the page from the start, so what it says once the shelf moves on is heard. */}
-      <p className="shelf-said" role="status">
+      <p className="heard-only" role="status">
         {next?.said}
       </p>
       {/* Keyed by the request, so the next one's contents fade in afresh. */}
       <div key={key} className="shelf-contents" data-next={moved || undefined}>
-        {display && contents(display, settled)}
+        {contents(display, settled)}
       </div>
       {/* The last request's contents, fading out over the new ones; out of reach and unheard meanwhile. */}
       {leaving && (
@@ -140,7 +144,7 @@ function Contents({
 }) {
   switch (shows.state) {
     case "settled":
-      return null;
+      return <p className="shelf-note">{t("rail.shelf.answeredNote")}</p>;
     case "loading":
       return (
         <p className="shelf-note" role="status">
@@ -175,14 +179,7 @@ function Contents({
           <div className="shelf-details">
             <PermissionInput request={request} />
           </div>
-          {request.blocked_path && (
-            <p className="shelf-detail">
-              {t("rail.shelf.pathLabel")}{" "}
-              <span className="mono">
-                <Revealed text={request.blocked_path} />
-              </span>
-            </p>
-          )}
+          <BlockedPath request={request} className="shelf-detail" />
           {request.reason && (
             <p className="shelf-detail">
               <Revealed text={request.reason.text} />
@@ -254,12 +251,14 @@ function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: 
     const el = root.current;
     if (!el) return;
     // An element removed while it holds focus sends no focusout, so the answer that goes with the last request
-    // leaves this true. Focus the user moves elsewhere, or out of the window, does send one; coming back sends a
-    // focusin.
+    // leaves this true. Focus the user moves elsewhere sends one. So does the window losing focus, with no next
+    // target and focus still in the shelf: that leaves this true too, so an answer that goes while Ersa is in the
+    // background hands focus to the shelf itself (R10).
     const focusIn = () => {
       focused.current = true;
     };
     const focusOut = (event: FocusEvent) => {
+      if (event.relatedTarget === null && el.contains(document.activeElement)) return;
       focused.current = event.relatedTarget instanceof Node && el.contains(event.relatedTarget);
     };
     el.addEventListener("focusin", focusIn);

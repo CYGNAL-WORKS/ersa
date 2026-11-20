@@ -95,7 +95,6 @@ describe("the shelf", () => {
     const html = draw({ state: "unknown", place: { n: 1, m: 2 } }, { cost: "$0.82" });
     expect(text(html)).toBe("1 of 2 This session is waiting on a request Ersa can't show here. · $0.82");
     expect(html).not.toContain("<button");
-    expect(html).toContain('data-tone="caution"');
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R12
@@ -156,7 +155,9 @@ describe("the shelf", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R23
   it("is the accent for a question, and reads its kind, what it asks, the readouts, then its answers", () => {
     const html = draw({ state: "question", requestId: "r3", questions: [{ id: "q1", text: "Which branch?", multi_select: false, takes_text: false }] }, { ring: 0.53, cost: "$0.82" });
-    expect(html).toContain('data-tone="accent"');
+    // The shelf takes its open tile's tone, so the two never differ.
+    const css = readFileSync(join(import.meta.dirname, "Shelf.css"), "utf8");
+    expect(css).toMatch(/:where\(\.session-item\[data-tone="accent"\]\) \.shelf \{\s+--shelf-edge: var\(--color-accent\);/);
     expect(text(html)).toBe("Question Which branch? 53% · $0.82 Decline Answer");
   });
 
