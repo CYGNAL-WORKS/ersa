@@ -308,6 +308,29 @@ describe("adding a project from the new-session screen", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R27
+  it("takes no Ctrl+O while the quit question stands over the screen", async () => {
+    let quitRequested = () => {};
+    const shell = {
+      ...fakeShell("D:/clones/stranger"),
+      onQuitRequested: (handler: () => void) => {
+        quitRequested = handler;
+        return () => {};
+      },
+    };
+    // A session running when Quit is chosen, so the window asks first (FLOW-CLOSE-AND-QUIT-R04).
+    const running: Session = { ...session("s1", "alpha", "2026-11-01T00:00:00Z"), state: "running", tile: { state: "running", pending: [] } };
+    let lists = 0;
+    await screenWith([project("alpha")], shell, { "session.list": () => (lists++ === 0 ? [] : [running]) });
+    await act(async () => quitRequested());
+    await settle();
+    expect(screen.getByRole("region", { name: "Quit Ersa?" })).toBeTruthy();
+    fireEvent.keyDown(words(), { key: "o", ctrlKey: true });
+    await settle();
+    expect(shell.pickFolder).not.toHaveBeenCalled();
+    expect(trustQuestion()).toBeNull();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R27
   it("leaves Add project unavailable, without its shortcut, when there is no folder dialog to open", async () => {
     await screenWith([project("alpha")]);
     fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));

@@ -45,14 +45,13 @@ interface NewSessionScreenProps {
   onRead?: (paths: readonly string[], workspace: string | undefined) => Promise<Attached[]>;
   /** Hears drags from the file manager over the window, for the composer's box (FLOW-SEND-MESSAGE-R08). */
   dragDrop?: ShellControl["onDragDrop"];
-  /** The sessions page stands over the screen, which stays as it is behind it. */
-  covered?: boolean;
   /** Each project's root workspace, by project id: the workspace a session in the project folder runs in. */
   rootWorkspaces?: Readonly<Record<string, string>>;
   starting?: Sending;
   /**
    * Opens the system's folder dialog on the local host and finds whether the folder picked is already a project
-   * there; absent while there is no dialog to open, and Add project is then unavailable.
+   * there; absent while there is no dialog to open or while something stands over the screen (the sessions page, the
+   * quit or delete question), and Add project and Ctrl+O then do nothing.
    */
   onChooseFolder?: () => Promise<FolderChoice>;
   /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
@@ -133,40 +132,62 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       // Measured over the room as it is with the question out of the column; a tight screen's scroll is kept.
       const scrolled = section.scrollTop;
       delete section.dataset.tight;
-      card.style.maxHeight = "";
       const style = getComputedStyle(section);
       const top = parseFloat(style.paddingTop) || 0;
       const room = zone.getBoundingClientRect().top - section.getBoundingClientRect().top - top;
-      // What must show: everything but the explanation, and its first line or so.
-      const first = body.firstElementChild;
-      const least = card.offsetHeight - body.offsetHeight + (first instanceof HTMLElement ? first.offsetHeight : 0);
-      if (room >= least) {
-        card.style.maxHeight = `${room}px`;
+      const path = card.querySelector<HTMLElement>(".trust-question-path");
+      // Uncapped, at the width the card has now. What must show: the title, the answers, the folder's first line and
+      // the explanation's first paragraph; a long folder gives up its other lines and scrolls inside itself, so a cap
+      // at the screen's height still holds the title, the folder and the answers together.
+      const measure = () => {
+        card.style.maxHeight = "";
+        body.style.minHeight = "";
+        if (path) path.style.minHeight = "";
+        const first = body.firstElementChild;
+        const firstHeight = first instanceof HTMLElement ? first.offsetHeight : 0;
+        const pathHeight = path?.offsetHeight ?? 0;
+        const pathLine = path ? Math.min(pathHeight, parseFloat(getComputedStyle(path).lineHeight) || pathHeight) : 0;
+        const rest = card.offsetHeight - body.offsetHeight - pathHeight;
+        return { firstHeight, pathHeight, rest, least: rest + pathLine + firstHeight };
+      };
+      // Capped: the explanation keeps its first paragraph, and the folder keeps every line the cap leaves room for,
+      // so the explanation gives up its room before the folder gives up a line.
+      const cap = (to: number, sizes: ReturnType<typeof measure>) => {
+        card.style.maxHeight = `${to}px`;
+        body.style.minHeight = `${sizes.firstHeight}px`;
+        if (path) path.style.minHeight = `${Math.max(0, Math.min(sizes.pathHeight, to - sizes.rest - sizes.firstHeight))}px`;
+      };
+      const loose = measure();
+      if (room >= loose.least) {
+        cap(room, loose);
       } else {
         // In the column, capped to the screen's own height, so the title, folder and answers show together at its top.
+        // Measured again there, since the scroll bar a tight screen gains narrows the card and may wrap the folder.
         section.dataset.tight = "";
-        // Measured before the scroll is restored, so from the column's top.
-        const below = card.getBoundingClientRect().top - section.getBoundingClientRect().top;
-        card.style.maxHeight = `${Math.max(least, section.clientHeight - below - (parseFloat(style.paddingBottom) || 0))}px`;
+        const tight = measure();
+        // Measured before the scroll is restored, so from the column's top; and from the room the card stands in, not
+        // the card, which its entrance still moves.
+        const below = zone.getBoundingClientRect().top - section.getBoundingClientRect().top;
+        cap(Math.max(tight.least, section.clientHeight - below - (parseFloat(style.paddingBottom) || 0)), tight);
         section.scrollTop = scrolled;
       }
     };
     fit();
     // The room changes with the window and with the box and the session controls: text that grows the box, chips
-    // that wrap. Only a change of height refits: neither the screen's nor the box column's height changes when the
-    // question is capped, and the scroll bar a tight screen gains changes only widths, so fitting never sets this
-    // off again. (jsdom has no ResizeObserver; the tests there need no layout.)
+    // that wrap, a narrower window that wraps a long folder onto more lines. Fitting never sets this off again for
+    // good: it always measures with the question out of the column, so its answer depends on the window alone and
+    // not on the scroll bar a tight screen gains. (jsdom has no ResizeObserver; the tests there need no layout.)
     const start = screen.current?.querySelector(".new-session-start");
-    const heights = new Map<Element, number>();
+    const sizes = new Map<Element, string>();
     const watch =
       typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver((entries) => {
             let changed = false;
             for (const entry of entries) {
-              const height = entry.contentRect.height;
-              if (heights.get(entry.target) !== height) changed = true;
-              heights.set(entry.target, height);
+              const size = `${entry.contentRect.width}x${entry.contentRect.height}`;
+              if (sizes.get(entry.target) !== size) changed = true;
+              sizes.set(entry.target, size);
             }
             if (changed) fit();
           });
@@ -215,17 +236,29 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     }
   };
 
-  // Ctrl+O chooses Add project from anywhere on the screen (FLOW-NEW-SESSION-R27). The listener is added once and
-  // calls the latest `addProject` through a ref.
-  const shortcut = useRef<() => unknown>(addProject);
-  // Behind the sessions page the screen is out of reach, and its question could not be seen or answered.
-  shortcut.current = props.covered ? () => {} : addProject;
+  // Ctrl+O chooses Add project from anywhere on the screen (FLOW-NEW-SESSION-R27); App gives no `onChooseFolder`
+  // while something stands over the screen, so it then does nothing. While the trust question is open, Escape cancels
+  // it from anywhere on the screen, the message box included (docs/design/COMPOSER.md). The listener is added once
+  // and reads the latest state through a ref.
+  const keys = useRef({ addProject, cancel: () => {}, asking: false });
+  keys.current = { addProject, cancel: () => void answer(false), asking: asking !== undefined };
   useEffect(() => {
+    // From the screen, or from nowhere in particular: never from a question standing over it, nor while the screen is
+    // out of reach behind one or behind the sessions page.
+    const onScreen = (target: EventTarget | null) => {
+      const section = screen.current;
+      if (!section || section.closest("[inert], [hidden]")) return false;
+      return target === document.body || (target instanceof Node && section.contains(target));
+    };
     const onKey = (event: KeyboardEvent) => {
       if (event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "o") {
         // The keys are Add project's on this screen, never the webview's own.
         event.preventDefault();
-        void shortcut.current();
+        void keys.current.addProject();
+      } else if (event.key === "Escape" && keys.current.asking && !event.defaultPrevented && onScreen(event.target)) {
+        // A chip's list or the attach menu takes its own Escape first, and closes itself rather than the question.
+        event.preventDefault();
+        keys.current.cancel();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -309,6 +342,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
           // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
           statusTaken={asking !== undefined || adding?.state === "failed"}
+          // Nothing is sent while the question about a new folder is open, so no session starts on the project chosen
+          // before it; the words stay the user's to edit.
+          held={asking !== undefined}
           quietFocus={asking !== undefined}
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}

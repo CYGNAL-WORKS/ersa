@@ -110,6 +110,77 @@ describe("adding a project from the project chip", () => {
     expect(question.textContent).toContain("D:\\Clones\\stranger");
   });
 
+  it("sends nothing while the trust question is open, and sends again once it is answered", async () => {
+    const onStart = vi.fn(async () => false);
+    const onChooseFolder = async () => ({ kind: "new", path: "D:/clones/stranger" }) as const;
+    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder, onStart, initialText: "Fix the build" })));
+    await addFromChip();
+    const words = screen.getByRole("textbox", { name: "Message" });
+    words.focus();
+    await act(async () => {
+      fireEvent.keyDown(words, { key: "Enter" });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    });
+    expect(onStart).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => {
+      fireEvent.keyDown(words, { key: "Enter" });
+    });
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R17
+  it("cancels the trust question on Escape from the message box, leaving everything as it was", async () => {
+    const onAddProject = vi.fn(async () => undefined);
+    const onChooseFolder = async () => ({ kind: "new", path: "D:/clones/stranger" }) as const;
+    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder, onAddProject, initialText: "Fix the build" })));
+    await addFromChip();
+    const words = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    words.focus();
+    await act(async () => {
+      fireEvent.keyDown(words, { key: "Escape" });
+    });
+    expect(screen.queryByRole("region", { name: /^Trust / })).toBeNull();
+    expect(onAddProject).not.toHaveBeenCalled();
+    expect(chosen()).toBe("Project: alpha");
+    expect(words.value).toBe("Fix the build");
+    expect(document.activeElement).toBe(words);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R17
+  it("leaves the trust question open on an Escape meant for something else", async () => {
+    const onChooseFolder = async () => ({ kind: "new", path: "D:/clones/stranger" }) as const;
+    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder })));
+    await addFromChip();
+    // From outside the screen, such as the quit question in the rail.
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    try {
+      fireEvent.keyDown(elsewhere, { key: "Escape" });
+      expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
+      // An open chip's list, which closes itself instead.
+      fireEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+      fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
+  // verifies: FLOW-NEW-SESSION-R27
+  it("opens no second folder dialog on Ctrl+O while the trust question is open", async () => {
+    const onChooseFolder = vi.fn(async () => ({ kind: "new", path: "D:/clones/stranger" }) as const);
+    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder })));
+    await addFromChip();
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole("textbox"), { key: "o", ctrlKey: true });
+    });
+    expect(onChooseFolder).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole("region", { name: /^Trust / })).toHaveLength(1);
+  });
+
   // verifies: FLOW-NEW-SESSION-R18
   it("chooses a found project even before Core's list has it", async () => {
     const beyond: Project = project("beyond");
