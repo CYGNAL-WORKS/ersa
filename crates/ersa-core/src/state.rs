@@ -66,6 +66,11 @@ pub struct CoreConfig {
     /// [`crate::workspace::GIT_TIMEOUT`], as a git call has, except in tests
     /// that let it run out.
     pub folder_removal_limit: Duration,
+    /// How long `session.delete` goes on trying a workspace's folder that
+    /// fails to delete: no try begins later than this after the first
+    /// (PROTO-CORE-API-R113). [`crate::workspace::FOLDER_TRY_WINDOW`],
+    /// except in tests that let it run out.
+    pub folder_try_window: Duration,
     /// The transport git and backends' version commands run through on the
     /// local host. `None` is the local machine's; tests put one in front
     /// of it that holds a command, as a slow repository or backend would.
@@ -172,6 +177,7 @@ impl CoreConfig {
             folder_inspection_limit: FOLDER_INSPECTION_LIMIT,
             record_deletion_limit: RECORD_DELETION_LIMIT,
             folder_removal_limit: crate::workspace::GIT_TIMEOUT,
+            folder_try_window: crate::workspace::FOLDER_TRY_WINDOW,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })

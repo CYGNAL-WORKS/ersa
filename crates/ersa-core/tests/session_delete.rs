@@ -1283,3 +1283,208 @@ async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark() {
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
 }
+
+/// What git does to a worktree removal in [`FailingGit`].
+#[derive(Clone, Copy)]
+enum Removal {
+    /// Deletes git's record of the worktree and then fails, leaving the
+    /// files, as git on Windows does on a file in use.
+    DropsRecordThenFails,
+    /// Fails before touching anything, so git still lists the worktree.
+    Fails,
+}
+
+/// Core's command transport: the local one, with every
+/// `git worktree remove` failing as `removal` says.
+struct FailingGit {
+    removal: Removal,
+    inner: ersa_core::transport::LocalTreeTransport,
+}
+
+#[ersa_adapter::async_trait]
+impl ersa_adapter::Transport for FailingGit {
+    async fn spawn(
+        &self,
+        mut spec: ersa_adapter::ProcessSpec,
+    ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+        let removes = spec
+            .args
+            .windows(2)
+            .any(|pair| pair == ["worktree", "remove"]);
+        if spec.program == "git" && removes {
+            match self.removal {
+                Removal::DropsRecordThenFails => {
+                    // The worktree's `.git` file names git's record of it.
+                    // Gone after the first try; git's own removal then
+                    // fails on every try: not a working tree.
+                    let worktree = PathBuf::from(spec.args.last().unwrap());
+                    if let Ok(link) = std::fs::read_to_string(worktree.join(".git")) {
+                        let record = link.trim().trim_start_matches("gitdir:").trim();
+                        let _ = std::fs::remove_dir_all(record);
+                    }
+                }
+                Removal::Fails => spec.args.push("--no-such-option".into()),
+            }
+        }
+        self.inner.spawn(spec).await
+    }
+}
+
+/// A started Core whose git fails worktree removals as `removal` says, and
+/// whose warnings are written to the returned log. The subscriber is this
+/// thread's, so the test's runtime must have one thread: Core runs on it.
+async fn start_failing_git(
+    fake: &Arc<FakeAdapter>,
+    removal: Removal,
+) -> (TestCore, Client, Log, tracing::subscriber::DefaultGuard) {
+    let log = Log::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(log.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .finish();
+    let guard = tracing::subscriber::set_default(subscriber);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
+    let git = Arc::new(FailingGit {
+        removal,
+        inner: ersa_core::transport::LocalTreeTransport::for_commands(),
+    });
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| config.command_transport = Some(ersa_core::CommandTransport(git)),
+        adapters,
+    )
+    .await;
+    let client = core.client().await;
+    (core, client, log, guard)
+}
+
+/// What a test's subscriber wrote.
+#[derive(Clone, Default)]
+struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Log {
+    /// The lines written at warning level.
+    fn warnings(&self) -> Vec<String> {
+        let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+        text.lines()
+            .filter(|line| line.contains(" WARN "))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The one warning holding `text` and `session`'s id.
+    fn warning(&self, text: &str, session: &str) -> String {
+        let warnings = self.warnings();
+        warnings
+            .iter()
+            .find(|line| line.contains(text) && line.contains(&format!("session={session}")))
+            .cloned()
+            .unwrap_or_else(|| panic!("no warning {text:?} for {session}: {warnings:#?}"))
+    }
+}
+
+impl std::io::Write for Log {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Log {
+    type Writer = Log;
+    fn make_writer(&'a self) -> Log {
+        self.clone()
+    }
+}
+
+const GIT_FAILED: &str = "git's removal of the worktree failed";
+const STEP_FAILED: &str = "a step of the session's delete failed";
+
+/// git's removal fails after deleting its record of the worktree, leaving
+/// the files: the same delete goes on to delete the folder itself, then the
+/// branch, the record and the session, and the warning for git's failure
+/// names the session, the step and git's reason.
+// verifies: PROTO-CORE-API-R112
+// verifies: PROTO-CORE-API-R114
+#[tokio::test]
+async fn a_git_removal_that_drops_its_record_and_fails_still_deletes_the_folder() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client, log, _guard) =
+        start_failing_git(&fake, Removal::DropsRecordThenFails).await;
+    let (project, repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    let branch = branch_of(&workspace);
+
+    let token = token(&mut client, &workspace).await;
+    let response = client
+        .call("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(
+        response["result"],
+        json!({ "id": id, "workspace_deleted": true, "branch_kept": false }),
+        "{response}"
+    );
+    assert!(!folder.exists());
+    assert!(!branch_exists(&repo, &branch));
+    assert!(backend_ids(&fake.records).is_empty());
+    assert!(listed(&mut client, &id).await.is_none());
+    assert!(!workspace_listed(&mut client, &project, &workspace).await);
+
+    let git_failed = log.warning(GIT_FAILED, &id);
+    assert!(git_failed.contains("step=5"), "{git_failed}");
+    assert!(git_failed.contains("is not a working tree"), "{git_failed}");
+    // No step failed in the end.
+    let warnings = log.warnings();
+    assert!(
+        !warnings.iter().any(|line| line.contains(STEP_FAILED)),
+        "{warnings:#?}"
+    );
+}
+
+/// git's removal fails with the worktree still listed: the delete fails at
+/// step 5, keeping the folder, and both git's failure and the step's are
+/// warnings naming the session, the step and the reason. A record deletion
+/// that then fails is a warning for step 6.
+// verifies: PROTO-CORE-API-R114
+#[tokio::test]
+async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reason() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client, log, _guard) = start_failing_git(&fake, Removal::Fails).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+
+    let token = token(&mut client, &workspace).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+    assert!(folder.is_dir());
+    let git_failed = log.warning(GIT_FAILED, &id);
+    assert!(git_failed.contains("step=5"), "{git_failed}");
+    // git's own words: it rejects the option with its usage.
+    assert!(git_failed.contains("usage: git worktree remove"), "{git_failed}");
+    let step_failed = log.warning(STEP_FAILED, &id);
+    assert!(step_failed.contains("step=5"), "{step_failed}");
+    assert!(
+        step_failed.contains("git worktree remove failed")
+            && step_failed.contains("usage: git worktree remove"),
+        "{step_failed}"
+    );
+
+    // Step 6: a root workspace's session skips step 5, and its record
+    // deletion is refused.
+    let root = root(&mut client, &project).await;
+    let id = idle_session(&mut client, &root).await;
+    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::No);
+    let error = client.error("session.delete", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "internal", "{error}");
+    let step_failed = log.warning(STEP_FAILED, &id);
+    assert!(step_failed.contains("step=6"), "{step_failed}");
+    assert!(step_failed.contains("refused to delete"), "{step_failed}");
+}
