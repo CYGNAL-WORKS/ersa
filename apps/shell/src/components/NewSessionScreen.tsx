@@ -136,9 +136,10 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       const top = parseFloat(style.paddingTop) || 0;
       const room = zone.getBoundingClientRect().top - section.getBoundingClientRect().top - top;
       const path = card.querySelector<HTMLElement>(".trust-question-path");
-      // Uncapped, at the width the card has now. What must show: the title, the answers, the folder's first line and
-      // the explanation's first paragraph; a long folder gives up its other lines and scrolls inside itself, so a cap
-      // at the screen's height still holds the title, the folder and the answers together.
+      // Uncapped, at the width the card has now. What must show over the room above the box: the title, the folder,
+      // the answers and the explanation's first paragraph. In the column, where the cap is the screen's height, a long
+      // folder may give up all but its first line and scroll inside itself, so the title, the folder and the answers
+      // still show together.
       const measure = () => {
         card.style.maxHeight = "";
         body.style.minHeight = "";
@@ -148,7 +149,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         const pathHeight = path?.offsetHeight ?? 0;
         const pathLine = path ? Math.min(pathHeight, parseFloat(getComputedStyle(path).lineHeight) || pathHeight) : 0;
         const rest = card.offsetHeight - body.offsetHeight - pathHeight;
-        return { firstHeight, pathHeight, rest, least: rest + pathLine + firstHeight };
+        return { firstHeight, pathHeight, rest, whole: rest + pathHeight + firstHeight, least: rest + pathLine + firstHeight };
       };
       // Capped: the explanation keeps its first paragraph, and the folder keeps every line the cap leaves room for,
       // so the explanation gives up its room before the folder gives up a line.
@@ -158,7 +159,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         if (path) path.style.minHeight = `${Math.max(0, Math.min(sizes.pathHeight, to - sizes.rest - sizes.firstHeight))}px`;
       };
       const loose = measure();
-      if (room >= loose.least) {
+      if (room >= loose.whole) {
         cap(room, loose);
       } else {
         // In the column, capped to the screen's own height, so the title, folder and answers show together at its top.
@@ -255,8 +256,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         // The keys are Add project's on this screen, never the webview's own.
         event.preventDefault();
         void keys.current.addProject();
-      } else if (event.key === "Escape" && keys.current.asking && !event.defaultPrevented && onScreen(event.target)) {
-        // A chip's list or the attach menu takes its own Escape first, and closes itself rather than the question.
+      } else if (event.key === "Escape" && keys.current.asking && onScreen(event.target)) {
         event.preventDefault();
         keys.current.cancel();
       }
