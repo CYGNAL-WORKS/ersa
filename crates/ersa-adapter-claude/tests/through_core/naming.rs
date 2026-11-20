@@ -520,16 +520,49 @@ async fn listed_backend_id(client: &mut Client, id: &str) -> Value {
         .clone()
 }
 
-/// Claude Code starts a session, and a fork, under an id Core chose: Core
-/// holds it from then, so `session.create`'s and `session.fork`'s answers and
-/// `session.list` carry it before any message, and before the CLI has
-/// reported anything.
+/// The session id the recorded CLI announced in its `init` line: the one a
+/// real CLI takes from `--session-id`, and this recording took when it was
+/// recorded.
+fn recorded_session_id(stdout: &[String]) -> String {
+    stdout
+        .iter()
+        .map(|l| parse(l))
+        .find(|v| v["type"] == "system" && v["subtype"] == "init")
+        .expect("the recording has an init line")["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// Waits for a `session.tile` for session `id` carrying `backend_session_id`.
+async fn tile_carrying(client: &mut Client, id: &str, backend_id: &str) -> Value {
+    let wanted = |n: &Value| {
+        n["method"] == "session.tile"
+            && n["params"]["session_id"] == id
+            && n["params"]["backend_session_id"] == backend_id
+    };
+    tokio::time::timeout(Duration::from_secs(10), client.notification_where(wanted))
+        .await
+        .expect("no session.tile carried the backend's id")
+}
+
+/// Claude Code starts a session under an id Core chose, but has a record
+/// under it only from the session's first message: until then the id finds
+/// nothing in its own tools, so Core carries none, in the answer or the list.
+/// A turn's end looks for the record, and a tile then carries the id before
+/// any list is read.
+// verifies: FLOW-RESUME-SESSION-R18
+// verifies: FLOW-RESUME-SESSION-R19
+// verifies: FLOW-RESUME-SESSION-R20
 #[tokio::test(flavor = "multi_thread")]
-async fn a_session_and_a_fork_list_the_id_core_chose_before_any_message() {
+async fn a_session_carries_the_id_core_chose_once_a_turn_ends_with_its_record_written() {
     let stdout = recorded();
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("get_context_usage"))
+        .wait_for_stdin(is("user"))
+        .then_stdout(&stdout[3..])
         .hold_open();
     let home = tempdir();
     let core = claude_core(&transport, home.path()).await;
@@ -537,14 +570,63 @@ async fn a_session_and_a_fork_list_the_id_core_chose_before_any_message() {
     let created = create(&core, &mut client).await;
     let id = created["id"].as_str().unwrap().to_string();
     initialize_sent(&transport).await;
+    // Started under an id Core chose, with no record under it yet.
     let chosen = chosen_id(&transport);
-    assert_eq!(created["backend_session_id"], json!(chosen));
-    assert_eq!(listed_backend_id(&mut client, &id).await, json!(chosen));
+    assert!(created.get("backend_session_id").is_none(), "{created:#}");
+    assert_eq!(listed_backend_id(&mut client, &id).await, Value::Null);
 
-    // A fork needs its original's record to copy.
+    // The CLI writes the record with the first message. The stub writes
+    // none, so the test files it as the CLI would, under the id the
+    // recording announces (a real CLI's is `--session-id`'s).
+    let named = recorded_session_id(&stdout);
+    assert_ne!(named, chosen);
+    let cwd = transport.spawned()[0].cwd.clone().unwrap();
+    write_record(home.path(), &cwd, &named);
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.events_until("turn.completed").await;
+    // The turn's end looked, and a tile carries the id with no list read.
+    tile_carrying(&mut client, &id, &named).await;
+    assert_eq!(listed_backend_id(&mut client, &id).await, json!(named));
+}
+
+/// A fork, also started under an id Core chose, shows its original's
+/// conversation but has no record of its own until its first message: Core
+/// carries no id for it, in `session.fork`'s answer or the list, until a
+/// list's look finds the fork's own record, and a tile then carries it too.
+// verifies: FLOW-RESUME-SESSION-R18
+// verifies: FLOW-RESUME-SESSION-R19
+// verifies: FLOW-RESUME-SESSION-R20
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_carries_the_id_core_chose_once_a_list_finds_its_own_record() {
+    let stdout = recorded();
+    // Only `initialize` is answered: the stub's stdin waits count every
+    // process's lines, so a longer script would replay into the fork.
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(is("initialize"))
+        .then_stdout([&stdout[0]])
+        .hold_open();
+    let home = tempdir();
+    let core = claude_core(&transport, home.path()).await;
+    let mut client = core.client().await;
+    let id = create(&core, &mut client).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    initialize_sent(&transport).await;
+    let chosen = chosen_id(&transport);
+
+    // A fork needs its original's record to copy; the original's own look
+    // finds it once the session is listed.
     client.result("session.stop", json!({ "id": id })).await;
     let cwd = transport.spawned()[0].cwd.clone().unwrap();
     write_record(home.path(), &cwd, &chosen);
+    assert_eq!(listed_backend_id(&mut client, &id).await, json!(chosen));
+
     let fork = client.result("session.fork", json!({ "id": id })).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -562,11 +644,16 @@ async fn a_session_and_a_fork_list_the_id_core_chose_before_any_message() {
         .expect("--session-id");
     let fork_chosen = args[at + 1].clone();
     assert_ne!(fork_chosen, chosen);
-    assert_eq!(fork["backend_session_id"], json!(fork_chosen));
+    assert!(fork.get("backend_session_id").is_none(), "{fork:#}");
+    assert_eq!(listed_backend_id(&mut client, &fork_id).await, Value::Null);
+    // The original keeps its own.
+    assert_eq!(listed_backend_id(&mut client, &id).await, json!(chosen));
+
+    // Once the backend has the fork's record, the list's look finds it.
+    write_record(home.path(), &cwd, &fork_chosen);
     assert_eq!(
         listed_backend_id(&mut client, &fork_id).await,
         json!(fork_chosen)
     );
-    // The original keeps its own.
-    assert_eq!(listed_backend_id(&mut client, &id).await, json!(chosen));
+    tile_carrying(&mut client, &fork_id, &fork_chosen).await;
 }

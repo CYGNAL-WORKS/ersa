@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-20 FLOW-RESUME-SESSION: R18 says Core carries an id it chose "only while the adapter's latest look found" the record, but not what a look that fails or times out counts as; Core keeps the answer of the last look that concluded, so a slow disk does not flicker Copy session ID. Also, Core tells a chosen id from a named one by the backend (it starts sessions under ids its host chooses) and not by the row, so a Claude Code session from before Core chose ids, whose id the CLI named, is held to R18 rather than R17; it differs only when its record is gone, and then its id leads nowhere anyway.
 
 
 ## Resolved recently (optional, trimmed in planning passes)
