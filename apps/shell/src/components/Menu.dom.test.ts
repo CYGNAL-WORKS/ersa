@@ -155,6 +155,20 @@ describe("a menu from the pointer", () => {
     expect(closed).toEqual([]);
   });
 
+  it("gives keyboard focus in a submenu the pointer closes to the item under the pointer, so the menu keeps its keys", () => {
+    render(createElement(Owner, { focus: "item" }));
+    key("ArrowDown");
+    key("ArrowRight");
+    expect(focused()).toBe("Ideas");
+    fireEvent.pointerEnter(screen.getByRole("menuitem", { name: "Delete…" }));
+    expect(screen.getByRole("menuitem", { name: "Move to section" }).getAttribute("aria-expanded")).toBe("false");
+    expect(focused()).toBe("Delete…");
+    key("ArrowUp");
+    expect(focused()).toBe("Move to section");
+    key("Escape");
+    expect(closed).toEqual(["escape"]);
+  });
+
   it("closes on a press outside it", () => {
     render(createElement(Owner, { focus: "menu" }));
     fireEvent.pointerDown(document.body);
