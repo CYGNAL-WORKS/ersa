@@ -422,6 +422,24 @@ describe("a system dialog that fails to open, then something newer", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R23
+  it("stays through a send's progress, its end, and an older refusal going, none of which clears it", async () => {
+    const { rerender } = render(props({ sending: { state: "sending", progress: { phase: "copying", share: 0.25 } } }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    rerender(props({ sending: { state: "sending", progress: { phase: "copying", share: 0.5 } } }));
+    expect(statusLine()?.textContent).toBe(failed);
+    rerender(props({}));
+    expect(statusLine()?.textContent).toBe(failed);
+    // An older refusal, shown when the dialog failed, that then goes.
+    const refusedChange = "Ersa can't change the model. The session has ended.";
+    rerender(props({ refusedChange }));
+    await chooseFiles();
+    expect(statusLine()?.textContent).toBe(failed);
+    rerender(props({}));
+    expect(statusLine()?.textContent).toBe(failed);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
   it("is said only while the box is available", async () => {
     const { rerender } = render(props({}));
     await chooseFiles();
