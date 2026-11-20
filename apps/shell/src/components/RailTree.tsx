@@ -13,7 +13,7 @@ import { Icon, IconButton } from "./Icon";
 import { MenuButton } from "./MenuButton";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
 import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
-import { besideGone, useLeavingFocus } from "./useLeavingFocus";
+import { besideGone, useFocusRestore } from "./useFocusRestore";
 import { useTitleDraft } from "./SessionTitle";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
@@ -129,22 +129,22 @@ export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, force, shelf, onChevron, onCloseShelf } = props;
   const { archiving, moving, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   const root = useRef<HTMLElement>(null);
-  // The pin or move on its way, and whether focus was in the rail when it was chosen. One at a time: while it is
-  // saved, Pin, Unpin and Move to section are unavailable on every tile.
-  const pending = useRef<{ id: string; focused: boolean }>(undefined);
-  useLayoutEffect(() => {
-    const pin = pending.current;
-    const el = root.current;
-    if (!pin || !el || moving?.[pin.id]?.state === "sending") return;
-    pending.current = undefined;
-    // The tile is drawn afresh in its new group, so the focus its menu gave back is lost: it goes to the tile in its
-    // new place or, when that group is collapsed, to the group's heading (docs/design/RAIL.md, Menus). When Core
-    // refused it nothing moved, and focus lost with a new section's field goes to the tile where it is.
-    const lost = document.activeElement === null || document.activeElement === document.body;
-    const item = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].find((tile) => tile.dataset.sessionId === pin.id);
-    if (!pin.focused || !lost || !item) return;
-    tileFocus(item, ".session")?.focus({ preventScroll: true });
-  });
+  // The one place focus is given back as the rail redraws (useFocusRestore); New session when no tile is left.
+  const focus = useFocusRestore(root, (section) => section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"));
+  // The moves on their way, as last drawn: a restore asked for earlier reads them as they are now.
+  const movingNow = useRef(moving);
+  movingNow.current = moving;
+  // A pin or move chosen with focus in the rail: the tile is drawn afresh in its new group, so the focus its menu gave
+  // back is lost. Once Core has it, focus goes to the tile in its new place or, when that group is collapsed, to the
+  // group's heading (docs/design/RAIL.md, Menus). One at a time: while it is saved, Pin, Unpin and Move to section
+  // are unavailable on every tile. When Core refused it nothing moved, and focus lost with a new section's field goes
+  // to the tile where it is.
+  const followTile = (id: string) =>
+    focus.restore((el) => {
+      if (movingNow.current?.[id]?.state === "sending") return "wait";
+      const item = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].find((tile) => tile.dataset.sessionId === id);
+      return item && tileFocus(item, ".session");
+    });
   // A new session's tile, a fork's included, slides in at its place while the others make room (DESIGN.md, Motion). New
   // means listed for the first time since Ersa started: the first listing draws every tile in place, and a listing
   // read again after a reconnect, an unarchived session or a pinned one bring nothing new. A new session still waiting
@@ -166,12 +166,10 @@ export function RailTree(props: RailTreeProps) {
     for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
     arrive(el, items);
   });
-  // Pin, Unpin and Move to section note whether focus is in the rail, to give it back to the moved tile once Core has
-  // the change.
+  // Only a choice made with focus in the rail (in the tile's menu, or a new section's field) has focus to give back.
+  const inRail = () => root.current?.contains(document.activeElement) ?? false;
   const noteFocus = (id: string) => {
-    const el = root.current;
-    // Only a choice made with focus in the rail (in the tile's menu, or a new section's field) has focus to give back.
-    if (el) pending.current = { id, focused: el.contains(document.activeElement) };
+    if (inRail()) followTile(id);
   };
   const actionsOf = (s: Session): TileActions => {
     const { pin, move, ...actions } = tileActions(s, props);
@@ -195,31 +193,20 @@ export function RailTree(props: RailTreeProps) {
   };
   // A new section's name: once Core has made it, focus goes from the field to the new heading or, when a session
   // moves into it, follows the session's tile (RAIL.md, Menus).
-  const headingFocus = useRef<string>(undefined);
   const newSection = props.newSection && {
     ...props.newSection,
     onName: async (name: string) => {
       const draft = props.newSection;
       // Whether focus is in the rail is taken before the answer, while the field still has it; the move is noted once
       // Core has made the section, as the move starts.
-      const focused = root.current?.contains(document.activeElement) ?? false;
+      const focused = inRail();
       const section = await draft?.onName(name);
-      if (section && draft?.for !== undefined) pending.current = { id: draft.for, focused };
-      else if (section) headingFocus.current = section.id;
+      if (section && draft?.for !== undefined) {
+        if (focused) followTile(draft.for);
+      } else if (section) focus.restore((el) => headingToggle(el, section.id) ?? "wait");
       return section;
     },
   };
-  useLayoutEffect(() => {
-    const id = headingFocus.current;
-    const el = root.current;
-    if (id === undefined || !el) return;
-    const toggle = el.querySelector<HTMLElement>(`[data-slide="${CSS.escape(headingSlide(id))}"] .rail-heading-toggle`);
-    if (!toggle) return;
-    headingFocus.current = undefined;
-    const now = document.activeElement;
-    if (now === null || now === document.body) toggle.focus({ preventScroll: true });
-  });
-  const leaving = useLeavingFocus(root, (section) => section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"));
   const { groupBy = DEFAULT_ARRANGEMENT.groupBy, sortBy = DEFAULT_ARRANGEMENT.sortBy, show = DEFAULT_ARRANGEMENT.show, now = new Date() } = props;
   // The rail rearranges when the grouping or filter changes, when the day turns while grouped by date, when Core has a
   // session's pin, or when what the sort reads of a session differs from the listing before, as it does when the
@@ -261,7 +248,26 @@ export function RailTree(props: RailTreeProps) {
   // field reads busy and Enter waits.
   const newSectionSaving = newSection?.for !== undefined && Object.values(moving ?? {}).some((m) => m.state === "sending");
   const draftHeading = newSection && <NewSectionHeading key="new-section" draft={newSection} saving={newSectionSaving} />;
-  const deleted = useSectionDeletedFocus(root, tree.groups.map((g) => g.key), props.sectionHandlers?.removing);
+  // A section deleted from its heading's menu: the menu gave focus back to the heading's More, which goes with the
+  // heading, so once it has gone focus moves to the heading after it as drawn before, else the one before, else New
+  // session (FLOW-ORGANIZE-SESSIONS-R33). Refused, the heading stays, and so does focus.
+  const keys = tree.groups.map((g) => g.key);
+  const removingNow = useRef(props.sectionHandlers?.removing);
+  removingNow.current = props.sectionHandlers?.removing;
+  const deleted = (key: string) => {
+    // Only a choice made with focus in the rail or in the heading's menu has focus to give back.
+    const was = document.activeElement;
+    if (!was || !(root.current?.contains(was) || was.closest("[role=menu]"))) return;
+    const order = keys;
+    focus.restore((el) => {
+      const removing = removingNow.current?.[key];
+      if (removing?.state === "failed") return undefined;
+      if (removing !== undefined || headingToggle(el, key)) return "wait";
+      // The tiles' rule, over the headings: a heading is never folded away, so each drawn is open.
+      const to = besideGone(order, key, order.filter((k) => headingToggle(el, k)));
+      return to === undefined ? el.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session") : headingToggle(el, to);
+    });
+  };
   // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
   // end. Grouped otherwise, no session waits on its project.
@@ -334,7 +340,7 @@ export function RailTree(props: RailTreeProps) {
   const pinnedEmpty = tree.pinned.length === 0;
   return (
     <BeforeCommit root={root} measure={rearranging.current} places={before}>
-      <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")} {...leaving}>
+      <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")} {...focus.handlers}>
         {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
         {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
         {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}
@@ -897,34 +903,9 @@ function SectionGroup({
   );
 }
 
-/**
- * Where keyboard focus goes once a section deleted from its heading's menu has gone: the menu gave it back to the
- * heading's More, which goes with the heading, so it moves to the heading after it as drawn before, else the one
- * before, else New session; unless the user put focus somewhere else meanwhile. Returns what to call as Delete is
- * chosen.
- */
-function useSectionDeletedFocus(root: RefObject<HTMLElement | null>, keys: readonly string[], removing: Readonly<Record<string, Sending>> | undefined) {
-  const pending = useRef<{ key: string; order: readonly string[] }>(undefined);
-  useLayoutEffect(() => {
-    const going = pending.current;
-    const el = root.current;
-    if (!going || !el) return;
-    // Refused: the heading stays, and so does focus.
-    if (removing?.[going.key]?.state === "failed") pending.current = undefined;
-    if (removing?.[going.key] !== undefined || keys.includes(going.key)) return;
-    pending.current = undefined;
-    const now = document.activeElement;
-    if (now !== null && now !== document.body) return;
-    const toggleOf = (key: string) => el.querySelector<HTMLElement>(`[data-slide="${CSS.escape(headingSlide(key))}"] .rail-heading-toggle`);
-    // The tiles' rule (useLeavingFocus), over the headings: a heading is never folded away, so each drawn is open.
-    const to = besideGone(going.order, going.key, keys.filter((key) => toggleOf(key) !== null));
-    (to === undefined ? el.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session") : toggleOf(to))?.focus({ preventScroll: true });
-  });
-  return (key: string) => {
-    // Only a choice made with focus in the rail or in the heading's menu has focus to give back.
-    const focus = document.activeElement;
-    if (focus && (root.current?.contains(focus) || focus.closest("[role=menu]"))) pending.current = { key, order: keys };
-  };
+/** A group heading's toggle, found by the group's key: what takes focus at a heading. */
+function headingToggle(root: Element, key: string): HTMLElement | null {
+  return root.querySelector<HTMLElement>(`[data-slide="${CSS.escape(headingSlide(key))}"] .rail-heading-toggle`);
 }
 
 /**
