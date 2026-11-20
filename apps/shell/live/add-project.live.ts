@@ -87,9 +87,10 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
 // the room holds all but the explanation's first line, and the rest are short enough for the column.
 
 /** Opens the trust question for a new folder from the project chip, as a pointer would; the first test covers Ctrl+O. */
-async function askAbout(ersa: { page: Page; dir: string; answerDialog: (path: string) => Promise<unknown> }) {
-  const stranger = path.join(ersa.dir, "stranger");
-  mkdirSync(stranger);
+async function askAbout(ersa: { page: Page; dir: string; answerDialog: (path: string) => Promise<unknown> }, ...within: string[]) {
+  // The folder is named stranger, under any folders `within` names.
+  const stranger = path.join(ersa.dir, ...within, "stranger");
+  mkdirSync(stranger, { recursive: true });
   const screen = ersa.page.getByRole("region", { name: "New session" });
   await screen.getByRole("button", { name: "Project: Choose a folder" }).click();
   const answered = ersa.answerDialog(stranger);
@@ -179,4 +180,32 @@ test("the trust question fits again as the window shrinks, keeping where a tight
     const cancel = (await question.getByRole("button", { name: "Cancel" }).boundingBox())!;
     expect(cancel.y + cancel.height).toBeLessThanOrEqual(390);
   }).toPass({ timeout: 5_000 });
+});
+
+// A long folder in a small window, narrowed after the question opened (#375): the window wraps the folder onto more
+// lines, and the question fits again, the folder giving up lines and scrolling inside itself rather than pushing the
+// answers out of the card or the folder out of view. Capped in the column, the card reaches the foot of the screen:
+// its cap is measured from where it rests, not from where its entrance starts it.
+test("the trust question about a long folder fits a small window narrowed after it opened", async ({ ersa }) => {
+  const { page } = ersa;
+  await page.setViewportSize({ width: 1100, height: 470 });
+  // Long, and still short of Windows' 260-character limit on a path.
+  const deep = ["a-folder-whose-name-runs-on-and-on-0123456789", "another-folder-whose-name-runs-on-and-on-0123456789"];
+  const { stranger, question, box } = await askAbout(ersa, ...deep);
+  for (const [width, height] of [
+    [800, 470],
+    [640, 400],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await expect(async () => showsWhole(page, question, stranger, box)).toPass({ timeout: 5_000 });
+  }
+  const fit = await question.evaluate((card) => {
+    const screen = card.closest<HTMLElement>(".new-session")!;
+    const style = getComputedStyle(screen);
+    const foot = screen.getBoundingClientRect().top + screen.clientHeight - parseFloat(style.paddingBottom);
+    return { tight: screen.dataset.tight !== undefined, bottom: card.getBoundingClientRect().bottom, foot };
+  });
+  expect(fit.tight, "the question takes its place in the column").toBe(true);
+  expect(Math.abs(fit.bottom - fit.foot), "the card reaches the foot of the screen").toBeLessThanOrEqual(0.5);
+  await ersa.shot("trust-question-long-folder-640x400");
 });

@@ -4,9 +4,10 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, Method } from "./core/client";
+import type { ShellControl } from "./core/shell";
 import type { CoreHelloResult, Session, Workspace, WorkspaceChanges } from "./protocol/core-api.gen";
 
 afterEach(cleanup);
@@ -283,5 +284,36 @@ describe("Delete on a tile", () => {
     // The rail reads the session again: it stays, saying its deletion failed.
     await settle();
     expect(tile("Fix the build")?.textContent).toContain("Couldn't delete");
+  });
+});
+
+describe("the new-session screen behind the delete question", () => {
+  // verifies: FLOW-NEW-SESSION-R27
+  it("takes no Ctrl+O while the delete question stands over it", async () => {
+    const pickFolder = vi.fn(async () => "D:/clones/stranger");
+    const shell: ShellControl = {
+      onQuitRequested: () => () => {},
+      quitHeard: async () => {},
+      show: async () => false,
+      hide: async () => {},
+      quit: async () => {},
+      openLink: () => {},
+      pickFolder,
+      pickFiles: async () => [],
+      onDragDrop: () => () => {},
+    };
+    const core = fakeCore({ "backend.list": () => [] });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
+    await settle();
+    expect(screen.getByRole("region", { name: "New session" })).toBeTruthy();
+    fireEvent.click(deleteItem("Fix the build"));
+    await settle();
+    expect(screen.getByRole("dialog", { name: "Delete Fix the build?" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "o", ctrlKey: true });
+    await settle();
+    expect(pickFolder).not.toHaveBeenCalled();
   });
 });
