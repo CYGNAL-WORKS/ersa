@@ -118,6 +118,8 @@
 .attachment-image[data-sized] img {
   width: stretch;
   height: stretch;
+  /* A header that disagrees with the pixels keeps its place, and the picture fits inside it, never stretched. */
+  object-fit: contain;
 }
 
 .attachment-image[data-state="drawn"] img {

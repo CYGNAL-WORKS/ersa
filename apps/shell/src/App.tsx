@@ -731,8 +731,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           let paths: string[];
           try {
             paths = what === "folder" ? [await pickFolder()].filter((p): p is string => p !== null) : await pickFiles(what === "images");
-          } catch {
-            return [];
+          } catch (error) {
+            // A dialog that failed to open is not a cancel: logged here, and the composer says so (FLOW-SEND-MESSAGE-R23).
+            console.error(error);
+            throw error;
           }
           return read(paths, workspace);
         }
