@@ -194,7 +194,8 @@ async fn images_go_inline_and_paths_inside_the_workspace_go_relative() {
     assert!(!s.workspace.join(".ersa").exists());
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
+// verifies: PROTO-CORE-API-R111
 #[tokio::test]
 async fn attachments_from_outside_are_copied_into_the_sessions_own_scratch_folder() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -267,7 +268,7 @@ async fn attachments_from_outside_are_copied_into_the_sessions_own_scratch_folde
     assert_eq!(copies(&scratch), vec!["1", "2", "3"]);
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
 #[tokio::test]
 async fn numbering_continues_past_the_highest_copy_already_there() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -285,7 +286,7 @@ async fn numbering_continues_past_the_highest_copy_already_there() {
     );
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
 #[cfg(unix)]
 #[tokio::test]
 async fn a_copied_folder_leaves_its_links_out() {
@@ -671,7 +672,7 @@ fn aside(scratch: &Path) -> Vec<String> {
     copies(&scratch.join(".partial"))
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
 #[tokio::test]
 async fn a_folder_nested_thousands_deep_is_copied_whole() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -1034,4 +1035,107 @@ async fn many_inspects_of_one_workspace_at_once_each_judge_where_the_path_lies()
     for ask in asks {
         assert_eq!(ask.await.unwrap(), json!(false));
     }
+}
+
+/// A backend that takes no images is named as such, by path and pasted, and
+/// never as an image larger than "0 bytes at most".
+// verifies: PROTO-CORE-API-R23
+#[tokio::test]
+async fn an_image_for_a_backend_that_takes_none_says_so() {
+    let mut adapter = FakeAdapter::new(1);
+    adapter.image_limits = ersa_adapter::ImageLimits::default();
+    let mut s = setup(adapter).await;
+    let id = s.session().await;
+    let png = file(&s.outside, "shot.png", PNG);
+    for (index, attachments) in [
+        json!([{ "kind": "image", "path": path(&png) }]),
+        json!([
+            { "kind": "file", "path": path(&png) },
+            { "kind": "image", "media_type": "image/png", "data": BASE64.encode(PNG) },
+        ]),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let response = s.send(&id, "", attachments).await;
+        let reason = refused_at(&response, index as u64);
+        assert!(
+            reason.contains("this session's backend doesn't take images"),
+            "{reason}"
+        );
+        assert!(!reason.contains("bytes"), "{reason}");
+    }
+    assert!(s.messages().is_empty());
+    assert!(copies(&s.scratch(&id)).is_empty());
+}
+
+/// A repository that ships its own `.ersa/.gitignore`, one that ignores
+/// nothing, still has every copy ignored, and its file is left as it is.
+/// So does one that ships an `.ersa/attachments/.gitignore`, in Core's own
+/// folder, that ignores nothing.
+// verifies: PROTO-CORE-API-R110
+// verifies: PROTO-CORE-API-R111
+#[tokio::test]
+async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    // One that un-ignores Core's folder outright: the deeper file still wins.
+    file(&s.workspace, ".ersa/.gitignore", b"!attachments/\n");
+    file(&s.workspace, ".ersa/attachments/.gitignore", b"");
+    support::git(&s.workspace, &["add", ".ersa"]);
+    support::git(&s.workspace, &["commit", "--quiet", "-m", "ship .ersa"]);
+    let id = s.session().await;
+    let notes = file(&s.outside, "notes.md", b"# notes\n");
+    file(&s.outside, "dir/a.txt", b"a");
+    let response = s
+        .send(
+            &id,
+            "",
+            json!([
+                { "kind": "file", "path": path(&notes) },
+                { "kind": "folder", "path": path(&s.outside.join("dir")) },
+            ]),
+        )
+        .await;
+    assert!(response.get("result").is_some(), "{response:#}");
+    assert_eq!(copies(&s.scratch(&id)), vec!["1", "2"]);
+    // What `git add -A` would add: no copy. Core's own ignore file was made
+    // again, so it alone shows as changed under `.ersa/`.
+    let status = support::git(
+        &s.workspace,
+        &["status", "--porcelain", "--untracked-files=all"],
+    );
+    let under_ersa: Vec<&str> = status.lines().filter(|l| l.contains(".ersa")).collect();
+    assert_eq!(
+        under_ersa,
+        vec![" M .ersa/attachments/.gitignore"],
+        "{status}"
+    );
+    assert_eq!(
+        std::fs::read(s.workspace.join(".ersa").join(".gitignore")).unwrap(),
+        b"!attachments/\n"
+    );
+}
+
+/// Core's own `.ersa/attachments/.gitignore` must be a plain file too: one
+/// that is a folder refuses the copy, and nothing is copied.
+// verifies: PROTO-CORE-API-R23
+#[tokio::test]
+async fn cores_ignore_file_that_is_not_a_plain_file_refuses_the_copy() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let id = s.session().await;
+    let notes = path(&file(&s.outside, "notes.md", b"x"));
+    std::fs::create_dir_all(
+        s.workspace
+            .join(".ersa")
+            .join("attachments")
+            .join(".gitignore"),
+    )
+    .unwrap();
+    let response = s
+        .send(&id, "", json!([{ "kind": "file", "path": notes }]))
+        .await;
+    let message = refused_at(&response, 0);
+    assert!(message.contains(".gitignore"), "{message}");
+    assert!(s.messages().is_empty());
+    assert!(copies(&s.scratch(&id)).is_empty());
 }
