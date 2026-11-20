@@ -1344,12 +1344,8 @@ impl ersa_adapter::Transport for FailingGit {
 }
 
 /// A started Core whose git fails worktree removals as `removal` says, and
-/// whose warnings are written to the returned log. The subscriber is this
-/// thread's, so the test's runtime must have one thread: Core runs on it.
-async fn start_failing_git(
-    fake: &Arc<FakeAdapter>,
-    removal: Removal,
-) -> (TestCore, Client, Log, tracing::subscriber::DefaultGuard) {
+/// whose warnings are written to the returned log.
+async fn start_failing_git(fake: &Arc<FakeAdapter>, removal: Removal) -> (TestCore, Client, Log) {
     start_failing_git_with(fake, removal, None, |_| {}).await
 }
 
@@ -1359,14 +1355,8 @@ async fn start_failing_git_with(
     removal: Removal,
     hold: Option<Duration>,
     configure: impl FnOnce(&mut ersa_core::CoreConfig),
-) -> (TestCore, Client, Log, tracing::subscriber::DefaultGuard) {
-    let log = Log::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(log.clone())
-        .with_ansi(false)
-        .with_max_level(tracing::Level::WARN)
-        .finish();
-    let guard = tracing::subscriber::set_default(subscriber);
+) -> (TestCore, Client, Log) {
+    let log = Log::installed();
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
     let git = Arc::new(FailingGit {
         removal,
@@ -1384,14 +1374,35 @@ async fn start_failing_git_with(
     )
     .await;
     let client = core.client().await;
-    (core, client, log, guard)
+    (core, client, log)
 }
 
-/// What a test's subscriber wrote.
+/// What the test binary's subscriber wrote, every test's together: each
+/// test picks its own lines by session id.
 #[derive(Clone, Default)]
 struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
 
 impl Log {
+    /// The log, its subscriber installed as the binary's global default on
+    /// first use. Global, not per thread: `tracing` caches whether a span
+    /// is wanted across threads, so a per-thread subscriber can miss the
+    /// span that names the session when another test's thread, with no
+    /// subscriber, reached it first.
+    fn installed() -> Log {
+        static LOG: std::sync::OnceLock<Log> = std::sync::OnceLock::new();
+        LOG.get_or_init(|| {
+            let log = Log::default();
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(log.clone())
+                .with_ansi(false)
+                .with_max_level(tracing::Level::WARN)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+            log
+        })
+        .clone()
+    }
+
     /// The lines written at warning level.
     fn warnings(&self) -> Vec<String> {
         let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
@@ -1441,8 +1452,7 @@ const STEP_FAILED: &str = "a step of the session's delete failed";
 #[tokio::test]
 async fn a_git_removal_that_drops_its_record_and_fails_still_deletes_the_folder() {
     let fake = Arc::new(FakeAdapter::new(1));
-    let (core, mut client, log, _guard) =
-        start_failing_git(&fake, Removal::DropsRecordThenFails).await;
+    let (core, mut client, log) = start_failing_git(&fake, Removal::DropsRecordThenFails).await;
     let (project, repo) = project(&mut client, core.dir.path()).await;
     let (workspace, folder) = isolated(&mut client, &project).await;
     let id = idle_session(&mut client, &workspace).await;
@@ -1468,8 +1478,11 @@ async fn a_git_removal_that_drops_its_record_and_fails_still_deletes_the_folder(
     assert!(git_failed.contains("is not a working tree"), "{git_failed}");
     // No step failed in the end.
     let warnings = log.warnings();
+    let session = format!("session={id}");
     assert!(
-        !warnings.iter().any(|line| line.contains(STEP_FAILED)),
+        !warnings
+            .iter()
+            .any(|line| line.contains(STEP_FAILED) && line.contains(&session)),
         "{warnings:#?}"
     );
 }
@@ -1482,7 +1495,7 @@ async fn a_git_removal_that_drops_its_record_and_fails_still_deletes_the_folder(
 #[tokio::test]
 async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reason() {
     let fake = Arc::new(FakeAdapter::new(1));
-    let (core, mut client, log, _guard) = start_failing_git(&fake, Removal::Fails).await;
+    let (core, mut client, log) = start_failing_git(&fake, Removal::Fails).await;
     let (project, _repo) = project(&mut client, core.dir.path()).await;
     let (workspace, folder) = isolated(&mut client, &project).await;
     let id = idle_session(&mut client, &workspace).await;
@@ -1551,7 +1564,7 @@ fn held_in_use(file: &Path, held: Duration, released: std::sync::mpsc::Receiver<
 async fn a_folder_held_in_use_for_a_few_seconds_is_still_deleted() {
     let fake = Arc::new(FakeAdapter::new(1));
     let hold = Some(Duration::from_secs(6));
-    let (core, mut client, _log, _guard) =
+    let (core, mut client, _log) =
         start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |_| {}).await;
     let (project, _repo) = project(&mut client, core.dir.path()).await;
     let (workspace, folder) = isolated(&mut client, &project).await;
@@ -1577,7 +1590,7 @@ async fn a_folder_still_in_use_when_the_tries_end_fails_the_delete() {
     let fake = Arc::new(FakeAdapter::new(1));
     // Held until Core, and with it the stand-in git, is dropped.
     let hold = Some(Duration::from_secs(600));
-    let (core, mut client, _log, _guard) =
+    let (core, mut client, _log) =
         start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |config| {
             config.folder_try_window = Duration::from_millis(500)
         })
