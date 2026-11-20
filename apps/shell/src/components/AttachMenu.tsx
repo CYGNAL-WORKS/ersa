@@ -2,6 +2,7 @@ import { File, Folder, Image, Plus } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { t } from "../catalog";
 import { Icon, IconButton } from "./Icon";
+import { useOpenSide } from "./openSide";
 import "./Chip.css";
 import "./AttachMenu.css";
 
@@ -33,6 +34,7 @@ export function AttachMenu({ onChoose, disabled, initialOpen = false, forceChoic
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const side = useOpenSide(menu, button, open);
   const id = useId();
   const anchor = `--attach-${id.replace(/[^a-zA-Z0-9]/g, "")}`;
   const focusOnOpen = useRef(false);
@@ -130,7 +132,7 @@ export function AttachMenu({ onChoose, disabled, initialOpen = false, forceChoic
         }}
       />
       {open && (
-        <div ref={menu} id={id} className="chip-list attach-menu" role="menu" aria-label={t("composer.attach.menuLabel")} style={{ positionAnchor: anchor } as CSSProperties} onKeyDown={onMenuKey}>
+        <div ref={menu} id={id} className="chip-list attach-menu" data-side={side} role="menu" aria-label={t("composer.attach.menuLabel")} style={{ positionAnchor: anchor } as CSSProperties} onKeyDown={onMenuKey}>
           {CHOICES.map((choice) => (
             <div
               key={choice.what}
