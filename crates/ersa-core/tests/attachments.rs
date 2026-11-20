@@ -1078,7 +1078,8 @@ async fn an_image_for_a_backend_that_takes_none_says_so() {
 #[tokio::test]
 async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
     let mut s = setup(FakeAdapter::new(1)).await;
-    file(&s.workspace, ".ersa/.gitignore", b"");
+    // One that un-ignores Core's folder outright: the deeper file still wins.
+    file(&s.workspace, ".ersa/.gitignore", b"!attachments/\n");
     file(&s.workspace, ".ersa/attachments/.gitignore", b"");
     support::git(&s.workspace, &["add", ".ersa"]);
     support::git(&s.workspace, &["commit", "--quiet", "-m", "ship .ersa"]);
@@ -1111,6 +1112,30 @@ async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
     );
     assert_eq!(
         std::fs::read(s.workspace.join(".ersa").join(".gitignore")).unwrap(),
-        b""
+        b"!attachments/\n"
     );
+}
+
+/// Core's own `.ersa/attachments/.gitignore` must be a plain file too: one
+/// that is a folder refuses the copy, and nothing is copied.
+// verifies: PROTO-CORE-API-R23
+#[tokio::test]
+async fn cores_ignore_file_that_is_not_a_plain_file_refuses_the_copy() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let id = s.session().await;
+    let notes = path(&file(&s.outside, "notes.md", b"x"));
+    std::fs::create_dir_all(
+        s.workspace
+            .join(".ersa")
+            .join("attachments")
+            .join(".gitignore"),
+    )
+    .unwrap();
+    let response = s
+        .send(&id, "", json!([{ "kind": "file", "path": notes }]))
+        .await;
+    let message = refused_at(&response, 0);
+    assert!(message.contains(".gitignore"), "{message}");
+    assert!(s.messages().is_empty());
+    assert!(copies(&s.scratch(&id)).is_empty());
 }
