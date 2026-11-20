@@ -51,6 +51,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Admission**: the one place in Core that decides every change to which projects, workspaces, sessions and sections exist and to what is under way on each. It holds that state, and one table says, for each state and each input, whether the input is done, refused or held (ADR 0037).
 - **Operation**: work on a session or workspace that takes time: a start, a stop, an archive, a delete, a removal, a send, a fork. Admission records it from when it is admitted until its end is reported.
 - **App log**: Core's log of its own operational records (process started, exited, failed to start, Core restarted). Not part of any session record; Core reads it back at startup for each session's first and last facts.
+- **Diagnostic log**: what Core writes for a person to read when something goes wrong: warnings and errors with their reasons, kept in a file in Ersa's data folder. Not the app log: Core never reads it back.
 - **Harness tools server**: the MCP tools Core exposes to every session's backend: cross-session messaging, session metadata, user-defined tools, and interface-driving tools. Never permission prompting.
 
 ## Interface
