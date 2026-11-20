@@ -1082,7 +1082,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             <NewSessionScreen
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
               key={composing?.key ?? 0}
-              covered={sessionsPage}
               hosts={[hello.host]}
               localHostId={hello.host.id}
               projects={screenProjects}
@@ -1096,7 +1095,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               dragDrop={dragDrop}
               rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
-              onChooseFolder={chooseFolder}
+              // Behind the sessions page, the quit question or the delete question the screen is out of reach, and a
+              // trust question it opened could not be seen or answered: Add project and Ctrl+O do nothing meanwhile.
+              onChooseFolder={sessionsPage || behind || quitAsk ? undefined : chooseFolder}
               onAddProject={addProject}
               away={away}
               onStop={() => startStop.current?.stop()}

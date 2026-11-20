@@ -84,6 +84,13 @@
   animation: trust-question-rise var(--motion-settle) var(--motion-ease-out);
 }
 
+/* In a window too short for a long folder, the folder gives up all but the lines the new-session screen leaves it
+   and scrolls inside itself, as the explanation does, so the title, the folder and the answers show together. */
+.trust-question[data-place="composer"] .trust-question-path {
+  flex-shrink: 1;
+  overflow-y: auto;
+}
+
 .trust-question[data-place="composer"] .trust-question-title {
   font-family: var(--type-ui-family);
   font-size: var(--type-ui-size);
