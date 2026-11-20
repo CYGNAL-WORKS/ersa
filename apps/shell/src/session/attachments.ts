@@ -14,6 +14,8 @@ export interface Attached {
   detail: string;
   /** Whether sending copies it, as Core judged it for one workspace, or for none yet (FLOW-SEND-MESSAGE-R17). */
   copied?: { workspace: string | undefined; copied: boolean };
+  /** An image's size in bytes, which counts toward the most Core sends inline in one message. */
+  bytes?: number;
   /** A pasted image's bytes, sent inline rather than by path (FLOW-SEND-MESSAGE-R08). */
   inline?: { media_type: string; data: string };
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
@@ -58,7 +60,9 @@ export function same(a: string, b: string): boolean {
 
 /** `info` as the composer holds it, with whether sending copies it, as Core judged it for `workspace`. */
 export function attached(info: AttachmentInspectResult, workspace?: string): Attached {
-  return { path: info.path, name: info.name, kind: info.kind, detail: detail(info), copied: { workspace, copied: info.copied } };
+  const held: Attached = { path: info.path, name: info.name, kind: info.kind, detail: detail(info), copied: { workspace, copied: info.copied } };
+  // An image goes inline, so its size counts toward the message's inline total (see `inlineLimited`).
+  return info.kind === "image" && info.size_bytes !== undefined ? { ...held, bytes: info.size_bytes } : held;
 }
 
 /**
@@ -116,7 +120,7 @@ export const INLINE_MAX = 10 * 1024 * 1024;
  */
 export async function pastedImage(file: Blob): Promise<Attached> {
   pastes += 1;
-  const pasted = { path: `pasted:${pastes}`, name: t("composer.attachment.pastedName"), kind: "image" as const, detail: size(file.size) };
+  const pasted = { path: `pasted:${pastes}`, name: t("composer.attachment.pastedName"), kind: "image" as const, detail: size(file.size), bytes: file.size };
   if (file.size > INLINE_MAX) return { ...pasted, problem: t("composer.attachment.pastedTooLargeError") };
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -127,6 +131,24 @@ export async function pastedImage(file: Blob): Promise<Attached> {
   } catch {
     return { ...pasted, problem: t("composer.attachment.pastedUnreadableError") };
   }
+}
+
+/**
+ * The images in `list` past the most Core sends inline in one message (PROTO-CORE-API, Turns and attachments;
+ * FLOW-SEND-MESSAGE-R10). The limit covers a message's images together, picked or pasted, so two that fit alone can be
+ * too many together. Counted in order, as Core counts them: an image is past the limit when it and the images before
+ * it pass it. One already marked is left out, since it holds the message anyway. The composer derives this each time
+ * rather than keeping it, so removing one image clears what it caused.
+ */
+export function overInline(list: readonly Attached[]): ReadonlySet<Attached> {
+  const over = new Set<Attached>();
+  let total = 0;
+  for (const a of list) {
+    if (a.kind !== "image" || a.problem !== undefined || a.bytes === undefined) continue;
+    total += a.bytes;
+    if (total > INLINE_MAX) over.add(a);
+  }
+  return over;
 }
 
 /**
