@@ -1104,10 +1104,10 @@ describe("a tile's menu, and renaming on the tile", () => {
     const core = await open();
     const lists = () => core.calls.filter((c) => c.method === "session.list").length;
     const listed = lists();
-    const id = titled[1].id;
+    const id = titled[1]!.id;
     const tile = (more: object) =>
       act(async () =>
-        core.emit({ kind: "notification", method: "session.tile", params: { session_id: id, tile: { state: "idle", pending: [] }, title: "Write the notes", created_at: titled[1].created_at, ...more } } as CoreEvent),
+        core.emit({ kind: "notification", method: "session.tile", params: { session_id: id, tile: { state: "idle", pending: [] }, title: "Write the notes", created_at: titled[1]!.created_at, ...more } } as CoreEvent),
       );
     const item = () => {
       fireEvent.click(within(rail()).getByRole("button", { name: "More for Write the notes" }));
