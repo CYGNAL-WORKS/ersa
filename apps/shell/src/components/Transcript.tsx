@@ -341,14 +341,7 @@ function PermissionCard({
       )}
       {/* Every field of the input, whole while the request is open: the user approves exactly what will run. */}
       <PermissionInput request={request} />
-      {request.blocked_path && (
-        <p className="transcript-card-detail">
-          {t("transcript.permission.pathLabel")}{" "}
-          <span className="mono">
-            <Revealed text={request.blocked_path} />
-          </span>
-        </p>
-      )}
+      <BlockedPath request={request} className="transcript-card-detail" />
       {/* The answers the shelf would offer, with the same primary (FLOW-APPROVE-PERMISSION-R27). None is focused by
           default, and Enter never approves. The transcript says it is reconnecting above, once. */}
       {open && (
@@ -399,6 +392,19 @@ function QuestionCard({ item, answer, live, onAnswer }: { item: Extract<Item, { 
         ))
       )}
     </section>
+  );
+}
+
+/** The path a permission request is blocked on, when it gives one: the card and the shelf say it alike (R11). */
+export function BlockedPath({ request, className }: { request: PermissionRequested; className: string }) {
+  if (!request.blocked_path) return null;
+  return (
+    <p className={className}>
+      {t("transcript.permission.pathLabel")}{" "}
+      <span className="mono">
+        <Revealed text={request.blocked_path} />
+      </span>
+    </p>
   );
 }
 
