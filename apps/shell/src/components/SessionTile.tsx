@@ -188,15 +188,16 @@ export function TileItem({
   const domId = useId();
   const open = shelf !== undefined;
   const shown = shelf?.render(domId);
-  // The shelf last drawn, kept while it slides back after closing (docs/design/RAIL.md, The shelf: Motion).
-  const last = useRef<ReactNode>(undefined);
+  // The shelf last drawn and its tone, kept while it slides back after closing (docs/design/RAIL.md, The shelf: Motion):
+  // the shelf takes its edge from this tile's tone, so the tone stays until it has gone.
+  const last = useRef<{ node: ReactNode; tone: OpenShelf["tone"] }>(undefined);
   // Kept once committed, so a render React discards never slides back.
   useLayoutEffect(() => {
-    if (shown !== undefined) last.current = shown;
+    if (shown !== undefined && shelf) last.current = { node: shown, tone: shelf.tone };
   });
   // Decided in the render that closes it, so the layer never leaves the page for a frame and the shelf keeps its
   // element, and the join measured on it, as it slides back.
-  const [closing, setClosing] = useState<ReactNode>();
+  const [closing, setClosing] = useState<{ node: ReactNode; tone: OpenShelf["tone"] }>();
   const [wasOpen, setWasOpen] = useState(open);
   if (open !== wasOpen) {
     setWasOpen(open);
@@ -277,10 +278,9 @@ export function TileItem({
     const target = event.target as Element;
     if (!inShelf(target) && !target.classList.contains("session-chevron-button")) return;
     event.preventDefault();
-    focusInShelf.current = true;
     onClose();
   };
-  const layer = shown ?? closing;
+  const layer = shown ?? closing?.node;
   // Each tile names its own anchor, so a shelf sliding back stays by its tile while another tile's opens.
   const anchor = `--tile-${domId.replace(/[^\w-]/g, "")}`;
   return (
@@ -289,7 +289,7 @@ export function TileItem({
       className="session-item"
       data-slide={`session:${id}`}
       data-shelf={open || undefined}
-      data-tone={shelf?.tone}
+      data-tone={shelf?.tone ?? closing?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
       // A slide's transform would take the shelf off its anchor, so the tile that holds one slides by its offset.
       data-slide-top={layer !== undefined || undefined}

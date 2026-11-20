@@ -10,17 +10,6 @@
   animation: rail-foot-in var(--motion-settle) var(--motion-ease-out);
 }
 
-/* The status region while it shows nothing: out of the layout and out of sight, but still read by assistive
-   technology, which hears "Reconnected" from it. */
-.rail-foot-unseen {
-  position: absolute;
-  width: var(--line-hairline);
-  height: var(--line-hairline);
-  overflow: hidden;
-  clip-path: circle(0);
-  white-space: nowrap;
-}
-
 /* What sits beneath the note starts under its words, not under its glyph. */
 .rail-foot > :not(.problem) {
   margin-inline-start: calc(var(--size-glyph) + var(--space-sm));
