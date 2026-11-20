@@ -46,7 +46,7 @@ pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
         | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown"
-        | "attachment.inspect" => LONG_REQUEST_TIMEOUT,
+        | "attachment.inspect" | "session.delete" => LONG_REQUEST_TIMEOUT,
         // A silence, not a limit: see [`SEND_SILENCE`].
         "session.send" => SEND_SILENCE,
         _ => REQUEST_TIMEOUT,
@@ -596,6 +596,14 @@ mod link_tests {
         // Longer than Core's own limit on an inspect, so Core's reason reaches the window.
         assert_eq!(timeout_for("attachment.inspect"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("project.list"), REQUEST_TIMEOUT);
+    }
+
+    /// A delete's folder alone can take longer than the 30 seconds most
+    /// requests get, so the Shell waits 10 minutes for its answer.
+    // verifies: PROTO-CORE-API-R115
+    #[test]
+    fn a_delete_is_waited_on_for_10_minutes() {
+        assert_eq!(timeout_for("session.delete"), Duration::from_secs(10 * 60));
     }
 
     #[tokio::test]
