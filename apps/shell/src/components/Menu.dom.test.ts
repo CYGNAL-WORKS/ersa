@@ -135,6 +135,26 @@ describe("a menu from the pointer", () => {
     expect(closed).toEqual(["away"]);
   });
 
+  // #374: moving from a submenu's item to a plain one, as from Group by to Reset to defaults, leaves no submenu open.
+  it("opens a submenu under the pointer, keeps it open inside it, and closes it on a plain item or one it can't take", () => {
+    render(createElement(Owner, { focus: "menu" }));
+    const sub = screen.getByRole("menuitem", { name: "Move to section" });
+    const expanded = () => sub.getAttribute("aria-expanded");
+    fireEvent.pointerEnter(sub);
+    expect(expanded()).toBe("true");
+    // Into the submenu: it stays open.
+    fireEvent.pointerEnter(screen.getByRole("menuitemradio", { name: "Ideas" }));
+    expect(expanded()).toBe("true");
+    fireEvent.pointerEnter(screen.getByRole("menuitem", { name: "Delete…" }));
+    expect(expanded()).toBe("false");
+    fireEvent.pointerEnter(sub);
+    expect(expanded()).toBe("true");
+    // An item it can't take closes it too.
+    fireEvent.pointerEnter(screen.getByRole("menuitem", { name: /Fork/ }));
+    expect(expanded()).toBe("false");
+    expect(closed).toEqual([]);
+  });
+
   it("closes on a press outside it", () => {
     render(createElement(Owner, { focus: "menu" }));
     fireEvent.pointerDown(document.body);
