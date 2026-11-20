@@ -38,7 +38,7 @@ import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
 import type { Draft } from "../session/questionForm";
 import { type ShelfShown, type ShelfShows, shelfTone, shownAfter, shownRequest } from "../session/shelf";
-import { tileOf, wantTone } from "../session/tile";
+import { tileOf } from "../session/tile";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
 
@@ -849,6 +849,8 @@ interface ShelfMore {
   live?: boolean;
   /** Settles once shown, as when its last request is answered elsewhere: what the shelf keeps on screen meanwhile. */
   settle?: boolean;
+  /** Its tile waits on a question, whatever the shelf shows. */
+  asks?: boolean;
 }
 
 /** Every part a menu has (docs/design/RAIL.md, Menus), as the arrange and tile menus will use them. */
@@ -894,7 +896,7 @@ function QuestionCardOpen({ questions, initial }: { questions: Question[]; initi
 }
 
 function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }) {
-  const { short, answer, live = true, focus, settle } = more;
+  const { short, answer, live = true, focus, settle, asks } = more;
   // What the shelf shows now: `shows`, or settled once it has been shown, before the gallery paints.
   const [now, setNow] = useState(shows);
   useLayoutEffect(() => {
@@ -903,7 +905,9 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
   // The open tile waits on what its shelf shows: a question's tile says it has one.
   const listed = shelfTiles[1] as Session;
   const open: Session =
-    shows.state === "question" ? { ...listed, tile: { ...listed.tile, pending: [{ kind: "question", request_id: shows.requestId }] } } : listed;
+    shows.state === "question" || asks
+      ? { ...listed, tile: { ...listed.tile, pending: [{ kind: "question", request_id: shows.state === "question" ? shows.requestId : "rq" }] } }
+      : listed;
   const tiles = [shelfTiles[0] as Session, open, shelfTiles[2] as Session];
   const tile = tileOf(open);
   // Its tone is kept as the window keeps it, from what the shelf has shown.
@@ -921,7 +925,7 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
           onSelect={() => {}}
           shelf={{
             id: open.id,
-            tone: shelfTone(now, nextRecord, wantTone(open.tile.pending)),
+            tone: shelfTone(now, nextRecord, open.tile.pending),
             render: (domId) => (
               <Shelf id={domId} tile={tile} shows={now} onRetry={() => {}} answers={answer && { [shownRequest(shows) ?? ""]: answer }} live={live} onDecide={() => {}} onAnswer={() => {}} force={focus ? "focus" : undefined} />
             ),
@@ -961,6 +965,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A question as it settles", { state: "question", requestId: "rq", questions: [singleQuestion] }, { settle: true }],
   ["Loading", { state: "loading" }],
   ["Answered before it showed one", { state: "loading" }, { settle: true }],
+  ["Loading, for a session that waits on a question", { state: "loading" }, { asks: true }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
   ["A request Ersa can't show", { state: "unknown" }],
   // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.
