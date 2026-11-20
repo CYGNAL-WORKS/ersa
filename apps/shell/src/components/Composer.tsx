@@ -161,9 +161,13 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
   // words arrives again; a send's progress or its ending well changes neither key. Before paint, so the dialog's line
   // never shows over the newer one.
   const sendRefusal = sending?.state === "failed" || sending?.state === "unknown" ? JSON.stringify(sending) : undefined;
+  // One effect each, so one line going while the other stays is not an arrival.
   useLayoutEffect(() => {
-    if (sendRefusal !== undefined || refusedChange !== undefined) setDialogFailed(false);
-  }, [sendRefusal, refusedChange]);
+    if (sendRefusal !== undefined) setDialogFailed(false);
+  }, [sendRefusal]);
+  useLayoutEffect(() => {
+    if (refusedChange !== undefined) setDialogFailed(false);
+  }, [refusedChange]);
   const add = (more: readonly Attached[]) => {
     if (more.length === 0) return;
     setDialogFailed(false);
