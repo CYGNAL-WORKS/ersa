@@ -648,3 +648,9 @@ pub fn resolve_program(program: &str, path: Option<&str>) -> String {
     }
     program.to_string()
 }
+
+/// Opens a file to read. Windows never waits opening a file by path: the
+/// names that reach a pipe or a device are refused before ([`names_device`]).
+pub fn open_without_waiting(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}

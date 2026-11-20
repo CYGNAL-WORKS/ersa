@@ -177,7 +177,7 @@ pub struct Target<'a> {
 }
 
 /// Checks every attachment, then copies the ones from outside the
-/// workspace into the session's scratch folder (PROTO-CORE-API-R21 to R23).
+/// workspace into the session's scratch folder (PROTO-CORE-API-R21, R23, R110).
 /// On any failure nothing this message copied remains.
 ///
 /// The caller holds the session's scratch folder for the whole job, so no
@@ -263,6 +263,11 @@ fn check(
     work: &Work,
 ) -> Result<Checked, Fail> {
     let reason = |s: String| Fail::Reason(s);
+    // Said first, for a pasted image and one by path alike: otherwise the
+    // size check below would name a limit of 0 bytes.
+    if attachment.kind == AttachmentKind::Image && images.media_types.is_empty() {
+        return Err(reason("this session's backend doesn't take images".into()));
+    }
     if attachment.kind == AttachmentKind::Image && attachment.path.is_none() {
         // A pasted image: its bytes are in the message.
         let (Some(media_type), Some(data)) = (&attachment.media_type, &attachment.data) else {
@@ -306,7 +311,7 @@ fn check(
                 )));
             }
             let mut bytes = Vec::with_capacity(meta.len() as usize);
-            fs::File::open(given)?
+            open_file(given)?
                 .take(images.max_bytes + 1)
                 .read_to_end(&mut bytes)?;
             work.step()?;
@@ -491,36 +496,32 @@ fn copy_all(
 }
 
 /// Makes sure `.ersa/attachments/<session id>/.partial/` are real folders
-/// inside the workspace, never links, that `.ersa/` is ignored by version
-/// control, and that `.partial/` is empty. Returns the session's folder.
+/// inside the workspace, never links, that `.ersa/attachments/` is ignored
+/// by version control (and `.ersa/` too, unless the repository ships its own
+/// `.ersa/.gitignore`), and that `.partial/` is empty. Returns the session's
+/// folder.
 fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<PathBuf, Fail> {
     let ersa = workspace.join(ERSA);
     real_folder(&ersa)?;
     work.step()?;
-    let ignore = ersa.join(".gitignore");
-    match fs::symlink_metadata(&ignore) {
-        Ok(meta) if meta.file_type().is_file() => {}
-        Ok(_) => {
-            return Err(Fail::Reason(
-                ".ersa/.gitignore is not a plain file in the workspace".into(),
-            ));
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            // `create_new`: never writes through something that appeared
-            // meanwhile.
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&ignore)?
-                .write_all(b"*\n")?;
-        }
-        Err(e) => return Err(e.into()),
-    }
+    // A repository may ship its own `.ersa/.gitignore`, which may ignore
+    // less than everything: it is the user's, so it is only made when absent
+    // (PROTO-CORE-API-R111).
+    ignore_everything(&ersa.join(".gitignore"), None)?;
     work.step()?;
     let mut folder = ersa;
     for part in [ATTACHMENTS, session_id, PARTIAL] {
         folder = folder.join(part);
         real_folder(&folder)?;
+        if part == ATTACHMENTS {
+            // Core's own ignore file, in Core's own folder, keeps every copy
+            // ignored whatever `.ersa/.gitignore` says: git applies a deeper
+            // `.gitignore` over a shallower one. Being Core's, it is read and
+            // made again when it says anything else, staged under a name of
+            // this session's own.
+            let staging = folder.join(format!(".gitignore.{session_id}"));
+            ignore_everything(&folder.join(".gitignore"), Some(&staging))?;
+        }
         work.step()?;
     }
     // What a crash or a stopped job left aside goes first: the folder is
@@ -534,6 +535,87 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
         .parent()
         .expect("under the session's folder")
         .to_path_buf())
+}
+
+/// What an ignore file of Core's holds: every entry beside it ignored.
+const IGNORE_ALL: &[u8] = b"*\n";
+
+/// Makes a `.gitignore` at `path` that ignores everything beside it, when
+/// none is there; one that is not a plain file (a link, a folder) is
+/// refused. One already there is left as it is, unless Core owns it, which
+/// the `staging` path Core makes it under says: then one that says anything
+/// else is made again.
+///
+/// Sessions of one workspace share Core's file and nothing orders their
+/// jobs, so Core's file is never removed or made in place: it is written
+/// whole at `staging`, a name only this session's job uses, and renamed
+/// over `path`. A rename replaces what is there (a link as the link itself,
+/// never followed) or makes it, so two jobs at once both succeed.
+fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if !meta.file_type().is_file() => {
+            return Err(Fail::Reason(format!(
+                "{} is not a plain file in the workspace",
+                path.display()
+            )));
+        }
+        Ok(_) => {
+            let Some(_) = staging else {
+                return Ok(());
+            };
+            // Read through `open_file`, so a FIFO swapped in meanwhile never
+            // holds the job.
+            let mut held = Vec::new();
+            open_file(path)?
+                .take(IGNORE_ALL.len() as u64 + 1)
+                .read_to_end(&mut held)?;
+            if held == IGNORE_ALL {
+                return Ok(());
+            }
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    let Some(staging) = staging else {
+        // The user's file: made only when absent. `create_new` never writes
+        // through something that appeared meanwhile, and one another job
+        // made meanwhile is left as it is.
+        return match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(mut file) => Ok(file.write_all(IGNORE_ALL)?),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(e.into()),
+        };
+    };
+    // What a crash left at `staging` goes first; `create_new` then never
+    // writes through something put there meanwhile.
+    remove_entry(staging)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(staging)?
+        .write_all(IGNORE_ALL)?;
+    fs::rename(staging, path).map_err(|e| {
+        let _ = remove_entry(staging);
+        Fail::from(e)
+    })
+}
+/// Opens the file at `path` to read, checked again by what was opened: it
+/// may have been swapped for something else (a FIFO, a folder) since it was
+/// checked, and a FIFO opened the usual way waits for a writer that may
+/// never come, holding the session's scratch folder all the while.
+fn open_file(path: &Path) -> Result<fs::File, Fail> {
+    let file = crate::platform::open_without_waiting(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(Fail::Reason(format!(
+            "{} changed after it was checked and is no longer a file",
+            path.display()
+        )));
+    }
+    Ok(file)
 }
 
 /// Makes `path` a folder when nothing is there, and refuses anything there
@@ -590,7 +672,7 @@ impl Copy<'_> {
 
     fn file(&mut self, from: &Path, to: &Path) -> Result<(), Fail> {
         self.count_entry()?;
-        let mut source = fs::File::open(from)?;
+        let mut source = open_file(from)?;
         let mut dest = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -969,6 +1051,125 @@ mod tests {
         // Stops while copying were among them: the file alone takes three
         // chunks.
         assert!(stopped > 10, "{stopped}");
+    }
+
+    /// A file swapped for a FIFO after it was checked is refused when the
+    /// copy opens it, at once, rather than waiting for a writer that never
+    /// comes while the job holds the session's scratch folder.
+    // verifies: PROTO-CORE-API-R23
+    #[cfg(unix)]
+    #[test]
+    fn a_source_swapped_for_a_fifo_after_the_check_is_refused_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = fs::canonicalize(dir.path()).unwrap().join("workspace");
+        let outside = workspace.parent().unwrap().join("outside");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let source = outside.join("notes.md");
+        fs::write(&source, b"notes").unwrap();
+        let attachment = Attachment {
+            kind: AttachmentKind::File,
+            path: Some(source.display().to_string()),
+            media_type: None,
+            data: None,
+        };
+        let target = Target {
+            workspace: &workspace,
+            session_id: "s-1",
+            images: ImageLimits::default(),
+        };
+        let work = Work::default();
+        let checked = check(&attachment, &workspace, target.images, &mut 0, &work)
+            .unwrap_or_else(|_| panic!("the file passes the check"));
+        assert!(matches!(checked, Checked::Copy { .. }));
+
+        // The swap: the checked file becomes a FIFO with no writer.
+        fs::remove_file(&source).unwrap();
+        let made = std::process::Command::new("mkfifo")
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(made.success());
+
+        let (answer, answered) = std::sync::mpsc::channel();
+        let job_workspace = workspace.clone();
+        std::thread::spawn(move || {
+            let target = Target {
+                workspace: &job_workspace,
+                session_id: "s-1",
+                images: ImageLimits::default(),
+            };
+            let mut checked = [checked];
+            let result = copy_all(
+                &target,
+                &job_workspace,
+                &mut checked,
+                0,
+                &mut Vec::new(),
+                &Work::default(),
+            );
+            let _ = answer.send(result);
+        });
+        // A generous limit on the copy's own answer, never a pause sized to
+        // pass: an open that waits on a writer never answers at all.
+        let result = answered.recv_timeout(Duration::from_secs(10));
+        if result.is_err() {
+            // Release the stuck open so the thread ends with the test.
+            let _ = fs::OpenOptions::new().write(true).open(&source);
+        }
+        match result {
+            Ok(Err(Refused::At { index: 0, reason })) => {
+                assert!(reason.contains("notes.md"), "{reason}");
+            }
+            other => panic!("the copy must be refused at once: {other:?}"),
+        }
+        // Nothing stays in the scratch folder.
+        let scratch = workspace.join(ERSA).join(ATTACHMENTS).join("s-1");
+        let partial: Vec<_> = fs::read_dir(scratch.join(PARTIAL)).unwrap().collect();
+        assert!(partial.is_empty());
+    }
+
+    /// Jobs of different sessions in one workspace, nothing ordering them,
+    /// all find a shipped `.ersa/attachments/.gitignore` that ignores less
+    /// and make it again at once: none of them is refused for it, and it ends
+    /// holding `*`.
+    // verifies: PROTO-CORE-API-R110
+    #[test]
+    fn sessions_making_cores_ignore_file_again_at_once_all_succeed() {
+        const JOBS: usize = 8;
+        let dir = tempfile::tempdir().unwrap();
+        let attachments = dir.path().join(ATTACHMENTS);
+        fs::create_dir_all(&attachments).unwrap();
+        let ignore = attachments.join(".gitignore");
+        for round in 0..100 {
+            fs::write(&ignore, b"").unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(JOBS));
+            let jobs: Vec<_> = (0..JOBS)
+                .map(|job| {
+                    let (start, attachments, ignore) =
+                        (start.clone(), attachments.clone(), ignore.clone());
+                    std::thread::spawn(move || {
+                        let staging = attachments.join(format!(".gitignore.s-{job}"));
+                        start.wait();
+                        ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
+                            Fail::Reason(reason) => reason,
+                            Fail::Stopped => "stopped".into(),
+                        })
+                    })
+                })
+                .collect();
+            for job in jobs {
+                let answer = job.join().unwrap();
+                assert!(answer.is_ok(), "round {round}: {answer:?}");
+            }
+            assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL, "round {round}");
+        }
+        // No staging file is left behind.
+        let left: Vec<_> = fs::read_dir(&attachments)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from(".gitignore")]);
     }
 
     #[test]
