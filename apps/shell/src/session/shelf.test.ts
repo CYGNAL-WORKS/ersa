@@ -113,7 +113,8 @@ describe("what the shelf shows", () => {
     const view = viewOf([permission("r1"), permission("r2"), question("r3")]);
     const shows = shelfOf(view, pending(["question", "r3"], ["permission", "r2"], ["permission", "r1"]));
     expect(shows).toMatchObject({ state: "permission", request: { request_id: "r1" }, place: { n: 1, m: 3 } });
-    expect(shelfTone(shows)).toBe("caution");
+    // The shown request's tone, whatever the tile's with the shelf closed.
+    expect(shelfTone(shows, undefined, "accent")).toBe("caution");
   });
 
   it("skips requests already answered and the ones the tile no longer lists", () => {
@@ -125,7 +126,7 @@ describe("what the shelf shows", () => {
     ]);
     expect(shelfOf(view, pending(["question", "r3"]))).toMatchObject({ state: "question", requestId: "r3" });
     expect(shelfOf(view, pending(["question", "r3"]))).not.toHaveProperty("place.m");
-    expect(shelfTone(shelfOf(view, pending(["question", "r3"])))).toBe("accent");
+    expect(shelfTone(shelfOf(view, pending(["question", "r3"])), undefined, "caution")).toBe("accent");
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R11
@@ -311,12 +312,20 @@ describe("several requests", () => {
     expect(shownAfter(first, undefined, undefined)).toBeUndefined();
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R34
   it("keeps a settling shelf in the tone of the last request it showed", () => {
     const asked = shownAfter(undefined, "s1", asking);
-    expect(shelfTone({ state: "settled" }, asked)).toBe("accent");
+    expect(shelfTone({ state: "settled" }, asked, "caution")).toBe("accent");
     // One it couldn't show is the last on screen too.
-    expect(shelfTone({ state: "settled" }, shownAfter(asked, "s1", { state: "unknown" }))).toBe("caution");
-    expect(shelfTone({ state: "settled" }, shownAfter(undefined, "s1", { state: "loading" }))).toBe("caution");
+    expect(shelfTone({ state: "settled" }, shownAfter(asked, "s1", { state: "unknown" }), "accent")).toBe("caution");
+  });
+
+  it("keeps the tone its tile has with the shelf closed while it has shown no request", () => {
+    for (const closed of ["accent", "caution"] as const) {
+      expect(shelfTone({ state: "loading" }, undefined, closed)).toBe(closed);
+      expect(shelfTone({ state: "failed", message: "gone" }, undefined, closed)).toBe(closed);
+      expect(shelfTone({ state: "settled" }, shownAfter(undefined, "s1", { state: "loading" }), closed)).toBe(closed);
+    }
   });
 });
 
