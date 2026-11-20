@@ -8,8 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-20 FLOW-NEW-SESSION: no requirement says that nothing is sent while the trust question is open, though R24 to R27 rely on it (a send would start a session on the project chosen before the question). #375 holds send while it is open (send shows unavailable, the words stay editable), and its test cites no requirement.
-- [ ] 2026-11-20 none (docs/design/COMPOSER.md, The trust question): COMPOSER.md says what the question shows but not what gives way in a window too small for it. #375 keeps the folder whole wherever the room above the box or the column holds it; in the smallest windows the folder gives up all but its first line and scrolls inside itself, as the explanation does, so the title, the folder and the answers show together.
 
 
 ## Resolved recently (optional, trimmed in planning passes)

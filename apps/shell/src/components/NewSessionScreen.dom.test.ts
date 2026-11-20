@@ -110,6 +110,7 @@ describe("adding a project from the project chip", () => {
     expect(question.textContent).toContain("D:\\Clones\\stranger");
   });
 
+  // verifies: FLOW-NEW-SESSION-R42
   it("sends nothing while the trust question is open, and sends again once it is answered", async () => {
     const onStart = vi.fn(async () => false);
     const onChooseFolder = async () => ({ kind: "new", path: "D:/clones/stranger" }) as const;
