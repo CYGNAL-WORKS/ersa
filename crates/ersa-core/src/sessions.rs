@@ -908,13 +908,6 @@ impl Handle {
         self.row().map(|row| self.describe_from(row))
     }
 
-    /// Whether the session runs under an id Core chose that no look has
-    /// found the backend's record under yet: a turn's end, and each list,
-    /// looks again (FLOW-RESUME-SESSION-R19).
-    fn awaits_record(&self) -> bool {
-        self.id_chosen && !lock(&self.presented).record_found
-    }
-
     /// The backend's id Core carries for the session, in `session.list` and
     /// every `session.tile`. The row holds the id once it is the backend's:
     /// one the backend announced, one its record lists, or one Core chose
@@ -1205,11 +1198,11 @@ impl SessionManager {
         let mut summaries = tokio::task::JoinSet::new();
         for handle in self.handles() {
             // A live session's last activity follows its turns, and its
-            // record is read again when it ends. One whose id Core chose and
-            // whose record no look has found yet is looked at all the same,
-            // so the list carries the id once the backend has the record
-            // (FLOW-RESUME-SESSION-R19).
-            if handle.live().is_some() && !handle.awaits_record() {
+            // record is read again when it ends. One whose id Core chose is
+            // looked at all the same, so the list carries the id while the
+            // backend has the record, and not once it is gone
+            // (FLOW-RESUME-SESSION-R18, R19).
+            if handle.live().is_some() && !handle.id_chosen {
                 continue;
             }
             let Some(row) = handle.stored_row() else {
@@ -3292,10 +3285,10 @@ async fn run_pipeline(pipeline: Pipeline) {
         publish(&mut lock(&handle.hub), &handle.id, &events);
         // A turn has ended, so the backend has had the session's first
         // message: look for its record under the id Core chose, and carry
-        // the id once the look finds it (FLOW-RESUME-SESSION-R19). Apart
-        // from the stream, which never waits on a read.
+        // the id while the look finds it (FLOW-RESUME-SESSION-R18, R19).
+        // Apart from the stream, which never waits on a read.
         if activity_changed
-            && handle.awaits_record()
+            && handle.id_chosen
             && let Some(row) = handle.stored_row()
         {
             let (store, handle, tiles) = (store.clone(), Arc::clone(&handle), Arc::clone(&tiles));

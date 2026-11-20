@@ -957,3 +957,50 @@ async fn the_list_carries_a_self_named_session_id_from_when_the_backend_names_it
     let stopped = session_row(&mut client, &id).await;
     assert_eq!(stopped["backend_session_id"], json!(backend_id));
 }
+
+/// When the backend names a session anew on its stream, and nothing else
+/// about the tile changes, Core still sends a tile carrying the id it now
+/// carries, so a window that has the session learns it.
+// verifies: FLOW-RESUME-SESSION-R20
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tile_goes_out_when_the_backend_names_the_session_anew() {
+    let (core, _stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+    let session = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
+        )
+        .await;
+    let id = session["id"].as_str().unwrap().to_string();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while session_row(&mut client, &id)
+        .await
+        .get("backend_session_id")
+        .is_none()
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fake never named the session"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    client
+        .result(
+            "session.send",
+            json!({ "id": id, "text": "name as fake-renamed" }),
+        )
+        .await;
+    let carrying = |n: &Value| {
+        n["method"] == "session.tile"
+            && n["params"]["session_id"] == id
+            && n["params"]["backend_session_id"] == "fake-renamed"
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client.notification_where(carrying),
+    )
+    .await
+    .expect("no session.tile carried the new id");
+}
