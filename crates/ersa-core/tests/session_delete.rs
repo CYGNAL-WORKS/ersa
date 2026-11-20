@@ -5,7 +5,7 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -13,6 +13,9 @@ use std::time::Duration;
 use ersa_adapter::OpenElsewhere;
 use ersa_core::{Adapter, Gate};
 use serde_json::{Value, json};
+use support::deleting::{
+    FailingGit, Removal, idle_session, isolated, listed, project, root, token,
+};
 use support::fake::{self, FakeAdapter, Records};
 use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
 
@@ -35,101 +38,6 @@ async fn restarted(core: TestCore, records: Records) -> (TestCore, Client) {
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let client = core.client().await;
     (core, client)
-}
-
-/// A git repository at `dir/repo`, added as a project; returns the project
-/// and the repository's folder.
-async fn project(client: &mut Client, dir: &Path) -> (Value, PathBuf) {
-    let repo = dir.join("repo");
-    git_repo(&repo);
-    let project = client
-        .result(
-            "project.add",
-            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
-        )
-        .await;
-    (project, repo)
-}
-
-/// A new isolated workspace of `project`; returns it and its folder.
-async fn isolated(client: &mut Client, project: &Value) -> (Value, PathBuf) {
-    let workspace = client
-        .result("workspace.create", json!({ "project_id": project["id"] }))
-        .await;
-    let folder = PathBuf::from(workspace["path"].as_str().unwrap());
-    (workspace, folder)
-}
-
-/// The project's root workspace.
-async fn root(client: &mut Client, project: &Value) -> Value {
-    let workspaces = client
-        .result("workspace.list", json!({ "project_id": project["id"] }))
-        .await;
-    workspaces
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|w| w["kind"] == "root")
-        .cloned()
-        .expect("a root workspace")
-}
-
-/// A session of the fake backend in `workspace`, started and idle: its
-/// backend has named it, so it has a record. Returns its id.
-async fn idle_session(client: &mut Client, workspace: &Value) -> String {
-    let session = client
-        .result(
-            "session.create",
-            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
-        )
-        .await;
-    let id = session["id"].as_str().unwrap().to_string();
-    client
-        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-        .await;
-    client.events_until("session.started").await;
-    client
-        .result("session.send", json!({ "id": id, "text": "idle" }))
-        .await;
-    wait_for_state(client, &id, "idle").await;
-    id
-}
-
-/// Waits until `session.list` reports the session in `state`.
-async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if listed(client, id)
-            .await
-            .is_some_and(|row| row["state"] == state)
-        {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {id} never became {state}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
-/// The session's row in `session.list`, if it is listed.
-async fn listed(client: &mut Client, id: &str) -> Option<Value> {
-    let sessions = client.result("session.list", json!({})).await;
-    sessions
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["id"] == id)
-        .cloned()
-}
-
-/// The token of the workspace's `workspace.changes` now.
-async fn token(client: &mut Client, workspace: &Value) -> Value {
-    client
-        .result("workspace.changes", json!({ "id": workspace["id"] }))
-        .await["token"]
-        .clone()
 }
 
 /// Whether `workspace.list` still lists the workspace.
@@ -1284,65 +1192,6 @@ async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark() {
     assert_eq!(kind(&error), "invalid_state", "{error}");
 }
 
-/// What git does to a worktree removal in [`FailingGit`].
-#[derive(Clone, Copy)]
-enum Removal {
-    /// Deletes git's record of the worktree and then fails, leaving the
-    /// files, as git on Windows does on a file in use.
-    DropsRecordThenFails,
-    /// Fails before touching anything, so git still lists the worktree.
-    Fails,
-}
-
-/// Core's command transport: the local one, with every
-/// `git worktree remove` failing as `removal` says.
-struct FailingGit {
-    removal: Removal,
-    /// When set, the first removal also holds the worktree's `in-use.txt`
-    /// in use (Windows), as a process that has just exited does, for this
-    /// long or until this stand-in is dropped: counted from git's first
-    /// try, so the tries at the folder are what it outlasts.
-    hold: Option<Duration>,
-    /// Lets the held file go when dropped.
-    held: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
-    inner: ersa_core::transport::LocalTreeTransport,
-}
-
-#[ersa_adapter::async_trait]
-impl ersa_adapter::Transport for FailingGit {
-    async fn spawn(
-        &self,
-        mut spec: ersa_adapter::ProcessSpec,
-    ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
-        let removes = spec
-            .args
-            .windows(2)
-            .any(|pair| pair == ["worktree", "remove"]);
-        if spec.program == "git" && removes {
-            match self.removal {
-                Removal::DropsRecordThenFails => {
-                    // The worktree's `.git` file names git's record of it.
-                    // Gone after the first try; git's own removal then
-                    // fails on every try: not a working tree.
-                    let worktree = PathBuf::from(spec.args.last().unwrap());
-                    let mut held = self.held.lock().unwrap();
-                    if let (Some(hold), None) = (self.hold, held.as_ref()) {
-                        let (release, released) = std::sync::mpsc::channel();
-                        held_in_use(&worktree.join("in-use.txt"), hold, released);
-                        *held = Some(release);
-                    }
-                    if let Ok(link) = std::fs::read_to_string(worktree.join(".git")) {
-                        let record = link.trim().trim_start_matches("gitdir:").trim();
-                        let _ = std::fs::remove_dir_all(record);
-                    }
-                }
-                Removal::Fails => spec.args.push("--no-such-option".into()),
-            }
-        }
-        self.inner.spawn(spec).await
-    }
-}
-
 /// A started Core whose git fails worktree removals as `removal` says, and
 /// whose warnings are written to the returned log.
 async fn start_failing_git(fake: &Arc<FakeAdapter>, removal: Removal) -> (TestCore, Client, Log) {
@@ -1358,12 +1207,7 @@ async fn start_failing_git_with(
 ) -> (TestCore, Client, Log) {
     let log = Log::installed();
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
-    let git = Arc::new(FailingGit {
-        removal,
-        hold,
-        held: std::sync::Mutex::new(None),
-        inner: ersa_core::transport::LocalTreeTransport::for_commands(),
-    });
+    let git = Arc::new(FailingGit::new(removal, hold));
     let core = start_with_adapters(
         tempdir(),
         move |config| {
@@ -1531,26 +1375,6 @@ async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reaso
     let step_failed = log.warning(STEP_FAILED, &id);
     assert!(step_failed.contains("step=6"), "{step_failed}");
     assert!(step_failed.contains("refused to delete"), "{step_failed}");
-}
-
-/// Holds `file` open for `held`, or until `released` hears or is
-/// disconnected, sharing reading only, so deleting it fails on Windows
-/// until then, as a process that has just exited holds files there.
-/// Elsewhere an open file does not stop its deletion.
-fn held_in_use(file: &Path, held: Duration, released: std::sync::mpsc::Receiver<()>) {
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // FILE_SHARE_READ alone: no delete sharing.
-        options.share_mode(1);
-    }
-    let open = options.open(file).unwrap();
-    std::thread::spawn(move || {
-        let _ = released.recv_timeout(held);
-        drop(open);
-    });
 }
 
 /// git's removal fails at once, after dropping its record, and a file in
