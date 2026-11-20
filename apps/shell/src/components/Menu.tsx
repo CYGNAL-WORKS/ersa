@@ -190,7 +190,6 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
       popover={nested || !POPOVERS ? undefined : "manual"}
       tabIndex={-1}
       data-place={"anchor" in place ? (nested ? "beside" : "below") : "point"}
-      data-checks={nested || undefined}
       data-closing={!open || undefined}
       // While it fades out it takes no input.
       inert={!open}
@@ -227,8 +226,19 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
               aria-expanded={sub ? subOpen : undefined}
               aria-checked={nested && entry.kind === "item" && entry.checked !== undefined ? entry.checked : undefined}
               style={sub ? ({ anchorName: anchor } as CSSProperties) : undefined}
-              onPointerEnter={() => {
-                if (!sub || off) return;
+              onPointerEnter={(event) => {
+                // Keyboard focus in the submenu the pointer is about to close comes back to the item under the pointer,
+                // so the menu keeps its keys: a closed submenu is inert, and focus in it would fall out of the menu.
+                const at = document.activeElement;
+                if (subOpen === false && at && at.closest(".menu") !== list.current && list.current?.contains(at)) {
+                  event.currentTarget.focus({ preventScroll: true });
+                }
+                // The pointer on an item that opens no submenu closes the one open beside it, as a desktop's menus do;
+                // the submenu's own items are another menu's, so moving into it keeps it open.
+                if (!sub || off) {
+                  setSubmenu(undefined);
+                  return;
+                }
                 setSubFocus("none");
                 setSubmenu(i);
               }}
