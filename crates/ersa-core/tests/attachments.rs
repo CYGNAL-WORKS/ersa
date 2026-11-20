@@ -194,7 +194,8 @@ async fn images_go_inline_and_paths_inside_the_workspace_go_relative() {
     assert!(!s.workspace.join(".ersa").exists());
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
+// verifies: PROTO-CORE-API-R111
 #[tokio::test]
 async fn attachments_from_outside_are_copied_into_the_sessions_own_scratch_folder() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -267,7 +268,7 @@ async fn attachments_from_outside_are_copied_into_the_sessions_own_scratch_folde
     assert_eq!(copies(&scratch), vec!["1", "2", "3"]);
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
 #[tokio::test]
 async fn numbering_continues_past_the_highest_copy_already_there() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -285,7 +286,7 @@ async fn numbering_continues_past_the_highest_copy_already_there() {
     );
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
 #[cfg(unix)]
 #[tokio::test]
 async fn a_copied_folder_leaves_its_links_out() {
@@ -671,7 +672,7 @@ fn aside(scratch: &Path) -> Vec<String> {
     copies(&scratch.join(".partial"))
 }
 
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
 #[tokio::test]
 async fn a_folder_nested_thousands_deep_is_copied_whole() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -1072,7 +1073,8 @@ async fn an_image_for_a_backend_that_takes_none_says_so() {
 /// nothing, still has every copy ignored, and its file is left as it is.
 /// So does one that ships an `.ersa/attachments/.gitignore`, in Core's own
 /// folder, that ignores nothing.
-// verifies: PROTO-CORE-API-R22
+// verifies: PROTO-CORE-API-R110
+// verifies: PROTO-CORE-API-R111
 #[tokio::test]
 async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
     let mut s = setup(FakeAdapter::new(1)).await;
