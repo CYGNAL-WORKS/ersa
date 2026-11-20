@@ -209,6 +209,7 @@ describe("the shelf across a reconnect", () => {
 });
 
 describe("a question as it settles", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R34
   it("keeps the question's tone on the open tile while the question stays on screen", async () => {
     const core = fakeCore([{ kind: "question", request_id: "rq" }]);
     render(createElement(App, { client: core.client }));
