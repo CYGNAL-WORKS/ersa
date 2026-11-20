@@ -463,6 +463,22 @@ describe("a system dialog that fails to open, then a newer line", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R23
+  it("stays when one of two older lines goes, the other still there", async () => {
+    const message = { sending: { state: "failed", message: "The session has ended." } };
+    for (const [both, left] of [
+      [{ ...message, refusedChange }, message],
+      [{ ...message, refusedChange }, { refusedChange }],
+    ] as const) {
+      const { rerender, unmount } = render(props(both));
+      await chooseFiles();
+      expect(statusLine()?.textContent).toBe(failed);
+      rerender(props(left));
+      expect(statusLine()?.textContent).toBe(failed);
+      unmount();
+    }
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R23
   it("stays through a send's progress and its end, none of which clears it", async () => {
     const { rerender } = render(props({ sending: { state: "sending", progress: { phase: "copying", share: 0.25 } } }));
     await chooseFiles();
