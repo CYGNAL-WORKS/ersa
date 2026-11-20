@@ -581,7 +581,7 @@ async fn a_session_carries_the_id_core_chose_once_a_turn_ends_with_its_record_wr
     let named = recorded_session_id(&stdout);
     assert_ne!(named, chosen);
     let cwd = transport.spawned()[0].cwd.clone().unwrap();
-    write_record(home.path(), &cwd, &named);
+    let record = write_record(home.path(), &cwd, &named);
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
@@ -592,6 +592,11 @@ async fn a_session_carries_the_id_core_chose_once_a_turn_ends_with_its_record_wr
     // The turn's end looked, and a tile carries the id with no list read.
     tile_carrying(&mut client, &id, &named).await;
     assert_eq!(listed_backend_id(&mut client, &id).await, json!(named));
+
+    // Still running, its record gone: the next list's look finds nothing,
+    // so the id leads nowhere and is not carried.
+    std::fs::remove_file(&record).unwrap();
+    assert_eq!(listed_backend_id(&mut client, &id).await, Value::Null);
 }
 
 /// A fork, also started under an id Core chose, shows its original's
