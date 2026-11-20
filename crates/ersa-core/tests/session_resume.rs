@@ -899,6 +899,7 @@ async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
 /// for it until the backend names it on its stream, and lists none until
 /// then; from then on the list carries that id, also once the session stops.
 // verifies: FLOW-RESUME-SESSION-R17
+// verifies: FLOW-RESUME-SESSION-R20
 #[tokio::test(flavor = "multi_thread")]
 async fn the_list_carries_a_self_named_session_id_from_when_the_backend_names_it() {
     let records = Records::default();
@@ -938,6 +939,19 @@ async fn the_list_carries_a_self_named_session_id_from_when_the_backend_names_it
     };
     let backend_id = only_record(&records);
     assert_eq!(after["backend_session_id"], json!(backend_id));
+    // A tile carries it as the list does, so a window that already has the
+    // session learns it (FLOW-RESUME-SESSION-R20).
+    let carrying = |n: &Value| {
+        n["method"] == "session.tile"
+            && n["params"]["session_id"] == id
+            && n["params"]["backend_session_id"] == backend_id
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        client.notification_where(carrying),
+    )
+    .await
+    .expect("no session.tile carried the backend's id");
 
     client.result("session.stop", json!({ "id": id })).await;
     let stopped = session_row(&mut client, &id).await;

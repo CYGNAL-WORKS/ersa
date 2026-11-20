@@ -1091,11 +1091,39 @@ describe("a tile's menu, and renaming on the tile", () => {
     fireEvent.click(within(rail()).getByRole("button", { name: "More for Write the notes" }));
     const item = screen.getByRole("menuitem", { name: /^Copy session ID/ });
     expect(item.getAttribute("aria-disabled")).toBe("true");
-    expect(item.textContent).toContain("Available once the backend has an ID for this session");
+    expect(item.textContent).toContain("Available once the backend saves this session");
     await act(async () => {
       fireEvent.click(item);
     });
     expect(written).toEqual([]);
+  });
+
+  // verifies: FLOW-RESUME-SESSION-R21
+  it("takes the session's id from a tile, and drops it when a tile carries none, with no list read", async () => {
+    const written = stubClipboard();
+    const core = await open();
+    const lists = () => core.calls.filter((c) => c.method === "session.list").length;
+    const listed = lists();
+    const id = titled[1].id;
+    const tile = (more: object) =>
+      act(async () =>
+        core.emit({ kind: "notification", method: "session.tile", params: { session_id: id, tile: { state: "idle", pending: [] }, title: "Write the notes", created_at: titled[1].created_at, ...more } } as CoreEvent),
+      );
+    const item = () => {
+      fireEvent.click(within(rail()).getByRole("button", { name: "More for Write the notes" }));
+      return screen.getByRole("menuitem", { name: /^Copy session ID/ });
+    };
+    await tile({ backend_session_id: "7d1e-fork-record" });
+    const copy = item();
+    expect(copy.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => {
+      fireEvent.click(copy);
+    });
+    expect(written).toEqual(["7d1e-fork-record"]);
+    // A tile that carries none means Core carries none any more.
+    await tile({});
+    expect(item().getAttribute("aria-disabled")).toBe("true");
+    expect(lists()).toBe(listed);
   });
 });
 
