@@ -124,13 +124,20 @@
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-transient);
+  /* It slides space-xs toward its place, away from its chip: down beneath it, up above it (data-side, measured as it
+     opens, since the window may have flipped it). */
+  --chip-list-from: calc(-1 * var(--space-xs));
   animation: chip-list-in var(--motion-quick) var(--motion-ease-out);
+}
+
+.chip-list[data-side="above"] {
+  --chip-list-from: var(--space-xs);
 }
 
 @keyframes chip-list-in {
   from {
     opacity: 0;
-    transform: translateY(calc(-1 * var(--space-xs)));
+    transform: translateY(var(--chip-list-from));
   }
 }
 
