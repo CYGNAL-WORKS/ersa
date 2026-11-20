@@ -224,6 +224,20 @@ describe("a shelf that has shown no request", () => {
     expect((shelf.closest(".session-item") as HTMLElement).dataset.tone).toBe("accent");
     expect(chevron.dataset.tone).toBe("accent");
   });
+
+  it("keeps the caution tone while it loads when its tile waits on a permission request", async () => {
+    const core = fakeCore();
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    const chevron = screen.getByRole("button", { name: /^Request from / });
+    expect(chevron.dataset.tone).toBe("caution");
+    fireEvent.click(chevron);
+    const shelf = screen.getByRole("dialog", { name: /^Request from / });
+    expect(within(shelf).getByText("Loading…")).toBeTruthy();
+    expect((shelf.closest(".session-item") as HTMLElement).dataset.tone).toBe("caution");
+  });
 });
 
 describe("a question as it settles", () => {

@@ -6,6 +6,7 @@ import type { Envelope, PermissionRequested, QuestionAsked } from "../protocol/a
 import type { Session } from "../protocol/core-api.gen";
 import { EARLIER, type Follower, type SessionView, follow } from "./follow";
 import type { SharedSubscriptions } from "./subscriptions";
+import { wantTone } from "./tile";
 import { type Item, isOpen, isOpenQuestion } from "./transcript";
 
 type Pending = Session["tile"]["pending"][number];
@@ -70,12 +71,12 @@ export type ShelfTone = "accent" | "caution";
 /**
  * The tone of the shelf and of its tile while open (`docs/design/RAIL.md`, The shelf): the shown request's, or one it
  * can't show. Settled, the shelf still shows what it last showed, so it keeps that one's tone, which `shown` records
- * (R34). A shelf that has shown no request, loading, failed or settled before it showed one, keeps `closed`, the tone
- * its tile has with the shelf closed (`wantTone`).
+ * (R34). A shelf that has shown no request, loading, failed or settled before it showed one, keeps the tone its tile
+ * has with the shelf closed, which the tile's `pending` list decides.
  */
-export function shelfTone(shows: ShelfShows, shown: ShelfShown | undefined, closed: ShelfTone): ShelfTone {
-  if (shows.state === "settled") return shown?.tone ?? closed;
-  if (shows.state === "loading" || shows.state === "failed") return closed;
+export function shelfTone(shows: ShelfShows, shown: ShelfShown | undefined, pending: Pending[]): ShelfTone {
+  if (shows.state === "settled") return shown?.tone ?? wantTone(pending);
+  if (shows.state === "loading" || shows.state === "failed") return wantTone(pending);
   return requestTone(shows);
 }
 
