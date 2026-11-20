@@ -732,7 +732,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           try {
             paths = what === "folder" ? [await pickFolder()].filter((p): p is string => p !== null) : await pickFiles(what === "images");
           } catch (error) {
-            // A dialog that failed to open is not a cancel: logged here, and the composer says so (FLOW-SEND-MESSAGE-R07).
+            // A dialog that failed to open is not a cancel: logged here, and the composer says so (FLOW-SEND-MESSAGE-R23).
             console.error(error);
             throw error;
           }
