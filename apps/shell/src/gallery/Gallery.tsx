@@ -38,7 +38,7 @@ import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
 import type { Draft } from "../session/questionForm";
 import { type ShelfShown, type ShelfShows, shelfTone, shownAfter, shownRequest } from "../session/shelf";
-import { tileOf } from "../session/tile";
+import { tileOf, wantTone } from "../session/tile";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
 
@@ -921,7 +921,7 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
           onSelect={() => {}}
           shelf={{
             id: open.id,
-            tone: shelfTone(now, nextRecord),
+            tone: shelfTone(now, nextRecord, wantTone(open.tile.pending)),
             render: (domId) => (
               <Shelf id={domId} tile={tile} shows={now} onRetry={() => {}} answers={answer && { [shownRequest(shows) ?? ""]: answer }} live={live} onDecide={() => {}} onAnswer={() => {}} force={focus ? "focus" : undefined} />
             ),

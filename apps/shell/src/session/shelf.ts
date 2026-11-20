@@ -68,13 +68,19 @@ export type ShelfShows =
 export type ShelfTone = "accent" | "caution";
 
 /**
- * The tone of the shelf and of its tile while open: the shown request's (`docs/design/RAIL.md`, The shelf). Settled,
- * the shelf still shows the last request it showed, so it keeps that one's tone, which `shown` records.
+ * The tone of the shelf and of its tile while open (`docs/design/RAIL.md`, The shelf): the shown request's, or one it
+ * can't show. Settled, the shelf still shows what it last showed, so it keeps that one's tone, which `shown` records
+ * (R34). A shelf that has shown no request, loading, failed or settled before it showed one, keeps `closed`, the tone
+ * its tile has with the shelf closed (`wantTone`).
  */
-export function shelfTone(shows: ShelfShows, shown?: ShelfShown): ShelfTone {
-  if (shows.state === "settled") return shown?.tone ?? "caution";
-  return shows.state === "question" ? "accent" : "caution";
+export function shelfTone(shows: ShelfShows, shown: ShelfShown | undefined, closed: ShelfTone): ShelfTone {
+  if (shows.state === "settled") return shown?.tone ?? closed;
+  if (shows.state === "loading" || shows.state === "failed") return closed;
+  return requestTone(shows);
 }
+
+/** The tone of a request the shelf shows, or of one it can't show: only a question is the accent. */
+const requestTone = (shows: ShelfShows): ShelfTone => (shows.state === "question" ? "accent" : "caution");
 
 /**
  * What the shelf shows for a session: its oldest pending request, the one whose event came first (R01), read
@@ -151,7 +157,7 @@ export function shownAfter(shown: ShelfShown | undefined, id: string | undefined
   const last: ShelfShown = shown?.id === id ? shown : { id, requests: new Set() };
   const request = shows && shownRequest(shows);
   const shownNow = shows && (request !== undefined || shows.state === "unknown");
-  const tone = shownNow ? shelfTone(shows) : last.tone;
+  const tone = shownNow ? requestTone(shows) : last.tone;
   if ((request === undefined || last.requests.has(request)) && tone === last.tone) return last;
   return { id, requests: request === undefined ? last.requests : new Set([...last.requests, request]), tone };
 }

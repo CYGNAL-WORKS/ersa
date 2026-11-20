@@ -23,7 +23,7 @@ import { type Connection, type CoreView, type ProjectsView, type SessionsView, c
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
-import { contextUsed, tileOf } from "./session/tile";
+import { contextUsed, tileOf, wantTone } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
@@ -852,7 +852,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     const tile = tileOf(shelfSession, backends);
     return {
       id: shelfSession.id,
-      tone: shelfTone(shelfShows, nextShown),
+      tone: shelfTone(shelfShows, nextShown, wantTone(shelfSession.tile.pending)),
       render: (domId: string) => (
         <Shelf
           id={domId}
