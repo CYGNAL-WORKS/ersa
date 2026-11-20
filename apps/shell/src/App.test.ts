@@ -571,10 +571,10 @@ describe("the rail's New session and collapsing", () => {
   it("offers New session at the rail's top once Ersa has connected, and opens the new-session screen", async () => {
     render(createElement(App, { client: fakeCore().client }));
     const top = within(rail()).getByRole("button", { name: "New session" });
-    expect((top as HTMLButtonElement).disabled).toBe(true);
+    expect(top.getAttribute("aria-disabled")).toBe("true");
     await settle();
     await settle();
-    expect((top as HTMLButtonElement).disabled).toBe(false);
+    expect(top.getAttribute("aria-disabled")).toBeNull();
     // The newest session shows at launch; New session leaves it for the screen.
     expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
     fireEvent.click(top);
@@ -2032,5 +2032,30 @@ describe("withdrawing trust", () => {
     await withdraw("alpha");
     expect(noteOf("alpha")).toBe("");
     expect(screen.getByText("Ersa can't change this project's trust.")).toBeTruthy();
+  });
+});
+
+// New session at the rail's top while Ersa can't reach Core (docs/design/RAIL.md, The rail; DESIGN.md: an
+// unavailable control keeps focus and says why).
+describe("New session while Core is away", () => {
+  it("keeps keyboard focus, says why it is unavailable, and opens nothing", async () => {
+    const rail = () => screen.getByRole("navigation", { name: "Rail" });
+    const core = fakeCore();
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    const newSession = () => within(rail()).getByRole("button", { name: "New session" });
+    newSession().focus();
+    expect(newSession().getAttribute("aria-disabled")).toBeNull();
+    core.drop();
+    await settle();
+    expect(document.activeElement).toBe(newSession());
+    expect(newSession().getAttribute("aria-disabled")).toBe("true");
+    expect(newSession().hasAttribute("disabled")).toBe(false);
+    expect(within(rail()).getByRole("button", { name: "New session", description: "Available once Ersa reaches your sessions" })).toBe(newSession());
+    // The newest session stays; choosing New session meanwhile opens no new-session screen.
+    fireEvent.click(newSession());
+    await settle();
+    expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
   });
 });
