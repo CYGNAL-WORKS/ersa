@@ -6,7 +6,8 @@
 //! after the run whose stream is `<version>/<stem>.jsonl`. Its projection is
 //! compared with a golden file under `tests/golden/<version>/record/`; rewrite
 //! them with `ERSA_BLESS=1 cargo test -p ersa-adapter-claude --test
-//! session_record` and review the diff.
+//! session_record` and review the diff. Record a new fixture pair (stream and
+//! record) with `node scripts/record-claude-session.mjs`.
 
 mod common;
 
