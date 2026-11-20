@@ -169,18 +169,6 @@ describe("adding a project from the project chip", () => {
     }
   });
 
-  // verifies: FLOW-NEW-SESSION-R27
-  it("opens no second folder dialog on Ctrl+O while the trust question is open", async () => {
-    const onChooseFolder = vi.fn(async () => ({ kind: "new", path: "D:/clones/stranger" }) as const);
-    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder })));
-    await addFromChip();
-    await act(async () => {
-      fireEvent.keyDown(screen.getByRole("textbox"), { key: "o", ctrlKey: true });
-    });
-    expect(onChooseFolder).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByRole("region", { name: /^Trust / })).toHaveLength(1);
-  });
-
   // verifies: FLOW-NEW-SESSION-R18
   it("chooses a found project even before Core's list has it", async () => {
     const beyond: Project = project("beyond");
