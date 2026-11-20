@@ -45,6 +45,8 @@ interface ComposerProps {
   dragDrop?: ShellControl["onDragDrop"];
   /** For the gallery: the box as while files are dragged over it. */
   forceDragOver?: boolean;
+  /** For the gallery: the status line as after the system's dialog failed to open (R23). */
+  forceDialogFailed?: boolean;
   /** The session's workspace, by id; absent while it is not made yet, so every file and folder will be copied (R17). */
   workspace?: string;
   /** Attachments already added: a message given back to send again, or the gallery's. */
@@ -89,7 +91,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, forceDialogFailed, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -256,7 +258,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     <div className="composer">
       {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
       <div className="composer-status">
-        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} dialogFailed={dialogFailed} marked={refusedHere} waiting={waiting} />}
+        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} dialogFailed={dialogFailed || !!forceDialogFailed} marked={refusedHere} waiting={waiting} />}
       </div>
       <form
         ref={box}
@@ -379,9 +381,10 @@ function Attachment({
 }
 
 /**
- * One message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a
+ * One message at a time, first that Ersa can't reach the sessions, then, while the box is available, a system dialog
+ * for attachments that failed to open, then a send whose outcome Ersa can't tell, then a
  * refused message, then a refused change to the session, then detecting backends, then a host with no backend or
- * whose backends could not be listed, then a system dialog that failed to open, then a send on its way, then a message waiting in the backend
+ * whose backends could not be listed, then a send on its way, then a message waiting in the backend
  * (docs/design/COMPOSER.md, The status line); nothing, and no height, while there is nothing to say. A message refused
  * for one of its attachments says why beside that attachment instead.
  */
@@ -389,6 +392,16 @@ function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked,
   if (unavailable === "reconnecting" || unavailable === "unreachable") {
     // The rail's foot says the same and is the one that announces it.
     return <p className="composer-status-line">{t(unavailable === "reconnecting" ? "rail.foot.reconnectingError" : "rail.foot.unreachableError")}</p>;
+  }
+  // A dialog the user just tried to open answers what they did, so it comes before older lines, which show again once
+  // it goes (R23); only while the box is available, since attach is unavailable otherwise.
+  if (dialogFailed && unavailable === undefined) {
+    return (
+      <p className="composer-status-line" role="alert">
+        <span className="glyph" data-tone="danger" aria-hidden="true" />
+        {t("composer.attach.dialogFailedError")}
+      </p>
+    );
   }
   if (sending?.state === "unknown") {
     // Never that it failed: it may have arrived (FLOW-SEND-MESSAGE-R15).
@@ -423,14 +436,6 @@ function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked,
   }
   if (typeof unavailable === "object") {
     return <p className="composer-status-line">{t("composer.backendFailedError", { label: unavailable.failedBackend })}</p>;
-  }
-  if (dialogFailed) {
-    return (
-      <p className="composer-status-line" role="alert">
-        <span className="glyph" data-tone="danger" aria-hidden="true" />
-        {t("composer.attach.dialogFailedError")}
-      </p>
-    );
   }
   const progress = sending?.state === "sending" ? sending.progress : undefined;
   if (progress?.phase === "copying") {
