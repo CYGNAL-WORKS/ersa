@@ -333,6 +333,9 @@ pub struct FakeAdapter {
     /// Held by a test to hold every record summary, once read, until it
     /// lets go, as a slow file system would.
     pub summary_gate: Arc<tokio::sync::Mutex<()>>,
+    /// The images the backend takes: PNG and GIF of at most [`IMAGE_MAX`]
+    /// bytes, unless a test says otherwise.
+    pub image_limits: ImageLimits,
 }
 
 /// Where the fake files its records, shared like [`Records`].
@@ -382,6 +385,10 @@ impl FakeAdapter {
             filed: Arc::default(),
             list_gate: Arc::default(),
             summary_gate: Arc::default(),
+            image_limits: ImageLimits {
+                media_types: &["image/png", "image/gif"],
+                max_bytes: IMAGE_MAX,
+            },
         }
     }
 
@@ -592,10 +599,7 @@ impl Adapter for FakeAdapter {
     }
 
     fn image_limits(&self) -> ImageLimits {
-        ImageLimits {
-            media_types: &["image/png", "image/gif"],
-            max_bytes: IMAGE_MAX,
-        }
+        self.image_limits
     }
 
     fn projector(&self) -> Box<dyn Projector> {

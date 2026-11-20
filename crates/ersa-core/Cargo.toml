@@ -36,7 +36,8 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Threading",
 ] }
 
-# `geteuid` and `kill`, used only by src/platform/unix.rs.
+# `geteuid`, `kill` and `O_NONBLOCK`, used only by src/platform/unix.rs (and
+# `mkfifo` by a test in src/attachments.rs).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
