@@ -24,7 +24,7 @@ Their fills and edges change over `motion-quick` with `motion-ease-out`. Send be
 
 ## The status line
 
-One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a refused message, then a refused change to the session, then detecting backends, then a host that couldn't list its backends or has none that can run, then a send on its way, then a message waiting in the backend; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
+One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then, while the box is available, a system dialog for attachments that failed to open, then a send whose outcome Ersa can't tell, then a refused message, then a refused change to the session, then detecting backends, then a host that couldn't list its backends or has none that can run, then a send on its way, then a message waiting in the backend; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
 
 | When | It says | Leading mark | The box |
 |---|---|---|---|
@@ -34,11 +34,12 @@ One line above the box, `size-control` high at least, showing one message at a t
 | Backends are being detected | that it is detecting the backends on this host | none | unavailable |
 | The host couldn't list its backends (FLOW-NEW-SESSION-R11) | "Ersa couldn't detect the backends on this host." then the reason the host gave | none | unavailable |
 | The host lists its backends and none can run | With every backend `missing`: "No backend is available on this host. Install a backend on it to start a session." With any backend in `error`: that backend by its label and what to do, such as "Claude Code isn't working on this host. Check that it's installed and signed in, then open New session again." (`backend.list` carries no reason for an error yet) | none | unavailable |
+| The system's file or folder dialog failed to open (FLOW-SEND-MESSAGE-R23) | that Ersa couldn't open it, and to try again, until the user next chooses an attach item, attaches something or sends a message; it is the composer's own and not kept for its session, so it is gone when the user comes back from another session | a glyph at `size-glyph` in `danger` | as at rest |
 | A message is on its way | how much is copied, as a share, or that the backend is starting | the ring at `size-ring`, its arc filling to the share over `motion-settle` | as at rest, stop offered |
 | Changing the model, effort or permission mode was refused | the reason, in the user's terms, until the user sends or opens a chip in that session; it is kept for its session, so it is still there when the user comes back to it | a glyph at `size-glyph` in `danger` | as at rest |
 | A message is waiting in the backend | One message: that it is waiting, and, in the window that sent it, its first line, cut with an ellipsis where the status line ends, else its file's name, else "Pasted image". Several: how many are waiting | none | as at rest, stop offered |
 
-The line for a refused message or a refused change is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
+The line for a refused message, a refused change or a dialog that failed to open is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
 
 ## The archived note
 

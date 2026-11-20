@@ -149,7 +149,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     setLeaving((now) => new Set(now).add(gone));
   };
 
-  // The system's dialog failed to open (FLOW-SEND-MESSAGE-R07): said in the status line, not taken for a cancel,
+  // The system's dialog failed to open (FLOW-SEND-MESSAGE-R23): said in the status line, not taken for a cancel,
   // until the user next attaches something or sends.
   const [dialogFailed, setDialogFailed] = useState(false);
   const add = (more: readonly Attached[]) => {

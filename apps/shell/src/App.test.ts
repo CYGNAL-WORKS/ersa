@@ -1630,7 +1630,7 @@ describe("sending while the agent works under a session App draws", () => {
   });
 });
 
-// Attachments under a session and on the new-session screen (FLOW-SEND-MESSAGE-R07, R10, R13, R16).
+// Attachments under a session and on the new-session screen (FLOW-SEND-MESSAGE-R07, R10, R13, R16, R23).
 describe("the attachments App gives the composer", () => {
   const inspected: Record<string, unknown> = {
     "D:/code/beta/notes.md": { path: "D:/code/beta/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12, copied: false },
@@ -1710,7 +1710,7 @@ describe("the attachments App gives the composer", () => {
     expect(methods(core)).not.toContain("session.send");
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R07
+  // verifies: FLOW-SEND-MESSAGE-R23
   it("says a file or folder dialog that fails to open is not a cancel, logs why, and clears it on the next attach", async () => {
     const shell = fakeShell();
     const broken = new Error("dialog plugin: permission denied");
