@@ -395,11 +395,6 @@ function QuestionCard({ item, answer, live, onAnswer }: { item: Extract<Item, { 
   );
 }
 
-/**
- * A permission request's input, field by field, with every hidden character marked: the transcript's permission
- * card and the shelf both show it so (FLOW-APPROVE-PERMISSION-R11). The description is shown once, as the request's
- * own detail, not again as a field.
- */
 /** The path a permission request is blocked on, when it gives one: the card and the shelf say it alike (R11). */
 export function BlockedPath({ request, className }: { request: PermissionRequested; className: string }) {
   if (!request.blocked_path) return null;
@@ -413,6 +408,11 @@ export function BlockedPath({ request, className }: { request: PermissionRequest
   );
 }
 
+/**
+ * A permission request's input, field by field, with every hidden character marked: the transcript's permission
+ * card and the shelf both show it so (FLOW-APPROVE-PERMISSION-R11). The description is shown once, as the request's
+ * own detail, not again as a field.
+ */
 export function PermissionInput({ request }: { request: PermissionRequested }) {
   return (
     <InputFields

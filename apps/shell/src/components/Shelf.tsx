@@ -3,7 +3,7 @@ import { t } from "../catalog";
 import type { Answer, Decision, Reply } from "../session/answers";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { Draft } from "../session/questionForm";
-import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
+import { type ShelfShows, shownRequest } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
@@ -61,6 +61,9 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
     if (request && last.shown && placeOf(request) > placeOf(last.shown)) {
       // What was on screen fades out over the new contents, unless reduced motion is on.
       setNext({ key, said: nextSaid(request), from: reducedMotion() || !last.onScreen ? undefined : last.shown });
+    } else if (shows.state === "settled" && !last.shown) {
+      // Settled before it showed a request: what it now says is heard from the region kept on the page.
+      setNext({ said: t("rail.shelf.answeredNote") });
     } else {
       // Not moving on: nothing fades, and what was last said stays said.
       setNext((n) => n && { said: n.said });
@@ -94,7 +97,7 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
   return (
     // Focusable, though not in the tab order, so focus can move to the shelf itself: as it opens (R05), as an answer
     // makes the answers unavailable, and as it moves on (R10).
-    <div ref={root} id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(display)}>
+    <div ref={root} id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })}>
       {/* Kept on the page from the start, so what it says once the shelf moves on is heard. */}
       <p className="heard-only" role="status">
         {next?.said}
