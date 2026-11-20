@@ -313,3 +313,15 @@ pub fn names_device(_path: &Path) -> bool {
 pub fn resolve_program(program: &str, _path: Option<&str>) -> String {
     program.to_string()
 }
+
+/// Opens a file to read without waiting: a FIFO that took a checked file's
+/// place opens at once (`O_NONBLOCK`) instead of waiting for a writer, so
+/// the caller can check what it opened. Reads of a regular file are the
+/// same either way.
+pub fn open_without_waiting(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+}
