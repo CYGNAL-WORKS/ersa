@@ -506,7 +506,7 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
     work.step()?;
     // A repository may ship its own `.ersa/.gitignore`, which may ignore
     // less than everything: it is the user's, so it is only made when absent.
-    ignore_everything(&ersa.join(".gitignore"), false)?;
+    ignore_everything(&ersa.join(".gitignore"), None)?;
     work.step()?;
     let mut folder = ersa;
     for part in [ATTACHMENTS, session_id, PARTIAL] {
@@ -516,8 +516,10 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
             // Core's own ignore file, in Core's own folder, keeps every copy
             // ignored whatever `.ersa/.gitignore` says: git applies a deeper
             // `.gitignore` over a shallower one. Being Core's, it is read and
-            // made again when it says anything else.
-            ignore_everything(&folder.join(".gitignore"), true)?;
+            // made again when it says anything else, staged under a name of
+            // this session's own.
+            let staging = folder.join(format!(".gitignore.{session_id}"));
+            ignore_everything(&folder.join(".gitignore"), Some(&staging))?;
         }
         work.step()?;
     }
@@ -539,9 +541,16 @@ const IGNORE_ALL: &[u8] = b"*\n";
 
 /// Makes a `.gitignore` at `path` that ignores everything beside it, when
 /// none is there; one that is not a plain file (a link, a folder) is
-/// refused. One already there is left as it is, unless Core `owns` it: then
-/// one that says anything else is made again.
-fn ignore_everything(path: &Path, owns: bool) -> Result<(), Fail> {
+/// refused. One already there is left as it is, unless Core owns it, which
+/// the `staging` path Core makes it under says: then one that says anything
+/// else is made again.
+///
+/// Sessions of one workspace share Core's file and nothing orders their
+/// jobs, so Core's file is never removed or made in place: it is written
+/// whole at `staging`, a name only this session's job uses, and renamed
+/// over `path`. A rename replaces what is there (a link as the link itself,
+/// never followed) or makes it, so two jobs at once both succeed.
+fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
     match fs::symlink_metadata(path) {
         Ok(meta) if !meta.file_type().is_file() => {
             return Err(Fail::Reason(format!(
@@ -549,8 +558,10 @@ fn ignore_everything(path: &Path, owns: bool) -> Result<(), Fail> {
                 path.display()
             )));
         }
-        Ok(_) if !owns => return Ok(()),
         Ok(_) => {
+            let Some(_) = staging else {
+                return Ok(());
+            };
             // Read through `open_file`, so a FIFO swapped in meanwhile never
             // holds the job.
             let mut held = Vec::new();
@@ -560,22 +571,37 @@ fn ignore_everything(path: &Path, owns: bool) -> Result<(), Fail> {
             if held == IGNORE_ALL {
                 return Ok(());
             }
-            // Removed rather than written over, so nothing put in its place
-            // meanwhile is ever written through.
-            fs::remove_file(path)?;
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
     }
-    // `create_new`: never writes through something that appeared meanwhile.
+    let Some(staging) = staging else {
+        // The user's file: made only when absent. `create_new` never writes
+        // through something that appeared meanwhile, and one another job
+        // made meanwhile is left as it is.
+        return match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(mut file) => Ok(file.write_all(IGNORE_ALL)?),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+            Err(e) => Err(e.into()),
+        };
+    };
+    // What a crash left at `staging` goes first; `create_new` then never
+    // writes through something put there meanwhile.
+    remove_entry(staging)?;
     fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(path)?
+        .open(staging)?
         .write_all(IGNORE_ALL)?;
-    Ok(())
+    fs::rename(staging, path).map_err(|e| {
+        let _ = remove_entry(staging);
+        Fail::from(e)
+    })
 }
-
 /// Opens the file at `path` to read, checked again by what was opened: it
 /// may have been swapped for something else (a FIFO, a folder) since it was
 /// checked, and a FIFO opened the usual way waits for a writer that may
@@ -1100,6 +1126,49 @@ mod tests {
         let scratch = workspace.join(ERSA).join(ATTACHMENTS).join("s-1");
         let partial: Vec<_> = fs::read_dir(scratch.join(PARTIAL)).unwrap().collect();
         assert!(partial.is_empty());
+    }
+
+    /// Jobs of different sessions in one workspace, nothing ordering them,
+    /// all find a shipped `.ersa/attachments/.gitignore` that ignores less
+    /// and make it again at once: none of them is refused for it, and it ends
+    /// holding `*`.
+    // verifies: PROTO-CORE-API-R22
+    #[test]
+    fn sessions_making_cores_ignore_file_again_at_once_all_succeed() {
+        const JOBS: usize = 8;
+        let dir = tempfile::tempdir().unwrap();
+        let attachments = dir.path().join(ATTACHMENTS);
+        fs::create_dir_all(&attachments).unwrap();
+        let ignore = attachments.join(".gitignore");
+        for round in 0..100 {
+            fs::write(&ignore, b"").unwrap();
+            let start = std::sync::Arc::new(std::sync::Barrier::new(JOBS));
+            let jobs: Vec<_> = (0..JOBS)
+                .map(|job| {
+                    let (start, attachments, ignore) =
+                        (start.clone(), attachments.clone(), ignore.clone());
+                    std::thread::spawn(move || {
+                        let staging = attachments.join(format!(".gitignore.s-{job}"));
+                        start.wait();
+                        ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
+                            Fail::Reason(reason) => reason,
+                            Fail::Stopped => "stopped".into(),
+                        })
+                    })
+                })
+                .collect();
+            for job in jobs {
+                let answer = job.join().unwrap();
+                assert!(answer.is_ok(), "round {round}: {answer:?}");
+            }
+            assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL, "round {round}");
+        }
+        // No staging file is left behind.
+        let left: Vec<_> = fs::read_dir(&attachments)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from(".gitignore")]);
     }
 
     #[test]
