@@ -4,7 +4,7 @@
 // A component built for the window gets an entry here in the same change.
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
-import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useLayoutEffect, useState } from "react";
 import { t } from "../catalog";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
@@ -37,7 +37,7 @@ import type { Answer } from "../session/answers";
 import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
 import type { Draft } from "../session/questionForm";
-import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
+import { type ShelfShown, type ShelfShows, shelfTone, shownAfter, shownRequest } from "../session/shelf";
 import { tileOf } from "../session/tile";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
@@ -847,6 +847,8 @@ interface ShelfMore {
   focus?: boolean;
   answer?: Answer;
   live?: boolean;
+  /** Settles once shown, as when its last request is answered elsewhere: what the shelf keeps on screen meanwhile. */
+  settle?: boolean;
 }
 
 /** Every part a menu has (docs/design/RAIL.md, Menus), as the arrange and tile menus will use them. */
@@ -892,13 +894,22 @@ function QuestionCardOpen({ questions, initial }: { questions: Question[]; initi
 }
 
 function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }) {
-  const { short, answer, live = true, focus } = more;
+  const { short, answer, live = true, focus, settle } = more;
+  // What the shelf shows now: `shows`, or settled once it has been shown, before the gallery paints.
+  const [now, setNow] = useState(shows);
+  useLayoutEffect(() => {
+    if (settle) setNow({ state: "settled" });
+  }, [settle]);
   // The open tile waits on what its shelf shows: a question's tile says it has one.
   const listed = shelfTiles[1] as Session;
   const open: Session =
     shows.state === "question" ? { ...listed, tile: { ...listed.tile, pending: [{ kind: "question", request_id: shows.requestId }] } } : listed;
   const tiles = [shelfTiles[0] as Session, open, shelfTiles[2] as Session];
   const tile = tileOf(open);
+  // Its tone is kept as the window keeps it, from what the shelf has shown.
+  const [record, setRecord] = useState<ShelfShown>();
+  const nextRecord = shownAfter(record, open.id, now);
+  if (nextRecord !== record) setRecord(nextRecord);
   return (
     <div className="gallery-shelf" data-short={short || undefined}>
       <div className="gallery-shelf-rail">
@@ -910,9 +921,9 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
           onSelect={() => {}}
           shelf={{
             id: open.id,
-            tone: shelfTone(shows),
+            tone: shelfTone(now, nextRecord),
             render: (domId) => (
-              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shownRequest(shows) ?? ""]: answer }} live={live} onDecide={() => {}} onAnswer={() => {}} force={focus ? "focus" : undefined} />
+              <Shelf id={domId} tile={tile} shows={now} onRetry={() => {}} answers={answer && { [shownRequest(shows) ?? ""]: answer }} live={live} onDecide={() => {}} onAnswer={() => {}} force={focus ? "focus" : undefined} />
             ),
           }}
         />
@@ -947,7 +958,9 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A question's answer refused", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "failed", message: "the session has ended" } }],
   ["A question's answer Ersa can't tell reached the agent", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "unknown" } }],
   ["A question while Ersa reconnects", { state: "question", requestId: "rq", questions: [singleQuestion] }, { live: false }],
+  ["A question as it settles", { state: "question", requestId: "rq", questions: [singleQuestion] }, { settle: true }],
   ["Loading", { state: "loading" }],
+  ["Answered before it showed one", { state: "loading" }, { settle: true }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
   ["A request Ersa can't show", { state: "unknown" }],
   // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.

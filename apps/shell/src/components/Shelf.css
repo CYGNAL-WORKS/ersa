@@ -120,17 +120,6 @@
   }
 }
 
-/* Heard, not shown: what the shelf moved on to. Kept out of the layout, and out of the gap between its parts. */
-.shelf-said {
-  position: absolute;
-  width: var(--line-hairline);
-  height: var(--line-hairline);
-  margin: 0;
-  overflow: hidden;
-  clip-path: circle(0);
-  white-space: nowrap;
-}
-
 .shelf-heading {
   display: flex;
   justify-content: space-between;
