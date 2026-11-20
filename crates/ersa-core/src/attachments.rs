@@ -177,7 +177,7 @@ pub struct Target<'a> {
 }
 
 /// Checks every attachment, then copies the ones from outside the
-/// workspace into the session's scratch folder (PROTO-CORE-API-R21 to R23).
+/// workspace into the session's scratch folder (PROTO-CORE-API-R21, R23, R110).
 /// On any failure nothing this message copied remains.
 ///
 /// The caller holds the session's scratch folder for the whole job, so no
@@ -505,7 +505,8 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
     real_folder(&ersa)?;
     work.step()?;
     // A repository may ship its own `.ersa/.gitignore`, which may ignore
-    // less than everything: it is the user's, so it is only made when absent.
+    // less than everything: it is the user's, so it is only made when absent
+    // (PROTO-CORE-API-R111).
     ignore_everything(&ersa.join(".gitignore"), None)?;
     work.step()?;
     let mut folder = ersa;
@@ -1132,7 +1133,7 @@ mod tests {
     /// all find a shipped `.ersa/attachments/.gitignore` that ignores less
     /// and make it again at once: none of them is refused for it, and it ends
     /// holding `*`.
-    // verifies: PROTO-CORE-API-R22
+    // verifies: PROTO-CORE-API-R110
     #[test]
     fn sessions_making_cores_ignore_file_again_at_once_all_succeed() {
         const JOBS: usize = 8;
