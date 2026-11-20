@@ -80,11 +80,11 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
 });
 
 // The trust question in windows of every height (#218 merge review). Where the room above the box holds its title,
-// folder, answers and the explanation's first line, it is capped to that room and the box stays put; where it does
-// not, it takes its place in the column, the box moves down and a column taller than the window scrolls. Either way
-// the title, folder and answers show together, inside the card and clear of the box, with some of the explanation.
-// The sizes are measured: at 1400x700 the question fits whole above the box, at 1100x540 the cap binds, at 1100x470
-// the room holds all but the explanation's first line, and the rest are short enough for the column.
+// folder, answers and the explanation's first paragraph (the safety check), it is capped to that room and the box
+// stays put; where it does not, it takes its place in the column, the box moves down and a column taller than the
+// window scrolls. Either way the title, folder and answers show together, inside the card and clear of the box, with
+// some of the explanation. The sizes are measured: down to 1100x470 the room above the one-line box holds the
+// question, and the rest are short enough for the column.
 
 /** Opens the trust question for a new folder from the project chip, as a pointer would; the first test covers Ctrl+O. */
 async function askAbout(ersa: { page: Page; dir: string; answerDialog: (path: string) => Promise<unknown> }, ...within: string[]) {
@@ -139,7 +139,7 @@ async function showsWhole(page: Page, question: Locator, stranger: string, box: 
 for (const [width, height, stays] of [
   [1400, 700, true],
   [1100, 540, true],
-  [1100, 470, false],
+  [1100, 470, true],
   [700, 520, false],
   [660, 440, false],
   [640, 400, false],
