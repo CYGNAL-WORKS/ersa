@@ -1,8 +1,8 @@
 import { ArrowUp, Square, X } from "lucide-react";
-import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { ShellControl } from "../core/shell";
-import { type Attached, addAll, pastedImage, same, willCopy } from "../session/attachments";
+import { type Attached, addAll, overInline, pastedImage, same, willCopy } from "../session/attachments";
 import type { Sending, Waiting } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
 import { AttachmentChip } from "./AttachmentChip";
@@ -36,7 +36,7 @@ interface ComposerProps {
   onSend: (text: string, attachments: readonly Attached[]) => Promise<boolean>;
   /**
    * Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07, R13);
-   * absent where nothing can be attached, and attach is then unavailable.
+   * rejects when the dialog fails to open; absent where nothing can be attached, and attach is then unavailable.
    */
   onAttach?: (what: AttachWhat) => Promise<Attached[]>;
   /** Reads each path dropped on the box (R08, R13); absent, the box takes no drop. */
@@ -45,6 +45,8 @@ interface ComposerProps {
   dragDrop?: ShellControl["onDragDrop"];
   /** For the gallery: the box as while files are dragged over it. */
   forceDragOver?: boolean;
+  /** For the gallery: the status line as after the system's dialog failed to open (R23). */
+  forceDialogFailed?: boolean;
   /** The session's workspace, by id; absent while it is not made yet, so every file and folder will be copied (R17). */
   workspace?: string;
   /** Attachments already added: a message given back to send again, or the gallery's. */
@@ -91,7 +93,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, held: heldByScreen, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, forceDialogFailed, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, held: heldByScreen, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -101,8 +103,10 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
   // part of the message.
   const [leaving, setLeaving] = useState<ReadonlySet<Attached>>(new Set());
   const live = attachments.filter((a) => !leaving.has(a));
+  // Images that fit alone but not with those before them, derived so a removal clears them (R10).
+  const over = overInline(live);
   // An attachment Ersa can't send holds the message until it is removed (FLOW-SEND-MESSAGE-R10).
-  const held = live.some((a) => a.problem !== undefined);
+  const held = over.size > 0 || live.some((a) => a.problem !== undefined);
   // While the agent works, Enter still sends: the message waits in the backend (FLOW-SEND-MESSAGE-R18). Only a
   // message still on its way holds the next one back (R02).
   const canSend = !unavailable && !busy && !held && !heldByScreen && (text.trim() !== "" || live.length > 0);
@@ -149,12 +153,37 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     setLeaving((now) => new Set(now).add(gone));
   };
 
+  // The system's dialog failed to open (FLOW-SEND-MESSAGE-R23): said in the status line in place of what was said
+  // there, not taken for a cancel, until the user next chooses an attach item, attaches something or sends.
+  const [dialogFailed, setDialogFailed] = useState(false);
+  // A send whose outcome Ersa can't tell, a refused message or a refused change that arrives after it ends it, and it
+  // does not come back when that one goes (R24). Keyed by what each says, so one that goes and returns with the same
+  // words arrives again; a send's progress or its ending well changes neither key. Before paint, so the dialog's line
+  // never shows over the newer one.
+  const sendRefusal = sending?.state === "failed" || sending?.state === "unknown" ? JSON.stringify(sending) : undefined;
+  // One effect each, so one line going while the other stays is not an arrival.
+  useLayoutEffect(() => {
+    if (sendRefusal !== undefined) setDialogFailed(false);
+  }, [sendRefusal]);
+  useLayoutEffect(() => {
+    if (refusedChange !== undefined) setDialogFailed(false);
+  }, [refusedChange]);
   const add = (more: readonly Attached[]) => {
+    if (more.length === 0) return;
+    setDialogFailed(false);
     // The same file or folder is attached once (R12).
-    if (more.length > 0) setAttachments((now) => addAll(now, more));
+    setAttachments((now) => addAll(now, more));
   };
   const attach = async (what: AttachWhat) => {
-    if (onAttach) add(await onAttach(what));
+    if (!onAttach) return;
+    setDialogFailed(false);
+    let picked: Attached[];
+    try {
+      picked = await onAttach(what);
+    } catch {
+      return setDialogFailed(true);
+    }
+    add(picked);
   };
 
   // Files dragged from the file manager (FLOW-SEND-MESSAGE-R08): while over the box its edge is the accent, and what
@@ -223,6 +252,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     const written = text;
     const going = live;
     sent.current = going;
+    setDialogFailed(false);
     // Clear only what was sent: anything typed or attached meanwhile is the next message (FLOW-SEND-MESSAGE-R02).
     if (await onSend(written, going)) {
       setText((now) => (now === written ? "" : now));
@@ -242,7 +272,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     <div className="composer">
       {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
       <div className="composer-status">
-        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} marked={refusedHere} waiting={waiting} />}
+        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} dialogFailed={dialogFailed || !!forceDialogFailed} marked={refusedHere} waiting={waiting} />}
       </div>
       <form
         ref={box}
@@ -262,7 +292,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
             {attachments.map((a) => (
               <Attachment
                 key={a.path}
-                attachment={a}
+                attachment={over.has(a) ? { ...a, problem: t("composer.attachment.togetherTooLargeError") } : a}
                 copied={willCopy(a, workspace)}
                 leaving={leaving.has(a)}
                 onRemove={() => remove(a)}
@@ -365,16 +395,27 @@ function Attachment({
 }
 
 /**
- * One message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a
+ * One message at a time, first that Ersa can't reach the sessions, then, while the box is available, a system dialog
+ * for attachments that failed to open, then a send whose outcome Ersa can't tell, then a
  * refused message, then a refused change to the session, then detecting backends, then a host with no backend or
  * whose backends could not be listed, then a send on its way, then a message waiting in the backend
  * (docs/design/COMPOSER.md, The status line); nothing, and no height, while there is nothing to say. A message refused
  * for one of its attachments says why beside that attachment instead.
  */
-function StatusLine({ unavailable, sending, refusedChange, marked, waiting }: { unavailable?: Unavailable; sending?: Sending; refusedChange?: string; marked: boolean; waiting?: Waiting }) {
+function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked, waiting }: { unavailable?: Unavailable; sending?: Sending; refusedChange?: string; dialogFailed: boolean; marked: boolean; waiting?: Waiting }) {
   if (unavailable === "reconnecting" || unavailable === "unreachable") {
     // The rail's foot says the same and is the one that announces it.
     return <p className="composer-status-line">{t(unavailable === "reconnecting" ? "rail.foot.reconnectingError" : "rail.foot.unreachableError")}</p>;
+  }
+  // A dialog the user just tried to open answers what they did, so it shows in place of a line already there, which
+  // shows again once it goes (R23); only while the box is available. A newer refusal ends it in the composer (R24).
+  if (dialogFailed && unavailable === undefined) {
+    return (
+      <p className="composer-status-line" role="alert">
+        <span className="glyph" data-tone="danger" aria-hidden="true" />
+        {t("composer.attach.dialogFailedError")}
+      </p>
+    );
   }
   if (sending?.state === "unknown") {
     // Never that it failed: it may have arrived (FLOW-SEND-MESSAGE-R15).
