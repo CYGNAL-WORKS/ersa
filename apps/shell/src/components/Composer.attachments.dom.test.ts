@@ -216,6 +216,30 @@ describe("pasting and dropping attachments", () => {
     expect(fireEvent.paste(words(), { clipboardData: { files: [], getData: () => "Words" } })).toBe(true);
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("marks a pasted image that fits alone but not with the one before it, holds the message, and clears on removal", async () => {
+    const onSend = vi.fn(async () => true);
+    render(draw({ onSend, onRead: async () => [] }));
+    // Six MB each, ten MB together at most: blobs whose size is known without reading them is enough.
+    const six = new File([new Uint8Array(6 * 1024 * 1024)], "image.png", { type: "image/png" });
+    fireEvent.paste(words(), { clipboardData: { files: [six], getData: () => "" } });
+    await act(async () => {});
+    fireEvent.paste(words(), { clipboardData: { files: [six], getData: () => "" } });
+    await act(async () => {});
+    expect(shown()).toEqual(["Pasted image6 MB", "Pasted imageWith the images before it, this is more than 10 MB, the most Ersa sends in one message."]);
+    fireEvent.change(words(), { target: { value: "Look" } });
+    await act(async () => {
+      fireEvent.keyDown(words(), { key: "Enter" });
+    });
+    expect(onSend).not.toHaveBeenCalled();
+    // Removing the first leaves the second within the limit.
+    const removes = screen.getAllByRole("button", { name: "Remove Pasted image" });
+    await act(async () => {
+      fireEvent.click(removes[0] as HTMLElement);
+    });
+    expect(shown()).toEqual(["Pasted image6 MB"]);
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R22
   it("attaches the image of a clipboard that holds text too, and pastes the text as well", async () => {
     render(draw({ onRead: async () => [] }));
