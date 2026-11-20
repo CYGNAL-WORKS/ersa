@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Where keyboard focus goes when every row leaves at once.
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Session } from "../protocol/core-api.gen";
@@ -42,5 +42,17 @@ describe("focus when every row leaves", () => {
     focusRow();
     rerender(page({ sessions: { state: "unavailable" }, offline: true }));
     expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Active" }));
+  });
+
+  // The rail's rule (docs/design/RAIL.md), shared with the rail: a press on something that takes no focus gives focus
+  // to the user, and a row leaving later takes nothing back.
+  it("takes nothing back once the user pressed somewhere that takes no focus", async () => {
+    const { rerender } = render(page({}));
+    focusRow();
+    fireEvent.pointerDown(document.body);
+    (document.activeElement as HTMLElement | null)?.blur();
+    await act(() => Promise.resolve());
+    rerender(page({ sessions: { state: "ready", sessions: [] } }));
+    expect(document.activeElement).toBe(document.body);
   });
 });

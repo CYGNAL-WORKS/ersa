@@ -199,6 +199,55 @@ describe("Delete on a tile", () => {
     expect(document.activeElement?.classList.contains("rail-new-session")).toBe(true);
   });
 
+  // The rail reads Fix the build (alpha), In beta (beta, collapsed) and In gamma (gamma). Deleting and archiving give
+  // focus to the same tile, past the one folded away; pinning keeps it on the tile, now in Pinned.
+  it.each([
+    ["deleted", "In gamma"],
+    ["archived", "In gamma"],
+    ["pinned", "Fix the build"],
+  ] as const)("gives focus, as Fix the build is %s, to %s", async (how, to) => {
+    const projects = ["alpha", "beta", "gamma"].map((id) => ({ id, host_id: "local", path: `D:/code/${id}`, name: id, vcs: "git", trusted: true }));
+    const more = ["beta", "gamma"].map((id): Workspace => ({ id: `w-${id}`, project_id: id, kind: "isolated", path: `D:/ws/${id}-1`, vcs_ref: `ersa/${id}`, state: "ready" }));
+    let rows = [
+      listed[0]!,
+      session("s4", "In beta", "2026-11-04T09:00:00Z", { state: "idle", pending: [] }, "w-beta"),
+      session("s5", "In gamma", "2026-11-05T09:00:00Z", { state: "idle", pending: [] }, "w-gamma"),
+    ];
+    const change = (id: string, patch: Partial<Session>) => {
+      rows = rows.map((s) => (s.id === id ? { ...s, ...patch } : s));
+      return rows.find((s) => s.id === id);
+    };
+    await open({
+      "project.list": () => projects,
+      "workspace.list": () => [...workspaces, ...more],
+      "settings.set": () => ({}),
+      "session.list": () => rows,
+      "session.delete": (params: { id: string }) => {
+        rows = rows.filter((s) => s.id !== params.id);
+        return { id: params.id, workspace_deleted: true, branch_kept: false };
+      },
+      "session.set_archived": (params: { id: string; archived: boolean }) => change(params.id, { archived: params.archived }),
+      "session.arrange": (params: { id: string; pinned: boolean }) => change(params.id, { pinned: params.pinned }),
+    });
+    fireEvent.click(within(rail()).getByRole("button", { name: /^beta/ }));
+    const menuButton = within(rail()).getByRole("button", { name: "More for Fix the build" });
+    menuButton.focus();
+    fireEvent.click(menuButton);
+    const item = { deleted: /^Delete…/, archived: /^Archive/, pinned: /^Pin/ }[how];
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+    await settle();
+    if (how === "deleted") {
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete and lose them" }));
+      await settle();
+    }
+    await settle();
+    await settle();
+    if (how === "pinned") expect(tile(to)?.closest(".rail-pinned")).toBeTruthy();
+    // Within that tile: the tile itself, or the More its menu gave focus back to.
+    expect(tile(to)?.closest("[data-session-id]")?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
   it("shows a failed deletion on its tile, whose menu holds Delete… alone, which asks again with what is left", async () => {
     const core = await open({
