@@ -1034,6 +1034,10 @@ You can also paste attachments, or drop them on the box.
 
 Images
 
+### `composer.attach.dialogFailedError`
+
+Ersa couldn't open the dialog to add attachments. Try again.
+
 ### `composer.attachment.listLabel`
 
 Attachments
@@ -1093,6 +1097,10 @@ This image is larger than 10 MB, the most Ersa sends in one message.
 ### `composer.attachment.pastedUnreadableError`
 
 Ersa couldn't read this image.
+
+### `composer.attachment.togetherTooLargeError`
+
+With the images before it, this is more than 10 MB, the most Ersa sends in one message.
 
 ## `newSession`
 

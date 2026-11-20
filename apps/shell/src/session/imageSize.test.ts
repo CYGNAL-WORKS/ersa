@@ -73,4 +73,18 @@ describe("an image's size from its header", () => {
     const beyond = entry(0x0112, 6);
     const photo = [0xff, 0xd8, 0xff, 0xe1, ...be16(held.length + 2), ...held, ...beyond, 0xff, 0xc0, ...be16(17), 8, ...be16(3024), ...be16(4032), 3, 0, 0, 0];
     expect(imageSize(base64(photo))).toEqual({ width: 4032, height: 3024 });
-  });});
+  });
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("believes no header stating a side past 32768 or a long side past 64 times the short one", () => {
+    const png = (width: number, height: number) =>
+      base64([0x89, ...text("PNG"), 0x0d, 0x0a, 0x1a, 0x0a, ...be32(13), ...text("IHDR"), ...be32(width), ...be32(height), 8, 6, 0, 0, 0]);
+    expect(imageSize(png(1, 4294967295))).toBeUndefined();
+    expect(imageSize(png(40000, 40000))).toBeUndefined();
+    expect(imageSize(png(32769, 32768))).toBeUndefined();
+    expect(imageSize(png(32768, 32768))).toEqual({ width: 32768, height: 32768 });
+    expect(imageSize(png(10, 641))).toBeUndefined();
+    expect(imageSize(png(10, 640))).toEqual({ width: 10, height: 640 });
+    expect(imageSize(png(6401, 100))).toBeUndefined();
+    expect(imageSize(png(6400, 100))).toEqual({ width: 6400, height: 100 });
+  });
+});
