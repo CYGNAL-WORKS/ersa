@@ -5,7 +5,7 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -13,6 +13,9 @@ use std::time::Duration;
 use ersa_adapter::OpenElsewhere;
 use ersa_core::{Adapter, Gate};
 use serde_json::{Value, json};
+use support::deleting::{
+    FailingGit, Removal, idle_session, isolated, listed, project, root, token,
+};
 use support::fake::{self, FakeAdapter, Records};
 use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
 
@@ -35,101 +38,6 @@ async fn restarted(core: TestCore, records: Records) -> (TestCore, Client) {
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let client = core.client().await;
     (core, client)
-}
-
-/// A git repository at `dir/repo`, added as a project; returns the project
-/// and the repository's folder.
-async fn project(client: &mut Client, dir: &Path) -> (Value, PathBuf) {
-    let repo = dir.join("repo");
-    git_repo(&repo);
-    let project = client
-        .result(
-            "project.add",
-            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
-        )
-        .await;
-    (project, repo)
-}
-
-/// A new isolated workspace of `project`; returns it and its folder.
-async fn isolated(client: &mut Client, project: &Value) -> (Value, PathBuf) {
-    let workspace = client
-        .result("workspace.create", json!({ "project_id": project["id"] }))
-        .await;
-    let folder = PathBuf::from(workspace["path"].as_str().unwrap());
-    (workspace, folder)
-}
-
-/// The project's root workspace.
-async fn root(client: &mut Client, project: &Value) -> Value {
-    let workspaces = client
-        .result("workspace.list", json!({ "project_id": project["id"] }))
-        .await;
-    workspaces
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|w| w["kind"] == "root")
-        .cloned()
-        .expect("a root workspace")
-}
-
-/// A session of the fake backend in `workspace`, started and idle: its
-/// backend has named it, so it has a record. Returns its id.
-async fn idle_session(client: &mut Client, workspace: &Value) -> String {
-    let session = client
-        .result(
-            "session.create",
-            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
-        )
-        .await;
-    let id = session["id"].as_str().unwrap().to_string();
-    client
-        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-        .await;
-    client.events_until("session.started").await;
-    client
-        .result("session.send", json!({ "id": id, "text": "idle" }))
-        .await;
-    wait_for_state(client, &id, "idle").await;
-    id
-}
-
-/// Waits until `session.list` reports the session in `state`.
-async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if listed(client, id)
-            .await
-            .is_some_and(|row| row["state"] == state)
-        {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {id} never became {state}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
-/// The session's row in `session.list`, if it is listed.
-async fn listed(client: &mut Client, id: &str) -> Option<Value> {
-    let sessions = client.result("session.list", json!({})).await;
-    sessions
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["id"] == id)
-        .cloned()
-}
-
-/// The token of the workspace's `workspace.changes` now.
-async fn token(client: &mut Client, workspace: &Value) -> Value {
-    client
-        .result("workspace.changes", json!({ "id": workspace["id"] }))
-        .await["token"]
-        .clone()
 }
 
 /// Whether `workspace.list` still lists the workspace.
@@ -1282,4 +1190,249 @@ async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark() {
         )
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
+}
+
+/// A started Core whose git fails worktree removals as `removal` says, and
+/// whose warnings are written to the returned log.
+async fn start_failing_git(fake: &Arc<FakeAdapter>, removal: Removal) -> (TestCore, Client, Log) {
+    start_failing_git_with(fake, removal, None, |_| {}).await
+}
+
+/// [`start_failing_git`], with `configure` applied to Core's configuration.
+async fn start_failing_git_with(
+    fake: &Arc<FakeAdapter>,
+    removal: Removal,
+    hold: Option<Duration>,
+    configure: impl FnOnce(&mut ersa_core::CoreConfig),
+) -> (TestCore, Client, Log) {
+    let log = Log::installed();
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
+    let git = Arc::new(FailingGit::new(removal, hold));
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| {
+            config.command_transport = Some(ersa_core::CommandTransport(git));
+            configure(config);
+        },
+        adapters,
+    )
+    .await;
+    let client = core.client().await;
+    (core, client, log)
+}
+
+/// What the test binary's subscriber wrote, every test's together: each
+/// test picks its own lines by session id.
+#[derive(Clone, Default)]
+struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Log {
+    /// The log, its subscriber installed as the binary's global default on
+    /// first use. Global, not per thread: `tracing` caches whether a span
+    /// is wanted across threads, so a per-thread subscriber can miss the
+    /// span that names the session when another test's thread, with no
+    /// subscriber, reached it first.
+    fn installed() -> Log {
+        static LOG: std::sync::OnceLock<Log> = std::sync::OnceLock::new();
+        LOG.get_or_init(|| {
+            let log = Log::default();
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(log.clone())
+                .with_ansi(false)
+                .with_max_level(tracing::Level::WARN)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+            log
+        })
+        .clone()
+    }
+
+    /// The lines written at warning level.
+    fn warnings(&self) -> Vec<String> {
+        let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+        text.lines()
+            .filter(|line| line.contains(" WARN "))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The one warning holding `text` and `session`'s id.
+    fn warning(&self, text: &str, session: &str) -> String {
+        let warnings = self.warnings();
+        warnings
+            .iter()
+            .find(|line| line.contains(text) && line.contains(&format!("session={session}")))
+            .cloned()
+            .unwrap_or_else(|| panic!("no warning {text:?} for {session}: {warnings:#?}"))
+    }
+}
+
+impl std::io::Write for Log {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Log {
+    type Writer = Log;
+    fn make_writer(&'a self) -> Log {
+        self.clone()
+    }
+}
+
+const GIT_FAILED: &str = "git's removal of the worktree failed";
+const STEP_FAILED: &str = "a step of the session's delete failed";
+
+/// git's removal fails after deleting its record of the worktree, leaving
+/// the files: the same delete goes on to delete the folder itself, then the
+/// branch, the record and the session, and the warning for git's failure
+/// names the session, the step and git's reason.
+// verifies: PROTO-CORE-API-R112
+// verifies: PROTO-CORE-API-R114
+#[tokio::test]
+async fn a_git_removal_that_drops_its_record_and_fails_still_deletes_the_folder() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client, log) = start_failing_git(&fake, Removal::DropsRecordThenFails).await;
+    let (project, repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    let branch = branch_of(&workspace);
+
+    let token = token(&mut client, &workspace).await;
+    let response = client
+        .call("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(
+        response["result"],
+        json!({ "id": id, "workspace_deleted": true, "branch_kept": false }),
+        "{response}"
+    );
+    assert!(!folder.exists());
+    assert!(!branch_exists(&repo, &branch));
+    assert!(backend_ids(&fake.records).is_empty());
+    assert!(listed(&mut client, &id).await.is_none());
+    assert!(!workspace_listed(&mut client, &project, &workspace).await);
+
+    let git_failed = log.warning(GIT_FAILED, &id);
+    assert!(git_failed.contains("step=5"), "{git_failed}");
+    assert!(git_failed.contains("is not a working tree"), "{git_failed}");
+    // No step failed in the end.
+    let warnings = log.warnings();
+    let session = format!("session={id}");
+    assert!(
+        !warnings
+            .iter()
+            .any(|line| line.contains(STEP_FAILED) && line.contains(&session)),
+        "{warnings:#?}"
+    );
+}
+
+/// git's removal fails with the worktree still listed: the delete fails at
+/// step 5, keeping the folder, and both git's failure and the step's are
+/// warnings naming the session, the step and the reason. A record deletion
+/// that then fails is a warning for step 6.
+// verifies: PROTO-CORE-API-R114
+#[tokio::test]
+async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reason() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client, log) = start_failing_git(&fake, Removal::Fails).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+
+    let token = token(&mut client, &workspace).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+    assert!(folder.is_dir());
+    let git_failed = log.warning(GIT_FAILED, &id);
+    assert!(git_failed.contains("step=5"), "{git_failed}");
+    // git's own words: it rejects the option with its usage.
+    assert!(
+        git_failed.contains("usage: git worktree remove"),
+        "{git_failed}"
+    );
+    let step_failed = log.warning(STEP_FAILED, &id);
+    assert!(step_failed.contains("step=5"), "{step_failed}");
+    assert!(
+        step_failed.contains("git worktree remove failed")
+            && step_failed.contains("usage: git worktree remove"),
+        "{step_failed}"
+    );
+
+    // Step 6: a root workspace's session skips step 5, and its record
+    // deletion is refused.
+    let root = root(&mut client, &project).await;
+    let id = idle_session(&mut client, &root).await;
+    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::No);
+    let error = client.error("session.delete", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "internal", "{error}");
+    let step_failed = log.warning(STEP_FAILED, &id);
+    assert!(step_failed.contains("step=6"), "{step_failed}");
+    assert!(step_failed.contains("refused to delete"), "{step_failed}");
+}
+
+/// git's removal fails at once, after dropping its record, and a file in
+/// the workspace is held in use for 6 seconds from git's first try, longer
+/// than git's tries and then four tries at the folder take (about 4
+/// seconds): the delete goes on trying the folder until the file is let
+/// go, then finishes.
+// verifies: PROTO-CORE-API-R113
+#[cfg(windows)]
+#[tokio::test]
+async fn a_folder_held_in_use_for_a_few_seconds_is_still_deleted() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let hold = Some(Duration::from_secs(6));
+    let (core, mut client, _log) =
+        start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |_| {}).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    std::fs::write(folder.join("in-use.txt"), "held").unwrap();
+
+    let token = token(&mut client, &workspace).await;
+    let response = client
+        .call("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(response["result"]["workspace_deleted"], true, "{response}");
+    assert!(!folder.exists());
+    assert!(listed(&mut client, &id).await.is_none());
+}
+
+/// The same, with the tries at the folder ending before the file is let
+/// go: the last try fails, and so does the delete, leaving the file and the
+/// session marked failed.
+// verifies: PROTO-CORE-API-R113
+#[cfg(windows)]
+#[tokio::test]
+async fn a_folder_still_in_use_when_the_tries_end_fails_the_delete() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    // Held until Core, and with it the stand-in git, is dropped.
+    let hold = Some(Duration::from_secs(600));
+    let (core, mut client, _log) =
+        start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |config| {
+            config.folder_try_window = Duration::from_millis(500)
+        })
+        .await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    let file = folder.join("in-use.txt");
+    std::fs::write(&file, "held").unwrap();
+
+    let token = token(&mut client, &workspace).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+    assert!(file.exists());
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
 }
