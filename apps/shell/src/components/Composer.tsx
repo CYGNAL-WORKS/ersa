@@ -58,6 +58,8 @@ interface ComposerProps {
   onWrite?: () => void;
   /** What a screen opens above the box in the status line's place, such as the trust question: the line says nothing meanwhile. */
   statusTaken?: boolean;
+  /** A question the screen asks stands before sending, such as the trust question: nothing is sent while it is open. */
+  held?: boolean;
   /** The session controls, beneath the box in the same column, space-xs below it (docs/design/COMPOSER.md). */
   controls?: ReactNode;
   /**
@@ -91,7 +93,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, forceDialogFailed, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, forceDialogFailed, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, held: heldByScreen, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -107,7 +109,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
   const held = over.size > 0 || live.some((a) => a.problem !== undefined);
   // While the agent works, Enter still sends: the message waits in the backend (FLOW-SEND-MESSAGE-R18). Only a
   // message still on its way holds the next one back (R02).
-  const canSend = !unavailable && !busy && !held && (text.trim() !== "" || live.length > 0);
+  const canSend = !unavailable && !busy && !held && !heldByScreen && (text.trim() !== "" || live.length > 0);
 
   // The attachments last sent, so a refusal naming one by its place marks that one (R10), even if others went since.
   const sent = useRef<readonly Attached[]>([]);
