@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-20 FLOW-ARCHIVE-DELETE-SESSION: a Delete on Windows, run seconds after the session stopped, removed git's record of the worktree and then left about 7,000 files (mostly `node_modules`), so the session read "Couldn't delete". Nothing held the files minutes later, and Core's own folder removal then deleted them cleanly, so the likely cause is files held briefly by processes that outlived the session. Two things the brief leaves open: how long a delete keeps retrying busy files (four tries over about 2 seconds today, too short when a stopped session's child processes take longer to exit), and whether Core logs why a delete failed (it logs nothing, so the cause could only be inferred). Meanwhile, nothing changed; the user's try again finishes the delete.
 
 
 ## Resolved recently (optional, trimmed in planning passes)
