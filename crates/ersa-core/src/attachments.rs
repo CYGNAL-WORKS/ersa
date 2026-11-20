@@ -311,7 +311,7 @@ fn check(
                 )));
             }
             let mut bytes = Vec::with_capacity(meta.len() as usize);
-            fs::File::open(given)?
+            open_file(given)?
                 .take(images.max_bytes + 1)
                 .read_to_end(&mut bytes)?;
             work.step()?;
@@ -559,6 +559,21 @@ fn ignore_everything(path: &Path) -> Result<(), Fail> {
     }
 }
 
+/// Opens the file at `path` to read, checked again by what was opened: it
+/// may have been swapped for something else (a FIFO, a folder) since it was
+/// checked, and a FIFO opened the usual way waits for a writer that may
+/// never come, holding the session's scratch folder all the while.
+fn open_file(path: &Path) -> Result<fs::File, Fail> {
+    let file = crate::platform::open_without_waiting(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(Fail::Reason(format!(
+            "{} changed after it was checked and is no longer a file",
+            path.display()
+        )));
+    }
+    Ok(file)
+}
+
 /// Makes `path` a folder when nothing is there, and refuses anything there
 /// that is not a real folder (a link, a junction, a file).
 fn real_folder(path: &Path) -> Result<(), Fail> {
@@ -613,7 +628,7 @@ impl Copy<'_> {
 
     fn file(&mut self, from: &Path, to: &Path) -> Result<(), Fail> {
         self.count_entry()?;
-        let mut source = fs::File::open(from)?;
+        let mut source = open_file(from)?;
         let mut dest = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
