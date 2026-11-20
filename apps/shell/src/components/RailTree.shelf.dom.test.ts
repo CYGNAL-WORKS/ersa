@@ -44,6 +44,8 @@ const active = session("b", "Fix the build", "2026-11-06T10:00:00Z", []);
 /** What the rail's owner holds: the sessions, and which shelf is open, changed as the window changes it. */
 let list: (sessions: Session[]) => void = () => {};
 const decided: string[] = [];
+/** The open shelf's tone, as the window gives it. */
+let tone: "accent" | "caution" = "caution";
 
 function Rail() {
   const [sessions, setSessions] = useState([waiting, active]);
@@ -62,7 +64,7 @@ function Rail() {
       shelf: open
         ? {
             id: open,
-            tone: "caution",
+            tone,
             render: (domId: string) =>
               createElement(Shelf, {
                 id: domId,
@@ -101,9 +103,25 @@ beforeEach(() => {
     disconnect() {}
   };
   decided.length = 0;
+  tone = "caution";
 });
 
 afterEach(cleanup);
+
+describe("the shelf sliding back", () => {
+  it("keeps its tile's tone, which its edge takes, while it slides back", () => {
+    // With motion, the closed shelf stays on the page while it slides back.
+    window.matchMedia = ((query: string) => ({ matches: false, media: query })) as unknown as typeof window.matchMedia;
+    tone = "accent";
+    const open = openShelf();
+    const tile = open.closest(".session-item") as HTMLElement;
+    expect(tile.dataset.tone).toBe("accent");
+    fireEvent.keyDown(open, { key: "Escape" });
+    expect(open.isConnected).toBe(true);
+    expect(tile.hasAttribute("data-shelf")).toBe(false);
+    expect(tile.dataset.tone).toBe("accent");
+  });
+});
 
 describe("the shelf and keyboard focus", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R05
