@@ -2,9 +2,10 @@ import { mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// Copy session ID and a session whose folder is gone, in the running window (#340; FLOW-RESUME-SESSION-R16, R17, R03,
-// PROTO-CORE-API-R80), with the stand-in backend: the tile's menu copies the id Core lists, and writing to a stopped
-// session whose folder was deleted says so in the catalog's words and keeps the session.
+// Copy session ID and a session whose folder is gone, in the running window (#340, #524; FLOW-RESUME-SESSION-R16, R18,
+// R19, R03, PROTO-CORE-API-R80), with the stand-in backend: the tile's menu copies the id Core lists once Core has found
+// the session's record, and writing to a stopped session whose folder was deleted says so in the catalog's words and
+// keeps the session.
 test("Copy session ID copies the listed id, and writing to a session whose folder is gone says so and keeps it", async ({ ersa }) => {
   test.setTimeout(300_000);
   const folder = path.join(ersa.dir, "copy-id-check");
@@ -23,6 +24,12 @@ test("Copy session ID copies the listed id, and writing to a session whose folde
   await words.fill("Hello there");
   await words.press("Enter");
   await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible({ timeout: 120_000 });
+
+  // The stand-in, like the CLI, writes the session's record with its first message, but ends no turn: a reopened
+  // window's list is where Core looks for the record (FLOW-RESUME-SESSION-R19).
+  await ersa.restart();
+  page = ersa.page;
+  rail = page.getByRole("navigation", { name: "Rail" });
 
   // A live check never touches the owner's clipboard or raises its permission prompt, so the page's clipboard write
   // is replaced by a recorder; the App test holds the exact-id rule with its own stand-in.

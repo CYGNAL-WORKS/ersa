@@ -10,7 +10,11 @@
 //!   request with one model, the CLI's own `default` entry, so detection
 //!   lists it and the session starts and takes messages; it then accepts
 //!   each change of model, permission mode or effort as the CLI does.
-//!   Sent the message `limits`, it reports the plan's usage windows as the
+//!   With `CLAUDE_CONFIG_DIR` set, its first message writes a session record
+//!   under the `--session-id` it was started with, as the CLI does, so
+//!   Core's look finds the session there (FLOW-RESUME-SESSION-R18); the
+//!   record names no folder, so it is never listed as a session started
+//!   outside Ersa. Sent the message `limits`, it reports the plan's usage windows as the
 //!   CLI's `rate_limit_event` does, with made-up shares: a 5-hour limit at
 //!   84 percent resetting in 1 hr 15 min, and a weekly limit at 62 percent
 //!   resetting in three days.
@@ -74,6 +78,39 @@ fn said(message: &serde_json::Value, text: &str) -> bool {
             .is_some_and(|blocks| blocks.iter().any(|b| b["text"].as_str() == Some(text)))
 }
 
+/// Writes the session's record, one user entry, under
+/// `$CLAUDE_CONFIG_DIR/projects/stand-in/<--session-id>.jsonl`, once: the
+/// CLI files a record with its first message. Without either, nothing.
+fn write_record() {
+    let Some(home) = std::env::var_os("CLAUDE_CONFIG_DIR") else {
+        return;
+    };
+    let args: Vec<String> = std::env::args().collect();
+    let Some(id) = args
+        .iter()
+        .position(|a| a == "--session-id")
+        .and_then(|at| args.get(at + 1))
+    else {
+        return;
+    };
+    let dir = std::path::Path::new(&home).join("projects").join("stand-in");
+    let file = dir.join(format!("{id}.jsonl"));
+    if file.exists() {
+        return;
+    }
+    // A bookkeeping entry the CLI writes first, which holds no prompt: the
+    // record then gives the session no title, as the stand-in's stream does.
+    let line = serde_json::json!({
+        "type": "queue-operation",
+        "operation": "enqueue",
+        "timestamp": "2026-11-20T09:00:00.000Z",
+        "sessionId": id,
+    });
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(file, format!("{line}
+"));
+}
+
 /// Writes a `rate_limit_event` line with two usage windows, made up, whose
 /// reset times are counted from now so the window shows each way of saying
 /// when a limit resets (docs/design/COMPOSER.md, The context ring).
@@ -112,6 +149,7 @@ fn answer_initialize() {
             continue;
         };
         if message["type"] == "user" {
+            write_record();
             if said(&message, "limits") {
                 report_limits();
             }
