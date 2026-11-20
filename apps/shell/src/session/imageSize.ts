@@ -20,7 +20,21 @@ export function imageSize(data: string): ImageSize | undefined {
     return undefined;
   }
   const size = png(bytes) ?? gif(bytes) ?? webp(bytes) ?? jpeg(bytes);
-  return size && size.width > 0 && size.height > 0 ? size : undefined;
+  return size && plausible(size) ? size : undefined;
+}
+
+/** The longest side a header may state and be believed: past any screenshot or photo, and past what a window draws. */
+const MAX_SIDE = 32_768;
+/** How many times its short side an image's long side may be, so its place is never a sliver. */
+const MAX_RATIO = 64;
+
+/**
+ * Whether a header's size is one to lay a place out from. One that isn't, as a corrupt PNG's 1 by 4294967295, gives
+ * no place: the image then takes its own size as drawn, within the same cap (Transcript's AttachedImage).
+ */
+function plausible({ width, height }: ImageSize): boolean {
+  if (width <= 0 || height <= 0 || width > MAX_SIDE || height > MAX_SIDE) return false;
+  return Math.max(width, height) <= MAX_RATIO * Math.min(width, height);
 }
 
 const u16le = (b: Uint8Array, at: number) => (b[at] ?? 0) | ((b[at + 1] ?? 0) << 8);

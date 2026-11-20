@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttachmentInspectResult } from "../protocol/core-api.gen";
-import { INLINE_MAX, addAll, attached, detail, pastedImage, sendable, size, willCopy, waitingName } from "./attachments";
+import { type Attached, INLINE_MAX, addAll, attached, detail, overInline, pastedImage, sendable, size, willCopy, waitingName } from "./attachments";
 
 const info = (over: Partial<AttachmentInspectResult>): AttachmentInspectResult => ({
   path: "D:\\work\\repo\\notes.md",
@@ -92,6 +92,34 @@ describe("a pasted image", () => {
     const again = await pastedImage(new Blob([new Uint8Array([255, 216, 255])], { type: "image/jpeg" }));
     expect(sendable([jpeg])).toEqual([{ kind: "image", media_type: "image/jpeg", data: btoa("\xff\xd8\xff") }]);
     expect(addAll([jpeg], [again])).toHaveLength(2);
+  });
+});
+
+describe("images together over the inline limit", () => {
+  const MB = 1024 * 1024;
+  const image = (path: string, bytes: number, problem?: string): Attached => ({ path, name: path, kind: "image", detail: "", bytes, ...(problem && { problem }) });
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("marks each image that, with the images before it, passes 10 MB, counting picked and pasted alike", () => {
+    const a = image("pasted:a", 6 * MB);
+    const b = image("pasted:b", 6 * MB);
+    expect(overInline([a])).toEqual(new Set());
+    expect(overInline([a, b])).toEqual(new Set([b]));
+    // Exactly the limit together still fits.
+    expect(overInline([image("x", 5 * MB), image("y", 5 * MB)])).toEqual(new Set());
+    // A picked image counts by the size Core read.
+    const picked = attached(info({ path: "C:/pics/a.png", name: "a.png", kind: "image", size_bytes: 9 * MB }));
+    expect(picked.bytes).toBe(9 * MB);
+    expect(overInline([picked, image("pasted:c", 2 * MB)]).size).toBe(1);
+    // Files and folders, and an image already marked, are not counted.
+    const marked = image("pasted:big", 11 * MB, "too large");
+    const file = { path: "D:/a.bin", name: "a.bin", kind: "file" as const, detail: "", bytes: 20 * MB };
+    expect(overInline([marked, file, a])).toEqual(new Set());
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("counts a pasted image by its size", async () => {
+    const png = await pastedImage(new Blob([new Uint8Array(7)], { type: "image/png" }));
+    expect(png.bytes).toBe(7);
   });
 });
 

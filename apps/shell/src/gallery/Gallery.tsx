@@ -1650,6 +1650,8 @@ const entries: Entry[] = [
         "Backends can't be listed",
         statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ detectionFailed: "The host didn't answer in time." }} />),
       ],
+      // FLOW-SEND-MESSAGE-R23: the system's dialog for an attachment failed to open.
+      ["The attach dialog failed to open", statusRoom(<Composer {...attachProps} initialText="Match the mockup." forceDialogFailed />)],
       ["The attach menu open", menuRoom(<Composer {...attachProps} attachMenuOpen />)],
       ["An attach choice under the pointer", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "hover" }} />)],
       ["An attach choice pressed", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "pressed" }} />)],
