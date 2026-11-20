@@ -1001,9 +1001,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_source_swapped_for_a_fifo_after_the_check_is_refused_at_once() {
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
-
         let dir = tempfile::tempdir().unwrap();
         let workspace = fs::canonicalize(dir.path()).unwrap().join("workspace");
         let outside = workspace.parent().unwrap().join("outside");
@@ -1029,9 +1026,11 @@ mod tests {
 
         // The swap: the checked file becomes a FIFO with no writer.
         fs::remove_file(&source).unwrap();
-        let fifo = CString::new(source.as_os_str().as_bytes()).unwrap();
-        // SAFETY: `fifo` is a NUL-terminated path that outlives the call.
-        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        let made = std::process::Command::new("mkfifo")
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(made.success());
 
         let (answer, answered) = std::sync::mpsc::channel();
         let job_workspace = workspace.clone();
