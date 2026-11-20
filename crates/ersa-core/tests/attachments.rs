@@ -1070,12 +1070,15 @@ async fn an_image_for_a_backend_that_takes_none_says_so() {
 
 /// A repository that ships its own `.ersa/.gitignore`, one that ignores
 /// nothing, still has every copy ignored, and its file is left as it is.
+/// So does one that ships an `.ersa/attachments/.gitignore`, in Core's own
+/// folder, that ignores nothing.
 // verifies: PROTO-CORE-API-R22
 #[tokio::test]
 async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
     let mut s = setup(FakeAdapter::new(1)).await;
     file(&s.workspace, ".ersa/.gitignore", b"");
-    support::git(&s.workspace, &["add", ".ersa/.gitignore"]);
+    file(&s.workspace, ".ersa/attachments/.gitignore", b"");
+    support::git(&s.workspace, &["add", ".ersa"]);
     support::git(&s.workspace, &["commit", "--quiet", "-m", "ship .ersa"]);
     let id = s.session().await;
     let notes = file(&s.outside, "notes.md", b"# notes\n");
@@ -1092,12 +1095,18 @@ async fn copies_stay_ignored_under_a_gitignore_the_repository_ships() {
         .await;
     assert!(response.get("result").is_some(), "{response:#}");
     assert_eq!(copies(&s.scratch(&id)), vec!["1", "2"]);
-    // What `git add -A` would add: nothing under `.ersa/`.
+    // What `git add -A` would add: no copy. Core's own ignore file was made
+    // again, so it alone shows as changed under `.ersa/`.
     let status = support::git(
         &s.workspace,
         &["status", "--porcelain", "--untracked-files=all"],
     );
-    assert!(!status.contains(".ersa"), "{status}");
+    let under_ersa: Vec<&str> = status.lines().filter(|l| l.contains(".ersa")).collect();
+    assert_eq!(
+        under_ersa,
+        vec![" M .ersa/attachments/.gitignore"],
+        "{status}"
+    );
     assert_eq!(
         std::fs::read(s.workspace.join(".ersa").join(".gitignore")).unwrap(),
         b""
