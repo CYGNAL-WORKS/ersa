@@ -170,6 +170,67 @@ describe("several requests", () => {
   });
 });
 
+describe("the shelf across a reconnect", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R09
+  it("keeps counting its place from the requests it showed before Core went away", async () => {
+    const core = fakeCore([
+      { kind: "permission", request_id: "r1" },
+      { kind: "permission", request_id: "r2" },
+      { kind: "permission", request_id: "r3" },
+    ]);
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Request from / }));
+    await settle();
+    const events = [
+      requested,
+      envelope({ ...request, request_id: "r2", tool_use_id: "t2", description: "Write the second file" }, 1),
+      envelope({ ...request, request_id: "r3", tool_use_id: "t3", description: "Write the third file" }, 2),
+      envelope({ type: "permission.decided", request_id: "r1", behavior: "allow", decided_by: "user" }, 3),
+    ];
+    // The first is shown, then answered.
+    await core.send(...events.slice(0, 3));
+    await core.send(...events.slice(3));
+    expect(within(screen.getByRole("dialog", { name: /^Request from / })).getByText("2 of 3")).toBeTruthy();
+
+    // Core goes, and the tiles with it; Ersa attaches again by itself, and the same shelf is open once Core lists them.
+    core.drop();
+    expect(screen.queryByRole("button", { name: /^Request from / })).toBeNull();
+    for (let turn = 0; turn < 200 && !screen.queryByRole("button", { name: /^Request from / }); turn++) await act(() => new Promise((r) => setTimeout(r, 20)));
+    await settle();
+    await settle();
+    await core.send(...events);
+    const again = screen.getByRole("dialog", { name: /^Request from / });
+    expect(within(again).getByText("Write the second file")).toBeTruthy();
+    expect(within(again).getByText("2 of 3")).toBeTruthy();
+  });
+});
+
+describe("a question as it settles", () => {
+  it("keeps the question's tone on the open tile while the question stays on screen", async () => {
+    const core = fakeCore([{ kind: "question", request_id: "rq" }]);
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Request from / }));
+    await settle();
+    await core.send(
+      envelope({ type: "question.asked", request_id: "rq", questions: [{ id: "q1", text: "Which branch?", options: [], multi_select: false, takes_text: true }] }, 0),
+    );
+    const shelf = screen.getByRole("dialog", { name: /^Request from / });
+    const tile = shelf.closest(".session-item") as HTMLElement;
+    expect(tile.dataset.tone).toBe("accent");
+    // Answered elsewhere: the tile still lists it until Core lists its sessions again, and the question stays on screen.
+    await core.send(envelope({ type: "question.answered", request_id: "rq", declined: true, answers: [], answered_by: "backend" }, 1));
+    expect(within(shelf).getByText("Which branch?")).toBeTruthy();
+    expect(tile.dataset.tone).toBe("accent");
+    expect(shelf.dataset.tone).toBe("accent");
+  });
+});
+
 describe("answering from the shelf", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R18
   it("sends the one answer, and keeps the answers unavailable on the transcript's card once the session is made active", async () => {

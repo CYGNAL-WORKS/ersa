@@ -85,6 +85,17 @@ describe("the shelf moving to the next request", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R10
+  it("puts focus on the shelf itself as it moves on while the window is in the background", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 2 } }));
+    const deny = screen.getByRole("button", { name: "Deny" });
+    act(() => deny.focus());
+    // The window loses focus: focus leaves for nowhere, though the page keeps Deny as its focused element.
+    act(() => void deny.dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: null })));
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }));
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+
   it("eases its height once per move, and leaves a running ease alone as it renders again", () => {
     const eases: { cancelled: boolean }[] = [];
     const [animate, box, style] = [HTMLElement.prototype.animate, HTMLElement.prototype.getBoundingClientRect, window.getComputedStyle];
@@ -122,6 +133,23 @@ describe("the shelf moving to the next request", () => {
     expect(dialog.textContent).not.toContain("Loading");
     expect(dialog.textContent).not.toContain("Reconnecting");
     for (const name of ["Deny", "Allow"]) expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
+  });
+
+  it("keeps a question's tone as it settles, since it is still the request on screen", () => {
+    const question = { state: "question", requestId: "q1", questions: [{ id: "a", text: "Which branch?", multi_select: false, takes_text: false }] } satisfies ShelfShows;
+    const { rerender } = render(shelf(question));
+    expect(screen.getByRole("dialog").dataset.tone).toBe("accent");
+    rerender(shelf({ state: "settled" }));
+    expect(screen.getByRole("dialog").textContent).toContain("Which branch?");
+    expect(screen.getByRole("dialog").dataset.tone).toBe("accent");
+  });
+
+  it("says every request is answered when it settles without having shown one", () => {
+    const { rerender } = render(shelf({ state: "loading" }));
+    rerender(shelf({ state: "settled" }));
+    const note = screen.getByText("Every request from this session is answered.");
+    expect(note.className).toBe("shelf-note");
+    expect(screen.getByRole("dialog").textContent).not.toContain("Loading");
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R24

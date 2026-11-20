@@ -252,8 +252,10 @@ export const enUS = {
       nextLabel: "{kind}, {n} of {m}: {asked}",
       // Heard as the shelf moves to a request it can't show: "2 of 3: This session is waiting on…".
       nextUnknownLabel: "{n} of {m}: {note}",
-      pathLabel: "Path:",
       loadingProgress: "Loading…",
+      // Shown once every request the shelf knew of is answered before it showed one, until Core lists the session's
+      // requests again and the shelf closes (FLOW-APPROVE-PERMISSION-R08).
+      answeredNote: "Every request from this session is answered.",
       readError: "Ersa can't read this session's requests.",
       retryButton: "Retry",
       unknownNote: "This session is waiting on a request Ersa can't show here.",
