@@ -48,7 +48,7 @@ export function RailFoot({ view, onRetry }: RailFootProps) {
   return (
     <>
       {/* One status region for as long as the rail is: mounted empty, so a problem line arriving in it is announced. */}
-      <div className={foot.kind === "reconnecting" ? "rail-foot" : "rail-foot-unseen"} role="status">
+      <div className={foot.kind === "reconnecting" ? "rail-foot" : "heard-only"} role="status">
         {foot.kind === "reconnecting" ? (
           <>
             <p className="problem rail-foot-trying">{t("rail.foot.reconnectingError")}</p>

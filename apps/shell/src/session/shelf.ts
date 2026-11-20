@@ -6,6 +6,7 @@ import type { Envelope, PermissionRequested, QuestionAsked } from "../protocol/a
 import type { Session } from "../protocol/core-api.gen";
 import { EARLIER, type Follower, type SessionView, follow } from "./follow";
 import type { SharedSubscriptions } from "./subscriptions";
+import { wantTone } from "./tile";
 import { type Item, isOpen, isOpenQuestion } from "./transcript";
 
 type Pending = Session["tile"]["pending"][number];
@@ -65,10 +66,22 @@ export type ShelfShows =
   | { state: "permission"; request: PermissionRequested; place?: Place }
   | { state: "question"; requestId: string; questions: QuestionAsked["questions"]; place?: Place };
 
-/** The tone of the shelf and of its tile while open (`docs/design/RAIL.md`, The shelf). */
-export function shelfTone(shows: ShelfShows): "accent" | "caution" {
-  return shows.state === "question" ? "accent" : "caution";
+export type ShelfTone = "accent" | "caution";
+
+/**
+ * The tone of the shelf and of its tile while open (`docs/design/RAIL.md`, The shelf): the shown request's, or one it
+ * can't show. Settled, the shelf still shows what it last showed, so it keeps that one's tone, which `shown` records
+ * (R34). A shelf that has shown no request, loading, failed or settled before it showed one, keeps the tone its tile
+ * has with the shelf closed, which the tile's `pending` list decides.
+ */
+export function shelfTone(shows: ShelfShows, shown: ShelfShown | undefined, pending: Pending[]): ShelfTone {
+  if (shows.state === "settled") return shown?.tone ?? wantTone(pending);
+  if (shows.state === "loading" || shows.state === "failed") return wantTone(pending);
+  return requestTone(shows);
 }
+
+/** The tone of a request the shelf shows, or of one it can't show: only a question is the accent. */
+const requestTone = (shows: ShelfShows): ShelfTone => (shows.state === "question" ? "accent" : "caution");
 
 /**
  * What the shelf shows for a session: its oldest pending request, the one whose event came first (R01), read
@@ -126,21 +139,28 @@ export function shownRequest(shows: ShelfShows): string | undefined {
   return undefined;
 }
 
-/** The requests a session's shelf has shown since it opened, which count toward its place (R09). */
+/** What a session's shelf has shown since it opened. */
 export interface ShelfShown {
   id: string;
+  /** The requests it has shown, which count toward its place (R09). */
   requests: ReadonlySet<string>;
+  /** The tone of the last request it showed, or of one it couldn't show, which it keeps as it settles. */
+  tone?: ShelfTone;
 }
 
 /**
- * The shown requests after the open shelf (`id`) shows `request`: a new shelf starts afresh, and a closed one keeps
- * nothing. Returns `shown` itself when nothing changes.
+ * What the open shelf (`id`) has shown once it shows `shows`: a new shelf starts afresh, and a closed one keeps
+ * nothing. Nothing shown, as while loading or while Core is away, keeps the record. Returns `shown` itself when
+ * nothing changes.
  */
-export function shownAfter(shown: ShelfShown | undefined, id: string | undefined, request: string | undefined): ShelfShown | undefined {
+export function shownAfter(shown: ShelfShown | undefined, id: string | undefined, shows: ShelfShows | undefined): ShelfShown | undefined {
   if (id === undefined) return undefined;
-  const requests = shown?.id === id ? shown.requests : new Set<string>();
-  if (request === undefined || requests.has(request)) return shown?.id === id ? shown : { id, requests };
-  return { id, requests: new Set([...requests, request]) };
+  const last: ShelfShown = shown?.id === id ? shown : { id, requests: new Set() };
+  const request = shows && shownRequest(shows);
+  const shownNow = shows && (request !== undefined || shows.state === "unknown");
+  const tone = shownNow ? requestTone(shows) : last.tone;
+  if ((request === undefined || last.requests.has(request)) && tone === last.tone) return last;
+  return { id, requests: request === undefined ? last.requests : new Set([...last.requests, request]), tone };
 }
 
 /** The events held start after a gap: Core let go of the session's earliest events. */
