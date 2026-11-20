@@ -1299,11 +1299,12 @@ enum Removal {
 struct FailingGit {
     removal: Removal,
     /// When set, the first removal also holds the worktree's `in-use.txt`
-    /// in use for this long (Windows), as a process that has just exited
-    /// does: counted from git's first try, so the tries at the folder are
-    /// what it outlasts.
+    /// in use (Windows), as a process that has just exited does, for this
+    /// long or until this stand-in is dropped: counted from git's first
+    /// try, so the tries at the folder are what it outlasts.
     hold: Option<Duration>,
-    held: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Lets the held file go when dropped.
+    held: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
     inner: ersa_core::transport::LocalTreeTransport,
 }
 
@@ -1326,7 +1327,9 @@ impl ersa_adapter::Transport for FailingGit {
                     let worktree = PathBuf::from(spec.args.last().unwrap());
                     let mut held = self.held.lock().unwrap();
                     if let (Some(hold), None) = (self.hold, held.as_ref()) {
-                        *held = Some(held_in_use(&worktree.join("in-use.txt"), hold));
+                        let (release, released) = std::sync::mpsc::channel();
+                        held_in_use(&worktree.join("in-use.txt"), hold, released);
+                        *held = Some(release);
                     }
                     if let Ok(link) = std::fs::read_to_string(worktree.join(".git")) {
                         let record = link.trim().trim_start_matches("gitdir:").trim();
@@ -1517,10 +1520,11 @@ async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reaso
     assert!(step_failed.contains("refused to delete"), "{step_failed}");
 }
 
-/// Holds `file` open for `held`, sharing reading only, so deleting it fails
-/// on Windows until then, as a process that has just exited holds files
-/// there. Elsewhere an open file does not stop its deletion.
-fn held_in_use(file: &Path, held: Duration) -> std::thread::JoinHandle<()> {
+/// Holds `file` open for `held`, or until `released` hears or is
+/// disconnected, sharing reading only, so deleting it fails on Windows
+/// until then, as a process that has just exited holds files there.
+/// Elsewhere an open file does not stop its deletion.
+fn held_in_use(file: &Path, held: Duration, released: std::sync::mpsc::Receiver<()>) {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(windows)]
@@ -1531,9 +1535,9 @@ fn held_in_use(file: &Path, held: Duration) -> std::thread::JoinHandle<()> {
     }
     let open = options.open(file).unwrap();
     std::thread::spawn(move || {
-        std::thread::sleep(held);
+        let _ = released.recv_timeout(held);
         drop(open);
-    })
+    });
 }
 
 /// git's removal fails at once, after dropping its record, and a file in
@@ -1571,7 +1575,8 @@ async fn a_folder_held_in_use_for_a_few_seconds_is_still_deleted() {
 #[tokio::test]
 async fn a_folder_still_in_use_when_the_tries_end_fails_the_delete() {
     let fake = Arc::new(FakeAdapter::new(1));
-    let hold = Some(Duration::from_secs(6));
+    // Held until Core, and with it the stand-in git, is dropped.
+    let hold = Some(Duration::from_secs(600));
     let (core, mut client, _log, _guard) =
         start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |config| {
             config.folder_try_window = Duration::from_millis(500)
