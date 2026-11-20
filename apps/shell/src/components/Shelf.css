@@ -33,7 +33,9 @@
   --shelf-join-height: 0;
 }
 
-.shelf[data-tone="accent"] {
+/* In its open tile's tone, so the tile and the shelf are one shape with one tone (docs/design/RAIL.md, The shelf).
+   The tile adds no weight, so keyboard focus's edge below still wins. */
+:where(.session-item[data-tone="accent"]) .shelf {
   --shelf-edge: var(--color-accent);
 }
 
