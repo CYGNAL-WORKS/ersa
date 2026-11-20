@@ -898,7 +898,7 @@ async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
 /// A backend that names a session itself, as the fake does: Core holds no id
 /// for it until the backend names it on its stream, and lists none until
 /// then; from then on the list carries that id, also once the session stops.
-// verifies: FLOW-RESUME-SESSION-R15
+// verifies: FLOW-RESUME-SESSION-R17
 #[tokio::test(flavor = "multi_thread")]
 async fn the_list_carries_a_self_named_session_id_from_when_the_backend_names_it() {
     let records = Records::default();

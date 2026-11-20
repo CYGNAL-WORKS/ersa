@@ -894,7 +894,7 @@ impl Handle {
         Session {
             id: row.id,
             // The backend's id, so the user can resume the session in the
-            // backend's own tools (FLOW-RESUME-SESSION-R15). The row holds it
+            // backend's own tools (FLOW-RESUME-SESSION-R16). The row holds it
             // only once it is the backend's: one the backend announced, one
             // its record lists, or one Core chose and handed to a backend that
             // starts under it (PROTO-CLAUDE-CODE-STREAM-R35).
