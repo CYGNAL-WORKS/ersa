@@ -12,17 +12,9 @@
   background: var(--material-pressed);
 }
 
+/* Its entrance is the chip list's, which slides away from attach on whichever side the window placed it. */
 .chip-list.attach-menu {
   position-area: block-start span-inline-end;
-  animation-name: attach-menu-in;
-}
-
-/* It slides space-xs toward its place: up from attach. */
-@keyframes attach-menu-in {
-  from {
-    opacity: 0;
-    transform: translateY(var(--space-xs));
-  }
 }
 
 /* The note beneath the choices: attachments can also be pasted or dropped. It widens the menu up to size-menu, then wraps. */
