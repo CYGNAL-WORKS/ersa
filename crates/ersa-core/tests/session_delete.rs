@@ -1298,6 +1298,12 @@ enum Removal {
 /// `git worktree remove` failing as `removal` says.
 struct FailingGit {
     removal: Removal,
+    /// When set, the first removal also holds the worktree's `in-use.txt`
+    /// in use for this long (Windows), as a process that has just exited
+    /// does: counted from git's first try, so the tries at the folder are
+    /// what it outlasts.
+    hold: Option<Duration>,
+    held: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
     inner: ersa_core::transport::LocalTreeTransport,
 }
 
@@ -1318,6 +1324,10 @@ impl ersa_adapter::Transport for FailingGit {
                     // Gone after the first try; git's own removal then
                     // fails on every try: not a working tree.
                     let worktree = PathBuf::from(spec.args.last().unwrap());
+                    let mut held = self.held.lock().unwrap();
+                    if let (Some(hold), None) = (self.hold, held.as_ref()) {
+                        *held = Some(held_in_use(&worktree.join("in-use.txt"), hold));
+                    }
                     if let Ok(link) = std::fs::read_to_string(worktree.join(".git")) {
                         let record = link.trim().trim_start_matches("gitdir:").trim();
                         let _ = std::fs::remove_dir_all(record);
@@ -1337,6 +1347,16 @@ async fn start_failing_git(
     fake: &Arc<FakeAdapter>,
     removal: Removal,
 ) -> (TestCore, Client, Log, tracing::subscriber::DefaultGuard) {
+    start_failing_git_with(fake, removal, None, |_| {}).await
+}
+
+/// [`start_failing_git`], with `configure` applied to Core's configuration.
+async fn start_failing_git_with(
+    fake: &Arc<FakeAdapter>,
+    removal: Removal,
+    hold: Option<Duration>,
+    configure: impl FnOnce(&mut ersa_core::CoreConfig),
+) -> (TestCore, Client, Log, tracing::subscriber::DefaultGuard) {
     let log = Log::default();
     let subscriber = tracing_subscriber::fmt()
         .with_writer(log.clone())
@@ -1347,11 +1367,16 @@ async fn start_failing_git(
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
     let git = Arc::new(FailingGit {
         removal,
+        hold,
+        held: std::sync::Mutex::new(None),
         inner: ersa_core::transport::LocalTreeTransport::for_commands(),
     });
     let core = start_with_adapters(
         tempdir(),
-        move |config| config.command_transport = Some(ersa_core::CommandTransport(git)),
+        move |config| {
+            config.command_transport = Some(ersa_core::CommandTransport(git));
+            configure(config);
+        },
         adapters,
     )
     .await;
@@ -1468,7 +1493,10 @@ async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reaso
     let git_failed = log.warning(GIT_FAILED, &id);
     assert!(git_failed.contains("step=5"), "{git_failed}");
     // git's own words: it rejects the option with its usage.
-    assert!(git_failed.contains("usage: git worktree remove"), "{git_failed}");
+    assert!(
+        git_failed.contains("usage: git worktree remove"),
+        "{git_failed}"
+    );
     let step_failed = log.warning(STEP_FAILED, &id);
     assert!(step_failed.contains("step=5"), "{step_failed}");
     assert!(
@@ -1487,4 +1515,82 @@ async fn failed_steps_of_a_delete_are_warnings_naming_the_session_step_and_reaso
     let step_failed = log.warning(STEP_FAILED, &id);
     assert!(step_failed.contains("step=6"), "{step_failed}");
     assert!(step_failed.contains("refused to delete"), "{step_failed}");
+}
+
+/// Holds `file` open for `held`, sharing reading only, so deleting it fails
+/// on Windows until then, as a process that has just exited holds files
+/// there. Elsewhere an open file does not stop its deletion.
+fn held_in_use(file: &Path, held: Duration) -> std::thread::JoinHandle<()> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_SHARE_READ alone: no delete sharing.
+        options.share_mode(1);
+    }
+    let open = options.open(file).unwrap();
+    std::thread::spawn(move || {
+        std::thread::sleep(held);
+        drop(open);
+    })
+}
+
+/// git's removal fails at once, after dropping its record, and a file in
+/// the workspace is held in use for 6 seconds from git's first try, longer
+/// than git's tries and then four tries at the folder take (about 4
+/// seconds): the delete goes on trying the folder until the file is let
+/// go, then finishes.
+// verifies: PROTO-CORE-API-R113
+#[cfg(windows)]
+#[tokio::test]
+async fn a_folder_held_in_use_for_a_few_seconds_is_still_deleted() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let hold = Some(Duration::from_secs(6));
+    let (core, mut client, _log, _guard) =
+        start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |_| {}).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    std::fs::write(folder.join("in-use.txt"), "held").unwrap();
+
+    let token = token(&mut client, &workspace).await;
+    let response = client
+        .call("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(response["result"]["workspace_deleted"], true, "{response}");
+    assert!(!folder.exists());
+    assert!(listed(&mut client, &id).await.is_none());
+}
+
+/// The same, with the tries at the folder ending before the file is let
+/// go: the last try fails, and so does the delete, leaving the file and the
+/// session marked failed.
+// verifies: PROTO-CORE-API-R113
+#[cfg(windows)]
+#[tokio::test]
+async fn a_folder_still_in_use_when_the_tries_end_fails_the_delete() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let hold = Some(Duration::from_secs(6));
+    let (core, mut client, _log, _guard) =
+        start_failing_git_with(&fake, Removal::DropsRecordThenFails, hold, |config| {
+            config.folder_try_window = Duration::from_millis(500)
+        })
+        .await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    let file = folder.join("in-use.txt");
+    std::fs::write(&file, "held").unwrap();
+
+    let token = token(&mut client, &workspace).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": token }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+    assert!(file.exists());
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
 }
