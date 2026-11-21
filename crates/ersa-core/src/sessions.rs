@@ -348,6 +348,13 @@ struct Handle {
     /// none: one from before Core recorded it, or one found in the
     /// backend's records, was started stating that default.
     permission_default: Option<String>,
+    /// Whether the backend started the session under an id Core chose
+    /// (Claude Code: every session and fork Ersa starts), rather than one
+    /// the backend named. Such an id leads nowhere in the backend's own
+    /// tools until the backend writes a record under it, so Core carries it
+    /// only while the adapter's latest look found that record
+    /// (FLOW-RESUME-SESSION-R18), which [`Presented::record_found`] holds.
+    id_chosen: bool,
     /// What the session's record says of it, as last read.
     presented: Mutex<Presented>,
     hub: Mutex<Hub>,
@@ -370,6 +377,10 @@ struct Handle {
     version_check: ReadSlot<Result<Option<String>, String>>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+    /// The same for looking whether a fork has a record of its own yet,
+    /// which each list does for a fork whose record no look has found
+    /// (FLOW-RESUME-SESSION-R19).
+    own_record_look: ReadSlot<Result<Option<String>, String>>,
     /// The same for looking at the session's folder before a resume: on a
     /// network drive that stops answering, one stuck look per session.
     folder_check: ReadSlot<resume::FolderLook>,
@@ -547,6 +558,12 @@ struct Presented {
     /// when it went live. Held in memory only: Core stores no last activity
     /// (PROTO-CORE-API-R75).
     last_activity_at: Option<String>,
+    /// Whether the adapter's latest look found the backend's record of the
+    /// session under its own id: a look that failed or took too long leaves
+    /// it as it was. Held in memory only, since whether the record exists is
+    /// the backend's to say (ADR 0033); every start looks again
+    /// (FLOW-RESUME-SESSION-R18, R19).
+    record_found: bool,
 }
 
 impl Presented {
@@ -761,6 +778,7 @@ impl Handle {
         created_at: String,
         admission: Arc<Admission>,
         permission_default: Option<String>,
+        adapter: &dyn Adapter,
     ) -> Self {
         Handle {
             id: row.id.clone(),
@@ -768,12 +786,17 @@ impl Handle {
             workspace_id: row.workspace_id.clone(),
             admission,
             permission_default,
+            // A backend that starts sessions under an id its host chooses
+            // runs every session Ersa starts under one; a session found in
+            // its records was named there (FLOW-RESUME-SESSION-R17).
+            id_chosen: !row.started_elsewhere && adapter.new_session_id().is_some(),
             presented: Mutex::new(Presented {
                 title: None,
                 created_at,
                 recorded: Default::default(),
                 reported: Default::default(),
                 last_activity_at: None,
+                record_found: false,
             }),
             hub: Mutex::default(),
             raw: Mutex::default(),
@@ -781,6 +804,7 @@ impl Handle {
             record_read: tokio::sync::Mutex::new(None),
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
+            own_record_look: tokio::sync::Mutex::new(None),
             folder_check: tokio::sync::Mutex::new(None),
             reporting: Mutex::default(),
             scratch: Arc::default(),
@@ -884,6 +908,20 @@ impl Handle {
         self.row().map(|row| self.describe_from(row))
     }
 
+    /// The backend's id Core carries for the session, in `session.list` and
+    /// every `session.tile`. The row holds the id once it is the backend's:
+    /// one the backend announced, one its record lists, or one Core chose
+    /// and handed to a backend that starts under it
+    /// (PROTO-CLAUDE-CODE-STREAM-R35). One the backend named is carried from
+    /// then (FLOW-RESUME-SESSION-R17); one Core chose only while the
+    /// adapter's latest look found the backend's record under it, since
+    /// until the backend writes that record the id finds nothing in its own
+    /// tools (R18).
+    fn carried_backend_id(&self, row: &SessionRow, presented: &Presented) -> Option<String> {
+        let leads_somewhere = !self.id_chosen || presented.record_found;
+        row.backend_session_id.clone().filter(|_| leads_somewhere)
+    }
+
     /// The session with row `row`, as `session.list` reports it.
     fn describe_from(&self, row: SessionRow) -> Session {
         let presented = lock(&self.presented).clone();
@@ -891,14 +929,13 @@ impl Handle {
         let hub = lock(&self.hub);
         let (state, tile) = self.state_and_tile_in(&hub, &ending);
         let listed = settings::listed(&row, &presented.recorded, &presented.reported);
+        let backend_session_id = self.carried_backend_id(&row, &presented);
         Session {
             id: row.id,
             // The backend's id, so the user can resume the session in the
-            // backend's own tools (FLOW-RESUME-SESSION-R16). The row holds it
-            // only once it is the backend's: one the backend announced, one
-            // its record lists, or one Core chose and handed to a backend that
-            // starts under it (PROTO-CLAUDE-CODE-STREAM-R35).
-            backend_session_id: row.backend_session_id,
+            // backend's own tools (FLOW-RESUME-SESSION-R16), while it finds
+            // the session there (R17, R18).
+            backend_session_id,
             workspace_id: row.workspace_id,
             host_id: row.host_id,
             backend: row.backend,
@@ -1031,7 +1068,13 @@ impl SessionManager {
             let default = (!default.is_empty()).then_some(default);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
             let admission = Arc::clone(&self.admission);
-            let handle = Arc::new(Handle::new(&row, started, admission, default));
+            let handle = Arc::new(Handle::new(
+                &row,
+                started,
+                admission,
+                default,
+                adapter.as_ref(),
+            ));
             *lock(&handle.ending) = ending;
             // As admission keeps it, with that default.
             let Some(row) = handle.stored_row() else {
@@ -1155,8 +1198,11 @@ impl SessionManager {
         let mut summaries = tokio::task::JoinSet::new();
         for handle in self.handles() {
             // A live session's last activity follows its turns, and its
-            // record is read again when it ends.
-            if handle.live().is_some() {
+            // record is read again when it ends. One whose id Core chose is
+            // looked at all the same, so the list carries the id while the
+            // backend has the record, and not once it is gone
+            // (FLOW-RESUME-SESSION-R18, R19).
+            if handle.live().is_some() && !handle.id_chosen {
                 continue;
             }
             let Some(row) = handle.stored_row() else {
@@ -1266,7 +1312,13 @@ impl SessionManager {
             row: Box::new(row.clone()),
         });
         let admission = Arc::clone(&self.admission);
-        let handle = Arc::new(Handle::new(&row, now_rfc3339(), admission, None));
+        let handle = Arc::new(Handle::new(
+            &row,
+            now_rfc3339(),
+            admission,
+            None,
+            adapter.as_ref(),
+        ));
         lock(&handle.presented).title = begin.title;
         let forking = begin.forking;
         // A new session has no record yet: the backend has not been told
@@ -1360,6 +1412,8 @@ impl SessionManager {
             fed: fed_rx,
             progress: progress_tx,
             tiles: self.tiles.clone(),
+            adapter: Arc::clone(&adapter),
+            transport: Arc::clone(&transport),
         }));
         tokio::spawn(run_session(SessionTask {
             store: self.store.clone(),
@@ -2352,8 +2406,12 @@ async fn apply_summary(
     };
     // A fork with no record of its own was given its original's to read for
     // the conversation. What that record says of its title and first time is
-    // the original's, and changes with it.
+    // the original's, and changes with it. The look found no record under
+    // the fork's own id (FLOW-RESUME-SESSION-R18).
     if row.forked_from.as_deref() == Some(backend_id.as_str()) {
+        if take_record_look(&mut lock(&handle.presented), false) {
+            send_current_tile(tiles, handle);
+        }
         return;
     }
     let start = move || {
@@ -2373,12 +2431,22 @@ async fn apply_summary(
             // turn's end, whose time must stand (PROTO-CORE-API-R75). A turn
             // cannot both start and end between this and the next line.
             let live = handle.live().is_some();
-            let changed = lock(&handle.presented).take_summary(summary, live, &handle.id);
+            let changed = {
+                let mut presented = lock(&handle.presented);
+                let found = take_record_look(&mut presented, true);
+                presented.take_summary(summary, live, &handle.id) || found
+            };
             if changed {
                 send_current_tile(tiles, handle);
             }
         }
-        Some(Ok(None)) => {}
+        // No record under the session's own id: the backend's own tools
+        // find nothing under it yet, or any more (FLOW-RESUME-SESSION-R18).
+        Some(Ok(None)) => {
+            if take_record_look(&mut lock(&handle.presented), false) {
+                send_current_tile(tiles, handle);
+            }
+        }
         Some(Err(e)) => {
             tracing::warn!(session = %handle.id, error = %e, "could not read the session record's summary");
         }
@@ -2426,9 +2494,21 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
+/// Takes what a look at the session's own record found, and answers whether
+/// that changes the backend id Core carries, which every tile carries
+/// (FLOW-RESUME-SESSION-R18, R20). For an id the backend named it never
+/// does, so the tile it would send says nothing new; sending it anyway is
+/// harmless, and keeps this from needing the row.
+fn take_record_look(presented: &mut Presented, found: bool) -> bool {
+    let changed = presented.record_found != found;
+    presented.record_found = found;
+    changed
+}
+
 /// Reads session `row`'s summary (title, creation time, settings, last
 /// activity) from the record that
-/// holds its conversation ([`record_id`]).
+/// holds its conversation ([`record_id`]), and with it looks for the
+/// session's own record (FLOW-RESUME-SESSION-R19).
 async fn read_summary(
     store: &Store,
     handle: &Handle,
@@ -2459,10 +2539,20 @@ async fn record_id(
     let Some(original) = &row.forked_from else {
         return Some(own);
     };
-    let version = adapter.record_version(transport, &row.cwd, &own);
-    match tokio::time::timeout(RECORD_READ, version).await {
-        Ok(Ok(None)) => Some(original.clone()),
-        Ok(Ok(Some(_))) => {
+    let (cwd, id) = (row.cwd.clone(), own.clone());
+    let look = move || {
+        tokio::spawn(async move {
+            adapter
+                .record_version(transport, &cwd, &id)
+                .await
+                .map_err(|e| e.to_string())
+        })
+    };
+    // One look at a time per session: on a disk that stops answering, each
+    // list joins the look still running rather than leave another behind.
+    match read_once(&handle.own_record_look, RECORD_READ, look, async |_| false).await {
+        Some(Ok(None)) => Some(original.clone()),
+        Some(Ok(Some(_))) => {
             match store.clear_fork_link(handle.id.clone()).await {
                 Ok(()) => {
                     let change = RowChange::ForkLinkCleared;
@@ -3068,6 +3158,10 @@ struct Pipeline {
     fed: mpsc::UnboundedReceiver<Fed>,
     progress: watch::Sender<Progress>,
     tiles: Arc<TileHub>,
+    /// What looks for the session's record when a turn ends
+    /// (FLOW-RESUME-SESSION-R19).
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
 }
 
 async fn run_pipeline(pipeline: Pipeline) {
@@ -3077,6 +3171,8 @@ async fn run_pipeline(pipeline: Pipeline) {
         mut fed,
         progress,
         tiles,
+        adapter,
+        transport,
     } = pipeline;
     let mut last_tile = handle.state_and_tile().1;
     let mut lines_done = 0;
@@ -3155,6 +3251,7 @@ async fn run_pipeline(pipeline: Pipeline) {
         // one thing about the session's history Ersa keeps. Stored before
         // anyone hears of the session's events, so a crash after a client
         // saw them cannot leave a session whose record is lost.
+        let mut id_changed = false;
         if let Some(backend_id) = announced {
             let known = handle.stored_row().and_then(|row| row.backend_session_id);
             if known.as_deref() != Some(backend_id.as_str()) {
@@ -3165,6 +3262,7 @@ async fn run_pipeline(pipeline: Pipeline) {
                     Ok(()) => {
                         let change = RowChange::BackendId(backend_id);
                         handle.admission.wrote(&handle.id, change);
+                        id_changed = true;
                     }
                     Err(e) => {
                         tracing::error!(session = %handle.id, error = %e, "could not record the backend's session id");
@@ -3185,12 +3283,27 @@ async fn run_pipeline(pipeline: Pipeline) {
             }
         }
         publish(&mut lock(&handle.hub), &handle.id, &events);
+        // A turn has ended, so the backend has had the session's first
+        // message: look for its record under the id Core chose, and carry
+        // the id while the look finds it (FLOW-RESUME-SESSION-R18, R19).
+        // Apart from the stream, which never waits on a read.
+        if activity_changed
+            && handle.id_chosen
+            && let Some(row) = handle.stored_row()
+        {
+            let (store, handle, tiles) = (store.clone(), Arc::clone(&handle), Arc::clone(&tiles));
+            let (adapter, transport) = (Arc::clone(&adapter), Arc::clone(&transport));
+            tokio::spawn(async move {
+                read_summary(&store, &handle, &tiles, adapter, transport, row).await;
+            });
+        }
         // A tile carries the last activity, so a turn's end sends one even
         // when the tile itself ends as it began, as a turn that starts and
         // ends in one batch does.
         // A new title, the backend's announced or generated name, sends one
-        // too (PROTO-CORE-API-R83).
-        if tile != last_tile || activity_changed || title_changed {
+        // too (PROTO-CORE-API-R83), as does a backend id it named
+        // (FLOW-RESUME-SESSION-R20).
+        if tile != last_tile || activity_changed || title_changed || id_changed {
             send_tile(&tiles, &handle, &tile);
             last_tile = tile;
         }
@@ -3253,10 +3366,13 @@ fn send_current_tile(tiles: &TileHub, handle: &Handle) {
 /// which every tile carries as `session.list` has them. None is sent for a
 /// session that is gone.
 fn send_tile(tiles: &TileHub, handle: &Handle, tile: &Tile) {
-    if handle.stored_row().is_none() {
+    let Some(row) = handle.stored_row() else {
         return;
-    }
+    };
     let presented = lock(&handle.presented).clone();
+    // As `session.list` has it, so a window that already has the session
+    // learns an id Core comes to carry, or stops carrying (FLOW-RESUME-SESSION-R20).
+    let backend_session_id = handle.carried_backend_id(&row, &presented);
     // Every tile carries the title and the date created, so a coalesced
     // tile never loses a change to either (PROTO-CORE-API-R83, R105).
     let params = SessionTileParams {
@@ -3265,6 +3381,7 @@ fn send_tile(tiles: &TileHub, handle: &Handle, tile: &Tile) {
         last_activity_at: presented.last_activity_at,
         title: presented.title,
         created_at: presented.created_at,
+        backend_session_id,
     };
     tiles.publish(
         &handle.id,
@@ -3475,6 +3592,7 @@ mod tests {
             recorded: Default::default(),
             reported: Default::default(),
             last_activity_at: None,
+            record_found: false,
         };
         let summary = || RecordSummary {
             title: Some("Same".into()),
@@ -3500,6 +3618,7 @@ mod tests {
             recorded: Default::default(),
             reported: Default::default(),
             last_activity_at: None,
+            record_found: false,
         };
         let summary = |at: Option<&str>| RecordSummary {
             created_at: Some("2026-11-01T00:00:00.000Z".into()),
@@ -3804,7 +3923,13 @@ mod tests {
             Arc::new(app_log),
             Arc::clone(&admission),
         );
-        let handle = Arc::new(Handle::new(&row, now_rfc3339(), admission, None));
+        let handle = Arc::new(Handle::new(
+            &row,
+            now_rfc3339(),
+            admission,
+            None,
+            adapter.as_ref(),
+        ));
         assert!(manager.attach(&handle));
         manager
     }
@@ -4040,7 +4165,13 @@ mod tests {
         };
         let admitted = manager.admission.command(command).await.unwrap();
         let admission = Arc::clone(&manager.admission);
-        let handle = Arc::new(Handle::new(&found, now_rfc3339(), admission, None));
+        let handle = Arc::new(Handle::new(
+            &found,
+            now_rfc3339(),
+            admission,
+            None,
+            adapter.as_ref(),
+        ));
         // As a list does: attached in the step that reports it stored.
         let mine: Arc<Handle> = Arc::clone(&handle);
         admitted.end_stored(found.clone(), mine);
@@ -4354,7 +4485,7 @@ mod tests {
         // the backend's records: its handle knows the default.
         let admission = Arc::clone(&manager.admission);
         let default = Some("default".to_string());
-        let handle = Handle::new(&row, now_rfc3339(), admission, default);
+        let handle = Handle::new(&row, now_rfc3339(), admission, default, adapter.as_ref());
         assert_eq!(
             handle.row().unwrap().permission_mode.as_deref(),
             Some("default")

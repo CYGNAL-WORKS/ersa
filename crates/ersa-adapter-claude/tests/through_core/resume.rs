@@ -115,12 +115,12 @@ async fn a_session_resumed_while_open_shows_the_record_then_the_new_run_each_mes
     let runs = Arc::new(Runs::default());
     runs.then(first.clone());
     let home = tempdir();
-    let adapter = OnTransport {
-        adapter: ClaudeAdapter::new()
+    let adapter = OnTransport::new(
+        ClaudeAdapter::new()
             .with_claude_home(home.path().to_path_buf())
             .with_stop_grace(Duration::from_secs(1)),
-        transport: Arc::clone(&runs) as Arc<dyn Transport>,
-    };
+        Arc::clone(&runs) as Arc<dyn Transport>,
+    );
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
     let mut client = core.client().await;

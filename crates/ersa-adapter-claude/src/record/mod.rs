@@ -166,7 +166,7 @@ pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Resul
         ));
     }
     let expected = record_path(claude_home, cwd, session_id);
-    if is_plain_file(&expected) {
+    if is_plain_file(&expected)? {
         return Ok(Some(expected));
     }
     let projects = match fs::read_dir(claude_home.join("projects")) {
@@ -177,7 +177,12 @@ pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Resul
     let file = format!("{session_id}.jsonl");
     for project in projects {
         let candidate = project?.path().join(&file);
-        if is_plain_file(&candidate) {
+        // Another folder's project directory that cannot be looked into
+        // (one a `sudo claude` left to root) is skipped: it is not where
+        // this session's record would be filed, and failing every miss on
+        // it would fail looks at unrelated sessions. A failure at the
+        // session's own place is the one that says the look failed.
+        if is_plain_file(&candidate).unwrap_or(false) {
             return Ok(Some(candidate));
         }
     }
@@ -185,9 +190,24 @@ pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Resul
 }
 
 /// Whether `path` is a file itself, not a link to one: the CLI writes its
-/// records as plain files, and listing skips links too.
-fn is_plain_file(path: &Path) -> bool {
-    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
+/// records as plain files, and listing skips links too. Only a path that is
+/// not there is no record; a look that fails otherwise (access denied, an
+/// I/O error) is an error, which Core takes as no answer rather than as the
+/// record being gone (FLOW-RESUME-SESSION-R22). A path under a file that is
+/// not a folder (a stray file in `projects`) is not there either.
+fn is_plain_file(path: &Path) -> io::Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.file_type().is_file()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// The events of session `session_id`'s record ([`project_record`]), or none
@@ -720,6 +740,53 @@ mod counting {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const ID: &str = "d34f0c1b-64ee-437e-a4e3-3487df29a506";
+
+    /// A record that is not there is none, a stray file among the project
+    /// folders included; it is not an error.
+    // verifies: FLOW-RESUME-SESSION-R22
+    #[test]
+    fn a_record_that_is_not_there_is_none() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(find_record(home.path(), "/work", ID).unwrap().is_none());
+        let projects = home.path().join("projects");
+        fs::create_dir_all(projects.join("-work")).unwrap();
+        fs::write(projects.join("notes.txt"), "not a folder").unwrap();
+        assert!(find_record(home.path(), "/work", ID).unwrap().is_none());
+    }
+
+    /// A look the file system refuses at the session's own place is an
+    /// error, never "no record": Core then keeps what it carries rather
+    /// than dropping the session's id. Another folder's directory that
+    /// cannot be looked into is skipped, as before.
+    // verifies: FLOW-RESUME-SESSION-R22
+    #[cfg(unix)]
+    #[test]
+    fn a_look_the_file_system_refuses_is_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let projects = home.path().join("projects");
+        let own = projects.join(encoded_cwd("/work"));
+        let elsewhere = projects.join("-elsewhere");
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(&elsewhere).unwrap();
+        let lock =
+            |dir: &Path, mode| fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
+        lock(&elsewhere, 0o000);
+        // Someone the permissions do not hold back (root) cannot see this.
+        let refused = fs::symlink_metadata(elsewhere.join("probe"))
+            .is_err_and(|e| e.kind() == io::ErrorKind::PermissionDenied);
+        let skipped = find_record(home.path(), "/work", ID);
+        lock(&own, 0o000);
+        let failed = find_record(home.path(), "/work", ID);
+        lock(&own, 0o755);
+        lock(&elsewhere, 0o755);
+        if refused {
+            assert!(matches!(skipped, Ok(None)), "{skipped:?}");
+            assert!(failed.is_err(), "{failed:?}");
+        }
+    }
 
     /// The session-record fixtures, as text.
     fn record_fixtures() -> Vec<String> {

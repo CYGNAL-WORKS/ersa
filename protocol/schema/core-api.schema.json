@@ -3444,6 +3444,10 @@
           "type": "string",
           "format": "date-time",
           "description": "The session's created_at as session.list has it. Core sends a tile when reading the session's record corrects it."
+        },
+        "backend_session_id": {
+          "type": "string",
+          "description": "The session's id in its backend, as session.list has it; absent while Core carries none for the session. Core sends a tile when what it carries changes."
         }
       }
     },
