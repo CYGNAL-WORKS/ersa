@@ -4323,3 +4323,30 @@ async fn a_held_command_admitted_after_its_caller_left_is_ended_at_once() {
     assert!(state.project("p1").is_none() && state.project("p2").is_none());
     assert!(state.held().is_empty());
 }
+
+// A change to a repository's worktrees waits its turn at most its limit,
+// counted from when it began to wait, and then gives up, leaving the queue;
+// one that waits in time begins when the change before it lets go.
+#[tokio::test]
+async fn a_change_to_the_worktrees_waits_its_turn_or_gives_up_at_its_limit() {
+    use std::time::Duration;
+    let admission = Arc::new(Admission::default());
+    admission.restore(existing());
+    let long = Duration::from_secs(30);
+    let first = admission.worktrees(P, long).await.expect("its turn at once");
+
+    let gave_up = admission.worktrees(P, Duration::from_millis(50)).await;
+    assert_eq!(gave_up.err(), Some(Refusal::GaveUp));
+    assert!(admission.snapshot().held().is_empty());
+
+    let waiting = Arc::clone(&admission);
+    let next = tokio::spawn(async move { waiting.worktrees(P, long).await });
+    until_held(&admission).await;
+    drop(first);
+    let next = tokio::time::timeout(Duration::from_secs(5), next).await;
+    let next = next.expect("answered in time").unwrap();
+    assert!(next.is_ok(), "its turn once the first let go");
+    assert!(admission.snapshot().project(P).unwrap().worktrees);
+    drop(next);
+    assert!(!admission.snapshot().project(P).unwrap().worktrees);
+}
