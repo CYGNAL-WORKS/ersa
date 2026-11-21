@@ -221,7 +221,13 @@ impl SessionManager {
         let default = (!default.is_empty()).then_some(default);
         let admission = Arc::clone(&self.admission);
         let started = UNKNOWN_TIME.to_string();
-        let handle = Arc::new(Handle::new(&row, started, admission, default));
+        let handle = Arc::new(Handle::new(
+            &row,
+            started,
+            admission,
+            default,
+            folder.adapter.as_ref(),
+        ));
         // Attached in the step that reports its row stored. A removal of
         // its workspace or project waits while a session there is not
         // stored yet, so one let go by that step finds the session loaded

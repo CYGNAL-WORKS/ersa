@@ -91,10 +91,10 @@ impl Watched {
 /// stub CLI, the prompt and the decision sent over the API.
 async fn live_core_turn() -> Watched {
     let (stdout, sent) = fixture();
-    let adapter = OnTransport {
-        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
-        transport: Arc::new(stub(&stdout)),
-    };
+    let adapter = OnTransport::new(
+        isolated_claude().with_stop_grace(Duration::from_secs(1)),
+        Arc::new(stub(&stdout)),
+    );
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
     let mut client = core.client().await;
