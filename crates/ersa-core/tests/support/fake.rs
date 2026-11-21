@@ -966,6 +966,9 @@ impl AdapterSession for FakeSession {
             self.exit(Some(0));
         } else if text == "idle" {
             self.backend(json!({ "t": "idle" }));
+        } else if let Some(name) = text.strip_prefix("name as ") {
+            // The backend names the session anew, with nothing else.
+            self.backend(json!({ "t": "named", "session_id": name }));
         } else if let Some(report) = text.strip_prefix("report ") {
             let (model, mode) = report.split_once(' ').expect("report <model> <mode>");
             self.backend(json!({ "t": "settings", "model": model, "permission_mode": mode }));
@@ -1194,6 +1197,14 @@ impl Projector for FakeProjector {
                     reason: None,
                 }),
             ],
+            (Direction::Backend, Some("named")) => vec![Event::SessionStarted(SessionStarted {
+                backend: BACKEND.into(),
+                backend_version: "1.0".into(),
+                model: "fake".into(),
+                cwd: String::new(),
+                capabilities: Vec::new(),
+                backend_session_id: Some(text("session_id")),
+            })],
             (Direction::Backend, Some("idle")) => vec![Event::SessionState(SessionState {
                 state: LifecycleState::Idle,
                 reason: None,

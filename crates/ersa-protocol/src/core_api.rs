@@ -1079,6 +1079,11 @@ pub struct SessionTileParams {
     /// groups and sorts by a date the record corrected without reading the
     /// list again.
     pub created_at: String,
+    /// The session's `backend_session_id` as `session.list` has it, so a
+    /// window learns an id Core comes to carry, or stops carrying, without
+    /// reading the list again; absent while Core carries none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_session_id: Option<String>,
 }
 
 /// `host.status` params.
