@@ -1597,7 +1597,7 @@ async fn workspace_listed(client: &mut Client, workspace_id: &Value) -> bool {
 
 /// Archiving a running session stops it, as `session.stop` does, and marks
 /// it archived; the session and its workspace stay.
-// verifies: FLOW-ARCHIVE-DELETE-SESSION-R01
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R12
 #[tokio::test(flavor = "multi_thread")]
 async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
