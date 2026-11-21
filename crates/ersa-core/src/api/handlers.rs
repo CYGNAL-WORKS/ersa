@@ -16,11 +16,11 @@ use serde_json::{Map, Value};
 
 use super::{After, Answer, ApiError, ConnectionState, lock};
 use crate::admission::{self, Command, Refusal, Replaced, Report};
-use crate::workspace::Worktrees as _;
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
 use crate::settings;
 use crate::state::{Core, Inspection};
+use crate::workspace::Worktrees as _;
 use crate::workspace::{self, VcsError};
 
 // -- Core ----------------------------------------------------------------
