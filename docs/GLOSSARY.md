@@ -78,7 +78,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Session controls**: the row beneath the composer naming where and how a session runs: the host and project chips, the Worktree checkbox, then the backend, model, effort and permission mode chips, with the context ring. Set before the first message; shown during the session, where the model, effort and permission mode can still change.
 - **Worktree checkbox**: the checkbox in the session controls, labeled Worktree, that gives a new session an isolated workspace of its own. Unchecked, the session runs in the root workspace. "Worktree" is the label; the thing it makes is an isolated workspace.
 - **Sessions page**: what the transcript area shows after View all: every session in one list, active or archived, with search. Choosing one opens it.
-- **Settings page**: what the transcript area shows after Settings: Ersa's settings, in sections. Storage is the first.
+- **Settings page**: what the transcript area shows after Settings is chosen from its menu: Ersa's settings, in sections. Storage is the first.
 - **Clean up**: the list under Storage of what Ersa can remove and removes only once the user approves: the folders of sessions gone unused, leftovers that hold unsaved work, branches no session uses, and folders Ersa can't identify.
 - **New-session screen**: what the transcript area shows while no session is active: the composer and the session controls, ready for the first message, which starts the session.
 - **Workbench**: the right-hand area holding panes.
