@@ -1,6 +1,6 @@
 //! Requests that run git or a backend's command, or inspect a folder the
 //! user named, never hold up the connection's other requests
-//! (PROTO-CORE-API-R92), and a folder that does not answer in time is
+//! (PROTO-CORE-API-R117), and a folder that does not answer in time is
 //! refused (PROTO-CORE-API-R93). Driven over the socket, with the slow part
 //! held at a point the test controls, so every wait is on state, never on a
 //! fixed pause.
@@ -144,7 +144,7 @@ async fn held_process_holds_nothing_up(method: &str, params: impl FnOnce(&Value)
     assert!(answer.get("result").is_some(), "{method}: {answer}");
 }
 
-// verifies: PROTO-CORE-API-R92
+// verifies: PROTO-CORE-API-R117
 #[tokio::test(flavor = "multi_thread")]
 async fn workspace_create_holds_nothing_up() {
     held_process_holds_nothing_up(
@@ -154,7 +154,7 @@ async fn workspace_create_holds_nothing_up() {
     .await;
 }
 
-// verifies: PROTO-CORE-API-R92
+// verifies: PROTO-CORE-API-R117
 #[tokio::test(flavor = "multi_thread")]
 async fn workspace_remove_holds_nothing_up() {
     held_process_holds_nothing_up(
@@ -164,13 +164,13 @@ async fn workspace_remove_holds_nothing_up() {
     .await;
 }
 
-// verifies: PROTO-CORE-API-R92
+// verifies: PROTO-CORE-API-R117
 #[tokio::test(flavor = "multi_thread")]
 async fn backend_list_holds_nothing_up() {
     held_process_holds_nothing_up("backend.list", |_| json!({ "host_id": "local" })).await;
 }
 
-// verifies: PROTO-CORE-API-R92
+// verifies: PROTO-CORE-API-R117
 #[tokio::test(flavor = "multi_thread")]
 async fn host_list_holds_nothing_up() {
     held_process_holds_nothing_up("host.list", |_| json!({})).await;
@@ -191,13 +191,13 @@ async fn held_inspection_holds_nothing_up(method: &str) {
     assert!(answer.get("result").is_some(), "{method}: {answer}");
 }
 
-// verifies: PROTO-CORE-API-R92
+// verifies: PROTO-CORE-API-R117
 #[tokio::test(flavor = "multi_thread")]
 async fn project_add_holds_nothing_up() {
     held_inspection_holds_nothing_up("project.add").await;
 }
 
-// verifies: PROTO-CORE-API-R92
+// verifies: PROTO-CORE-API-R117
 #[tokio::test(flavor = "multi_thread")]
 async fn project_find_holds_nothing_up() {
     held_inspection_holds_nothing_up("project.find").await;

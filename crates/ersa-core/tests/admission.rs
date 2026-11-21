@@ -3772,6 +3772,7 @@ fn worktrees(project: &str) -> Command {
 // git dies when two of its worktree commands run in one repository at once
 // (each reads the others' records while one is half written): a second
 // change waits for the first, and begins when it ends.
+// verifies: PROTO-CORE-API-R118
 #[test]
 fn a_second_change_to_a_repositorys_worktrees_waits_for_the_first() {
     let mut state = two_projects();
@@ -4327,6 +4328,7 @@ async fn a_held_command_admitted_after_its_caller_left_is_ended_at_once() {
 // A change to a repository's worktrees waits its turn at most its limit,
 // counted from when it began to wait, and then gives up, leaving the queue;
 // one that waits in time begins when the change before it lets go.
+// verifies: PROTO-CORE-API-R119
 #[tokio::test]
 async fn a_change_to_the_worktrees_waits_its_turn_or_gives_up_at_its_limit() {
     use std::time::Duration;
