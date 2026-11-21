@@ -407,7 +407,7 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
 
 /// Whether `method` runs apart. A request that runs git or a backend's
 /// command, inspects a folder or file the user named, or waits on a backend
-/// never holds up the connection (PROTO-CORE-API-R92). Neither does any
+/// never holds up the connection (PROTO-CORE-API-R117). Neither does any
 /// request that names a session, so that requests about one session keep
 /// their order whatever they are (`session.list` and `session.create` name
 /// none). Every method is listed, so a new one does not build until it is
@@ -555,9 +555,9 @@ fn to_json<T: Serialize>(result: Result<T, ApiError>) -> Result<Value, ApiError>
 mod tests {
     use super::*;
 
-    /// The methods PROTO-CORE-API-R92 names run apart, and no method
+    /// The methods PROTO-CORE-API-R117 names run apart, and no method
     /// that runs apart is one only the connection itself can answer.
-    // verifies: PROTO-CORE-API-R92
+    // verifies: PROTO-CORE-API-R117
     #[test]
     fn slow_methods_run_apart_and_every_one_apart_has_a_handler() {
         for method in [
