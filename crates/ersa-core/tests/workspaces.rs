@@ -1026,6 +1026,7 @@ impl ersa_adapter::Transport for StoppingAdds {
 // (each reads the others' records while one is half written), so a second
 // `workspace.create` in a project waits for the first one's add, then
 // makes its own: both are made.
+// verifies: PROTO-CORE-API-R118
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_workspace_made_at_once_waits_for_the_firsts_git() {
     use std::sync::Arc;
