@@ -1,0 +1,26 @@
+Claude Desktop's clean-up of sessions and worktrees, from its own descriptions of its settings and tools, read 2026-11-20 in the Code tab.
+
+Archive
+  Stops the session's process and, by default, removes its worktree. The session can be reopened later from the Archived list, and a resumed session checks its branch out again.
+  A worktree that holds uncommitted changes when its session is archived stays on disk. Storage lists it as kept, per session.
+  A session that is still working, pinned or open on screen is not archived.
+  The branch stays.
+
+Delete
+  Removes the session's transcript, its record and its worktree with its branch, and cannot be undone. Always asks first, listing every session by title.
+  A branch holding commits that exist nowhere else is kept.
+  A session whose worktree has uncommitted changes, or could not be checked, is skipped unless the user asks for that work to be discarded too.
+
+Settings
+  "Auto-archive sessions when their pull request closes": off or on. Archives a session once its pull request merges or closes.
+  "Archive inactive sessions": Never, or after 1, 2, 7, 14 or 30 days with no activity and no attention. Running sessions are never archived, and a worktree with uncommitted changes stays on disk.
+  "Branch prefix": the prefix of new sessions' branch names, "claude" by default.
+  Worktree location: inside the project or elsewhere, the user's choice.
+
+Storage (Settings, This computer)
+  Shows what the app's sessions use on disk: the worktrees it made (in use; idle and removable; kept after archiving because they hold uncommitted changes, and for which sessions), conversation history, session records, caches, and the free space left.
+  "Clean up inactive sessions": removes the worktrees of sessions with no activity in the last 30, 60 or 90 days. The sessions, their conversations and their branches stay. A session that is running, pinned, open or recently used is never touched. The app first shows one list of the worktrees and the space freed, and removes nothing until the user approves.
+  The same clean-up can also remove worktrees that hold uncommitted changes, and can also delete the inactive sessions with their conversations; each is permanent and is named on the list the user approves.
+  A kept worktree of an archived session can be discarded on its own, after a question that names the session, the folder and how many uncommitted changes it holds. The session stays archived and its branch is kept.
+
+Not observed: any of these run on a real session here; what happens when a resumed session's branch has been deleted; whether anything is removed at the app's start; and whether a remote's branches are ever deleted (nothing read says they are).
