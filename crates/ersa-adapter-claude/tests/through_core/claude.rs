@@ -25,6 +25,18 @@ pub const FIXTURE: &str = "11-stream-permission-prompt-tool-stdio";
 pub struct OnTransport {
     pub adapter: ClaudeAdapter,
     pub transport: Arc<dyn Transport>,
+    /// What reading a record's summary does instead of reading it, while
+    /// set: a test's stand-in for a disk that fails or stops answering.
+    pub summary_fault: Arc<std::sync::Mutex<Option<SummaryFault>>>,
+}
+
+/// How a summary read goes wrong ([`OnTransport::summary_fault`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryFault {
+    /// It fails, as a read the file system refuses does.
+    Fails,
+    /// It never answers, as a read on a disk that hangs.
+    Hangs,
 }
 
 #[async_trait]
@@ -96,9 +108,19 @@ impl Adapter for OnTransport {
         cwd: &str,
         backend_session_id: &str,
     ) -> Result<Option<RecordSummary>, AdapterError> {
-        self.adapter
-            .summarize_record(transport, cwd, backend_session_id)
-            .await
+        let fault = *self.summary_fault.lock().unwrap();
+        match fault {
+            Some(SummaryFault::Fails) => Err(AdapterError::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "access is denied",
+            ))),
+            Some(SummaryFault::Hangs) => std::future::pending().await,
+            None => {
+                self.adapter
+                    .summarize_record(transport, cwd, backend_session_id)
+                    .await
+            }
+        }
     }
 
     async fn record_settings(

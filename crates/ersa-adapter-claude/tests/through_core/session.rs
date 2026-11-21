@@ -30,6 +30,7 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     let adapter = OnTransport {
         adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(transport.clone()),
+        summary_fault: Default::default(),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
@@ -156,6 +157,7 @@ async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
     let adapter = OnTransport {
         adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(transport.clone()),
+        summary_fault: Default::default(),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
@@ -249,6 +251,7 @@ async fn asked_through_core(
     let adapter = OnTransport {
         adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(transport.clone()),
+        summary_fault: Default::default(),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
