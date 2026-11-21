@@ -1577,6 +1577,25 @@ async fn restarted(core: TestCore) -> (TestCore, Client) {
 
 /// Whether `workspace.list` still lists the workspace `workspace_id`, in
 /// any project.
+/// The folder of the workspace with this id, as `workspace.list` gives it.
+async fn workspace_path(client: &mut Client, workspace_id: &Value) -> std::path::PathBuf {
+    let projects = client.result("project.list", json!({})).await;
+    for project in projects.as_array().unwrap() {
+        let workspaces = client
+            .result("workspace.list", json!({ "project_id": project["id"] }))
+            .await;
+        if let Some(workspace) = workspaces
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| &w["id"] == workspace_id)
+        {
+            return std::path::PathBuf::from(workspace["path"].as_str().unwrap());
+        }
+    }
+    panic!("no workspace {workspace_id}");
+}
+
 async fn workspace_listed(client: &mut Client, workspace_id: &Value) -> bool {
     let projects = client.result("project.list", json!({})).await;
     for project in projects.as_array().unwrap() {
@@ -1596,7 +1615,8 @@ async fn workspace_listed(client: &mut Client, workspace_id: &Value) -> bool {
 }
 
 /// Archiving a running session stops it, as `session.stop` does, and marks
-/// it archived; the session and its workspace stay.
+/// it archived; the session keeps its pin and its section, and the archive
+/// removes nothing: the workspace and its folder stay.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R12
 #[tokio::test(flavor = "multi_thread")]
 async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
@@ -1607,6 +1627,21 @@ async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
     let id = idle_session(&core, &mut client).await;
     let workspace_id = session_row(&mut client, &id).await["workspace_id"].clone();
     assert_eq!(session_row(&mut client, &id).await["archived"], false);
+    // In a section, then pinned: pinning leaves the section as it is.
+    let section = client
+        .result("section.create", json!({ "name": "Kept" }))
+        .await;
+    client
+        .result(
+            "session.arrange",
+            json!({ "id": id, "section_id": section["id"] }),
+        )
+        .await;
+    client
+        .result("session.arrange", json!({ "id": id, "pinned": true }))
+        .await;
+    let folder = workspace_path(&mut client, &workspace_id).await;
+    assert!(folder.is_dir(), "the workspace's folder exists before");
 
     let response = client
         .call(
@@ -1633,6 +1668,13 @@ async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
     assert_eq!(row["state"], "ended");
     assert_eq!(row["workspace_id"], workspace_id);
     assert!(workspace_listed(&mut client, &workspace_id).await);
+    // Its pin and its section are kept, and nothing was removed.
+    assert_eq!(row["pinned"], true);
+    assert_eq!(row["section_id"], section["id"]);
+    assert!(
+        folder.is_dir(),
+        "the archive removed the workspace's folder"
+    );
 }
 
 /// Archiving is refused while the session is starting or a turn runs in it,
