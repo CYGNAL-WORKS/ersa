@@ -761,7 +761,7 @@ pub(super) async fn workspace_create(
 
 /// The turns of a project's repository to have its worktrees changed, asked
 /// of admission: a change waits while another is under way, at most
-/// [`workspace::WORKTREE_TURN_WAIT`].
+/// `worktree_turn_wait` ([`workspace::WORKTREE_TURN_WAIT`]).
 pub(super) struct RepositoryTurns<'a> {
     pub core: &'a Core,
     pub project: &'a str,
@@ -770,7 +770,7 @@ pub(super) struct RepositoryTurns<'a> {
 #[ersa_adapter::async_trait]
 impl workspace::Worktrees for RepositoryTurns<'_> {
     async fn turn(&self) -> Result<Box<dyn Send>, VcsError> {
-        let wait = workspace::WORKTREE_TURN_WAIT;
+        let wait = self.core.config.worktree_turn_wait;
         match self.core.admission.worktrees(self.project, wait).await {
             Ok(under_way) => Ok(Box::new(under_way)),
             Err(Refusal::GaveUp) => Err(VcsError::WorktreesBusy),
