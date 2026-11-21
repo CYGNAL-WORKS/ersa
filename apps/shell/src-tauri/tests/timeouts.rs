@@ -11,3 +11,11 @@ use ersa_shell::bridge::timeout_for;
 fn a_delete_is_waited_on_for_10_minutes() {
     assert_eq!(timeout_for("session.delete"), Duration::from_secs(10 * 60));
 }
+
+/// A fork can make a workspace, and that waits its turn at the project's
+/// worktrees, so the Shell waits 10 minutes for its answer.
+// verifies: PROTO-CORE-API-R120
+#[test]
+fn a_fork_is_waited_on_for_10_minutes() {
+    assert_eq!(timeout_for("session.fork"), Duration::from_secs(10 * 60));
+}

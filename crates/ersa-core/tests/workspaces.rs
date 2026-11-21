@@ -1002,10 +1002,27 @@ async fn project_find_matches_a_folder_as_project_add_compares_them() {
 }
 
 /// Core's command transport, with every `git worktree add` stopping at
-/// `gate` before git runs, until the test lets it go.
+/// `gate` before git runs, until the test lets it go. It notes each
+/// `git worktree` command it is given, by its second word.
 struct StoppingAdds {
     gate: std::sync::Arc<ersa_core::Gate>,
+    ran: std::sync::Mutex<Vec<String>>,
     inner: ersa_core::transport::LocalTreeTransport,
+}
+
+impl StoppingAdds {
+    fn new(gate: &std::sync::Arc<ersa_core::Gate>) -> StoppingAdds {
+        StoppingAdds {
+            gate: std::sync::Arc::clone(gate),
+            ran: std::sync::Mutex::new(Vec::new()),
+            inner: ersa_core::transport::LocalTreeTransport::for_commands(),
+        }
+    }
+
+    /// The `git worktree` commands given so far, by their second word.
+    fn ran(&self) -> Vec<String> {
+        self.ran.lock().unwrap().clone()
+    }
 }
 
 #[ersa_adapter::async_trait]
@@ -1014,6 +1031,11 @@ impl ersa_adapter::Transport for StoppingAdds {
         &self,
         spec: ersa_adapter::ProcessSpec,
     ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+        let worktree = spec.args.iter().position(|arg| arg == "worktree");
+        if let (true, Some(at)) = (spec.program == "git", worktree) {
+            let what = spec.args.get(at + 1).cloned().unwrap_or_default();
+            self.ran.lock().unwrap().push(what);
+        }
         let adds = spec.args.windows(2).any(|pair| pair == ["worktree", "add"]);
         if spec.program == "git" && adds {
             self.gate.stop().await;
@@ -1033,10 +1055,7 @@ async fn a_second_workspace_made_at_once_waits_for_the_firsts_git() {
     use std::time::Duration;
 
     let gate = Arc::new(ersa_core::Gate::default());
-    let git = Arc::new(StoppingAdds {
-        gate: Arc::clone(&gate),
-        inner: ersa_core::transport::LocalTreeTransport::for_commands(),
-    });
+    let git = Arc::new(StoppingAdds::new(&gate));
     let core = support::start_with(support::tempdir(), move |config| {
         config.command_transport = Some(ersa_core::CommandTransport(git));
     })
@@ -1068,5 +1087,106 @@ async fn a_second_workspace_made_at_once_waits_for_the_firsts_git() {
     reached.expect("the second add began once the first ended");
     gate.go();
     let made = second.response(made_second).await;
+    assert_eq!(made["result"]["state"], json!("ready"), "{made}");
+}
+
+/// A Core whose `git worktree add`s stop at `gate`, whose requests wait
+/// `wait` for a turn at a project's worktrees, with a project; and its
+/// transport, client and the project.
+async fn with_stopping_adds(
+    gate: &std::sync::Arc<ersa_core::Gate>,
+    wait: std::time::Duration,
+) -> (TestCore, std::sync::Arc<StoppingAdds>, Client, Value) {
+    let git = std::sync::Arc::new(StoppingAdds::new(gate));
+    let transport = std::sync::Arc::clone(&git);
+    let core = support::start_with(support::tempdir(), move |config| {
+        config.command_transport = Some(ersa_core::CommandTransport(transport));
+        config.worktree_turn_wait = wait;
+    })
+    .await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let root = core.dir.path().join("worktrees").display().to_string();
+    let patch = json!({ "patch": { "workspaces": { "root": root } } });
+    client.result("settings.set", patch).await;
+    let project = add_project(&mut client, &repo).await;
+    (core, git, client, project)
+}
+
+// A request waits 300 seconds for its turn at a project's worktrees.
+// verifies: PROTO-CORE-API-R119
+#[test]
+fn a_turn_at_the_worktrees_is_waited_for_300_seconds() {
+    let wait = std::time::Duration::from_secs(300);
+    assert_eq!(ersa_core::workspace::WORKTREE_TURN_WAIT, wait);
+    let config = ersa_core::CoreConfig::new(std::path::PathBuf::from("data")).unwrap();
+    assert_eq!(config.worktree_turn_wait, wait);
+}
+
+// A `workspace.create` that waited its whole limit for another change to
+// the project's worktrees starts no git work: it answers `vcs_error` and
+// makes no workspace. A `workspace.remove` likewise, leaving the workspace
+// as it was.
+// verifies: PROTO-CORE-API-R119
+#[tokio::test(flavor = "multi_thread")]
+async fn a_change_that_waited_too_long_for_its_turn_runs_no_git_and_answers_vcs_error() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let gate = Arc::new(ersa_core::Gate::default());
+    let wait = Duration::from_millis(300);
+    let (core, git, mut client, project) = with_stopping_adds(&gate, wait).await;
+    let params = json!({ "project_id": project["id"] });
+    let in_time = |reached| tokio::time::timeout(Duration::from_secs(30), reached);
+
+    // A workspace to remove, made first.
+    let made = client.request("workspace.create", params.clone()).await;
+    in_time(gate.reached()).await.expect("its add began");
+    gate.go();
+    let kept = client.response(made).await["result"].clone();
+    assert_eq!(kept["state"], json!("ready"), "{kept}");
+
+    // A create whose add stands stopped holds the project's turn.
+    let mut holder = core.client().await;
+    let holding = holder.request("workspace.create", params.clone()).await;
+    in_time(gate.reached())
+        .await
+        .expect("the holder's add began");
+    let before = git.ran();
+
+    // A second create waits its limit, then answers without running git.
+    let refused = client.call("workspace.create", params.clone()).await;
+    assert_eq!(kind(&refused["error"]), "vcs_error", "{refused}");
+    let message = refused["error"]["message"].as_str().unwrap();
+    assert!(message.contains("did not finish in time"), "{refused}");
+    let listed = client.result("workspace.list", params.clone()).await;
+    assert_eq!(isolated(&listed).as_array().unwrap().len(), 2, "{listed}");
+
+    // A removal likewise: the workspace stays, ready, with its folder.
+    let remove = json!({ "id": kept["id"] });
+    let refused = client.call("workspace.remove", remove).await;
+    assert_eq!(kind(&refused["error"]), "vcs_error", "{refused}");
+    let message = refused["error"]["message"].as_str().unwrap();
+    assert!(message.contains("did not finish in time"), "{refused}");
+    let listed = client.result("workspace.list", params).await;
+    let still = isolated(&listed)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == kept["id"])
+        .cloned()
+        .expect("the workspace is still listed");
+    assert_eq!(still["state"], json!("ready"), "{still}");
+    assert!(Path::new(kept["path"].as_str().unwrap()).is_dir());
+
+    // Neither ran any git worktree command.
+    assert_eq!(git.ran(), before);
+    let began = tokio::time::timeout(Duration::from_millis(500), gate.reached()).await;
+    assert!(began.is_err(), "an add began for the create that gave up");
+
+    // The holder goes on unharmed.
+    gate.go();
+    let made = holder.response(holding).await;
     assert_eq!(made["result"]["state"], json!("ready"), "{made}");
 }
