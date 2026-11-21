@@ -35,5 +35,5 @@ Option 3.
 - Every removal of a workspace's folder, by a delete, a failed fork's cleanup, the sweep or the Clean up list, is the same removal with the same tries. The three that differed become one.
 - The one-hour bound that keeps the sweep away from a start still under way means a leftover lives up to an hour. That is the price of not tying a workspace to the window that made it.
 - A branch whose commits exist nowhere else is never deleted unasked, so squash-merged branches stay until the user approves the list, which marks the ones the base branch already holds.
-- Deleting many old sessions at once, which is what removes their branches, is not part of this: it belongs with Delete and the sessions page.
+- Deleting many old sessions at once, which is what removes their branches, is not part of this: selecting several sessions and acting on them is planned on its own.
 - Revisit if people lose ignored files they needed (local configuration that was never committed), which would argue for keeping a folder that holds ignored files Ersa did not make.

@@ -86,7 +86,7 @@ Storage:
 
 ## Out of scope
 
-- Deleting several sessions at once. It is what removes old sessions' branches, and belongs with Delete and the sessions page.
+- Selecting several sessions and archiving or deleting them at once. The owner wants it (2026-11-21), it is what removes old sessions' branches, and it gets its own planning pass.
 - Archiving a session when its pull request closes: Ersa knows nothing of pull requests yet.
 - Archiving a session and keeping its folder, which Claude Desktop's "by default" implies it can do.
 - A breakdown of what Ersa uses on disk.
@@ -104,4 +104,4 @@ Storage:
 
 ## Changes
 
-- 2026-11-21: created from the owner's direction of 2026-11-21: start from what Claude Desktop does, and put it on the settings page. Archiving puts the workspace away, which replaces his decision of 2026-11-05 that it stays (FLOW-ARCHIVE-DELETE-SESSION-R01 retired there); the sweep removes without asking only what holds no unsaved work (ADR 0038); the rest is one list. Settled in planning: ignored files are not unsaved work, as in Claude Desktop, though the sweep keeps a leftover that holds any; a put-away keeps what was checked out, so a session whose agent changed branches comes back as it was; the list removes one item per request, so nothing new reports progress; deleting sessions in bulk is left to Delete. FLOW-CLEAN-UP-R01 to R19 added.
+- 2026-11-21: created from the owner's direction of 2026-11-21: start from what Claude Desktop does, and put it on the settings page. Archiving puts the workspace away, which replaces his decision of 2026-11-05 that it stays (FLOW-ARCHIVE-DELETE-SESSION-R01 retired there); the sweep removes without asking only what holds no unsaved work (ADR 0038); the rest is one list. Settled in planning: ignored files are not unsaved work, as in Claude Desktop, though the sweep keeps a leftover that holds any; a put-away keeps what was checked out, so a session whose agent changed branches comes back as it was; the list removes one item per request, so nothing new reports progress; acting on several sessions at once is its own planning pass. FLOW-CLEAN-UP-R01 to R19 added.
