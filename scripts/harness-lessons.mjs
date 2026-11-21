@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The harness pass's first step (docs/agents/orchestration.md, Train the
-// harness): for each pull request merged since the last pass, what Docket's
+// The harness pass's first step (docs/agents/harness-lessons.md): for each
+// pull request merged since the last pass, what Docket's
 // merge review found, and which reviewer found it.
 //
 //   node scripts/harness-lessons.mjs [--since <commit>]
@@ -13,8 +13,9 @@
 // findings as JSON, every finding naming the reviewers that reported it;
 // another account's are ignored, since anyone can post one) are read, and
 // every blocking finding (high or medium) with origin "new" is listed and
-// counted against each reviewer that found it. A reviewer whose count stays at
-// zero changed no merge decision in the batch. A pull request with no merge
+// counted against each reviewer that found it, with how many of them that
+// reviewer found alone. A reviewer that found none alone changed no merge
+// decision in the batch: another reviewer blocked on each. A pull request with no merge
 // review is listed as not counted. A review marked superseded is not a round,
 // but its findings count: the review after it carries them as listed.
 //
@@ -87,14 +88,19 @@ export function compare(pr, author) {
   return { number: pr.number, title: pr.title, compared: true, rounds: rounds.length, blocked: rounds.filter((s) => s.verdict === "blocked").length, findings };
 }
 
-// Blocking findings per reviewer, most first; a finding two reviewers both
-// reported counts for each. "unnamed" holds findings whose record names none.
+// Blocking findings per reviewer, most first, as [name, all, alone]: a finding
+// two reviewers both reported counts for each, and is alone for neither.
+// "unnamed" holds findings whose record names none.
 export function tally(results) {
   const counts = new Map();
   for (const f of results.filter((r) => r.compared).flatMap((r) => r.findings)) {
-    for (const name of f.reviewers.length ? f.reviewers : ["unnamed"]) counts.set(name, (counts.get(name) ?? 0) + 1);
+    const names = f.reviewers.length ? f.reviewers : ["unnamed"];
+    for (const name of names) {
+      const [all, alone] = counts.get(name) ?? [0, 0];
+      counts.set(name, [all + 1, alone + (names.length === 1 ? 1 : 0)]);
+    }
   }
-  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return [...counts].map(([name, [all, alone]]) => [name, all, alone]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 export function report(results, author) {
@@ -105,7 +111,7 @@ export function report(results, author) {
   // CI token) that finds no merge review anywhere says why.
   lines.push(`${results.length} pull request(s) merged since the last pass; ${compared.length} counted, from merge reviews posted by ${author}; ${findings.length} blocking finding(s) at merge.`);
   const counts = tally(results);
-  lines.push(`Blocking findings by reviewer: ${counts.length ? counts.map(([name, n]) => `${name} ${n}`).join(", ") : "none"}. A reviewer in .claude/review.json that is not listed found none.`);
+  lines.push(`Blocking findings by reviewer: ${counts.length ? counts.map(([name, all, alone]) => `${name} ${all} (${alone} alone)`).join(", ") : "none"}. A reviewer in .claude/review.json that is not listed found none; one with 0 alone found nothing another reviewer missed.`);
   for (const r of results) {
     if (!r.compared) {
       lines.push(`\n#${r.number} ${r.title}: not counted (${r.why}).`);
