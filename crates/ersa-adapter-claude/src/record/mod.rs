@@ -177,7 +177,12 @@ pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Resul
     let file = format!("{session_id}.jsonl");
     for project in projects {
         let candidate = project?.path().join(&file);
-        if is_plain_file(&candidate)? {
+        // Another folder's project directory that cannot be looked into
+        // (one a `sudo claude` left to root) is skipped: it is not where
+        // this session's record would be filed, and failing every miss on
+        // it would fail looks at unrelated sessions. A failure at the
+        // session's own place is the one that says the look failed.
+        if is_plain_file(&candidate).unwrap_or(false) {
             return Ok(Some(candidate));
         }
     }
@@ -751,24 +756,35 @@ mod tests {
         assert!(find_record(home.path(), "/work", ID).unwrap().is_none());
     }
 
-    /// A look the file system refuses is an error, never "no record": Core
-    /// then keeps what it carries rather than dropping the session's id.
+    /// A look the file system refuses at the session's own place is an
+    /// error, never "no record": Core then keeps what it carries rather
+    /// than dropping the session's id. Another folder's directory that
+    /// cannot be looked into is skipped, as before.
     // verifies: FLOW-RESUME-SESSION-R22
     #[cfg(unix)]
     #[test]
     fn a_look_the_file_system_refuses_is_an_error() {
         use std::os::unix::fs::PermissionsExt;
         let home = tempfile::tempdir().unwrap();
-        let locked = home.path().join("projects").join("-elsewhere");
-        fs::create_dir_all(&locked).unwrap();
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let projects = home.path().join("projects");
+        let own = projects.join(encoded_cwd("/work"));
+        let elsewhere = projects.join("-elsewhere");
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(&elsewhere).unwrap();
+        let lock =
+            |dir: &Path, mode| fs::set_permissions(dir, fs::Permissions::from_mode(mode)).unwrap();
+        lock(&elsewhere, 0o000);
         // Someone the permissions do not hold back (root) cannot see this.
-        let refused = fs::symlink_metadata(locked.join("probe"))
+        let refused = fs::symlink_metadata(elsewhere.join("probe"))
             .is_err_and(|e| e.kind() == io::ErrorKind::PermissionDenied);
-        let found = find_record(home.path(), "/work", ID);
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let skipped = find_record(home.path(), "/work", ID);
+        lock(&own, 0o000);
+        let failed = find_record(home.path(), "/work", ID);
+        lock(&own, 0o755);
+        lock(&elsewhere, 0o755);
         if refused {
-            assert!(found.is_err(), "{found:?}");
+            assert!(matches!(skipped, Ok(None)), "{skipped:?}");
+            assert!(failed.is_err(), "{failed:?}");
         }
     }
 
