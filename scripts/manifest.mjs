@@ -23,10 +23,13 @@ import { fileURLToPath } from "node:url";
 // match Docket's merge gate, which holds a pull request on the same entries.
 // Every other list item (bulleted or numbered, with no checkbox or a ticked
 // one) reads as a finding and holds nothing at that gate.
+// A line is tried as an open entry first, by the gate's own pattern, so one
+// the gate holds on (`-[ ]`, with no space) is never taken for anything else.
 function inboxEntries(text) {
-  const items = text.split(/\r?\n/).filter((l) => /^\s*(?:[-*+]|\d+[.)])\s/.test(l));
-  const open = items.filter((l) => /^\s*-\s*\[ \]/.test(l));
-  return { open: open.length, other: items.filter((l) => !open.includes(l)) };
+  const isOpen = (l) => /^\s*-\s*\[ \]/.test(l);
+  const isItem = (l) => /^\s*(?:[-*+]|\d+[.)])(?:\s|\[)/.test(l);
+  const lines = text.split(/\r?\n/);
+  return { open: lines.filter(isOpen).length, other: lines.filter((l) => isItem(l) && !isOpen(l)) };
 }
 const inboxHold = (n) => `${n} open inbox entr${n === 1 ? "y needs" : "ies need"} a planning pass`;
 
