@@ -61,11 +61,11 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 ## Out of scope
 
 - Undoing a delete.
-- Deleting several sessions at once.
+- Selecting several sessions and archiving or deleting them at once, which gets its own planning pass (owner, 2026-11-21).
 
 ## Changes
 
-- 2026-11-21: owner's direction of 2026-11-21, to do what Claude Desktop does (`claude-desktop/cleanup-2026-11-20.txt`): an archived session's workspace is put away once it holds no unsaved work, which replaces his decision of 2026-11-05 that it stays (ADR 0038, FLOW-CLEAN-UP). R01 retired for R12, which keeps the record, the pin and the section and leaves the workspace to FLOW-CLEAN-UP; R13 added for deleting a session whose workspace is put away. Reclaiming workspaces leaves Out of scope, since FLOW-CLEAN-UP does it; deleting several sessions at once joins it. The refused Resume cites FLOW-RESUME-SESSION-R23, which replaced R03.
+- 2026-11-21: owner's direction of 2026-11-21, to do what Claude Desktop does (`claude-desktop/cleanup-2026-11-20.txt`): an archived session's workspace is put away once it holds no unsaved work, which replaces his decision of 2026-11-05 that it stays (ADR 0038, FLOW-CLEAN-UP). R01 retired for R12, which keeps the record, the pin and the section and leaves the workspace to FLOW-CLEAN-UP; R13 added for deleting a session whose workspace is put away. Reclaiming workspaces leaves Out of scope, since FLOW-CLEAN-UP does it; acting on several sessions at once joins it, until its own planning pass. The refused Resume cites FLOW-RESUME-SESSION-R23, which replaced R03.
 - 2026-11-20: from #521 inbox: a folder in use fails the delete only after Core has tried it for 30 seconds (PROTO-CORE-API-R113). No requirement IDs changed.
 - 2026-11-19: from #369 inbox: Try again is refused while a step the failed deletion gave up on has not ended (PROTO-CORE-API-R107). No requirement IDs changed.
 - 2026-11-15: from #328 inbox: a session started in the backend's own tools counts as another session using a workspace, so deleting a session there leaves the files. Meaning of R05 unchanged; no requirement IDs changed.
