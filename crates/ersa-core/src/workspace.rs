@@ -47,6 +47,24 @@ pub const FOLDER_TRY_WINDOW: Duration = Duration::from_secs(30);
 /// [`REMOVE_FIRST_BACKOFF`] and double up to this.
 const FOLDER_TRY_LONGEST_WAIT: Duration = Duration::from_secs(2);
 
+/// How long a request waits for its turn to change a repository's
+/// worktrees while another change to them is under way ([`Worktrees`]),
+/// counted from when it began to wait: as long as one git command may take.
+pub const WORKTREE_TURN_WAIT: Duration = GIT_TIMEOUT;
+
+/// A repository's turns to have its worktrees changed. git cannot add,
+/// remove or prune two worktrees of one repository at once: each lists the
+/// repository's worktrees and dies on the record of one another git is
+/// still writing ("failed to read .git/worktrees/<name>/commondir"). So
+/// every change to them waits for its turn.
+#[ersa_adapter::async_trait]
+pub trait Worktrees: Send + Sync {
+    /// Waits for the turn, at most [`WORKTREE_TURN_WAIT`], and answers
+    /// [`VcsError::WorktreesBusy`] past it. Keep what it returns while git
+    /// changes the repository's worktrees, and let go of it after.
+    async fn turn(&self) -> Result<Box<dyn Send>, VcsError>;
+}
+
 /// Why a VCS operation failed.
 #[derive(Debug, thiserror::Error)]
 pub enum VcsError {
@@ -74,15 +92,22 @@ pub enum VcsError {
     /// Too many earlier requests' file system reads have not answered yet.
     #[error("too many workspace folders asked about are not answering; try again once they do")]
     Busy,
+    /// Another change to the repository's worktrees did not finish within
+    /// [`WORKTREE_TURN_WAIT`]; this one began no git work.
+    #[error("another change to this project's workspaces did not finish in time; try again")]
+    WorktreesBusy,
 }
 
 impl VcsError {
     /// Whether the worktree was left exactly as it was: git refused before
-    /// touching it.
+    /// touching it, or a removal that never had its turn ran no git.
     pub fn is_refusal(&self) -> bool {
         matches!(
             self,
-            VcsError::Locked { .. } | VcsError::Dirty | VcsError::NotListed { .. }
+            VcsError::Locked { .. }
+                | VcsError::Dirty
+                | VcsError::NotListed { .. }
+                | VcsError::WorktreesBusy
         )
     }
 }
@@ -1219,13 +1244,21 @@ where
 /// goes on to delete the folder in this same call (PROTO-CORE-API-R112).
 /// Every failure of git's removal is logged as a warning
 /// (PROTO-CORE-API-R114); the caller's span names the session.
+///
+/// git's part runs in the repository's turns (`worktrees`): its removal in
+/// one, its prune and the branch in another. The tries at the folder, which
+/// can last [`FOLDER_TRY_WINDOW`] and touch only the folder, run between
+/// them, holding up no other change to the repository's worktrees.
 pub async fn git_worktree_delete(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
     branch: &str,
     tries: FolderTries,
+    worktrees: &dyn Worktrees,
 ) -> Result<bool, VcsError> {
+    // Kept, not read: holding it is the turn.
+    let mut _turn = worktrees.turn().await?;
     let as_folder = match git_worktree_remove(transport, repo, path, true, false).await {
         Ok(()) => false,
         Err(VcsError::NotListed { .. }) => true,
@@ -1248,7 +1281,9 @@ pub async fn git_worktree_delete(
         }
     };
     if as_folder {
+        drop(_turn);
         remove_folder(path, &tries).await?;
+        _turn = worktrees.turn().await?;
         let pruned = git(transport, repo, &["worktree", "prune"]).await?;
         check(pruned, "git worktree prune failed")?;
     }

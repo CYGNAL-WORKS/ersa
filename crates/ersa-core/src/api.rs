@@ -95,6 +95,7 @@ impl From<VcsError> for ApiError {
                 ApiError::new(ErrorKind::VcsError, message).with_detail(stderr)
             }
             VcsError::Busy
+            | VcsError::WorktreesBusy
             | VcsError::Locked { .. }
             | VcsError::Dirty
             | VcsError::NotListed { .. } => ApiError::new(ErrorKind::VcsError, e.to_string()),

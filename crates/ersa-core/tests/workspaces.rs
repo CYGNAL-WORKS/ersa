@@ -1000,3 +1000,72 @@ async fn project_find_matches_a_folder_as_project_add_compares_them() {
         .await;
     assert_eq!(kind(&error), "not_found");
 }
+
+/// Core's command transport, with every `git worktree add` stopping at
+/// `gate` before git runs, until the test lets it go.
+struct StoppingAdds {
+    gate: std::sync::Arc<ersa_core::Gate>,
+    inner: ersa_core::transport::LocalTreeTransport,
+}
+
+#[ersa_adapter::async_trait]
+impl ersa_adapter::Transport for StoppingAdds {
+    async fn spawn(
+        &self,
+        spec: ersa_adapter::ProcessSpec,
+    ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+        let adds = spec.args.windows(2).any(|pair| pair == ["worktree", "add"]);
+        if spec.program == "git" && adds {
+            self.gate.stop().await;
+        }
+        self.inner.spawn(spec).await
+    }
+}
+
+// git dies when two of its worktree commands run in one repository at once
+// (each reads the others' records while one is half written), so a second
+// `workspace.create` in a project waits for the first one's add, then
+// makes its own: both are made.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_workspace_made_at_once_waits_for_the_firsts_git() {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let gate = Arc::new(ersa_core::Gate::default());
+    let git = Arc::new(StoppingAdds {
+        gate: Arc::clone(&gate),
+        inner: ersa_core::transport::LocalTreeTransport::for_commands(),
+    });
+    let core = support::start_with(support::tempdir(), move |config| {
+        config.command_transport = Some(ersa_core::CommandTransport(git));
+    })
+    .await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let root = core.dir.path().join("worktrees").display().to_string();
+    let patch = json!({ "patch": { "workspaces": { "root": root } } });
+    client.result("settings.set", patch).await;
+    let project = add_project(&mut client, &repo).await;
+    let params = json!({ "project_id": project["id"] });
+
+    let mut first = core.client().await;
+    let made_first = first.request("workspace.create", params.clone()).await;
+    let reached = tokio::time::timeout(Duration::from_secs(30), gate.reached()).await;
+    reached.expect("the first add began");
+    // The second waits its turn: its git does not begin beside the first's.
+    let mut second = core.client().await;
+    let made_second = second.request("workspace.create", params).await;
+    let began = tokio::time::timeout(Duration::from_millis(500), gate.reached()).await;
+    assert!(began.is_err(), "a second add began beside the first");
+
+    // The first's add goes on and ends; then the second's begins.
+    gate.go();
+    let made = first.response(made_first).await;
+    assert_eq!(made["result"]["state"], json!("ready"), "{made}");
+    let reached = tokio::time::timeout(Duration::from_secs(30), gate.reached()).await;
+    reached.expect("the second add began once the first ended");
+    gate.go();
+    let made = second.response(made_second).await;
+    assert_eq!(made["result"]["state"], json!("ready"), "{made}");
+}

@@ -424,6 +424,10 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         // The removal's operation ends with what happened, reported below,
         // so a try left stuck holds nothing of it.
         workspace::FolderTries::holding(Arc::new(())),
+        &handlers::RepositoryTurns {
+            core,
+            project: &project.id,
+        },
     )
     .await;
     let removed = match deleted {
