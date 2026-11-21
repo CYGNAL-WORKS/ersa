@@ -30,6 +30,17 @@ pub struct OnTransport {
     pub summary_fault: Arc<std::sync::Mutex<Option<SummaryFault>>>,
 }
 
+impl OnTransport {
+    /// `adapter` starting its CLI on `transport`, with no summary fault.
+    pub fn new(adapter: ClaudeAdapter, transport: Arc<dyn Transport>) -> Self {
+        OnTransport {
+            adapter,
+            transport,
+            summary_fault: Arc::default(),
+        }
+    }
+}
+
 /// How a summary read goes wrong ([`OnTransport::summary_fault`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SummaryFault {
