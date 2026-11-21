@@ -175,12 +175,13 @@ test("an unverified requirement cited only outside a test file names that file",
 test("an inbox list item that is not an open entry fails the check", () => {
   // A finding written without its checkbox, ticked, or as a numbered item holds nothing at the merge gate.
   const run = copy(
-    "- 2026-11-05 none: a gap with no checkbox.\n- [x] 2026-11-05 none: a ticked one.\n1. 2026-11-05 none: a numbered one.\n2) [ ] 2026-11-05 none: numbered with a box.\n- [ ] 2026-11-05 none: an open one.\n",
+    "- 2026-11-05 none: a gap with no checkbox.\n- [x] 2026-11-05 none: a ticked one.\n1. 2026-11-05 none: a numbered one.\n2) [ ] 2026-11-05 none: numbered with a box.\n-[x] 2026-11-05 none: ticked, no space.\n- [ ] 2026-11-05 none: an open one.\n-[ ] 2026-11-05 none: open, no space.\n",
   );
   assert.equal(run("--check").status, 1);
   const manifest = readFileSync(join(run.dir, "docs", "MANIFEST.md"), "utf8");
-  assert.match(manifest, /1 open entries in docs\/briefs\/INBOX\.md/, "only the open entry is counted");
+  assert.match(manifest, /2 open entries in docs\/briefs\/INBOX\.md/, "the gate's pattern counts an entry with no space after its dash");
   const problems = manifest.split("## Problems")[1];
-  assert.equal(problems.match(/is not an open entry/g)?.length, 4, problems);
+  assert.equal(problems.match(/is not an open entry/g)?.length, 5, problems);
+  assert.doesNotMatch(problems, /open, no space/);
   assert.doesNotMatch(problems, /an open one/);
 });
