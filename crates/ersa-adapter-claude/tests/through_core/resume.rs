@@ -120,6 +120,7 @@ async fn a_session_resumed_while_open_shows_the_record_then_the_new_run_each_mes
             .with_claude_home(home.path().to_path_buf())
             .with_stop_grace(Duration::from_secs(1)),
         transport: Arc::clone(&runs) as Arc<dyn Transport>,
+        summary_fault: Default::default(),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
