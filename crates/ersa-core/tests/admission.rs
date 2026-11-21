@@ -2560,7 +2560,28 @@ fn worlds() -> Vec<(&'static str, Vec<Input>)> {
         ("sent", every_input(&["s1"], true, false, true)),
         // A fork with the project and its workspaces coming and going.
         ("forked", forked_inputs()),
+        // Changes to the repository's worktrees, with the project and its
+        // workspaces coming and going: no other row reads them.
+        ("worktrees", worktrees_inputs()),
     ]
+}
+
+/// A change to the worktrees of `P`'s repository, and its end.
+fn worktree_change() -> Vec<Input> {
+    let project = || P.to_string();
+    vec![
+        Input::Command(Command::Worktrees { project: project() }),
+        Input::Report(Report::Ended(Operation::Worktrees(project()))),
+    ]
+}
+
+/// The repository's worktrees are changed by operations on the project and
+/// its workspaces, and read by nothing but the next change: here, every
+/// input of the project and its workspaces, without a session.
+fn worktrees_inputs() -> Vec<Input> {
+    let mut inputs = inputs_of(&[], false, false, false, true);
+    inputs.extend(worktree_change());
+    inputs
 }
 
 fn world_inputs(name: &str) -> Vec<Input> {
@@ -2583,7 +2604,9 @@ fn forked_inputs() -> Vec<Input> {
 
 /// Every input there is, of every kind at once: the whole world.
 fn every_input_of_the_whole_world(sessions: &[&str]) -> Vec<Input> {
-    inputs_of(sessions, true, true, true, true)
+    let mut inputs = inputs_of(sessions, true, true, true, true);
+    inputs.extend(worktree_change());
+    inputs
 }
 
 fn inputs_of(
@@ -2925,6 +2948,9 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
             }
             ProjectPhase::Present => {}
         }
+        if project.worktrees {
+            reports.push(Report::Ended(Operation::Worktrees(id.clone())));
+        }
     }
     for (id, workspace) in state.workspaces() {
         match workspace.phase {
@@ -3086,6 +3112,18 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             "{}",
             context()
         );
+    }
+    // git changes a repository's worktrees one change at a time: one is
+    // admitted only when none is under way there, and held while one is.
+    if let Input::Command(Command::Worktrees { project }) = input
+        && let Some(was) = before.project(project)
+    {
+        let expected = if was.worktrees {
+            Outcome::Held
+        } else {
+            Outcome::Admitted(Operation::Worktrees(project.clone()))
+        };
+        assert_eq!(outcome, &expected, "{}", context());
     }
     // A send is handed over only when it was not cancelled.
     if let (Input::Report(Report::SendStage { session, stage }), Outcome::Noted) = (input, outcome)
@@ -3357,6 +3395,7 @@ fn every_input_is_in_a_world() {
                 Command::BeginRemoval { .. } => "BeginRemoval",
                 Command::Launch { .. } => "Launch",
                 Command::AwaitRunEnd { .. } => "AwaitRunEnd",
+                Command::Worktrees { .. } => "Worktrees",
             },
             Input::Report(report) => match report {
                 Report::ProjectStored { .. } => "ProjectStored",
@@ -3385,7 +3424,7 @@ fn every_input_is_in_a_world() {
     };
     let whole = every_input_of_the_whole_world(&["s1"]);
     let kinds: HashSet<&str> = whole.iter().map(kind).collect();
-    assert_eq!(kinds.len(), 19 + 21, "{kinds:#?}");
+    assert_eq!(kinds.len(), 20 + 21, "{kinds:#?}");
     // Every operation's end, and every kind of write.
     let ends: HashSet<_> = whole
         .iter()
@@ -3394,7 +3433,7 @@ fn every_input_is_in_a_world() {
             Input::Command(_) | Input::Report(_) => None,
         })
         .collect();
-    assert_eq!(ends.len(), 14, "the end of every kind of operation");
+    assert_eq!(ends.len(), 15, "the end of every kind of operation");
     for change in writes("s1") {
         let (session, change) = ("s1".to_string(), change);
         let written = Input::Report(Report::RowWritten { session, change });
@@ -3581,6 +3620,16 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
             .iter()
             .any(|s| forking(s, "s1") && sending(s, "s1").is_some())
     );
+    // Changes to the repository's worktrees, with the project and its
+    // workspaces through every phase, up to two changes waiting.
+    let changed = explore_with(world_inputs("worktrees"), 2, false);
+    assert!(changed.len() > 100, "only {} states", changed.len());
+    let changing = |s: &State| s.project(P).is_some_and(|p| p.worktrees);
+    assert!(changed.iter().any(|s| changing(s) && s.held().len() == 2));
+    assert!(changed.iter().any(|s| {
+        let removing = ProjectPhase::Removing;
+        changing(s) && s.project(P).is_some_and(|p| p.phase == removing)
+    }));
 }
 
 /// Numbers that are the same on every machine for a seed (xorshift).
@@ -3693,6 +3742,81 @@ fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
 fn every_input_in_every_reachable_state_of_the_whole_world() {
     let whole = explore_with(every_input_of_the_whole_world(&["s1"]), 1, true);
     assert!(whole.len() > 2_000_000, "only {} states", whole.len());
+}
+
+// -- One change to a repository's worktrees at a time ----------------------
+
+/// [`world`] and a second project in another folder, with its root.
+fn two_projects() -> State {
+    let mut existing = existing();
+    let other = Folder {
+        host: "local".into(),
+        key: "c:/other".into(),
+    };
+    existing.projects.push(("p2".into(), other));
+    existing.workspaces.push(ExistingWorkspace {
+        id: "p2-root".into(),
+        project: "p2".into(),
+        root: true,
+        phase: WorkspacePhase::Ready,
+    });
+    State::restored(existing)
+}
+
+fn worktrees(project: &str) -> Command {
+    Command::Worktrees {
+        project: project.into(),
+    }
+}
+
+// git dies when two of its worktree commands run in one repository at once
+// (each reads the others' records while one is half written): a second
+// change waits for the first, and begins when it ends.
+// verifies: PROTO-CORE-API-R118
+#[test]
+fn a_second_change_to_a_repositorys_worktrees_waits_for_the_first() {
+    let mut state = two_projects();
+    let first = Operation::Worktrees(P.into());
+    assert_eq!(command(&mut state, worktrees(P)), admitted(first.clone()));
+    assert_eq!(command(&mut state, worktrees(P)), Outcome::Held);
+    assert_eq!(command(&mut state, worktrees(P)), Outcome::Held);
+    // Another repository's worktrees wait for nothing of this one's.
+    let other = Operation::Worktrees("p2".into());
+    assert_eq!(command(&mut state, worktrees("p2")), admitted(other));
+    // The first ends: the one that waited longest begins, and only it.
+    let ended = step(&mut state, Input::Report(Report::Ended(first.clone())));
+    assert_eq!(ended.outcome, Outcome::Noted);
+    assert_eq!(ended.released, vec![(0, admitted(first.clone()))]);
+    assert_eq!(state.held(), &[worktrees(P)]);
+    let ended = step(&mut state, Input::Report(Report::Ended(first.clone())));
+    assert_eq!(ended.released, vec![(0, admitted(first.clone()))]);
+    assert!(state.held().is_empty());
+    // With none under way, a change begins at once.
+    report(&mut state, Report::Ended(first.clone()));
+    assert!(!state.project(P).unwrap().worktrees);
+    assert_eq!(command(&mut state, worktrees(P)), admitted(first));
+}
+
+#[test]
+fn a_change_to_the_worktrees_of_no_project_is_refused() {
+    let mut state = world();
+    let before = state.clone();
+    let outcome = command(&mut state, worktrees("p2"));
+    assert_eq!(outcome, Outcome::Refused(Refusal::NoProject));
+    assert_eq!(state, before);
+    // And an end for a change that is not under way changes nothing.
+    let ended = Report::Ended(Operation::Worktrees(P.into()));
+    assert_eq!(report(&mut state, ended), Outcome::Stale);
+}
+
+// A delete or a removal already under way when Core begins to close
+// finishes its git work: its turn is not refused.
+#[test]
+fn a_change_to_the_worktrees_is_not_refused_while_core_closes() {
+    let mut state = world();
+    report(&mut state, Report::Closing);
+    let outcome = command(&mut state, worktrees(P));
+    assert_eq!(outcome, admitted(Operation::Worktrees(P.into())));
 }
 
 // -- Operations under way and waiters (the wrapper around the function) -----
@@ -4199,4 +4323,35 @@ async fn a_held_command_admitted_after_its_caller_left_is_ended_at_once() {
     let state = admission.snapshot();
     assert!(state.project("p1").is_none() && state.project("p2").is_none());
     assert!(state.held().is_empty());
+}
+
+// A change to a repository's worktrees waits its turn at most its limit,
+// counted from when it began to wait, and then gives up, leaving the queue;
+// one that waits in time begins when the change before it lets go.
+// verifies: PROTO-CORE-API-R119
+#[tokio::test]
+async fn a_change_to_the_worktrees_waits_its_turn_or_gives_up_at_its_limit() {
+    use std::time::Duration;
+    let admission = Arc::new(Admission::default());
+    admission.restore(existing());
+    let long = Duration::from_secs(30);
+    let first = admission
+        .worktrees(P, long)
+        .await
+        .expect("its turn at once");
+
+    let gave_up = admission.worktrees(P, Duration::from_millis(50)).await;
+    assert_eq!(gave_up.err(), Some(Refusal::GaveUp));
+    assert!(admission.snapshot().held().is_empty());
+
+    let waiting = Arc::clone(&admission);
+    let next = tokio::spawn(async move { waiting.worktrees(P, long).await });
+    until_held(&admission).await;
+    drop(first);
+    let next = tokio::time::timeout(Duration::from_secs(5), next).await;
+    let next = next.expect("answered in time").unwrap();
+    assert!(next.is_ok(), "its turn once the first let go");
+    assert!(admission.snapshot().project(P).unwrap().worktrees);
+    drop(next);
+    assert!(!admission.snapshot().project(P).unwrap().worktrees);
 }
