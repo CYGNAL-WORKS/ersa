@@ -24,6 +24,8 @@
 
 use std::sync::Arc;
 
+use tracing::Instrument;
+
 use ersa_adapter::{OpenElsewhere, RecordDeletion};
 use ersa_protocol::core_api::{
     ErrorReason, SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind,
@@ -134,40 +136,28 @@ async fn finish(
 ) -> Result<SessionDeleteResult, ApiError> {
     let mut branch_kept = false;
     if files {
-        let project = handlers::find_project(core, &workspace.project_id).await?;
-        let transport = core
-            .transport_for(&project.host_id)
-            .ok_or_else(|| handlers::unreachable_host(&project.host_id))?;
-        let deleted = workspace::git_worktree_delete(
-            transport.as_ref(),
-            &project.path,
-            &workspace.path,
-            &workspace.vcs_ref,
-            workspace::FolderTries {
-                held: Arc::clone(&held) as _,
-                limit: core.config.folder_removal_limit,
-                gate: core.config.folder_gate.clone(),
-            },
-        )
-        .await;
-        branch_kept = deleted?;
+        // In a span naming the session and step, so the warning git's
+        // failed removal writes to the diagnostic log says which delete it
+        // was (PROTO-CORE-API-R114).
+        let step = tracing::warn_span!("session_delete", session = %id, step = 5);
+        let deleted = delete_files(core, workspace, &held).instrument(step).await;
+        branch_kept = deleted.inspect_err(|e| step_failed(id, 5, e))?;
     }
     let limit = core.config.record_deletion_limit;
-    match core
+    let deleted = match core
         .sessions
         .delete_record(id, session_transport, limit, held)
         .await
     {
-        Ok(RecordDeletion::Deleted) => {}
+        Ok(RecordDeletion::Deleted) => Ok(()),
         // Opened elsewhere since step 2.
-        Ok(RecordDeletion::Refused(refused)) => return Err(open_elsewhere(id, refused)),
-        Err(SessionError::Adapter(e)) => {
-            return Err(ApiError::internal(format!(
-                "deleting the session's record failed: {e}"
-            )));
-        }
-        Err(e) => return Err(e.into()),
-    }
+        Ok(RecordDeletion::Refused(refused)) => Err(open_elsewhere(id, refused)),
+        Err(SessionError::Adapter(e)) => Err(ApiError::internal(format!(
+            "deleting the session's record failed: {e}"
+        ))),
+        Err(e) => Err(e.into()),
+    };
+    deleted.inspect_err(|e| step_failed(id, 6, e))?;
     // The workspace's row goes when its files went, or when an earlier
     // delete of another session in it took them (this one's record kept
     // them, since it shared the workspace then); in either case only once
@@ -185,6 +175,50 @@ async fn finish(
         workspace_deleted: files,
         branch_kept,
     })
+}
+
+/// Step 5: the workspace's folder and, unless it holds work of its own,
+/// its branch. Returns whether the branch was kept.
+async fn delete_files(
+    core: &Core,
+    workspace: &Workspace,
+    held: &Arc<UnderWay>,
+) -> Result<bool, ApiError> {
+    let project = handlers::find_project(core, &workspace.project_id).await?;
+    let transport = core
+        .transport_for(&project.host_id)
+        .ok_or_else(|| handlers::unreachable_host(&project.host_id))?;
+    let kept = workspace::git_worktree_delete(
+        transport.as_ref(),
+        &project.path,
+        &workspace.path,
+        &workspace.vcs_ref,
+        workspace::FolderTries {
+            held: Arc::clone(held) as _,
+            limit: core.config.folder_removal_limit,
+            gate: core.config.folder_gate.clone(),
+            window: Some(core.config.folder_try_window),
+        },
+    )
+    .await?;
+    Ok(kept)
+}
+
+/// Writes step `step`'s failure to the diagnostic log (PROTO-CORE-API-R114):
+/// the user's tile says only that the delete failed.
+fn step_failed(id: &str, step: u8, error: &ApiError) {
+    let detail = error
+        .0
+        .data
+        .as_ref()
+        .and_then(|data| data.detail.as_deref());
+    tracing::warn!(
+        session = %id,
+        step,
+        reason = %error.0.message,
+        detail = detail.unwrap_or_default(),
+        "a step of the session's delete failed"
+    );
 }
 
 /// Whether an isolated workspace's files were deleted already: git no

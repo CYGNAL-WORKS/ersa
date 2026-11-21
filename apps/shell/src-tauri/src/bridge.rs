@@ -46,7 +46,7 @@ pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
         | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown"
-        | "attachment.inspect" => LONG_REQUEST_TIMEOUT,
+        | "attachment.inspect" | "session.delete" => LONG_REQUEST_TIMEOUT,
         // A silence, not a limit: see [`SEND_SILENCE`].
         "session.send" => SEND_SILENCE,
         _ => REQUEST_TIMEOUT,
