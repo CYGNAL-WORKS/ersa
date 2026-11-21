@@ -1436,3 +1436,43 @@ async fn a_folder_still_in_use_when_the_tries_end_fails_the_delete() {
         "failed"
     );
 }
+
+// A delete whose step 5 waited its whole limit for another change to the
+// project's worktrees starts none of its git work: it answers `vcs_error`,
+// reads failed, and its folder is still there.
+// verifies: PROTO-CORE-API-R119
+#[tokio::test(flavor = "multi_thread")]
+async fn a_delete_that_waited_too_long_for_its_turn_runs_no_git_and_answers_vcs_error() {
+    use support::deleting::{hold_the_turn, made_through, with_stopping_adds};
+
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let gate = Arc::new(Gate::default());
+    let wait = Duration::from_millis(300);
+    let (core, git, mut client, project) = with_stopping_adds(&gate, wait, adapters).await;
+    let workspace = made_through(&gate, &mut client, &project).await;
+    let folder = std::path::PathBuf::from(workspace["path"].as_str().unwrap());
+    let id = idle_session(&mut client, &workspace).await;
+    let shown = token(&mut client, &workspace).await;
+
+    // A create whose add stands stopped holds the project's turn.
+    let mut holder = core.client().await;
+    let holding = hold_the_turn(&gate, &mut holder, &project).await;
+    let before = git.changes();
+
+    let answer = client
+        .call("session.delete", json!({ "id": id, "token": shown }))
+        .await;
+    assert_eq!(kind(&answer["error"]), "vcs_error", "{answer}");
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+    assert!(folder.is_dir());
+    // It neither removed nor pruned a worktree.
+    assert_eq!(git.changes(), before);
+
+    gate.go();
+    let made = holder.response(holding).await;
+    assert_eq!(made["result"]["state"], json!("ready"), "{made}");
+}
