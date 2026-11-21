@@ -4333,7 +4333,10 @@ async fn a_change_to_the_worktrees_waits_its_turn_or_gives_up_at_its_limit() {
     let admission = Arc::new(Admission::default());
     admission.restore(existing());
     let long = Duration::from_secs(30);
-    let first = admission.worktrees(P, long).await.expect("its turn at once");
+    let first = admission
+        .worktrees(P, long)
+        .await
+        .expect("its turn at once");
 
     let gave_up = admission.worktrees(P, Duration::from_millis(50)).await;
     assert_eq!(gave_up.err(), Some(Refusal::GaveUp));
