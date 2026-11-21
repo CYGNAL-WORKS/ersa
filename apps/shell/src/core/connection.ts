@@ -177,7 +177,7 @@ export function connect(
         if (event.method === "session.tile") {
           const session_id = event.params.session_id;
           const tile = checkTile(event.params.tile);
-          const { last_activity_at, title, created_at } = event.params;
+          const { last_activity_at, title, created_at, backend_session_id } = event.params;
           const known =
             current.phase === "connected" &&
             current.sessions.state === "ready" &&
@@ -202,15 +202,18 @@ export function connect(
                       // rename or a generated name from it, with no list read (PROTO-CORE-API-R84). Every tile carries the
                       // date created (PROTO-CORE-API-R105), corrected when Core reads the record (R106), so the rail groups
                       // and sorts by it with no list read (FLOW-ORGANIZE-SESSIONS-R07, R09); one that is not text keeps what was listed.
+                      // Every tile carries the backend's id as the list does, absent while Core carries none, so Copy
+                      // session ID follows it with no list read (FLOW-RESUME-SESSION-R20, R21).
                       sessions: view.sessions.sessions.map((s) => {
                         if (s.id !== session_id) return s;
-                        const { title: _listed, ...rest } = s;
+                        const { title: _listed, backend_session_id: _listedId, ...rest } = s;
                         return {
                           ...rest,
                           tile,
                           last_activity_at: laterActivity(s.last_activity_at, last_activity_at),
                           created_at: typeof created_at === "string" ? created_at : s.created_at,
                           ...(title === undefined ? {} : { title }),
+                          ...(typeof backend_session_id === "string" ? { backend_session_id } : {}),
                         };
                       }),
                     },
