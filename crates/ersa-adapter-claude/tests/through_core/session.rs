@@ -27,10 +27,10 @@ async fn next_event(client: &mut Client, event_type: &str) -> Value {
 async fn a_claude_session_round_trips_a_permission_through_core() {
     let (stdout, sent) = fixture();
     let transport = stub(&stdout);
-    let adapter = OnTransport {
-        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
-        transport: Arc::new(transport.clone()),
-    };
+    let adapter = OnTransport::new(
+        isolated_claude().with_stop_grace(Duration::from_secs(1)),
+        Arc::new(transport.clone()),
+    );
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
     let mut client = core.client().await;
@@ -153,10 +153,10 @@ async fn setting_sources(transport: &ersa_adapter::fake::FakeTransport, n: usize
 async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
     let (stdout, _) = fixture();
     let transport = stub(&stdout);
-    let adapter = OnTransport {
-        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
-        transport: Arc::new(transport.clone()),
-    };
+    let adapter = OnTransport::new(
+        isolated_claude().with_stop_grace(Duration::from_secs(1)),
+        Arc::new(transport.clone()),
+    );
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
     let mut client = core.client().await;
@@ -246,10 +246,10 @@ async fn asked_through_core(
         .position(|l| parse(l)["request"]["subtype"] == "can_use_tool")
         .unwrap();
     let transport = stub_asking_at(&stdout, ask);
-    let adapter = OnTransport {
-        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
-        transport: Arc::new(transport.clone()),
-    };
+    let adapter = OnTransport::new(
+        isolated_claude().with_stop_grace(Duration::from_secs(1)),
+        Arc::new(transport.clone()),
+    );
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
     let mut client = core.client().await;

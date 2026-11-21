@@ -170,7 +170,7 @@ export const enUS = {
       // Puts the backend's id for the session on the clipboard, to resume it in the backend's own tools
       // (FLOW-RESUME-SESSION-R16), and why it can't be chosen while Core lists no id.
       copySessionIdButton: "Copy session ID",
-      copySessionIdReason: "Available once the backend has an ID for this session",
+      copySessionIdReason: "Available once the backend saves this session",
       // Archive or Unarchive, by whether the session is archived (FLOW-ARCHIVE-DELETE-SESSION).
       archiveButton: "Archive",
       unarchiveButton: "Unarchive",
