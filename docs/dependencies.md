@@ -20,7 +20,7 @@ To run the checks locally, install [OSV-Scanner](https://github.com/google/osv-s
 
 ## Adding an exception
 
-An exception is the owner's to grant: a session adds or changes one only when its issue names it, and otherwise reports the failing check and stops. Exceptions go only in `deps-policy.toml`, never in an `osv-scanner.toml` or `deny.toml`, so there is one place to review them. Each needs a `reason` that says why accepting it is safe and what ends it, and an `expires` date (YYYY-MM-DD, unquoted) at most 90 days out. Say why in the pull request too.
+An exception is the owner's to grant: a session adds or changes one only when its issue names it, and otherwise reports the failing check and stops. A pull request that changes `deps-policy.toml` waits for the owner's merge (`gate.ownerPaths` in `.claude/review.json`). Exceptions go only in `deps-policy.toml`, never in an `osv-scanner.toml` or `deny.toml`, so there is one place to review them. Each needs a `reason` that says why accepting it is safe and what ends it, and an `expires` date (YYYY-MM-DD, unquoted) at most 90 days out. Say why in the pull request too.
 
 To take a package version younger than seven days, typically a release that fixes a vulnerability:
 
