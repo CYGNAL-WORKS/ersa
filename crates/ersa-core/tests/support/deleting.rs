@@ -220,3 +220,97 @@ pub fn held_in_use(file: &Path, held: Duration, released: std::sync::mpsc::Recei
         drop(open);
     });
 }
+
+/// Core's command transport, with every `git worktree add` stopping at
+/// `gate` before git runs, until the test lets it go. It notes each change
+/// it is given to a repository's worktrees: an add, a removal or a prune.
+pub struct StoppingAdds {
+    gate: Arc<Gate>,
+    changes: std::sync::Mutex<Vec<String>>,
+    inner: LocalTreeTransport,
+}
+
+impl StoppingAdds {
+    pub fn new(gate: &Arc<Gate>) -> StoppingAdds {
+        StoppingAdds {
+            gate: Arc::clone(gate),
+            changes: std::sync::Mutex::new(Vec::new()),
+            inner: LocalTreeTransport::for_commands(),
+        }
+    }
+
+    /// The changes to worktrees given so far: `add`, `remove` or `prune`.
+    pub fn changes(&self) -> Vec<String> {
+        self.changes.lock().unwrap().clone()
+    }
+}
+
+#[ersa_adapter::async_trait]
+impl ersa_adapter::Transport for StoppingAdds {
+    async fn spawn(
+        &self,
+        spec: ersa_adapter::ProcessSpec,
+    ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+        let change = ["add", "remove", "prune"].into_iter().find(|what| {
+            spec.args
+                .windows(2)
+                .any(|pair| pair[0] == "worktree" && pair[1] == *what)
+        });
+        if let (true, Some(change)) = (spec.program == "git", change) {
+            self.changes.lock().unwrap().push(change.to_string());
+            if change == "add" {
+                self.gate.stop().await;
+            }
+        }
+        self.inner.spawn(spec).await
+    }
+}
+
+/// A Core with `adapters`, whose `git worktree add`s stop at `gate` and
+/// whose requests wait `wait` for a turn at a project's worktrees, with a
+/// project in a new repository; its transport, a client and the project.
+pub async fn with_stopping_adds(
+    gate: &Arc<Gate>,
+    wait: Duration,
+    adapters: Vec<Arc<dyn ersa_core::Adapter>>,
+) -> (super::TestCore, Arc<StoppingAdds>, Client, Value) {
+    let git = Arc::new(StoppingAdds::new(gate));
+    let transport = Arc::clone(&git);
+    let configure = move |config: &mut ersa_core::CoreConfig| {
+        config.command_transport = Some(ersa_core::CommandTransport(transport));
+        config.worktree_turn_wait = wait;
+    };
+    let core = super::start_with_adapters(super::tempdir(), configure, adapters).await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let root = core.dir.path().join("worktrees").display().to_string();
+    let patch = json!({ "patch": { "workspaces": { "root": root } } });
+    client.result("settings.set", patch).await;
+    let path = repo.display().to_string();
+    let params = json!({ "host_id": "local", "path": path, "trusted": false });
+    let project = client.result("project.add", params).await;
+    (core, git, client, project)
+}
+
+/// A workspace made in `project`, its add let through `gate`.
+pub async fn made_through(gate: &Gate, client: &mut Client, project: &Value) -> Value {
+    let params = json!({ "project_id": project["id"] });
+    let made = client.request("workspace.create", params).await;
+    let reached = tokio::time::timeout(Duration::from_secs(30), gate.reached()).await;
+    reached.expect("its add began");
+    gate.go();
+    let made = client.response(made).await["result"].clone();
+    assert_eq!(made["state"], json!("ready"), "{made}");
+    made
+}
+
+/// Asks `client` to make a workspace in `project`, and returns the request
+/// once its add stands stopped at `gate`, holding the project's turn.
+pub async fn hold_the_turn(gate: &Gate, client: &mut Client, project: &Value) -> i64 {
+    let params = json!({ "project_id": project["id"] });
+    let holding = client.request("workspace.create", params).await;
+    let reached = tokio::time::timeout(Duration::from_secs(30), gate.reached()).await;
+    reached.expect("the holder's add began");
+    holding
+}

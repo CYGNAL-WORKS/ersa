@@ -250,7 +250,7 @@ impl Lane {
 /// in a task of its own, and answer when done, possibly out of order
 /// (responses carry their request's id): every request that names a
 /// session, and every one that runs git or a backend's command or inspects
-/// a folder the user named (PROTO-CORE-API-R92). Detached requests about
+/// a folder the user named (PROTO-CORE-API-R117). Detached requests about
 /// the same session still run in the order they were sent: each waits for
 /// the one before it in its session's lane ([`Lane`]), except that a send
 /// lets the requests behind it run once it has its session's slot, and

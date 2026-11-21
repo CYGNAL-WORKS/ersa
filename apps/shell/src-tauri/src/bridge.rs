@@ -46,7 +46,7 @@ pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
         | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown"
-        | "attachment.inspect" | "session.delete" => LONG_REQUEST_TIMEOUT,
+        | "attachment.inspect" | "session.delete" | "session.fork" => LONG_REQUEST_TIMEOUT,
         // A silence, not a limit: see [`SEND_SILENCE`].
         "session.send" => SEND_SILENCE,
         _ => REQUEST_TIMEOUT,
@@ -590,6 +590,9 @@ mod link_tests {
     fn long_methods_get_long_timeouts() {
         assert_eq!(timeout_for("workspace.create"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("session.create"), LONG_REQUEST_TIMEOUT);
+        // A fork can make a workspace, which waits for any other change to
+        // the repository's worktrees before git makes it.
+        assert_eq!(timeout_for("session.fork"), LONG_REQUEST_TIMEOUT);
         // A send's limit is a silence that its progress restarts.
         assert_eq!(timeout_for("session.send"), SEND_SILENCE);
         assert_eq!(timeout_for("host.probe"), LONG_REQUEST_TIMEOUT);

@@ -199,6 +199,10 @@ async fn delete_files(
             gate: core.config.folder_gate.clone(),
             window: Some(core.config.folder_try_window),
         },
+        &handlers::RepositoryTurns {
+            core,
+            project: &project.id,
+        },
     )
     .await?;
     Ok(kept)

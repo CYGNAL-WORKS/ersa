@@ -71,6 +71,11 @@ pub struct CoreConfig {
     /// (PROTO-CORE-API-R113). [`crate::workspace::FOLDER_TRY_WINDOW`],
     /// except in tests that let it run out.
     pub folder_try_window: Duration,
+    /// How long a request waits for its turn at a project's worktrees
+    /// while another change to them is under way (PROTO-CORE-API-R119).
+    /// [`crate::workspace::WORKTREE_TURN_WAIT`], except in tests that let
+    /// it run out.
+    pub worktree_turn_wait: Duration,
     /// The transport git and backends' version commands run through on the
     /// local host. `None` is the local machine's; tests put one in front
     /// of it that holds a command, as a slow repository or backend would.
@@ -178,6 +183,7 @@ impl CoreConfig {
             record_deletion_limit: RECORD_DELETION_LIMIT,
             folder_removal_limit: crate::workspace::GIT_TIMEOUT,
             folder_try_window: crate::workspace::FOLDER_TRY_WINDOW,
+            worktree_turn_wait: crate::workspace::WORKTREE_TURN_WAIT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })
