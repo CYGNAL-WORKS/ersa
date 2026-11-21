@@ -49,7 +49,8 @@ const FOLDER_TRY_LONGEST_WAIT: Duration = Duration::from_secs(2);
 
 /// How long a request waits for its turn to change a repository's
 /// worktrees while another change to them is under way ([`Worktrees`]),
-/// counted from when it began to wait: as long as one git command may take.
+/// counted from when it began to wait: as long as one git command may take
+/// (PROTO-CORE-API-R119).
 pub const WORKTREE_TURN_WAIT: Duration = GIT_TIMEOUT;
 
 /// A repository's turns to have its worktrees changed. git cannot add,
@@ -59,7 +60,8 @@ pub const WORKTREE_TURN_WAIT: Duration = GIT_TIMEOUT;
 /// every change to them waits for its turn.
 #[ersa_adapter::async_trait]
 pub trait Worktrees: Send + Sync {
-    /// Waits for the turn, at most [`WORKTREE_TURN_WAIT`], and answers
+    /// Waits for the turn, at most [`WORKTREE_TURN_WAIT`] (or the test's
+    /// limit), and answers
     /// [`VcsError::WorktreesBusy`] past it. Keep what it returns while git
     /// changes the repository's worktrees, and let go of it after.
     async fn turn(&self) -> Result<Box<dyn Send>, VcsError>;
