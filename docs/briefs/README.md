@@ -55,9 +55,10 @@ One testable statement per requirement, written in the form "When X, Ersa shall 
 - **FLOW-NEW-SESSION-R01**: When the user starts a session for a git project, Ersa shall create a new worktree for it before the backend starts.
 ```
 
+- The ID in a line's leading bold defines the requirement. An ID written in full anywhere else, in a requirement or in prose, refers to one.
 - Rewording that preserves meaning keeps the ID.
 - A change of meaning retires the old ID and allocates a new one. Mark the retired line with strikethrough and say what replaced it: `- ~~**FLOW-NEW-SESSION-R02**~~: retired 2026-11-02, see FLOW-NEW-SESSION-R07.`
-- A test cites a requirement with the literal text `verifies: FLOW-NEW-SESSION-R01` in its name or a comment. Only citations in test files count (paths containing `tests/` or `__tests__/`, or names ending in `.test.*`, `.spec.*`, or `_test.rs`).
+- A test cites a requirement with the literal text `verifies: FLOW-NEW-SESSION-R01` in its name or a comment. Only citations in test files count (paths containing `tests/` or `__tests__/`, or names ending in `.test.*`, `.spec.*`, or `_test.rs`); for a requirement cited only elsewhere, the manifest names the file.
 - A commit that implements requirements ends with an `Implements:` trailer listing their IDs.
 
 ## Roles
@@ -77,4 +78,4 @@ Before writing or rewriting a brief for an area, read the matching file under `d
 
 ## Manifest
 
-`node scripts/manifest.mjs` regenerates `docs/MANIFEST.md` and the table in `docs/adr/README.md`. It reports: every brief with status, requirement count, and verified count; unverified requirements in ready or built flow and protocol briefs; open inbox entries; duplicate IDs; reference cycles; dangling references; cited fixtures that do not exist; retired IDs still cited; and layout or component briefs carrying requirement IDs while still draft. Pass `--check` to exit non-zero on problems. Open inbox entries count as a problem only with `--inbox` too, which CI passes on the merge queue and on main (ADR 0025).
+`node scripts/manifest.mjs` regenerates `docs/MANIFEST.md` and the table in `docs/adr/README.md`. It reports: every brief with status, requirement count, and verified count; unverified requirements in ready or built flow and protocol briefs; open inbox entries, and inbox list items that are not one; duplicate IDs; reference cycles; dangling references; cited fixtures that do not exist; retired IDs still cited; and layout or component briefs carrying requirement IDs while still draft. Pass `--check` to exit non-zero on problems. Open inbox entries count as a problem only with `--inbox` too, which CI passes on the merge queue and on main (ADR 0025).
