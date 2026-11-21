@@ -94,6 +94,7 @@ async fn live_core_turn() -> Watched {
     let adapter = OnTransport {
         adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(stub(&stdout)),
+        summary_fault: Default::default(),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;

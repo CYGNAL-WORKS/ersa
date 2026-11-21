@@ -6,10 +6,10 @@
 //! `rename_session` (PROTO-CLAUDE-CODE-STREAM, Invocation and Renaming).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::claude::{OnTransport, fixtures_of, parse};
+use crate::claude::{OnTransport, SummaryFault, fixtures_of, parse};
 use crate::support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 use ersa_adapter::Adapter;
 use ersa_adapter::fake::FakeTransport;
@@ -67,11 +67,21 @@ pub(crate) fn is(
 /// A Core whose only adapter is Claude Code's, starting its CLI on
 /// `transport`, with session records under `home`.
 pub(crate) async fn claude_core(transport: &FakeTransport, home: &Path) -> TestCore {
+    claude_core_with_fault(transport, home, Arc::default()).await
+}
+
+/// [`claude_core`], whose summary reads go wrong while `fault` says so.
+async fn claude_core_with_fault(
+    transport: &FakeTransport,
+    home: &Path,
+    fault: Arc<Mutex<Option<SummaryFault>>>,
+) -> TestCore {
     let adapter = OnTransport {
         adapter: ClaudeAdapter::new()
             .with_claude_home(home.to_path_buf())
             .with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(transport.clone()),
+        summary_fault: fault,
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
     start_with_adapters(tempdir(), |_| {}, adapters).await
@@ -597,6 +607,62 @@ async fn a_session_carries_the_id_core_chose_once_a_turn_ends_with_its_record_wr
     // so the id leads nowhere and is not carried.
     std::fs::remove_file(&record).unwrap();
     assert_eq!(listed_backend_id(&mut client, &id).await, Value::Null);
+}
+
+/// Once a look found the session's record, a look that fails, and one that
+/// runs out of time, are no answer: the id stays carried, in the list, and
+/// no tile goes out saying otherwise.
+// verifies: FLOW-RESUME-SESSION-R22
+#[tokio::test(flavor = "multi_thread")]
+async fn a_look_that_fails_or_runs_out_of_time_leaves_the_id_carried() {
+    let stdout = recorded();
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(is("initialize"))
+        .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("get_context_usage"))
+        .wait_for_stdin(is("user"))
+        .then_stdout(&stdout[3..])
+        .hold_open();
+    let home = tempdir();
+    let fault: Arc<Mutex<Option<SummaryFault>>> = Arc::default();
+    let core = claude_core_with_fault(&transport, home.path(), Arc::clone(&fault)).await;
+    let mut client = core.client().await;
+    let id = create(&core, &mut client).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    initialize_sent(&transport).await;
+    let named = recorded_session_id(&stdout);
+    let cwd = transport.spawned()[0].cwd.clone().unwrap();
+    write_record(home.path(), &cwd, &named);
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.events_until("turn.completed").await;
+    tile_carrying(&mut client, &id, &named).await;
+    assert_eq!(listed_backend_id(&mut client, &id).await, json!(named));
+
+    for kind in [SummaryFault::Fails, SummaryFault::Hangs] {
+        *fault.lock().unwrap() = Some(kind);
+        client.clear_notifications();
+        // The list waits for its looks, the one that hangs up to its limit,
+        // so any tile they sent is in before its answer.
+        assert_eq!(
+            listed_backend_id(&mut client, &id).await,
+            json!(named),
+            "{kind:?}"
+        );
+        let tile_for = |n: &Value| n["method"] == "session.tile" && n["params"]["session_id"] == id;
+        let tile = tokio::time::timeout(
+            Duration::from_millis(200),
+            client.notification_where(tile_for),
+        )
+        .await;
+        assert!(tile.is_err(), "{kind:?} sent {tile:?}");
+    }
 }
 
 /// A fork, also started under an id Core chose, shows its original's
