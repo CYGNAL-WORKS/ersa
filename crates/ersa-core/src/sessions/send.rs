@@ -295,7 +295,7 @@ impl SessionManager {
 
         // A session to resume is refused for a folder that is gone before
         // anything is copied into it or the backend is said to be starting
-        // (FLOW-RESUME-SESSION-R03); the resume then looks no more.
+        // (FLOW-RESUME-SESSION-R23); the resume then looks no more.
         if resuming {
             resume::check_folder(&handle).await?;
         }

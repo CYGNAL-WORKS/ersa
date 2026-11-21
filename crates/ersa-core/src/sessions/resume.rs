@@ -312,7 +312,7 @@ impl SessionManager {
 pub(super) type FolderLook = Result<bool, String>;
 
 /// Refuses with `folder_gone` when the session's folder is not an existing
-/// folder (FLOW-RESUME-SESSION-R03). Core looks for itself, before the
+/// folder (FLOW-RESUME-SESSION-R23). Core looks for itself, before the
 /// backend starts. Only the local host has sessions today. One look per
 /// session at a time: a look stuck on a drive that stopped answering is
 /// joined, never started again beside it ([`read_once`]).

@@ -37,6 +37,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 - **The backend refuses the fork's name**: the fork has no title until it has its own record, then the title the backend copied from the original, until the user renames it.
 - **Ersa restarts before a fork's first message**: the fork has no title, since the backend keeps no record of it until then.
 - **A fork closed before its first message and resumed later** is forked from its original again (FLOW-RESUME-SESSION-R10), so the agent's conversation in it includes what the original did since, though Ersa shows the fork up to its fork point until its first message.
+- **The original's workspace is put away** (FLOW-CLEAN-UP): the fork's workspace starts from the tip of the branch, or the commit, the original's workspace had checked out when it was put away, and the original's stays put away.
 - **A root workspace**: the fork and the original share files, as two sessions in one workspace always do; deleting either keeps the workspace, as deleting a session always keeps a root workspace (FLOW-ARCHIVE-DELETE-SESSION).
 
 ## Requirements
@@ -63,6 +64,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 ## Changes
 
+- 2026-11-21: for FLOW-CLEAN-UP: a fork of a session whose workspace is put away starts from what that workspace had checked out (PROTO-CORE-API-R123). No requirement IDs changed.
 - 2026-11-13: from #353 inbox: a fork closed before its first message and resumed later is forked from its original again, so it holds the original's later turns; whether it can keep its fork point is an open question. No requirement IDs changed.
 - 2026-11-13: from #302 inbox: the menu marks Fork unavailable only for what the session list already shows (a reply running, a request waiting, a message or fork on its way); a missing finished reply, a session open elsewhere and a backend that can't fork are said after the click, from Core's refusal reason, since `session.list` carrying fork availability would have Core read every record and probe other processes on each listing. The words per reason come with PROTO-CORE-API-R80. R03 and Step 1 reworded.
 - 2026-11-09: owner's decision from the audit against the backend rule: the backend names a fork at launch and Core holds no title (R07 retired for R08); a fork's link to its original goes once it has its own record (R09).

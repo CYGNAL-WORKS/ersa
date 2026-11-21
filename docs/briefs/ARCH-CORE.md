@@ -5,7 +5,7 @@ title: Ersa system architecture
 status: ready
 verified-by: review
 references: [PROTO-CORE-API, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031, 0033, 0037]
+adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031, 0033, 0037, 0038]
 ---
 
 # Ersa system architecture
@@ -66,7 +66,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 - **Projection**: a session's history is the backend's own session record (ADR 0017). When a session is opened (`PROTO-AGENT-EVENTS`, Opening a session), Core projects the record through the adapter into Ersa events, then appends events projected from the live stream, merged on the backend's message ids. Details only the live stream carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored. Nothing projected is stored. The raw log, the lines exchanged with a live backend since Core opened it, is held in memory for the developer pane.
 - **Adapter registry**: the adapters this build includes, which are the only backends Core knows (ADR 0031), and for each one the hosts it is installed on and its version and capabilities there.
 - **Transport layer**: starts processes and carries their stdio on a host, and reads files there: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honors both. Adapters and the VCS layer run through it without knowing which one they got, so a remote host's session record and live-session registry are read on that host, as M4's remote sessions need.
-- **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface. Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
+- **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface, puts an archived session's workspace away and back, and sweeps what no session uses (FLOW-CLEAN-UP, ADR 0038). Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
 - **Pack client**: fetches packs from a pack source, verifies and caches them, and has each installed backend's adapter render the neutral pack definition into that backend's native configuration.
 - **Mode engine**: resolves a session's mode into the base instructions, allowed tools, and tool-server list handed to the adapter at start.
 - **Harness tools server**: the MCP tools Ersa exposes to every session's backend (`PROTO-HARNESS-TOOLS`): cross-session messaging, session metadata, user-defined tools, and the interface-driving tools. For Claude Code it is served in-process over the control channel (ADR 0014). Permission requests do not go through it.
@@ -108,7 +108,7 @@ The what; the why is in the linked ADRs.
 - Backend processes are managed through the transport interface with explicit stdin, stdout, stderr, exit, and kill. Stdin is flushed after every line. Read loops are cancellation-safe. Backends are never run in a pseudo-terminal.
 - The terminal pane is a real hosted terminal: a pseudo-terminal (ConPTY on Windows, via a portable PTY library) running the user's shell in the workspace, rendered by a terminal emulator component in the Interface and carried over the same transport for remote hosts.
 - SSH shells out to the user's `ssh` executable with one long-lived connection per host that multiplexes everything else, because Windows OpenSSH lacks connection sharing. The harness tools server is reached from a remote host through a reverse tunnel on that connection.
-- Worktrees use short IDs under a configurable root outside the project tree, run a post-create hook (for dependency and build caches), and are removed stop-then-remove with retry.
+- Worktrees use short IDs under a configurable root outside the project tree, run a post-create hook (for dependency and build caches), and are removed one way by every caller, with retries (PROTO-CORE-API, Removing a folder).
 - SQLite via a bundled driver.
 - A replay server (a fake Core that serves recorded fixtures over the two protocols) is a first-class development tool used for interface work and tests.
 - Interface in React 19 and TypeScript, with Motion for transitions and a development-only gallery view with screenshot tests (ADR 0008).
@@ -163,6 +163,7 @@ Verified by review at this level; testable requirements live in the protocol bri
 
 ## Changes
 
+- 2026-11-21: (Parts, Implementation decisions) the workspace layer also puts workspaces away and back and sweeps leftovers (FLOW-CLEAN-UP, ADR 0038), and a worktree is removed one way by every caller (PROTO-CORE-API-R122), where this said stop-then-remove. No requirement IDs changed.
 - 2026-11-20: (Concurrency) admission's state also holds whose turn it is to change each project's worktrees (PROTO-CORE-API-R118). No requirement IDs changed.
 - 2026-11-16: from #446 inbox: a world that holds every input of admission's table has millions of states and takes minutes to explore in an optimized build, so it is not explored on every check. Every check explores smaller worlds that together hold every input and gives a world that holds them all seeded random sequences; a scheduled run explores that world completely, which keeps what ADR 0037 says of the table's tests. A smaller world leaves an input out only when no row it keeps reads what the input changes. ARCH-CORE-R18 retired; R19 to R21 added.
 - 2026-11-15: Core's concurrency model stated (ADR 0037): admission decides every lifecycle change from one table. ARCH-CORE-R14 to R18 added; no requirement retired.
