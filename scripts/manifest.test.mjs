@@ -1,5 +1,6 @@
-// Tests for manifest.mjs's inbox switch, the CI step that passes it, and its
-// repeated-label, repeated-section and fixture-citation checks, run on a copy of docs/ so the repository's own generated files are never rewritten.
+// Tests for manifest.mjs's inbox switch and inbox entries, the CI step that passes the switch, its
+// repeated-label, repeated-section, definition and fixture-citation checks, and the citation it finds outside
+// a test file, run on a copy of docs/ so the repository's own generated files are never rewritten.
 // Run: node --test scripts/manifest.test.mjs
 
 import assert from "node:assert/strict";
@@ -141,3 +142,46 @@ test("a brief that cites a fixture nobody recorded fails the check", () => {
   assert.equal(real.status, 0, real.problems);
 });
 
+
+test("a requirement is defined by its line's leading bold; its brief's IDs elsewhere on a line refer to one", () => {
+  // A requirement that names another in full, and a prose bullet that names one, define nothing more.
+  const { status, problems } = withSection(
+    "- **FLOW-APPROVE-PERMISSION-R98**: as FLOW-APPROVE-PERMISSION-R01 says, and more.\n- **A case of its own** follows FLOW-APPROVE-PERMISSION-R01.",
+    "FLOW-APPROVE-PERMISSION",
+    "## Open questions",
+  );
+  assert.equal(status, 0, problems);
+  const retired = withSection("- ~~**FLOW-APPROVE-PERMISSION-R01**~~: retired, see FLOW-APPROVE-PERMISSION-R98.", "FLOW-APPROVE-PERMISSION", "## Open questions");
+  assert.match(retired.problems, /requirement FLOW-APPROVE-PERMISSION-R01 is defined 2 times/, "a struck-through line still defines its ID");
+});
+
+test("an unverified requirement cited only outside a test file names that file", () => {
+  const run = copy();
+  const id = "FLOW-APPROVE-PERMISSION-R01";
+  mkdirSync(join(run.dir, "crates", "x", "src"), { recursive: true });
+  writeFileSync(join(run.dir, "crates", "x", "src", "lib.rs"), `// verifies: ${id}\n`);
+  const missed = run("--verifies", id);
+  assert.equal(missed.status, 1);
+  const where = /FLOW-APPROVE-PERMISSION-R01 \(cited only in crates\/x\/src\/lib\.rs, which is not a test file\)/;
+  assert.match(missed.stderr, where);
+  assert.match(readFileSync(join(run.dir, "docs", "MANIFEST.md"), "utf8"), where);
+  mkdirSync(join(run.dir, "crates", "x", "tests"));
+  writeFileSync(join(run.dir, "crates", "x", "tests", "a.rs"), `// verifies: ${id}\n`);
+  const cited = run("--verifies", id);
+  assert.equal(cited.status, 0, cited.stderr);
+  assert.doesNotMatch(readFileSync(join(run.dir, "docs", "MANIFEST.md"), "utf8"), /cited only in/);
+});
+
+test("an inbox list item that is not an open entry fails the check", () => {
+  // A finding written without its checkbox, ticked, or as a numbered item holds nothing at the merge gate.
+  const run = copy(
+    "- 2026-11-05 none: a gap with no checkbox.\n- [x] 2026-11-05 none: a ticked one.\n1. 2026-11-05 none: a numbered one.\n2) [ ] 2026-11-05 none: numbered with a box.\n-[x] 2026-11-05 none: ticked, no space.\n- [ ] 2026-11-05 none: an open one.\n-[ ] 2026-11-05 none: open, no space.\n",
+  );
+  assert.equal(run("--check").status, 1);
+  const manifest = readFileSync(join(run.dir, "docs", "MANIFEST.md"), "utf8");
+  assert.match(manifest, /2 open entries in docs\/briefs\/INBOX\.md/, "the gate's pattern counts an entry with no space after its dash");
+  const problems = manifest.split("## Problems")[1];
+  assert.equal(problems.match(/is not an open entry/g)?.length, 5, problems);
+  assert.doesNotMatch(problems, /open, no space/);
+  assert.doesNotMatch(problems, /an open one/);
+});

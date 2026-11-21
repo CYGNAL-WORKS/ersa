@@ -27,6 +27,6 @@ Per hunk, ask the questions that fit what it touches.
 - Can input from a peer reach a command line, a path or a parser unbounded or unescaped? Can a path escape the folder the user named, through `..`, a link or a race between check and use?
 - Who else can open, connect to or impersonate this endpoint, and does a credential reach a log, an event, a child's environment or a readable file?
 - Does the change widen what the user agreed to, such as a grant that outlives its revocation or a scope larger than the folder named, and does the interface say so where the user answers?
-- Does a new dependency or workflow step run code with more access than it needs, or from a source not pinned?
+- Does a new dependency or workflow step run code with more access than it needs, or from a source not pinned? An exception added or widened in `deps-policy.toml` that the issue does not name is high: say that it needs the owner.
 
 Run the tests that cover a hunk when reading alone does not settle a finding.

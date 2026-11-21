@@ -14,13 +14,13 @@ Both script modes also fail when `deps-policy.toml` has an exception that has ex
 
 The script exits 1 for a policy failure and 2 when it could not run: a registry did not answer, OSV-Scanner or git failed, or a lockfile is in a format it does not read. Re-run a job that exits 2 after fixing what it names; it says nothing about the dependencies.
 
-CI builds with `--locked`, so it never resolves versions `Cargo.lock` does not already name. Dependabot proposes weekly updates with a 7-day cooldown on the packages it chooses to update; its security updates are not delayed. An update can also move transitive packages to versions younger than seven days, and then the age check fails the Dependabot pull request like any other: wait and re-run, or add an exception.
+CI builds with `--locked`, so it never resolves versions `Cargo.lock` does not already name. Dependabot proposes weekly updates with a 7-day cooldown on the packages it chooses to update; its security updates are not delayed. An update can also move transitive packages to versions younger than seven days, and then the age check fails the Dependabot pull request like any other: wait and re-run. An exception is the owner's to grant (below).
 
 To run the checks locally, install [OSV-Scanner](https://github.com/google/osv-scanner) and `cargo-deny`, fetch `origin`, and run the three commands above. `age` compares with `origin/main` unless given `--base <ref>`. `vulns` finds OSV-Scanner on `PATH`, or at the path in `OSV_SCANNER`.
 
 ## Adding an exception
 
-Exceptions go only in `deps-policy.toml`, never in an `osv-scanner.toml` or `deny.toml`, so there is one place to review them. Each needs a `reason` that says why accepting it is safe and what ends it, and an `expires` date (YYYY-MM-DD, unquoted) at most 90 days out. Say why in the pull request too.
+An exception is the owner's to grant: a session adds or changes one only when its issue names it, and otherwise reports the failing check and stops. Exceptions go only in `deps-policy.toml`, never in an `osv-scanner.toml` or `deny.toml`, so there is one place to review them. Each needs a `reason` that says why accepting it is safe and what ends it, and an `expires` date (YYYY-MM-DD, unquoted) at most 90 days out. Say why in the pull request too.
 
 To take a package version younger than seven days, typically a release that fixes a vulnerability:
 

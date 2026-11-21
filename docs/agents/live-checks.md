@@ -24,7 +24,7 @@ Put it in `apps/shell/live/<name>.live.ts`, and import `test` and `expect` from 
 - `shot(name)`: saves a numbered screenshot. Take one after each step a reviewer should see.
 - `closeWindow()`: closes the window as its close button does. `windowShown()` says whether it is on screen, read from Windows' own window list, since a hidden window's page still reports itself visible. `running()` says whether the Shell and Core both still run.
 
-Core starts the stand-in backend for sessions by default: it starts and takes messages without calling a model. For the real Claude Code, signed in as you on this machine, add `test.use({ backend: "claude" })` to the file; its screenshots can't be published (below).
+Core starts the stand-in backend for sessions by default: it starts and takes messages without calling a model. For the real Claude Code, signed in as you on this machine, add `test.use({ backend: "claude" })` to the file; its screenshots can't be published (below). Every turn of such a check spends the owner's usage, so run it once per head, never in a loop.
 
 `smoke.live.ts` is the smallest example, and `native.live.ts` shows a dialog and a drop.
 

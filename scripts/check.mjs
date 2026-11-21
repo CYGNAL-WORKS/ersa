@@ -36,6 +36,9 @@ const checks = [
         { name: "interface types", cmd: "node", args: ["scripts/gen-types.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
         { name: "interface tokens", cmd: "node", args: ["scripts/gen-tokens.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
         { name: "interface catalog export", cmd: "node", args: ["scripts/gen-catalog.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
+        // The interface's types, as CI's Interface job checks them (`pnpm typecheck`):
+        // the unit tests strip types, so a type error in a test passes them.
+        { name: "interface type-check", cmd: "node", args: ["node_modules/typescript/bin/tsc", "--noEmit"], cwd: join(ROOT, "apps", "shell") },
         // The interface's unit tests, as CI's Interface job runs them (`pnpm test`).
         ...(QUICK ? [] : [{ name: "interface tests", cmd: "node", args: ["node_modules/vitest/vitest.mjs", "run"], cwd: join(ROOT, "apps", "shell") }]),
       ]
