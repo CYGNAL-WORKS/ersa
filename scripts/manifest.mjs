@@ -21,7 +21,13 @@ import { fileURLToPath } from "node:url";
 
 // An open inbox entry is a line starting `- [ ]`. The count and the wording
 // match Docket's merge gate, which holds a pull request on the same entries.
-const openInboxEntries = (text) => text.split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
+// Every other list item (bulleted or numbered, with no checkbox or a ticked
+// one) reads as a finding and holds nothing at that gate.
+function inboxEntries(text) {
+  const items = text.split(/\r?\n/).filter((l) => /^\s*(?:[-*+]|\d+[.)])\s/.test(l));
+  const open = items.filter((l) => /^\s*-\s*\[ \]/.test(l));
+  return { open: open.length, other: items.filter((l) => !open.includes(l)) };
+}
 const inboxHold = (n) => `${n} open inbox entr${n === 1 ? "y needs" : "ies need"} a planning pass`;
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
@@ -255,14 +261,10 @@ for (const id of cited.keys()) {
 
 let openInbox = 0;
 try {
-  const inbox = readFileSync(INBOX, "utf8");
-  openInbox = openInboxEntries(inbox);
-  // Every list item in the inbox is an open entry. Any other (no checkbox, a
-  // ticked one) reads as a finding and holds nothing at the merge gate.
-  for (const line of inbox.split(/\r?\n/)) {
-    if (/^\s*[-*+]\s/.test(line) && !/^\s*-\s*\[ \]/.test(line)) {
-      problems.push(`docs/briefs/INBOX.md: "${line.trim().slice(0, 60)}" is not an open entry (\`- [ ] …\`), so the merge gate does not hold for it`);
-    }
+  const inbox = inboxEntries(readFileSync(INBOX, "utf8"));
+  openInbox = inbox.open;
+  for (const line of inbox.other) {
+    problems.push(`docs/briefs/INBOX.md: "${line.trim().slice(0, 60)}" is not an open entry (\`- [ ] …\`), so the merge gate does not hold for it`);
   }
 } catch {
   problems.push("docs/briefs/INBOX.md is missing");
