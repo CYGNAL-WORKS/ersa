@@ -51,6 +51,11 @@ pub enum ProjectPhase {
 pub struct ProjectEntry {
     pub folder: Folder,
     pub phase: ProjectPhase,
+    /// Whether git is changing the worktrees of the project's repository:
+    /// adding, removing or pruning one. git cannot do two of those in one
+    /// repository at once (each reads the others' records while one is
+    /// half written), so a second waits for this one.
+    pub worktrees: bool,
 }
 
 /// The state a removal took its workspace from, and puts back when refused.
@@ -225,7 +230,13 @@ impl State {
         let mut state = State::default();
         for (id, folder) in existing.projects {
             let phase = ProjectPhase::Present;
-            state.projects.insert(id, ProjectEntry { folder, phase });
+            let worktrees = false;
+            let entry = ProjectEntry {
+                folder,
+                phase,
+                worktrees,
+            };
+            state.projects.insert(id, entry);
         }
         for workspace in existing.workspaces {
             let entry = WorkspaceEntry {
@@ -552,6 +563,13 @@ pub enum Command {
     AwaitRunEnd {
         session: Id,
     },
+    /// The project's repository's turn to have its worktrees changed (a
+    /// `git worktree add`, `remove` or `prune`), asked by an operation
+    /// admitted already: held while another change to them is under way,
+    /// whatever operation it is part of.
+    Worktrees {
+        project: Id,
+    },
 }
 
 /// An operation admission has let begin, named by what it is on.
@@ -575,6 +593,8 @@ pub enum Operation {
     RemoveSection(Id),
     /// A session's run, from its launch until Core has let go of it.
     Run(Id),
+    /// A change to the worktrees of the project's repository.
+    Worktrees(Id),
 }
 
 /// What happened, said once it is stored. A report is never refused or
@@ -917,6 +937,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                     let entry = ProjectEntry {
                         folder: folder.clone(),
                         phase: ProjectPhase::Adding,
+                        worktrees: false,
                     };
                     state.projects.insert(project.clone(), entry);
                     let entry = WorkspaceEntry {
@@ -1313,6 +1334,18 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 Some(Run::Stopped) => Outcome::Done,
             }
         }
+        // Not refused while Core is closing: it is a step of an operation
+        // admitted before, which is let finish. Nor does the project's phase
+        // matter: what can be under way while it is added or removed makes
+        // no worktree.
+        Command::Worktrees { project } => match state.projects.get_mut(project) {
+            None => Outcome::Refused(Refusal::NoProject),
+            Some(entry) if entry.worktrees => Outcome::Held,
+            Some(entry) => {
+                entry.worktrees = true;
+                Outcome::Admitted(Operation::Worktrees(project.clone()))
+            }
+        },
         Command::Launch { session } => {
             let closing = state.closing;
             let going = state
@@ -1671,6 +1704,15 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     Run::Stopped => Outcome::Stale,
                 },
                 None => Outcome::Stale,
+            },
+            // git is done with the repository's worktrees: the next change
+            // waiting for them may begin.
+            Operation::Worktrees(project) => match state.projects.get_mut(&project) {
+                Some(entry) if entry.worktrees => {
+                    entry.worktrees = false;
+                    Outcome::Noted
+                }
+                Some(_) | None => Outcome::Stale,
             },
         },
         // A start that succeeds forgets why an earlier one failed; one that
@@ -2042,6 +2084,35 @@ impl Admission {
                 }
             }
         }
+    }
+
+    /// Asks for the project's repository's turn to have its worktrees
+    /// changed ([`Command::Worktrees`]), waiting at most `limit` while
+    /// another change to them is under way: then it gives up
+    /// ([`Report::GaveUp`]) and is refused so. Keep the [`UnderWay`] while
+    /// git changes them, and only then.
+    pub async fn worktrees(
+        self: &Arc<Self>,
+        project: &str,
+        limit: Duration,
+    ) -> Result<UnderWay, Refusal> {
+        let command = Command::Worktrees {
+            project: project.to_string(),
+        };
+        let (outcome, waiter) = self.apply(Input::Command(command));
+        let outcome = match waiter {
+            None => outcome,
+            Some((number, mut waiter)) => match tokio::time::timeout(limit, &mut waiter).await {
+                Ok(answer) => answer.expect("a held command is always answered"),
+                Err(_) => {
+                    self.give_up(number);
+                    // Answered now: "gave up", or what a step just before
+                    // decided.
+                    waiter.await.expect("a held command is always answered")
+                }
+            },
+        };
+        self.answered(outcome)
     }
 
     /// The waiter numbered `number` stops waiting: its held command is
