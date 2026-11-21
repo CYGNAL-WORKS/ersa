@@ -16,6 +16,7 @@ use serde_json::{Map, Value};
 
 use super::{After, Answer, ApiError, ConnectionState, lock};
 use crate::admission::{self, Command, Refusal, Replaced, Report};
+use crate::workspace::Worktrees as _;
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
 use crate::settings;
@@ -712,6 +713,19 @@ pub(super) async fn workspace_create(
         return Err(e.into());
     }
 
+    // The repository's turn, kept through the add and any clean-up of it.
+    let turns = RepositoryTurns {
+        core,
+        project: &project.id,
+    };
+    let turn = match turns.turn().await {
+        Ok(turn) => turn,
+        Err(e) => {
+            core.store.delete_workspace(id.clone()).await?;
+            creating.end(failed(false));
+            return Err(e.into());
+        }
+    };
     let created =
         workspace::git_worktree_add(transport.as_ref(), &project.path, &path, &branch, &base).await;
     if let Err(e) = created {
@@ -731,16 +745,43 @@ pub(super) async fn workspace_create(
                 return Err(e.into());
             }
         }
+        drop(turn);
         core.store.delete_workspace(id.clone()).await?;
         creating.end(failed(false));
         return Err(e.into());
     }
+    drop(turn);
     core.store
         .set_workspace_state(id.clone(), WorkspaceState::Ready)
         .await?;
     creating.end(Report::WorkspaceReady { workspace: id });
     workspace.state = WorkspaceState::Ready;
     Ok(workspace)
+}
+
+/// The turns of a project's repository to have its worktrees changed, asked
+/// of admission: a change waits while another is under way, at most
+/// [`workspace::WORKTREE_TURN_WAIT`].
+pub(super) struct RepositoryTurns<'a> {
+    pub core: &'a Core,
+    pub project: &'a str,
+}
+
+#[ersa_adapter::async_trait]
+impl workspace::Worktrees for RepositoryTurns<'_> {
+    async fn turn(&self) -> Result<Box<dyn Send>, VcsError> {
+        let wait = workspace::WORKTREE_TURN_WAIT;
+        match self.core.admission.worktrees(self.project, wait).await {
+            Ok(under_way) => Ok(Box::new(under_way)),
+            Err(Refusal::GaveUp) => Err(VcsError::WorktreesBusy),
+            // Only a project that is gone; nothing that changes worktrees
+            // runs then, since a project with workspaces is not removed.
+            Err(refusal) => Err(VcsError::Failed {
+                message: format!("the project's worktrees cannot be changed: {refusal:?}"),
+                stderr: String::new(),
+            }),
+        }
+    }
 }
 
 /// The commit a new workspace starts from (PROTO-CORE-API-R19): `base` when
@@ -831,16 +872,26 @@ pub(super) async fn workspace_remove(
     }
 
     let force = params.force.unwrap_or(false);
-    let removed = workspace::git_worktree_remove(
-        transport.as_ref(),
-        &project.path,
-        &workspace.path,
-        force,
-        // An `error` workspace may be an add that was killed mid-way;
-        // its leftover `initializing` lock must not block removal.
-        replaced == WorkspaceState::Error,
-    )
-    .await;
+    let turns = RepositoryTurns {
+        core,
+        project: &project.id,
+    };
+    let removed = match turns.turn().await {
+        // Kept until git is done with the repository's worktrees.
+        Ok(_turn) => {
+            workspace::git_worktree_remove(
+                transport.as_ref(),
+                &project.path,
+                &workspace.path,
+                force,
+                // An `error` workspace may be an add that was killed mid-way;
+                // its leftover `initializing` lock must not block removal.
+                replaced == WorkspaceState::Error,
+            )
+            .await
+        }
+        Err(e) => Err(e),
+    };
     if let Err(e) = removed {
         // A refusal (locked, local changes without `force`, or a folder git
         // does not list) leaves the worktree as it was, so it goes back to
