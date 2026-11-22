@@ -434,6 +434,32 @@ export type SendPhase1 = "checking" | "copying" | "starting" | "handing_over";
  * An identifier Core issues.
  */
 export type Id3 = string;
+/**
+ * One line of a session's raw log: whole as `line`, or, when it is longer than the request's `clip`, as `head` and `size` in place of `line`.
+ */
+export type RawLogEntry =
+  | {
+      index: number;
+      ts: string;
+      dir: "backend" | "host";
+      /**
+       * The line verbatim, without its terminator.
+       */
+      line: string;
+    }
+  | {
+      index: number;
+      ts: string;
+      dir: "backend" | "host";
+      /**
+       * The longest start of the line that is at most `clip` bytes and ends on a whole character.
+       */
+      head: string;
+      /**
+       * The whole line's length in bytes.
+       */
+      size: number;
+    };
 export type HostListResult = Host[];
 export type ProjectListResult = Project[];
 /**
@@ -682,6 +708,10 @@ export interface SessionRawLogParams {
    * Last raw-log index, inclusive; the end of the log when absent.
    */
   to?: number;
+  /**
+   * Bytes: a line longer than this comes back as `head` and `size` in place of `line`. Every line comes back whole when absent.
+   */
+  clip?: number;
 }
 /**
  * No fields.
@@ -1086,15 +1116,6 @@ export interface Section {
   id: Id;
   name: string;
   created_at: string;
-}
-export interface RawLogEntry {
-  index: number;
-  ts: string;
-  dir: "backend" | "host";
-  /**
-   * The line verbatim, without its terminator.
-   */
-  line: string;
 }
 /**
  * User settings, an open JSON object. Known keys: workspaces.root (string), the directory new worktrees go under.
