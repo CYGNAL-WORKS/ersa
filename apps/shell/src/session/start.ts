@@ -103,6 +103,9 @@ export async function startSession(
       if (!root) return { ok: false, message: "This project has no root workspace in Core." };
       workspace = root;
     }
+    // Stopped while the workspace was made: no session is created, so no backend starts and no tile reaches the
+    // rail; the cleanup below removes the workspace this start made (FLOW-NEW-SESSION-R08).
+    if (stop?.stopped) throw STOPPED;
     onWorkspace?.(workspace);
     const params: SessionCreateParams = { workspace_id: workspace.id, backend };
     // A value the backend offers no choice of is left out: the backend decides.
@@ -112,7 +115,7 @@ export async function startSession(
     session = await client.call("session.create", params);
     const created = session;
     stop?.created(created.id);
-    // Stopped before the session existed: nothing is sent.
+    // Stopped while `session.create` was on its way, before the session existed to interrupt: nothing is sent.
     if (stop?.stopped) throw STOPPED;
     try {
       await client.call("session.send", attachments.length > 0 ? { id: created.id, text, attachments } : { id: created.id, text });
