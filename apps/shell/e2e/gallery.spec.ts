@@ -29,24 +29,30 @@ const components = [
   "Button",
 ];
 
-// A window taller than any section shown alone, so its page never scrolls (#390, #502, #532). In a page that scrolls,
-// what is fixed in the window (an open list, a tooltip) is laid out and drawn one of two ways, depending on when the
-// screenshot is taken: its text drawn differently, or a tooltip flipped above its chip. The window has this height
-// from the start, since resizing a drawn page sets its tiles measuring again while the screenshot waits for them.
-const TALL = 8192;
-
+// Each section is photographed in a window as tall as its page, so the page does not scroll (#390, #502, #532). In a
+// page that scrolls, what is fixed in the window (an open list, a tooltip) is laid out and drawn one of two ways,
+// depending on when the screenshot is taken: its text drawn differently, or a tooltip flipped above its chip. The
+// page's height is read in the test's usual window once its fonts are in, and the page is then opened again in a
+// window that tall: resizing a drawn page would set its tiles measuring again while the screenshot waits for them,
+// and a taller window than the page would stretch the sections that fill it.
 for (const theme of ["light", "dark"]) {
   for (const component of components) {
     test(`${component} in ${theme}`, async ({ page }) => {
       // The shelf lies beside a rail-wide tile, wider than a theme's column at the default width.
-      await page.setViewportSize({ width: component === "Shelf" ? 1600 : 1280, height: TALL });
-      await page.goto(`/gallery.html?component=${component}&theme=${theme}`);
+      if (component === "Shelf") await page.setViewportSize({ width: 1600, height: 900 });
+      const url = `/gallery.html?component=${component}&theme=${theme}`;
+      await page.goto(url);
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
+      const { width, height } = page.viewportSize()!;
+      const tall = await page.evaluate(() => document.documentElement.scrollHeight);
+      if (tall > height) {
+        await page.setViewportSize({ width, height: tall });
+        await page.goto(url);
+      }
       const section = page.locator(`[data-theme="${theme}"] [data-component="${component}"]`);
       await expect(section).toHaveScreenshot(`${component}-${theme}.png`);
-      // Still true once the screenshot is taken, by when every font is in: a section that outgrows the window would
-      // scroll again.
-      const height = await page.evaluate(() => document.documentElement.scrollHeight);
-      expect(height, `${component} fits the window`).toBeLessThanOrEqual(TALL);
     });
   }
 }
