@@ -199,7 +199,7 @@ pub(super) async fn project_add(
 /// The answer for a command admission refused, worded as before admission
 /// decided it. `named` is what the request was about: the folder's path for
 /// `project.add`, else the project's or workspace's id.
-fn refused(refusal: Refusal, named: &str) -> ApiError {
+pub(super) fn refused(refusal: Refusal, named: &str) -> ApiError {
     match refusal {
         Refusal::AlreadyProject { existing } => {
             ApiError::invalid_state(format!("{named} is already a project")).with_detail(existing)
@@ -227,6 +227,9 @@ fn refused(refusal: Refusal, named: &str) -> ApiError {
         )),
         Refusal::WorkspaceHasSessions => ApiError::invalid_state(format!(
             "workspace {named} has sessions; stop and remove them first"
+        )),
+        Refusal::SessionInUse => ApiError::invalid_state(format!(
+            "a session in workspace {named} is running, starting or being changed"
         )),
         // Answers to a session's admission, or an id used twice: Core's fault.
         Refusal::WorkspaceNotReady
@@ -597,13 +600,27 @@ pub(super) async fn changes_of(
         .store
         .sessions_counted_in_workspace(workspace.id.clone())
         .await?;
-    let found = workspace::git_worktree_changes(
-        transport.as_ref(),
-        &project.path,
-        &workspace.path,
-        &workspace.vcs_ref,
-    )
-    .await?;
+    let found = match core.store.put_away_checkout(workspace.id.clone()).await? {
+        // A put-away workspace has no folder: only what its branches hold
+        // is left to lose (PROTO-CORE-API-R123).
+        Some(checkout) if workspace.state == WorkspaceState::PutAway => {
+            let stored = match &checkout {
+                workspace::Checkout::Branch(branch) => branch.as_str(),
+                workspace::Checkout::Commit(_) => "",
+            };
+            let branches = [stored, workspace.vcs_ref.as_str()];
+            workspace::git_put_away_changes(transport.as_ref(), &project.path, &branches).await?
+        }
+        Some(_) | None => {
+            workspace::git_worktree_changes(
+                transport.as_ref(),
+                &project.path,
+                &workspace.path,
+                &workspace.vcs_ref,
+            )
+            .await?
+        }
+    };
 
     // The token is a digest of everything the counts were made from, plus
     // the sessions, so it changes when any of them does. `session.delete`
@@ -859,6 +876,7 @@ pub(super) async fn workspace_remove(
     // from, `error` if a delete had marked it (PROTO-CORE-API-R94).
     let replaced = match core.admission.replaced(&id) {
         Some(Replaced::Error) => WorkspaceState::Error,
+        Some(Replaced::PutAway) => WorkspaceState::PutAway,
         Some(Replaced::Ready) | None => WorkspaceState::Ready,
     };
     let stored = core
@@ -908,6 +926,13 @@ pub(super) async fn workspace_remove(
         if e.is_refusal() {
             core.store.set_workspace_state(id, replaced).await?;
             end_held(removing, not_removed);
+        } else if replaced == WorkspaceState::PutAway {
+            // It had no folder to lose: its sessions can still be resumed
+            // (PROTO-CORE-API-R133).
+            core.store
+                .set_workspace_state(id.clone(), WorkspaceState::PutAway)
+                .await?;
+            end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
         } else {
             core.store
                 .set_workspace_state(id.clone(), WorkspaceState::Error)

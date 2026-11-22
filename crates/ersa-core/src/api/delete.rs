@@ -135,6 +135,13 @@ async fn finish(
     held: Arc<UnderWay>,
 ) -> Result<SessionDeleteResult, ApiError> {
     let mut branch_kept = false;
+    // A put-away workspace has no folder, so its delete deletes none
+    // (PROTO-CORE-API-R123), even when an earlier try left it `error`.
+    let put_away = core
+        .store
+        .put_away_checkout(workspace.id.clone())
+        .await?
+        .is_some();
     if files {
         // In a span naming the session and step, so the warning git's
         // failed removal writes to the diagnostic log says which delete it
@@ -172,7 +179,7 @@ async fn finish(
         .await?;
     Ok(SessionDeleteResult {
         id: id.to_string(),
-        workspace_deleted: files,
+        workspace_deleted: files && !put_away,
         branch_kept,
     })
 }

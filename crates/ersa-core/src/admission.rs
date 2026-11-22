@@ -63,6 +63,9 @@ pub struct ProjectEntry {
 pub enum Replaced {
     Ready,
     Error,
+    /// Put away: a removal of it that fails leaves it put away
+    /// (PROTO-CORE-API-R133), since it removes no folder.
+    PutAway,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -74,6 +77,14 @@ pub enum WorkspacePhase {
     Removing {
         replaced: Replaced,
     },
+    /// Its folder was removed, the workspace and its branch kept
+    /// (FLOW-CLEAN-UP-R02). Sessions found in the backend's records for its
+    /// folder still join it; no other does.
+    PutAway,
+    /// A put-away holds it, or a try at its folder that the put-away gave
+    /// up on and that has not ended: nothing else removes the folder or the
+    /// workspace meanwhile (PROTO-CORE-API-R131), and nothing starts there.
+    PuttingAway,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -371,6 +382,31 @@ impl State {
             .any(|session| session.workspace == workspace && !session.found)
     }
 
+    /// Whether anything is under way on a session in `workspace`, or may
+    /// begin there: one not stored yet, being removed, with an exclusive
+    /// operation (a start among them), a message, a fork starting or a run,
+    /// or one marked deleting. A put-away waits for none of them: it is
+    /// refused, and tried again later.
+    fn has_session_in_use(&self, workspace: &str) -> bool {
+        self.sessions.values().any(|session| {
+            let run = match session.run {
+                Run::Running | Run::Ending => true,
+                Run::Stopped => false,
+            };
+            session.workspace == workspace
+                && (!session.stored()
+                    || session.removing
+                    || session.exclusive.is_some()
+                    || session.send.is_some()
+                    || session.forking
+                    || run
+                    || session
+                        .row
+                        .as_ref()
+                        .is_some_and(|row| row.deleting.is_some()))
+        })
+    }
+
     /// Whether a session was admitted into `workspace` and its row is not
     /// stored yet. A removal or a delete waits for it: which rows there are
     /// to take, or to count, is not known until that reports.
@@ -387,8 +423,11 @@ impl State {
             return true;
         };
         let removing = match entry.phase {
-            WorkspacePhase::Removing { .. } => true,
-            WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => false,
+            WorkspacePhase::Removing { .. } | WorkspacePhase::PuttingAway => true,
+            WorkspacePhase::Creating
+            | WorkspacePhase::Ready
+            | WorkspacePhase::Error
+            | WorkspacePhase::PutAway => false,
         };
         let project_going = entry.root
             && match self.projects.get(&entry.project).map(|entry| entry.phase) {
@@ -466,6 +505,12 @@ pub enum Command {
         workspace: Id,
     },
     RemoveWorkspace {
+        workspace: Id,
+    },
+    /// Putting an isolated workspace away (FLOW-CLEAN-UP-R02): never held,
+    /// since nothing waits for it; refused while anything is under way on
+    /// the workspace or a session there.
+    PutAway {
         workspace: Id,
     },
     /// A new session in `workspace`: one Ersa starts, or one `found` in the
@@ -579,6 +624,7 @@ pub enum Operation {
     RemoveProject(Id),
     CreateWorkspace(Id),
     RemoveWorkspace(Id),
+    PutAway(Id),
     CreateSession(Id),
     DeleteSession(Id),
     RemoveSession(Id),
@@ -632,6 +678,17 @@ pub enum Report {
     },
     /// The removal failed part-way; the workspace is in `error`.
     WorkspaceRemovalFailed {
+        workspace: Id,
+    },
+    /// The put-away ended with the workspace `put_away`: its folder gone,
+    /// or what is left of it, which goes when the workspace is put back
+    /// (FLOW-CLEAN-UP-R03).
+    WorkspacePutAway {
+        workspace: Id,
+    },
+    /// The put-away was refused before anything of the folder was removed;
+    /// the workspace is `ready` again.
+    PutAwayRefused {
         workspace: Id,
     },
     /// A `session.delete` that takes the workspace's files marked it `error`.
@@ -779,6 +836,9 @@ pub enum Refusal {
     WorkspaceNotReady,
     /// A removal or a delete holds the workspace.
     WorkspaceHeld,
+    /// Something is under way on a session in the workspace, or may begin
+    /// there.
+    SessionInUse,
     /// The id is taken.
     SessionExists,
     NoSession,
@@ -1030,11 +1090,14 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 return Outcome::Refused(Refusal::RootWorkspace);
             }
             let replaced = match entry.phase {
-                WorkspacePhase::Creating | WorkspacePhase::Removing { .. } => {
+                WorkspacePhase::Creating
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PuttingAway => {
                     return Outcome::Refused(Refusal::WorkspaceBusy);
                 }
                 WorkspacePhase::Ready => Replaced::Ready,
                 WorkspacePhase::Error => Replaced::Error,
+                WorkspacePhase::PutAway => Replaced::PutAway,
             };
             if state.has_started_session(workspace) {
                 return Outcome::Refused(Refusal::WorkspaceHasSessions);
@@ -1059,6 +1122,37 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             }
             Outcome::Admitted(Operation::RemoveWorkspace(workspace.clone()))
         }
+        Command::PutAway { workspace } => {
+            let Some(entry) = state.workspaces.get(workspace) else {
+                return Outcome::Refused(Refusal::NoWorkspace);
+            };
+            // The user's own folder is never put away (FLOW-CLEAN-UP-R01).
+            if entry.root {
+                return Outcome::Refused(Refusal::RootWorkspace);
+            }
+            match entry.phase {
+                WorkspacePhase::Ready => {}
+                WorkspacePhase::Creating
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PuttingAway => {
+                    return Outcome::Refused(Refusal::WorkspaceBusy);
+                }
+                WorkspacePhase::Error | WorkspacePhase::PutAway => {
+                    return Outcome::Refused(Refusal::WorkspaceNotReady);
+                }
+            }
+            // A delete holds it: what the delete counted must not change.
+            if entry.deleting.is_some() {
+                return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            if state.has_session_in_use(workspace) {
+                return Outcome::Refused(Refusal::SessionInUse);
+            }
+            if let Some(entry) = state.workspaces.get_mut(workspace) {
+                entry.phase = WorkspacePhase::PuttingAway;
+            }
+            Outcome::Admitted(Operation::PutAway(workspace.clone()))
+        }
         Command::CreateSession {
             workspace,
             session,
@@ -1076,10 +1170,16 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             match entry.phase {
                 WorkspacePhase::Creating
                 | WorkspacePhase::Error
-                | WorkspacePhase::Removing { .. } => {
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PuttingAway => {
                     return Outcome::Refused(Refusal::WorkspaceNotReady);
                 }
-                WorkspacePhase::Ready => {}
+                // The sessions its folder held go on being listed
+                // (PROTO-CORE-API-R123), and none is made there.
+                WorkspacePhase::PutAway if !*found => {
+                    return Outcome::Refused(Refusal::WorkspaceNotReady);
+                }
+                WorkspacePhase::PutAway | WorkspacePhase::Ready => {}
             }
             // A delete holds it: what the delete counted must not change.
             if entry.deleting.is_some() {
@@ -1352,6 +1452,12 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 .sessions
                 .get(session)
                 .is_some_and(|entry| state.held_for_removal(&entry.workspace));
+            // A put-away workspace has no folder until it is put back.
+            let put_away = state
+                .sessions
+                .get(session)
+                .and_then(|entry| state.workspaces.get(&entry.workspace))
+                .is_some_and(|workspace| workspace.phase == WorkspacePhase::PutAway);
             let Some(entry) = state.sessions.get_mut(session) else {
                 return Outcome::Refused(Refusal::NoSession);
             };
@@ -1362,6 +1468,9 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             // hold does not stop one: the delete counted the session.)
             if going {
                 return Outcome::Refused(Refusal::WorkspaceHeld);
+            }
+            if put_away {
+                return Outcome::Refused(Refusal::WorkspaceNotReady);
             }
             match entry.run {
                 Run::Running | Run::Ending => return Outcome::Refused(Refusal::Running),
@@ -1431,9 +1540,11 @@ fn note(state: &mut State, report: Report) -> Outcome {
         Report::WorkspaceReady { workspace } => {
             set_workspace(state, &workspace, |phase| match phase {
                 WorkspacePhase::Creating => Some(WorkspacePhase::Ready),
-                WorkspacePhase::Ready | WorkspacePhase::Error | WorkspacePhase::Removing { .. } => {
-                    None
-                }
+                WorkspacePhase::Ready
+                | WorkspacePhase::Error
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PutAway
+                | WorkspacePhase::PuttingAway => None,
             })
         }
         Report::WorkspaceCreateFailed { workspace, kept } => {
@@ -1441,7 +1552,11 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 Some(WorkspacePhase::Creating) => {}
                 None
                 | Some(
-                    WorkspacePhase::Ready | WorkspacePhase::Error | WorkspacePhase::Removing { .. },
+                    WorkspacePhase::Ready
+                    | WorkspacePhase::Error
+                    | WorkspacePhase::Removing { .. }
+                    | WorkspacePhase::PutAway
+                    | WorkspacePhase::PuttingAway,
                 ) => return Outcome::Stale,
             }
             if kept {
@@ -1455,7 +1570,13 @@ fn note(state: &mut State, report: Report) -> Outcome {
             match state.workspaces.get(&workspace).map(|entry| entry.phase) {
                 Some(WorkspacePhase::Removing { .. }) => {}
                 None
-                | Some(WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error) => {
+                | Some(
+                    WorkspacePhase::Creating
+                    | WorkspacePhase::Ready
+                    | WorkspacePhase::Error
+                    | WorkspacePhase::PutAway
+                    | WorkspacePhase::PuttingAway,
+                ) => {
                     return Outcome::Stale;
                 }
             }
@@ -1470,21 +1591,43 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 WorkspacePhase::Removing {
                     replaced: Replaced::Error,
                 } => Some(WorkspacePhase::Error),
-                WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => None,
+                WorkspacePhase::Removing {
+                    replaced: Replaced::PutAway,
+                } => Some(WorkspacePhase::PutAway),
+                WorkspacePhase::Creating
+                | WorkspacePhase::Ready
+                | WorkspacePhase::Error
+                | WorkspacePhase::PutAway
+                | WorkspacePhase::PuttingAway => None,
             })
         }
         Report::WorkspaceRemovalFailed { workspace } => fail_removal(state, &workspace),
+        Report::WorkspacePutAway { workspace } => put_away_ended(state, &workspace),
+        Report::PutAwayRefused { workspace } => {
+            set_workspace(state, &workspace, |phase| match phase {
+                WorkspacePhase::PuttingAway => Some(WorkspacePhase::Ready),
+                WorkspacePhase::Creating
+                | WorkspacePhase::Ready
+                | WorkspacePhase::Error
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PutAway => None,
+            })
+        }
         Report::WorkspaceErrored { workspace } => {
             set_workspace(state, &workspace, |phase| match phase {
-                WorkspacePhase::Creating | WorkspacePhase::Ready => Some(WorkspacePhase::Error),
+                WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::PutAway => {
+                    Some(WorkspacePhase::Error)
+                }
                 // The removal keeps its hold; what it puts back when
                 // refused is now `error` (PROTO-CORE-API-R94).
                 WorkspacePhase::Removing {
-                    replaced: Replaced::Ready,
+                    replaced: Replaced::Ready | Replaced::PutAway,
                 } => Some(WorkspacePhase::Removing {
                     replaced: Replaced::Error,
                 }),
+                // A delete is not admitted while a put-away holds it.
                 WorkspacePhase::Error
+                | WorkspacePhase::PuttingAway
                 | WorkspacePhase::Removing {
                     replaced: Replaced::Error,
                 } => None,
@@ -1500,10 +1643,13 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 return Outcome::Stale;
             }
             match entry.phase {
-                // A workspace still being made has had no session to delete.
-                WorkspacePhase::Creating => return Outcome::Stale,
-                WorkspacePhase::Ready | WorkspacePhase::Error | WorkspacePhase::Removing { .. } => {
-                }
+                // A workspace still being made has had no session to delete,
+                // and a delete is not admitted while a put-away holds one.
+                WorkspacePhase::Creating | WorkspacePhase::PuttingAway => return Outcome::Stale,
+                WorkspacePhase::Ready
+                | WorkspacePhase::Error
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PutAway => {}
             }
             state.drop_workspace(&workspace);
             Outcome::Noted
@@ -1623,10 +1769,15 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     WorkspacePhase::Creating => Some(WorkspacePhase::Error),
                     WorkspacePhase::Ready
                     | WorkspacePhase::Error
-                    | WorkspacePhase::Removing { .. } => None,
+                    | WorkspacePhase::Removing { .. }
+                    | WorkspacePhase::PutAway
+                    | WorkspacePhase::PuttingAway => None,
                 })
             }
             Operation::RemoveWorkspace(workspace) => fail_removal(state, &workspace),
+            // The store says `put_away` from before anything was removed, so
+            // however the put-away ended, put away is what it is.
+            Operation::PutAway(workspace) => put_away_ended(state, &workspace),
             Operation::CreateSession(session) => {
                 match state.sessions.get(&session).map(SessionEntry::stored) {
                     Some(false) => {
@@ -1815,11 +1966,37 @@ fn set_workspace(
     }
 }
 
-/// A removal that did not end in a refusal leaves its workspace in `error`.
+/// A removal that did not end in a refusal leaves its workspace in `error`,
+/// except a put-away one, which had no folder to lose and stays put away
+/// (PROTO-CORE-API-R133).
 fn fail_removal(state: &mut State, workspace: &str) -> Outcome {
     set_workspace(state, workspace, |phase| match phase {
-        WorkspacePhase::Removing { .. } => Some(WorkspacePhase::Error),
-        WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => None,
+        WorkspacePhase::Removing {
+            replaced: Replaced::PutAway,
+        } => Some(WorkspacePhase::PutAway),
+        WorkspacePhase::Removing {
+            replaced: Replaced::Ready | Replaced::Error,
+        } => Some(WorkspacePhase::Error),
+        WorkspacePhase::Creating
+        | WorkspacePhase::Ready
+        | WorkspacePhase::Error
+        | WorkspacePhase::PutAway
+        | WorkspacePhase::PuttingAway => None,
+    })
+}
+
+/// A put-away that did not end in a refusal leaves its workspace put away,
+/// as the store has had it since before anything was removed: its folder
+/// gone, or what is left of it, which goes when the workspace is put back
+/// (PROTO-CORE-API-R141).
+fn put_away_ended(state: &mut State, workspace: &str) -> Outcome {
+    set_workspace(state, workspace, |phase| match phase {
+        WorkspacePhase::PuttingAway => Some(WorkspacePhase::PutAway),
+        WorkspacePhase::Creating
+        | WorkspacePhase::Ready
+        | WorkspacePhase::Error
+        | WorkspacePhase::Removing { .. }
+        | WorkspacePhase::PutAway => None,
     })
 }
 
@@ -2197,7 +2374,11 @@ impl Admission {
     pub fn replaced(&self, workspace: &str) -> Option<Replaced> {
         match self.lock().state.workspace(workspace)?.phase {
             WorkspacePhase::Removing { replaced } => Some(replaced),
-            WorkspacePhase::Creating | WorkspacePhase::Ready | WorkspacePhase::Error => None,
+            WorkspacePhase::Creating
+            | WorkspacePhase::Ready
+            | WorkspacePhase::Error
+            | WorkspacePhase::PutAway
+            | WorkspacePhase::PuttingAway => None,
         }
     }
 
