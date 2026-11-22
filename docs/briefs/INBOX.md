@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-22 FLOW-NEW-SESSION: no requirement says how long the reason a picked folder could not be found or added stays on the new-session screen (COMPOSER.md's status table has no row for it either). #376 shows it until the user chooses a project or host from the chips, even the one already chosen, or a later pick or add clears or replaces it.
 
 
 ## Resolved recently (optional, trimmed in planning passes)
