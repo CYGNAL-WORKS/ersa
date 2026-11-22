@@ -4,14 +4,14 @@ type: flow
 title: Archive or delete a session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-ORGANIZE-SESSIONS]
-adrs: [0017, 0026, 0033]
+adrs: [0017, 0026, 0033, 0038]
 ---
 
 # Archive or delete a session
 
 ## Outcome
 
-A session the user is done with is out of the way: archived, it is stopped and hidden but can be read and resumed; deleted, it is gone: its conversation is deleted from the backend too, along with the isolated workspace it alone used and that workspace's branch, unless the branch holds commits that exist nowhere else, which keeps it.
+A session the user is done with is out of the way: archived, it is stopped and hidden but can be read and resumed, and its folder is put away once it holds no unsaved work; deleted, it is gone: its conversation is deleted from the backend too, along with the isolated workspace it alone used and that workspace's branch, unless the branch holds commits that exist nowhere else, which keeps it.
 
 ## Trigger
 
@@ -19,18 +19,19 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Steps
 
-1. The user chooses **Archive**, which is unavailable, saying to stop the session first, while the session is starting, working or waiting on the user. Ersa stops the session, as Stop does, and marks it archived. Its tile leaves the rail unless the rail shows archived sessions (FLOW-ORGANIZE-SESSIONS). Its record and workspace stay.
+1. The user chooses **Archive**, which is unavailable, saying to stop the session first, while the session is starting, working or waiting on the user. Ersa stops the session, as Stop does, and marks it archived. Its tile leaves the rail unless the rail shows archived sessions (FLOW-ORGANIZE-SESSIONS). Its record stays. Its isolated workspace is put away once it holds no unsaved work: the folder goes, the branch stays, and Resume puts the folder back (FLOW-CLEAN-UP).
 2. The user opens an archived session (showing Archived or All). Its transcript reads as usual; in place of the composer is a note that it is archived, with **Resume**. Resume unarchives it and resumes it (FLOW-RESUME-SESSION).
 3. The user chooses **Unarchive**. The session is no longer archived and returns to its group, stopped; the next message resumes it.
 4. The user chooses **Delete…**, which is unavailable, saying to stop the session first, while the session is starting, working or waiting on the user. Ersa asks first. The question names the session, says its conversation is deleted for good, naming no backend, and says what else goes with it:
    - For a session alone in an isolated workspace: the workspace's folder is deleted, and its branch, by name, unless the branch holds commits that no other branch or remote holds, when the question says the branch is kept and why. When the folder holds uncommitted or untracked files, ignored files, or commits no branch holds (made on a detached checkout), the question says so and how many, and its confirming button reads as deleting them.
+   - For a session whose workspace is put away: no folder is left to delete, and the question says so and what happens to the branch.
    - For a session in the root workspace, or in a workspace another session also uses: the files stay, and the question says where. A session started in the backend's own tools that the rail lists there is another session (FLOW-RESUME-SESSION).
 5. The user confirms. Ersa stops the session, deletes the workspace, and its branch, as step 4 said, deletes the session's record from the backend, and removes the session. Its tile leaves the rail (ADR 0026).
 6. Cancelling the question leaves everything as it was.
 
 ## Variations and errors
 
-- **Resume is refused**, as when the session's folder is gone (FLOW-RESUME-SESSION-R03): the session stays archived and Ersa says why; Unarchive still returns it to its group.
+- **Resume is refused**, as when the session's folder is gone (FLOW-RESUME-SESSION-R23) or the branch of a put-away workspace is (FLOW-CLEAN-UP-R04): the session stays archived and Ersa says why; Unarchive still returns it to its group.
 - **Deleting fails** (the folder is still in use after Core has tried it for 30 seconds (PROTO-CORE-API-R113), the branch can't be deleted): the session stays in the rail, stopped, its tile saying the deletion failed (`LAY-SHELL`), and Ersa says what failed and offers **Try again**, which asks the question again with what is left, then repeats the deletion from where it stopped. While a step Core gave up on has not ended, Try again is refused and Ersa says something else is changing the session or its folder (PROTO-CORE-API-R107).
 - **The workspace changed after the question.** On confirm Ersa stops the session, then checks that what would be lost is what the question described; when anything changed, even with the same counts, Ersa asks again, and the session stays stopped.
 - **Ersa stops part way through a delete** (a crash, a restart): when it starts again, a delete the user had confirmed shows as failed and offers Try again; one stopped before the confirmation was checked deleted and marked nothing.
@@ -43,7 +44,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Requirements
 
-- **FLOW-ARCHIVE-DELETE-SESSION-R01**: When the user archives a session, Ersa shall stop it and mark it archived in Core, keeping its record, its workspace, its pin and its section.
+- ~~**FLOW-ARCHIVE-DELETE-SESSION-R01**~~: retired 2026-11-21 (an archived session's workspace is put away, FLOW-CLEAN-UP-R01), replaced by R12.
 - **FLOW-ARCHIVE-DELETE-SESSION-R02**: An archived session shall open read-only: Ersa shall show its transcript and offer Resume in place of the composer, and Core shall refuse to send it a message.
 - **FLOW-ARCHIVE-DELETE-SESSION-R03**: When the user unarchives a session, or resumes an archived one and Core accepts the resume, Ersa shall clear its archived mark and keep its pin and section.
 - **FLOW-ARCHIVE-DELETE-SESSION-R04**: Before deleting a session, Ersa shall ask the user, saying whether its workspace and its branch will be deleted; how many uncommitted and untracked files, ignored files, and commits no branch holds will be lost with the folder; and, when the branch is kept, that it holds commits that exist nowhere else.
@@ -53,15 +54,18 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **FLOW-ARCHIVE-DELETE-SESSION-R08**: When what a deletion would lose has changed in any way since the user was asked, Ersa shall ask again before deleting.
 - **FLOW-ARCHIVE-DELETE-SESSION-R09**: When the user confirms a delete, Ersa shall delete the session's record from its backend, so that neither the rail, after a restart or when Ersa lists the backend's sessions, nor the backend's own tools list it again.
 - **FLOW-ARCHIVE-DELETE-SESSION-R10**: When `workspace.changes` reports `unrecorded`, the delete question shall say that commits made on a detached checkout can't be counted and may be lost with the folder, in place of a count of them.
+- **FLOW-ARCHIVE-DELETE-SESSION-R12**: When the user archives a session, Ersa shall stop it and mark it archived in Core, keeping its record, its pin and its section; the archive itself shall remove nothing.
+- **FLOW-ARCHIVE-DELETE-SESSION-R13**: For a session alone in a workspace that is put away, the delete question shall say that the folder is already removed and what happens to the branch, and the delete shall delete the branch as R05 says and no folder.
 - **FLOW-ARCHIVE-DELETE-SESSION-R11**: While the session is starting, working or waiting on the user, Ersa shall offer Archive as unavailable with the reason (`claude-desktop/sections-2026-11-09.txt`), and Core shall refuse `session.set_archived` with `archived: true`.
 
 ## Out of scope
 
 - Undoing a delete.
-- Reclaiming workspaces whose sessions are long gone.
+- Selecting several sessions and archiving or deleting them at once, which gets its own planning pass (owner, 2026-11-21).
 
 ## Changes
 
+- 2026-11-21: owner's direction of 2026-11-21, to do what Claude Desktop does (`claude-desktop/cleanup-2026-11-20.txt`): an archived session's workspace is put away once it holds no unsaved work, which replaces his decision of 2026-11-05 that it stays (ADR 0038, FLOW-CLEAN-UP). R01 retired for R12, which keeps the record, the pin and the section and leaves the workspace to FLOW-CLEAN-UP; R13 added for deleting a session whose workspace is put away. Reclaiming workspaces leaves Out of scope, since FLOW-CLEAN-UP does it; acting on several sessions at once joins it, until its own planning pass. The refused Resume cites FLOW-RESUME-SESSION-R23, which replaced R03.
 - 2026-11-20: from #521 inbox: a folder in use fails the delete only after Core has tried it for 30 seconds (PROTO-CORE-API-R113). No requirement IDs changed.
 - 2026-11-19: from #369 inbox: Try again is refused while a step the failed deletion gave up on has not ended (PROTO-CORE-API-R107). No requirement IDs changed.
 - 2026-11-15: from #328 inbox: a session started in the backend's own tools counts as another session using a workspace, so deleting a session there leaves the files. Meaning of R05 unchanged; no requirement IDs changed.
