@@ -29,12 +29,32 @@ const components = [
   "Button",
 ];
 
+// Each section is photographed in a window as tall as its page, so the page does not scroll (#390, #502, #532). In a
+// page that scrolls, what is fixed in the window (an open list, a tooltip) is laid out and drawn one of two ways,
+// depending on when the screenshot is taken: its text drawn differently, or a tooltip flipped above its chip. The
+// page's height is read in the test's usual window once its fonts are in, and the page is then opened again in a
+// window that tall: resizing a drawn page would set its tiles measuring again while the screenshot waits for them,
+// and a window taller than the page would stretch the sections that fill it. A page taller than TALLEST keeps the
+// usual window: a window that tall is slow to draw, and the rail's tree, some 30,000 pixels of breathing marks, then
+// cannot hold still long enough for its screenshot.
+const TALLEST = 8192;
+
 for (const theme of ["light", "dark"]) {
   for (const component of components) {
     test(`${component} in ${theme}`, async ({ page }) => {
       // The shelf lies beside a rail-wide tile, wider than a theme's column at the default width.
       if (component === "Shelf") await page.setViewportSize({ width: 1600, height: 900 });
-      await page.goto(`/gallery.html?component=${component}&theme=${theme}`);
+      const url = `/gallery.html?component=${component}&theme=${theme}`;
+      await page.goto(url);
+      await page.evaluate(async () => {
+        await document.fonts.ready;
+      });
+      const { width, height } = page.viewportSize()!;
+      const tall = await page.evaluate(() => document.documentElement.scrollHeight);
+      if (tall > height && tall <= TALLEST) {
+        await page.setViewportSize({ width, height: tall });
+        await page.goto(url);
+      }
       const section = page.locator(`[data-theme="${theme}"] [data-component="${component}"]`);
       await expect(section).toHaveScreenshot(`${component}-${theme}.png`);
     });
