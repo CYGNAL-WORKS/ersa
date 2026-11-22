@@ -106,6 +106,10 @@ pub struct Stats {
     /// open: the backend's id for it, and how many record renames had
     /// been written by then.
     pub open_checks: Mutex<Vec<(String, usize)>>,
+    /// Registry checks and record reads waiting now at the gate a test
+    /// holds (`open_check_gate`, `read_gate`), so the test can wait for
+    /// Core to get there.
+    pub at_gate: AtomicUsize,
     /// Every message the fake was given, in order.
     pub messages: Mutex<Vec<OutgoingMessage>>,
     /// Records deleted.
@@ -619,7 +623,9 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        self.stats.at_gate.fetch_add(1, Ordering::SeqCst);
         drop(self.read_gate.lock().await);
+        self.stats.at_gate.fetch_sub(1, Ordering::SeqCst);
         // A title is not part of the conversation, as Claude Code's
         // projection leaves its `custom-title` entries out.
         Ok(Arc::new(
@@ -662,7 +668,9 @@ impl Adapter for FakeAdapter {
         _transport: Arc<dyn Transport>,
         backend_session_id: &str,
     ) -> OpenElsewhere {
+        self.stats.at_gate.fetch_add(1, Ordering::SeqCst);
         drop(self.open_check_gate.lock().await);
+        self.stats.at_gate.fetch_sub(1, Ordering::SeqCst);
         let renames = self.stats.record_renames.load(Ordering::SeqCst);
         self.stats
             .open_checks

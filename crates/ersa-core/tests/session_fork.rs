@@ -112,6 +112,20 @@ async fn fork_started(fake: &FakeAdapter) {
     }
 }
 
+/// Waits for the fork to reach the gate the test holds: its registry check
+/// or its read of the record is under way, so the original is marked as
+/// being forked.
+async fn at_gate(fake: &FakeAdapter) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.stats.at_gate.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never reached the gate"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// Takes away every record but the original's.
 fn without_a_record_of_its_own_now(fake: &FakeAdapter, original_backend_id: &str) {
     fake.records
@@ -508,7 +522,7 @@ async fn a_message_sent_during_the_forks_reads_is_refused() {
     let gate = Arc::clone(&fake.open_check_gate);
     let held = gate.lock().await;
     let pending = client.request("session.fork", json!({ "id": id })).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    at_gate(&fake).await;
 
     let mut second = core.client().await;
     let error = second
@@ -533,7 +547,7 @@ async fn only_one_fork_of_a_session_reads_its_record_at_a_time() {
     let gate = Arc::clone(&fake.open_check_gate);
     let held = gate.lock().await;
     let pending = client.request("session.fork", json!({ "id": id })).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    at_gate(&fake).await;
 
     let mut second = core.client().await;
     let message = refused_now(&mut second, &id).await;
@@ -555,7 +569,7 @@ async fn a_session_removed_during_the_forks_reads_is_not_forked() {
     let gate = Arc::clone(&fake.open_check_gate);
     let held = gate.lock().await;
     let pending = client.request("session.fork", json!({ "id": id })).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    at_gate(&fake).await;
 
     let mut second = core.client().await;
     second.result("session.stop", json!({ "id": id })).await;
@@ -605,7 +619,7 @@ async fn a_read_of_the_record_that_hangs_holds_back_the_next_fork() {
     let gate = Arc::clone(&fake.read_gate);
     let held = gate.lock().await;
     let pending = client.request("session.fork", json!({ "id": id })).await;
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    at_gate(&fake).await;
 
     let mut second = core.client().await;
     let message = refused_now(&mut second, &id).await;
