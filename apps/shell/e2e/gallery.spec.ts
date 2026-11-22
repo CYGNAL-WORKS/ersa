@@ -23,6 +23,7 @@ const components = [
   "NewSessionScreen",
   "Chip",
   "ContextRing",
+  "Workbench",
   "ArchivedNote",
   "Composer",
   "Icon",

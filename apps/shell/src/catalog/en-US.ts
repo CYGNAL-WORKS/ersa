@@ -502,6 +502,20 @@ export const enUS = {
       underOneReadout: "<{percent}%",
     },
   },
+  // The workbench at the window's right (LAY-SHELL, The workbench; docs/design/WORKBENCH.md).
+  workbench: {
+    // The arrange menu's item that opens and closes it (FLOW-READ-RAW-LOG, step 1).
+    developerPaneButton: "Developer pane",
+    // The edge beside the transcript, for assistive technology.
+    resizeLabel: "Resize workbench",
+    // The pane's Close, an icon button: its accessible name and tooltip.
+    closeButton: "Close",
+  },
+  // The developer pane (FLOW-READ-RAW-LOG).
+  developer: {
+    // The pane's name, in its head.
+    nameHeading: "Developer",
+  },
   quit: {},
   trust: {
     // A project the user has not trusted, on its heading in the rail and in the project chip's list.
