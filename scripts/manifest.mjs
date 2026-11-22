@@ -7,7 +7,9 @@
 //                                     problem too: CI does on the merge queue
 //                                     and main, so none reaches main (ADR 0025)
 //   node scripts/manifest.mjs --verifies ID,ID  also exit 1 if a listed ID
-//                                     has no `verifies:` line in a test file
+//                                     has no `verifies:` line in a test file,
+//                                     naming the file that cites it when that
+//                                     file is not a test file
 //
 // Both outputs are generated. Edit briefs and ADRs, not the outputs.
 // Rules implemented here are those of ADR 0013 and docs/briefs/README.md.
@@ -19,7 +21,16 @@ import { fileURLToPath } from "node:url";
 
 // An open inbox entry is a line starting `- [ ]`. The count and the wording
 // match Docket's merge gate, which holds a pull request on the same entries.
-const openInboxEntries = (text) => text.split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
+// Every other list item (bulleted or numbered, with no checkbox or a ticked
+// one) reads as a finding and holds nothing at that gate.
+// A line is tried as an open entry first, by the gate's own pattern, so one
+// the gate holds on (`-[ ]`, with no space) is never taken for anything else.
+function inboxEntries(text) {
+  const isOpen = (l) => /^\s*-\s*\[ \]/.test(l);
+  const isItem = (l) => /^\s*(?:[-*+]|\d+[.)])(?:\s|\[)/.test(l);
+  const lines = text.split(/\r?\n/);
+  return { open: lines.filter(isOpen).length, other: lines.filter((l) => isItem(l) && !isOpen(l)) };
+}
 const inboxHold = (n) => `${n} open inbox entr${n === 1 ? "y needs" : "ies need"} a planning pass`;
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
@@ -44,8 +55,12 @@ if ((flag >= 0 && !REQUIRED.length) || process.argv.some((a) => a.startsWith("--
 
 const PREFIXES = "PRD|FLOW|LAY|CMP|PROTO|ARCH";
 const BRIEF_ID = new RegExp(`^(?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*$`);
-const REQ_ID = new RegExp(`\\b((?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\\d{2,})\\b`, "g");
-const VERIFIES = new RegExp(`verifies:\\s*((?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\\d{2,})`, "g");
+const REQ = `(?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\\d{2,}`;
+const REQ_ID = new RegExp(`\\b(${REQ})\\b`, "g");
+// A requirement is defined by the ID in its line's leading bold, struck
+// through when retired. An ID anywhere else on a line refers to one.
+const DEFINITION = new RegExp(`^\\s*-\\s*(~~)?\\s*\\*\\*(${REQ})\\*\\*`);
+const VERIFIES = new RegExp(`verifies:\\s*(${REQ})`, "g");
 const SKIP_DIRS = new Set([".git", "node_modules", "target", "dist", ".scratch", "templates", "schema", ".claude"]);
 const CODE_EXT = /\.(rs|ts|tsx|js|mjs|py)$/;
 // Only citations inside test files count as verification.
@@ -161,14 +176,10 @@ for (const file of walk(BRIEFS_DIR)) {
       labels.add(key);
     }
     if (!fenced) for (const name of citedFixtures(line)) if (!fixtures.has(name)) missing.add(name);
-    for (const m of line.matchAll(REQ_ID)) {
-      const id = m[1];
-      if (!id.startsWith(fm.id + "-R")) continue;
-      const isRetired = /~~\s*\*\*/.test(line);
-      const isDefinition = /^\s*-\s*(~~)?\s*\*\*/.test(line);
-      if (!isDefinition) continue;
-      seen.set(id, (seen.get(id) ?? 0) + 1);
-      (isRetired ? retired : active).add(id);
+    const def = DEFINITION.exec(line);
+    if (def && def[2].startsWith(fm.id + "-R")) {
+      seen.set(def[2], (seen.get(def[2]) ?? 0) + 1);
+      (def[1] ? retired : active).add(def[2]);
     }
   }
   checkBuilt();
@@ -226,18 +237,22 @@ for (const b of briefs) {
 
 // ---- Citations from test files ---------------------------------------------
 
+// A citation in a code file that is not a test file does not count; it is
+// kept so that an unverified requirement can say where its citation sits.
 const cited = new Map();
+const citedElsewhere = new Map();
 for (const file of walk(ROOT)) {
   if (!CODE_EXT.test(file)) continue;
   const r = rel(file);
   if (r.startsWith("docs/") || r.startsWith("scripts/")) continue;
-  if (!TEST_PATH.test(r)) continue;
+  const into = TEST_PATH.test(r) ? cited : citedElsewhere;
   const text = readFileSync(file, "utf8");
   for (const m of text.matchAll(VERIFIES)) {
-    if (!cited.has(m[1])) cited.set(m[1], []);
-    cited.get(m[1]).push(r);
+    if (!into.has(m[1])) into.set(m[1], []);
+    if (!into.get(m[1]).includes(r)) into.get(m[1]).push(r);
   }
 }
+const misplaced = (id) => (citedElsewhere.has(id) ? ` (cited only in ${citedElsewhere.get(id).join(", ")}, which is not a test file)` : "");
 const allActive = new Set(briefs.flatMap((b) => [...b.active]));
 const allRetired = new Set(briefs.flatMap((b) => [...b.retired]));
 for (const id of cited.keys()) {
@@ -249,7 +264,11 @@ for (const id of cited.keys()) {
 
 let openInbox = 0;
 try {
-  openInbox = openInboxEntries(readFileSync(INBOX, "utf8"));
+  const inbox = inboxEntries(readFileSync(INBOX, "utf8"));
+  openInbox = inbox.open;
+  for (const line of inbox.other) {
+    problems.push(`docs/briefs/INBOX.md: "${line.trim().slice(0, 60)}" is not an open entry (\`- [ ] …\`), so the merge gate does not hold for it`);
+  }
 } catch {
   problems.push("docs/briefs/INBOX.md is missing");
 }
@@ -338,7 +357,7 @@ const unverified = briefs
   .flatMap((b) => [...b.active].filter((id) => !cited.has(id)));
 lines.push("## Unverified requirements in ready or built flow and protocol briefs");
 lines.push("");
-lines.push(unverified.length ? unverified.map((id) => `- ${id}`).join("\n") : "None.");
+lines.push(unverified.length ? unverified.map((id) => `- ${id}${misplaced(id)}`).join("\n") : "None.");
 lines.push("");
 
 lines.push("## Inbox");
@@ -356,5 +375,5 @@ console.log(
   `wrote docs/MANIFEST.md and the ADR index: ${briefs.length} briefs, ${allActive.size} requirements, ${cited.size} cited, ${adrs.length} ADRs, ${openInbox} inbox, ${problems.length} problems`
 );
 const uncited = REQUIRED.filter((id) => !cited.has(id));
-if (uncited.length) console.error(`no test file says verifies: for ${uncited.join(", ")}`);
+if (uncited.length) console.error(`no test file says verifies: for ${uncited.map((id) => `${id}${misplaced(id)}`).join(", ")}`);
 if ((CHECK && problems.length) || uncited.length) process.exit(1);
