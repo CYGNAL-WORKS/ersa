@@ -402,8 +402,10 @@ async fn new_workspace_at_head(
     .await
 }
 
-/// Removes a workspace made for a fork that then wasn't created, as far as it
-/// can: what can't be removed stays listed for the user to remove.
+/// Removes a workspace made for a fork that then wasn't created, as every
+/// removal does (PROTO-CORE-API-R122): its folder, git's record and its
+/// branch. What can't be removed stays listed; the fork answers with the
+/// error that failed it either way.
 async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace) {
     let Some(git) = core.transport_for(&project.host_id) else {
         return;
@@ -421,32 +423,52 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         &project.path,
         &workspace.path,
         &workspace.vcs_ref,
+        // Forced: the fork never started, so nothing in it is the user's.
+        workspace::RemovalChecks::FORCED,
         // The removal's operation ends with what happened, reported below,
         // so a try left stuck holds nothing of it.
-        workspace::FolderTries::holding(Arc::new(())),
+        workspace::FolderTries::from_config(&core.config, Arc::new(())),
         &handlers::RepositoryTurns {
             core,
             project: &project.id,
         },
     )
     .await;
-    let removed = match deleted {
-        Ok(_) => core
-            .store
-            .delete_workspace(workspace.id.clone())
-            .await
-            .map_err(|e| e.to_string()),
-        Err(e) => Err(e.to_string()),
-    };
     let id = workspace.id.clone();
-    match removed {
-        Ok(()) => removing.end(Report::WorkspaceRemoved { workspace: id }),
-        // Its row is as it was, `ready` and listed.
-        Err(e) => {
+    let e = match deleted {
+        Ok(_) => match core.store.delete_workspace(id.clone()).await {
+            Ok(()) => return removing.end(Report::WorkspaceRemoved { workspace: id }),
+            // Its row is as it was, `ready` and listed.
+            Err(e) => {
+                removing.end(Report::WorkspaceRemovalRefused {
+                    workspace: id.clone(),
+                });
+                e.to_string()
+            }
+        },
+        // Refused before git touched it (no turn in time among them): its
+        // row is as it was, `ready` and listed.
+        Err(e) if e.is_refusal() => {
             tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
-            removing.end(Report::WorkspaceRemovalRefused { workspace: id });
+            return removing.end(Report::WorkspaceRemovalRefused { workspace: id });
         }
-    }
+        // Part of it may be gone, its folder among them: `error`, as a
+        // failed `workspace.remove` leaves one, so no session starts in it.
+        Err(e) => {
+            if let Err(stored) = core
+                .store
+                .set_workspace_state(id.clone(), WorkspaceState::Error)
+                .await
+            {
+                tracing::warn!(workspace = %id, error = %stored, "could not mark a fork's workspace error");
+            }
+            removing.end(Report::WorkspaceRemovalFailed {
+                workspace: id.clone(),
+            });
+            e.to_string()
+        }
+    };
+    tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
 }
 
 /// Refuses a `field` value that is not one of `offered`; absent is the

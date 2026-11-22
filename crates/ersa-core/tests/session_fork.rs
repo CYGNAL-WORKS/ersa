@@ -1118,3 +1118,95 @@ async fn a_fork_of_a_root_session_shares_its_workspace() {
         .await;
     assert_eq!(workspaces.as_array().unwrap().len(), 1, "{workspaces:#}");
 }
+
+/// A fork whose session Core refuses to record once its workspace is made
+/// (Core began shutting down while git made it), with git's removal of
+/// that workspace failing after git dropped its record: the cleanup goes on
+/// to the folder, as a delete does, and leaves no workspace, folder or
+/// branch.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
+    use support::deleting::{FailingGit, Removal};
+    use ersa_core::Gate;
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let adds = Arc::new(Gate::default());
+    let failing = Arc::new(
+        FailingGit::new(Removal::DropsRecordThenFails, None).stopping_adds(Arc::clone(&adds)),
+    );
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| {
+            support::detecting(config);
+            config.command_transport = Some(ersa_core::CommandTransport(failing));
+        },
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let repo = core.dir.path().join("repo");
+    let create = client
+        .request("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    adds.reached().await;
+    adds.go();
+    let workspace = client.response(create).await["result"].clone();
+    let id = idle_in(&mut client, &workspace).await;
+    let folders_before = workspace_folders(&workspace);
+    let branches_before = git(&repo, &["branch", "--list", "--format=%(refname)"]);
+
+    // The fork's workspace is being made when Core begins to shut down:
+    // from then on admission records no new session.
+    let _fork = client.request("session.fork", json!({ "id": id })).await;
+    adds.reached().await;
+    let mut other = core.client().await;
+    let _shutdown = other.request("core.shutdown", json!({})).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while fake.stats.stops.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "Core never began to shut down");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    adds.go();
+
+    // The fork's cleanup runs on: its workspace's folder, branch and row go.
+    let db = core.dir.path().join("data").join("ersa.db");
+    let store = ersa_core::persistence::Store::open(&db).expect("open");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let rows = store
+            .call(|conn| {
+                Ok(conn.query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
+                    row.get::<_, i64>(0)
+                })?)
+            })
+            .await
+            .expect("count");
+        let folders = workspace_folders(&workspace);
+        let branches = git(&repo, &["branch", "--list", "--format=%(refname)"]);
+        if rows == 2 && folders == folders_before && branches == branches_before {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "left behind: {rows} workspaces, folders {folders:?}, branches {branches}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let worktrees = git(&repo, &["worktree", "list", "--porcelain"]);
+    assert_eq!(worktrees.matches("worktree ").count(), 2, "{worktrees}");
+}
+
+/// The folders beside `workspace`'s under the workspaces root.
+fn workspace_folders(workspace: &Value) -> Vec<std::path::PathBuf> {
+    let parent = std::path::Path::new(workspace["path"].as_str().unwrap())
+        .parent()
+        .unwrap();
+    let mut folders: Vec<_> = std::fs::read_dir(parent)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    folders.sort();
+    folders
+}
