@@ -228,6 +228,7 @@ async fn a_folder_on_no_branch_stores_its_commit() {
 /// git's removal stopped, the workspace already reads `put_away`, its
 /// folder still there.
 // verifies: FLOW-CLEAN-UP-R02
+// verifies: PROTO-CORE-API-R141
 #[tokio::test(flavor = "multi_thread")]
 async fn the_workspace_is_put_away_before_anything_is_removed() {
     let gate = Arc::new(Gate::default());
@@ -253,7 +254,7 @@ async fn the_workspace_is_put_away_before_anything_is_removed() {
 
     gate.go();
     // git then fails with the worktree still listed: it is left put away,
-    // for the next put-away to finish.
+    // what is left of the folder going when it is put back.
     let answer = putting.await.unwrap();
     assert!(answer.is_err(), "{answer:?}");
     assert_eq!(s.listed(&workspace).await["state"], "put_away");
@@ -261,6 +262,7 @@ async fn the_workspace_is_put_away_before_anything_is_removed() {
 
 /// A put-away refused before anything was removed leaves the workspace
 /// `ready`, with nothing stored: a folder with changes not committed.
+// verifies: PROTO-CORE-API-R140
 #[tokio::test(flavor = "multi_thread")]
 async fn a_folder_with_changes_is_not_put_away() {
     let mut s = setup().await;
@@ -274,6 +276,53 @@ async fn a_folder_with_changes_is_not_put_away() {
     assert!(path.join("unsaved.txt").exists());
     assert_eq!(s.listed(&workspace).await["state"], "ready");
     assert_eq!(s.stored(&workspace).await, None);
+}
+
+/// A locked worktree is not put away: the workspace stays `ready`, its
+/// folder whole and nothing stored.
+// verifies: PROTO-CORE-API-R140
+#[tokio::test(flavor = "multi_thread")]
+async fn a_locked_worktree_is_not_put_away() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let path = folder(&workspace);
+    git(&s.repo, &["worktree", "lock", &path.display().to_string()]);
+
+    let refused = s.put_away(&workspace).await;
+
+    assert!(refused.is_err());
+    assert!(path.join("README.md").exists());
+    assert_eq!(s.listed(&workspace).await["state"], "ready");
+    assert_eq!(s.stored(&workspace).await, None);
+}
+
+/// A folder whose checkout git cannot read is not put away: one on a branch
+/// with no commit yet, and one whose record git no longer has (a folder git
+/// does not list), which git cannot read a checkout in either.
+// verifies: PROTO-CORE-API-R140
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_whose_checkout_git_cannot_read_is_not_put_away() {
+    let mut s = setup().await;
+    let unborn = s.workspace().await;
+    git(
+        &folder(&unborn),
+        &["switch", "--quiet", "--orphan", "nothing-yet"],
+    );
+    let unrecorded = s.workspace().await;
+    let admin = git(&folder(&unrecorded), &["rev-parse", "--absolute-git-dir"]);
+    std::fs::remove_dir_all(admin.trim()).unwrap();
+
+    for workspace in [&unborn, &unrecorded] {
+        let refused = s.put_away(workspace).await;
+
+        // Refused at the read of the checkout, before any removal: so a
+        // folder git does not list never reaches the removal's own refusal.
+        let error = refused.expect_err("refused");
+        assert!(error.0.message.contains("checked out"), "{error:?}");
+        assert!(folder(workspace).exists());
+        assert_eq!(s.listed(workspace).await["state"], "ready");
+        assert_eq!(s.stored(workspace).await, None);
+    }
 }
 
 // -- As every removal does (PROTO-CORE-API-R122, R124, R131) ---------------
@@ -302,6 +351,7 @@ async fn putting_away_goes_on_to_the_folder_when_git_fails_after_dropping_its_re
 /// A put-away waits its turn at the project's worktrees; past the wait it
 /// starts none of its git work, and the workspace is as it was.
 // verifies: PROTO-CORE-API-R124
+// verifies: PROTO-CORE-API-R140
 #[tokio::test(flavor = "multi_thread")]
 async fn a_put_away_that_waited_too_long_for_its_turn_removes_nothing() {
     let gate = Arc::new(Gate::default());
