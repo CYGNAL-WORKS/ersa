@@ -880,15 +880,18 @@ pub(super) async fn workspace_remove(
         // leftover `initializing` lock must not block removal.
         after_failed_add: replaced == WorkspaceState::Error,
     };
+    // Shared with each try at the folder, which keeps it until its thread
+    // returns: a try given up on that is still stuck holds the removal, so
+    // trying again meanwhile is refused and begins no second removal beside
+    // it, as for a delete (PROTO-CORE-API-R107).
+    let removing = Arc::new(removing);
     let removed = workspace::git_worktree_delete(
         transport.as_ref(),
         &project.path,
         &workspace.path,
         &workspace.vcs_ref,
         checks,
-        // The removal's operation ends with what happened, reported below,
-        // so a try left stuck holds nothing of it.
-        workspace::FolderTries::from_config(&core.config, Arc::new(())),
+        workspace::FolderTries::from_config(&core.config, Arc::clone(&removing) as _),
         &RepositoryTurns {
             core,
             project: &project.id,
@@ -904,12 +907,12 @@ pub(super) async fn workspace_remove(
         // sessions are theirs again.
         if e.is_refusal() {
             core.store.set_workspace_state(id, replaced).await?;
-            removing.end(not_removed);
+            end_held(removing, not_removed);
         } else {
             core.store
                 .set_workspace_state(id.clone(), WorkspaceState::Error)
                 .await?;
-            removing.end(Report::WorkspaceRemovalFailed { workspace: id });
+            end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
         }
         return Err(e.into());
     }
@@ -920,12 +923,27 @@ pub(super) async fn workspace_remove(
     // nothing begins on them until Core has let go of them.
     let quiet = core.sessions.quiet_found(&id).await;
     core.store.delete_workspace(id.clone()).await?;
-    removing.end(Report::WorkspaceRemoved {
-        workspace: id.clone(),
-    });
+    end_held(
+        removing,
+        Report::WorkspaceRemoved {
+            workspace: id.clone(),
+        },
+    );
     core.sessions.forget_found(quiet).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
+}
+
+/// Ends a removal whose tries at the folder shared it, with `report`. A try
+/// given up on whose thread has not returned still holds it: then the
+/// removal ends when that thread lets go, which admission takes as a failed
+/// removal, as `report` then is (a try that ran out fails the removal), so
+/// the workspace stays held until then (PROTO-CORE-API-R107).
+pub(super) fn end_held(removing: Arc<admission::UnderWay>, report: Report) {
+    match Arc::try_unwrap(removing) {
+        Ok(removing) => removing.end(report),
+        Err(still_held) => drop(still_held),
+    }
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by
