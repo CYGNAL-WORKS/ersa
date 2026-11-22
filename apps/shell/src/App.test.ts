@@ -499,6 +499,30 @@ describe("adding a project from the new-session screen", () => {
     expect(methods(core)).not.toContain("project.add");
     expect(chipValue()).toBe("Project: alpha");
   });
+
+  it("drops why a folder could not be added once another project is chosen, also on the next New session", async () => {
+    let refusals = 0;
+    await screenWith([project("alpha"), project("beta")], fakeShell("D:/clones/stranger", "D:/clones/other"), {
+      "project.find": (params: { path: string }) => {
+        refusals += 1;
+        throw { kind: "rpc", error: { code: -32602, message: "project.find: invalid params", data: { detail: `${params.path} is not a folder` } } };
+      },
+    });
+    await addFromChip();
+    expect(screen.getByRole("alert").textContent).toBe("D:/clones/stranger is not a folder");
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /beta/ }));
+    expect(chipValue()).toBe("Project: beta");
+    expect(screen.queryByRole("alert")).toBeNull();
+    // The screen drawn afresh by New session does not bring the old reason back.
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Rail" })).getByRole("button", { name: "New session" }));
+    await settle();
+    expect(screen.queryByRole("alert")).toBeNull();
+    // A later failure says so again.
+    await addFromChip();
+    expect(refusals).toBe(2);
+    expect(screen.getByRole("alert").textContent).toBe("D:/clones/other is not a folder");
+  });
 });
 
 // The rail's wiring (LAY-SHELL, The rail; FLOW-NEW-SESSION-R13): App hands the tree the sessions and the workspaces it
