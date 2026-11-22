@@ -15,7 +15,7 @@ The rail shows the user's sessions the way they want them: pinned ones first, th
 
 ## Trigger
 
-The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or the arrange menu beside New session (Group by, Sort by, Show, New section, Reset to defaults, View all; Settings, its last item until the title bar is built, is `LAY-SHELL`'s). `LAY-SHELL` (The rail) says where each control is and how it looks.
+The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or the arrange menu beside New session (Group by, Sort by, Show, New section, Reset to defaults, View all; Developer pane and Settings, its last items until the title bar is built, are `LAY-SHELL`'s). `LAY-SHELL` (The rail) says where each control is and how it looks.
 
 ## Steps
 
@@ -98,6 +98,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-22: the Trigger names Developer pane beside Settings among the arrange menu's last items, which are `LAY-SHELL`'s. No requirement IDs changed.
 - 2026-11-21: the Trigger names Settings as the arrange menu's last item until the title bar is built, which is `LAY-SHELL`'s. No requirement IDs changed.
 - 2026-11-18: from #337 inbox: Core's last activity for a session changes at a turn's end, when a live session stops (to its record's time, a little earlier) and when work is done outside Ersa (PROTO-CORE-API-R75), so the rule is now the rail's own: a tile moves only for a session's first last activity or a later one, and a stop moves nothing. FLOW-ORGANIZE-SESSIONS-R10 retired; R31 added.
 - 2026-11-18: from #324 inbox: Ersa's own unseen mark gets its requirements (FLOW-ORGANIZE-SESSIONS-R37, R39), and a turn that ends while Ersa can't reach Core marks its session once Ersa is connected again (R38), which closes that half of LAY-SHELL's open question: the mark says a session finished while the user was not looking, whether or not Ersa watched it end. No requirement retired.
