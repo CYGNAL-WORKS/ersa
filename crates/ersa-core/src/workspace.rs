@@ -1106,14 +1106,19 @@ pub async fn git_worktree_discard(
 /// - Local changes and no `force`: refused with [`VcsError::Dirty`].
 /// - Otherwise removed, retried while files are busy.
 ///
-/// The worktree's branch is kept, so committed work is never lost.
-pub async fn git_worktree_remove(
+/// git's part of [`git_worktree_delete`], which every removal goes through
+/// (PROTO-CORE-API-R122): this keeps the branch, and leaves a folder git no
+/// longer lists to the caller.
+async fn git_worktree_remove(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
-    force: bool,
-    after_failed_add: bool,
+    checks: RemovalChecks,
 ) -> Result<(), VcsError> {
+    let RemovalChecks {
+        force,
+        after_failed_add,
+    } = checks;
     let listed = git_worktree_list(transport, repo).await?;
     let Some(entry) = find(&listed, path).await else {
         if exists(path).await {
@@ -1227,25 +1232,47 @@ where
     }
 }
 
-/// Deletes an isolated workspace's files for the user's Delete
-/// (PROTO-CORE-API-R35): the git worktree at `path` of the repository at
-/// `repo`, forced, since the user was shown what it held, and then its
+/// What a removal refuses before it touches anything, as `workspace.remove`'s
+/// `force` says. A delete and a failed fork's cleanup are [`Self::FORCED`]:
+/// the user was shown what the workspace held, or nothing of theirs is in it.
+#[derive(Clone, Copy, Debug)]
+pub struct RemovalChecks {
+    /// Removes a worktree with local changes, and a folder git does not
+    /// list, whose changes git cannot read. Without it both are refused
+    /// ([`VcsError::Dirty`], [`VcsError::NotListed`]).
+    pub force: bool,
+    /// The workspace never finished being made (`error`): a lock its killed
+    /// add left behind is discarded rather than refused.
+    pub after_failed_add: bool,
+}
+
+impl RemovalChecks {
+    pub const FORCED: RemovalChecks = RemovalChecks {
+        force: true,
+        after_failed_add: false,
+    };
+}
+
+/// Removes an isolated workspace's files, the one way Core does for every
+/// caller (PROTO-CORE-API-R122): `session.delete`'s step 5, the cleanup of a
+/// fork that failed to start, and `workspace.remove`. The git worktree at
+/// `path` of the repository at `repo` goes, as `checks` allow, and then its
 /// branch `branch` unless another worktree has it checked out or it holds
 /// commits no other local or remote-tracking branch holds. Returns whether
 /// the branch was kept.
 ///
 /// A folder git no longer lists (on Windows a failed removal can delete
-/// git's record and leave files behind) is deleted as a folder; a locked
-/// worktree is refused, as `workspace.remove` refuses it. Safe to run
-/// again after it failed part way: a folder already gone is pruned, and a
-/// branch already gone is not kept.
+/// git's record and leave files behind) is deleted as a folder when
+/// `checks.force` allows; a locked worktree is refused. Safe to run again
+/// after it failed part way: a folder already gone is pruned, and a branch
+/// already gone is not kept.
 ///
 /// `tries` says how each try at a folder git no longer lists runs
-/// ([`remove_folder`]). With [`FolderTries::window`] set (`session.delete`),
-/// a git removal that fails after git dropped its record of the worktree
-/// goes on to delete the folder in this same call (PROTO-CORE-API-R112).
-/// Every failure of git's removal is logged as a warning
-/// (PROTO-CORE-API-R114); the caller's span names the session.
+/// ([`remove_folder`]): for [`FolderTries::window`] (PROTO-CORE-API-R113). A
+/// git removal that fails after git dropped its record of the worktree goes
+/// on to delete the folder in this same call (PROTO-CORE-API-R112). Every
+/// failure of git's removal is logged as a warning (PROTO-CORE-API-R114);
+/// the caller's span names the session.
 ///
 /// git's part runs in the repository's turns (`worktrees`): its removal in
 /// one, its prune and the branch in another. The tries at the folder, which
@@ -1256,22 +1283,26 @@ pub async fn git_worktree_delete(
     repo: &str,
     path: &str,
     branch: &str,
+    checks: RemovalChecks,
     tries: FolderTries,
     worktrees: &dyn Worktrees,
 ) -> Result<bool, VcsError> {
     // Kept, not read: holding it is the turn.
     let mut _turn = worktrees.turn().await?;
-    let as_folder = match git_worktree_remove(transport, repo, path, true, false).await {
-        Ok(()) => false,
-        Err(VcsError::NotListed { .. }) => true,
+    let as_folder = match git_worktree_remove(transport, repo, path, checks).await {
+        // Done as far as git is concerned, which after discarding a killed
+        // add means only that git no longer lists it: files it left go as a
+        // folder, with the same tries.
+        Ok(()) => exists(path).await,
+        Err(VcsError::NotListed { .. }) if checks.force => true,
         Err(e) => {
             tracing::warn!(path, reason = %describe(&e), "git's removal of the worktree failed");
             // On Windows git can fail on a file in use after deleting its
             // record of the worktree, leaving the files: its own tries then
             // fail on a worktree it no longer lists. Only a removal that ran
-            // and failed counts; one that timed out was called off (R91).
-            let gone_from_git = tries.window.is_some()
-                && matches!(e, VcsError::Failed { .. })
+            // and failed counts; one that timed out was called off (R91),
+            // and a refusal touched nothing.
+            let gone_from_git = matches!(e, VcsError::Failed { .. })
                 && matches!(
                     git_worktree_list(transport, repo).await,
                     Ok(listed) if find(&listed, path).await.is_none()
@@ -1285,7 +1316,16 @@ pub async fn git_worktree_delete(
     if as_folder {
         drop(_turn);
         remove_folder(path, &tries).await?;
-        _turn = worktrees.turn().await?;
+        // The folder is gone now, so a turn not had in time is no longer a
+        // refusal that left the worktree as it was: the caller must not put
+        // the workspace back as if nothing happened.
+        _turn = worktrees.turn().await.map_err(|e| match e {
+            VcsError::WorktreesBusy => VcsError::Failed {
+                message: format!("the workspace's folder was deleted, but {e}"),
+                stderr: String::new(),
+            },
+            e => e,
+        })?;
         let pruned = git(transport, repo, &["worktree", "prune"]).await?;
         check(pruned, "git worktree prune failed")?;
     }
@@ -1372,22 +1412,23 @@ pub struct FolderTries {
     /// Where each try stops, on its thread before it touches the folder,
     /// until a test lets it go ([`crate::CoreConfig::folder_gate`]).
     pub gate: Option<Arc<Gate>>,
-    /// `session.delete`'s step 5 sets this to how long tries at the folder
-    /// go on ([`FOLDER_TRY_WINDOW`], PROTO-CORE-API-R113), and then a failed
-    /// git removal of a worktree git no longer lists goes on to the folder
-    /// (PROTO-CORE-API-R112). `None` elsewhere (fork cleanup): the folder
-    /// gets [`REMOVE_ATTEMPTS`] tries, and git's failure ends the call.
-    pub window: Option<Duration>,
+    /// How long tries at the folder go on: [`FOLDER_TRY_WINDOW`]
+    /// (PROTO-CORE-API-R113), except in tests that shorten it.
+    pub window: Duration,
 }
 
 impl FolderTries {
-    /// Tries that hold `held`, each given [`GIT_TIMEOUT`].
-    pub fn holding(held: Arc<dyn std::any::Any + Send + Sync>) -> FolderTries {
+    /// The tries every removal makes, as Core's `config` sets them, each
+    /// keeping `held` on its thread.
+    pub fn from_config(
+        config: &crate::CoreConfig,
+        held: Arc<dyn std::any::Any + Send + Sync>,
+    ) -> FolderTries {
         FolderTries {
             held,
-            limit: GIT_TIMEOUT,
-            gate: None,
-            window: None,
+            limit: config.folder_removal_limit,
+            gate: config.folder_gate.clone(),
+            window: config.folder_try_window,
         }
     }
 }
@@ -1431,10 +1472,7 @@ async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> 
         message: format!("the workspace's folder {path} could not be deleted"),
         stderr,
     };
-    match tries.window {
-        Some(window) => retried_within(window, once, failed).await,
-        None => retried(once, failed).await,
-    }
+    retried_within(tries.window, once, failed).await
 }
 
 /// `e` with git's own words, for the diagnostic log.
@@ -1884,8 +1922,10 @@ mod tests {
             .unwrap();
         let path = folder.display().to_string();
         let tries = FolderTries {
+            held: Arc::new(()),
             limit: Duration::ZERO,
-            ..FolderTries::holding(Arc::new(()))
+            gate: None,
+            window: FOLDER_TRY_WINDOW,
         };
         let result = runtime.block_on(remove_folder(&path, &tries));
         drop(runtime);
@@ -1928,7 +1968,7 @@ mod tests {
             held: Arc::clone(&held) as _,
             limit: Duration::from_millis(50),
             gate: Some(Arc::clone(&gate)),
-            window: None,
+            window: FOLDER_TRY_WINDOW,
         };
         let path = folder.display().to_string();
         let result = remove_folder(&path, &tries).await;
