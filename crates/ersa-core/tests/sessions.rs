@@ -405,6 +405,228 @@ async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
     assert_eq!(window.as_array().unwrap(), &log[2..=3]);
 }
 
+/// The indices of raw log entries.
+fn raw_indices(log: &[Value]) -> Vec<u64> {
+    log.iter().map(|e| e["index"].as_u64().unwrap()).collect()
+}
+
+/// The session's raw log, read with `params` added to its id.
+async fn raw_log(client: &mut Client, id: &str, params: Value) -> Vec<Value> {
+    let mut params = params;
+    params["id"] = json!(id);
+    let log = client.result("session.raw_log", params).await;
+    log.as_array().unwrap().clone()
+}
+
+/// A new session with a reader, so Core holds its raw log after it stops.
+async fn read_session(core: &TestCore, client: &mut Client) -> String {
+    let id = new_session(core, client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    id
+}
+
+// verifies: PROTO-CORE-API-R136
+// verifies: PROTO-CORE-API-R137
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backend_started_again_keeps_its_earlier_lines_and_counts_on() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = read_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "first" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    let first = raw_log(&mut client, &id, json!({})).await;
+    assert!(!first.is_empty());
+
+    // A send to the stopped session starts its backend again.
+    client
+        .result("session.send", json!({ "id": id, "text": "second" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    let both = raw_log(&mut client, &id, json!({})).await;
+
+    // The first run's lines are still there, as they were.
+    assert_eq!(&both[..first.len()], &first[..]);
+    // The second run's lines follow, numbered on from the first's.
+    assert!(both.len() > first.len());
+    assert_eq!(
+        raw_indices(&both),
+        (0..both.len() as u64).collect::<Vec<_>>()
+    );
+    let second = json!({ "t": "user", "text": "second" }).to_string();
+    assert!(both[first.len()..].iter().any(|e| e["line"] == second));
+}
+
+// verifies: PROTO-CORE-API-R136
+#[tokio::test(flavor = "multi_thread")]
+async fn a_raw_log_held_again_never_reuses_an_index() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = read_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "first" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    let before = raw_indices(&raw_log(&mut client, &id, json!({})).await);
+    let last = *before.last().unwrap();
+
+    // Nobody reads it: Core lets the raw log go.
+    client
+        .result("session.unsubscribe", json!({ "id": id }))
+        .await;
+    assert!(raw_log(&mut client, &id, json!({})).await.is_empty());
+
+    // Held again, its lines count on from the last index it had.
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "second" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    let after = raw_indices(&raw_log(&mut client, &id, json!({})).await);
+    assert!(!after.is_empty());
+    assert_eq!(
+        after,
+        (last + 1..last + 1 + after.len() as u64).collect::<Vec<_>>(),
+        "{before:?} then {after:?}"
+    );
+}
+
+// verifies: PROTO-CORE-API-R138
+#[tokio::test(flavor = "multi_thread")]
+async fn a_clipped_read_cuts_long_lines_on_a_whole_character() {
+    /// The longest start of `line` of at most `clip` bytes on a character
+    /// boundary, worked out here rather than by Core's helper.
+    fn expected_head(line: &str, clip: usize) -> &str {
+        let mut end = clip;
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        &line[..end]
+    }
+
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = read_session(&core, &mut client).await;
+    // Two-byte characters after a 21-byte start (`{"t":"user","text":"a`):
+    // byte 1024 falls inside one.
+    let text = format!("a{}", "é".repeat(1000));
+    client
+        .result("session.send", json!({ "id": id, "text": text }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    let whole = raw_log(&mut client, &id, json!({})).await;
+    let host = json!({ "t": "user", "text": text }).to_string();
+    assert!(host.starts_with(r#"{"t":"user","text":""#) && host.len() > 1024);
+    let host_at = whole.iter().position(|e| e["line"] == host).unwrap();
+
+    for clip in [1024usize, host.len()] {
+        let clipped = raw_log(&mut client, &id, json!({ "clip": clip })).await;
+        assert_eq!(clipped.len(), whole.len());
+        let mut cut = 0;
+        for (got, full) in clipped.iter().zip(&whole) {
+            assert_eq!(got["index"], full["index"]);
+            assert_eq!(got["ts"], full["ts"]);
+            assert_eq!(got["dir"], full["dir"]);
+            let line = full["line"].as_str().unwrap();
+            if line.len() > clip {
+                cut += 1;
+                assert!(got.get("line").is_none(), "{got:#}");
+                assert_eq!(got["head"], expected_head(line, clip));
+                assert_eq!(got["size"], line.len());
+            } else {
+                // A line of `clip` bytes or fewer comes back whole.
+                assert_eq!(got["line"], line);
+                assert!(got.get("head").is_none() && got.get("size").is_none());
+            }
+        }
+        if clip == 1024 {
+            // The user's line and the echoed reply, both cut.
+            assert_eq!(cut, 2);
+            assert_eq!(clipped[host_at]["head"].as_str().unwrap().len(), 1023);
+        } else {
+            // Exactly `clip` bytes: the user's line comes back whole.
+            assert_eq!(clipped[host_at]["line"], host);
+            assert_eq!(cut, 1);
+        }
+    }
+
+    // The bounds are inclusive; anything outside them is refused.
+    for clip in [1024, 1024 * 1024] {
+        raw_log(&mut client, &id, json!({ "clip": clip })).await;
+    }
+    for clip in [json!(0), json!(1023), json!(1024 * 1024 + 1), json!(-1)] {
+        let error = client
+            .error("session.raw_log", json!({ "id": id, "clip": clip }))
+            .await;
+        assert_eq!(error["code"], -32602, "clip {clip}: {error:#}");
+    }
+}
+
+// verifies: PROTO-CORE-API-R139
+#[tokio::test(flavor = "multi_thread")]
+async fn a_raw_log_answer_is_bounded_by_its_size_as_sent() {
+    const CAP: usize = 8 * 1024 * 1024;
+    /// What entries take in an answer: their JSON and a comma each.
+    fn sent(entries: &[Value]) -> usize {
+        entries
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap().len() + 1)
+            .sum()
+    }
+    fn text(entries: &[Value]) -> usize {
+        entries
+            .iter()
+            .map(|e| e["line"].as_str().unwrap().len())
+            .sum()
+    }
+
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = read_session(&core, &mut client).await;
+    // A control character is six bytes in a line ("\u0001") and seven in
+    // the entry that carries it: four such lines are under 8 MiB as text
+    // and over it as sent.
+    let long = "\u{1}".repeat(330_000);
+    for _ in 0..2 {
+        client
+            .result("session.send", json!({ "id": id, "text": long }))
+            .await;
+    }
+    client.result("session.stop", json!({ "id": id })).await;
+
+    let first = raw_log(&mut client, &id, json!({})).await;
+    assert!(sent(&first) <= CAP, "{} bytes as sent", sent(&first));
+
+    // Paging on from the last index gets the rest, the second echo last.
+    let next = raw_indices(&first).last().unwrap() + 1;
+    let rest = raw_log(&mut client, &id, json!({ "from": next })).await;
+    assert!(!rest.is_empty(), "the first answer held every line");
+    let all: Vec<Value> = first.iter().chain(&rest).cloned().collect();
+    assert_eq!(raw_indices(&all), (0..all.len() as u64).collect::<Vec<_>>());
+    let echoes = |entries: &[Value]| {
+        entries
+            .iter()
+            .filter(|e| {
+                let line = e["line"].as_str().unwrap();
+                line.contains(r#""t":"reply""#) && line.len() > long.len()
+            })
+            .count()
+    };
+    assert_eq!(echoes(&all), 2);
+    assert!(echoes(&rest) >= 1);
+    // Under 8 MiB as text: only what it takes as sent split the answer.
+    assert!(text(&all) < CAP, "{} bytes of text", text(&all));
+    assert!(sent(&all) > CAP);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_subscriber_that_falls_behind_is_disconnected_without_stalling_the_session() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
