@@ -1218,6 +1218,26 @@ Resets in {minutes} min
 
 <{percent}%
 
+## `workbench`
+
+### `workbench.developerPaneButton`
+
+Developer pane
+
+### `workbench.resizeLabel`
+
+Resize workbench
+
+### `workbench.closeButton`
+
+Close
+
+## `developer`
+
+### `developer.nameHeading`
+
+Developer
+
 ## `quit`
 
 ## `trust`
