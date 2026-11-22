@@ -1334,6 +1334,60 @@ async fn a_session_its_backend_never_named_cannot_be_renamed() {
     assert_eq!(kind(&error), "not_found");
 }
 
+/// A session stops being live once its `session.ended` is sent, so a
+/// rename a client asks for after seeing it is a stopped session's: written
+/// to the record, or refused for what the record lacks, never refused as
+/// not running while Core is still letting go of the run.
+// verifies: PROTO-CORE-API-R130
+// verifies: PROTO-CORE-API-R79
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rename_after_session_ended_is_a_stopped_sessions_while_the_run_winds_down() {
+    // Core holds the run this long after announcing its end: the window a
+    // busy machine opens by chance.
+    let winding_down = |config: &mut ersa_core::CoreConfig| {
+        config.wind_down_pause = Duration::from_secs(2);
+    };
+
+    // Named: its backend exited on its own, and the record takes the title.
+    let records = Records::default();
+    let adapter = FakeAdapter::with_records(Arc::clone(&records));
+    let stats = Arc::clone(&adapter.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
+    let core = start_with_adapters(tempdir(), winding_down, adapters).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "exit" }))
+        .await;
+    client.events_until("session.ended").await;
+    let renamed = client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(renamed["title"], "Renamed");
+    assert_eq!(stats.record_renames.load(Ordering::SeqCst), 1);
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 0);
+
+    // Never named: its start failed, so there is nothing to rename.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::failing())];
+    let core = start_with_adapters(tempdir(), winding_down, adapters).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+    let error = client
+        .error("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(error["data"]["reason"], "backend_unnamed", "{error:#}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_blank_long_or_multi_line_title_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
