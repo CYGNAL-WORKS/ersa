@@ -6,16 +6,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{
-    BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, SessionConfig,
+    BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, RawLine, SessionConfig,
     SessionControl, TitleRules, Transport,
 };
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
     DecidePermissionParams, Empty, ErrorReason, IdParams, InspectParams, Inspected, ModelChoice,
-    Project, RawDirection, RawLogEntry, RawLogParams, Session, SessionCreateParams,
-    SessionSendParams, SessionSendResult, SetArchivedParams, SetEffortParams, SetModeParams,
-    SetModelParams, SetPermissionModeParams, SetTitleParams, SubscribeParams, SubscribeResult,
-    Workspace, WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
+    Project, RAW_LOG_CLIP_MAX, RAW_LOG_CLIP_MIN, RawDirection, RawLogEntry, RawLogParams, Session,
+    SessionCreateParams, SessionSendParams, SessionSendResult, SetArchivedParams, SetEffortParams,
+    SetModeParams, SetModelParams, SetPermissionModeParams, SetTitleParams, SubscribeParams,
+    SubscribeResult, Workspace, WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
 };
 use serde_json::Value;
 
@@ -23,14 +23,16 @@ use super::{ApiError, Peer, handlers};
 use crate::admission::{Command, Report};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
+use crate::raw_log;
 use crate::sessions::{Forkable, Resumption};
 use crate::state::Core;
 use crate::workspace;
 
 /// The most raw lines one `session.raw_log` call returns, and the most bytes
-/// of line text (one line always comes back, however long). A client pages
-/// through a longer log by asking again from the last index it got plus one.
-/// The log is held in memory, from when Core started the session's backend.
+/// its entries take as sent (PROTO-CORE-API-R139; one entry always comes
+/// back, however long). A client pages through a longer log by asking again
+/// from the last index it got plus one. Half the protocol's 16 MiB line cap,
+/// so an answer with `clip` always fits on a line.
 pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
@@ -1029,30 +1031,64 @@ pub(super) fn unsubscribe(peer: &Peer, params: IdParams) -> Result<Empty, ApiErr
 }
 
 /// Raw lines `from..=to`, exactly as they crossed (PROTO-CORE-API-R08), at
-/// most [`RAW_LOG_LIMIT`] of them.
+/// most [`RAW_LOG_LIMIT`] of them and [`RAW_LOG_BYTES`] as sent; a line longer
+/// than `clip` comes back as its head and size (PROTO-CORE-API-R138).
 pub(super) async fn raw_log(
     core: &Core,
     params: RawLogParams,
 ) -> Result<Vec<RawLogEntry>, ApiError> {
-    let lines = core.sessions.raw_log(
+    let clip = match params.clip {
+        None => None,
+        Some(clip) if (RAW_LOG_CLIP_MIN..=RAW_LOG_CLIP_MAX).contains(&clip) => {
+            // At most 1 MiB, so it fits a `usize` on every platform.
+            Some(clip as usize)
+        }
+        Some(clip) => {
+            return Err(ApiError::invalid_params(format!(
+                "clip must be from {RAW_LOG_CLIP_MIN} to {RAW_LOG_CLIP_MAX} bytes, not {clip}"
+            )));
+        }
+    };
+    let entries = core.sessions.raw_log(
         &params.id,
         params.from.unwrap_or(0),
         params.to.unwrap_or(u64::MAX),
         RAW_LOG_LIMIT,
         RAW_LOG_BYTES,
+        |line| {
+            let entry = raw_log_entry(line, clip);
+            // What the entry takes in the answer: its JSON, as Core writes
+            // it, and the comma before the next one. Escaping can make that
+            // several times the line's own length (PROTO-CORE-API-R139).
+            let cost = serde_json::to_vec(&entry).map_or(usize::MAX, |json| json.len() + 1);
+            (entry, cost)
+        },
     )?;
-    Ok(lines
-        .into_iter()
-        .map(|line| RawLogEntry {
-            index: line.index,
-            ts: line.ts,
-            dir: match line.dir {
-                Direction::Backend => RawDirection::Backend,
-                Direction::Host => RawDirection::Host,
-            },
-            line: line.line,
-        })
-        .collect())
+    Ok(entries)
+}
+
+/// One raw line as an entry: whole, or its head and size when it is longer
+/// than `clip` bytes.
+fn raw_log_entry(line: &RawLine, clip: Option<usize>) -> RawLogEntry {
+    let (text, head, size) = match clip {
+        Some(clip) if line.line.len() > clip => (
+            None,
+            Some(raw_log::head(&line.line, clip).to_string()),
+            Some(line.line.len() as u64),
+        ),
+        _ => (Some(line.line.clone()), None, None),
+    };
+    RawLogEntry {
+        index: line.index,
+        ts: line.ts.clone(),
+        dir: match line.dir {
+            Direction::Backend => RawDirection::Backend,
+            Direction::Host => RawDirection::Host,
+        },
+        line: text,
+        head,
+        size,
+    }
 }
 
 /// When Core gives a new session's backend its model, effort and permission
