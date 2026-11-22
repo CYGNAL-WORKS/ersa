@@ -193,12 +193,9 @@ async fn delete_files(
         &project.path,
         &workspace.path,
         &workspace.vcs_ref,
-        workspace::FolderTries {
-            held: Arc::clone(held) as _,
-            limit: core.config.folder_removal_limit,
-            gate: core.config.folder_gate.clone(),
-            window: Some(core.config.folder_try_window),
-        },
+        // Forced: the user was shown what the workspace held.
+        workspace::RemovalChecks::FORCED,
+        workspace::FolderTries::from_config(&core.config, Arc::clone(held) as _),
         &handlers::RepositoryTurns {
             core,
             project: &project.id,

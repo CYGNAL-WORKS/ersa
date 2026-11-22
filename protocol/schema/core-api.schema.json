@@ -2528,7 +2528,7 @@
         },
         "force": {
           "type": "boolean",
-          "description": "Remove even with uncommitted changes."
+          "description": "Remove even with uncommitted changes, and a folder git no longer lists as a worktree, whose changes git cannot count."
         }
       }
     },
