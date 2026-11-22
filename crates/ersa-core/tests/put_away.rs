@@ -422,23 +422,26 @@ async fn a_put_away_holds_the_workspace_while_a_try_it_gave_up_on_is_stuck() {
     assert!(folder(&workspace).exists(), "nothing else removed it");
     assert_eq!(s.listed(&workspace).await["state"], "put_away");
 
-    // The stuck try returns; then the workspace is removed.
+    // The stuck try returns; then the hold goes, and the workspace is put
+    // away, which nothing holds.
     gate.go();
-    let started = std::time::Instant::now();
-    loop {
-        let params = json!({ "id": session });
-        let _ = s.client.call("session.remove", params).await;
-        let remove = json!({ "id": workspace["id"], "force": true });
-        let answer = s.client.call("workspace.remove", remove).await;
-        if answer.get("result").is_some() {
-            break;
-        }
+    put_away_once_held(&s.core.core(), &workspace).await;
+}
+
+/// Waits, up to a generous limit, until nothing holds `workspace` and
+/// admission has it put away: a try at its folder given up on has ended.
+async fn put_away_once_held(core: &ersa_core::Core, workspace: &Value) {
+    let phase = || {
+        let state = core.admission.snapshot();
+        state.workspace(id(workspace)).map(|w| w.phase)
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while phase() != Some(ersa_core::admission::WorkspacePhase::PutAway) {
         assert!(
-            started.elapsed() < Duration::from_secs(30),
-            "the hold was never let go: {answer}"
+            tokio::time::Instant::now() < deadline,
+            "the hold was never let go: {:?}",
+            phase()
         );
-        // A try at the folder stops at the gate again: let it through.
-        gate.go();
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
@@ -650,20 +653,13 @@ async fn a_failed_removal_of_a_put_away_workspace_leaves_it_put_away() {
     reached(&gate).await;
     assert!(putting.await.unwrap().is_err());
     gate.go();
+    let core = s.core.core();
+    put_away_once_held(&core, &workspace).await;
+    // Its own try at the folder then stops at the gate and runs out.
     let remove = json!({ "id": workspace["id"], "force": true });
-    // Admitted once the try has returned; its own try at the folder then
-    // stops at the gate and runs out.
-    let started = std::time::Instant::now();
-    let answer = loop {
-        let request = s.client.request("workspace.remove", remove.clone()).await;
-        let stopped = tokio::time::timeout(Duration::from_secs(2), gate.reached()).await;
-        let answer = s.client.response(request).await;
-        if stopped.is_ok() {
-            break answer;
-        }
-        assert!(started.elapsed() < Duration::from_secs(30), "{answer}");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
+    let request = s.client.request("workspace.remove", remove).await;
+    reached(&gate).await;
+    let answer = s.client.response(request).await;
 
     assert_eq!(kind(&answer["error"]), "vcs_error", "{answer}");
     assert_eq!(s.listed(&workspace).await["state"], "put_away");
