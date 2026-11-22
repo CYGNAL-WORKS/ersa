@@ -871,41 +871,48 @@ pub(super) async fn workspace_remove(
         return Err(e.into());
     }
 
-    let force = params.force.unwrap_or(false);
-    let turns = RepositoryTurns {
-        core,
-        project: &project.id,
+    // As every removal (PROTO-CORE-API-R122): the folder, git's record and
+    // the branch, unless the branch holds work of its own or another
+    // worktree has it checked out. Whether it was kept is not reported.
+    let checks = workspace::RemovalChecks {
+        force: params.force.unwrap_or(false),
+        // An `error` workspace may be an add that was killed mid-way; its
+        // leftover `initializing` lock must not block removal.
+        after_failed_add: replaced == WorkspaceState::Error,
     };
-    let removed = match turns.turn().await {
-        // Kept until git is done with the repository's worktrees.
-        Ok(_turn) => {
-            workspace::git_worktree_remove(
-                transport.as_ref(),
-                &project.path,
-                &workspace.path,
-                force,
-                // An `error` workspace may be an add that was killed mid-way;
-                // its leftover `initializing` lock must not block removal.
-                replaced == WorkspaceState::Error,
-            )
-            .await
-        }
-        Err(e) => Err(e),
-    };
+    // Shared with each try at the folder, which keeps it until its thread
+    // returns: a try given up on that is still stuck holds the removal, so
+    // trying again meanwhile is refused and begins no second removal beside
+    // it, as for a delete (PROTO-CORE-API-R107).
+    let removing = Arc::new(removing);
+    let removed = workspace::git_worktree_delete(
+        transport.as_ref(),
+        &project.path,
+        &workspace.path,
+        &workspace.vcs_ref,
+        checks,
+        workspace::FolderTries::from_config(&core.config, Arc::clone(&removing) as _),
+        &RepositoryTurns {
+            core,
+            project: &project.id,
+        },
+    )
+    .await;
     if let Err(e) = removed {
-        // A refusal (locked, local changes without `force`, or a folder git
-        // does not list) leaves the worktree as it was, so it goes back to
-        // the state it had; any other failure leaves it in an unknown state.
+        // A refusal (locked, local changes or a folder git does not list
+        // without `force`, or no turn at the worktrees in time) leaves the
+        // worktree as it was, so it goes back to the state it had; any other
+        // failure leaves it in an unknown state.
         // Stored, then said: with the report the hold goes, and the found
         // sessions are theirs again.
         if e.is_refusal() {
             core.store.set_workspace_state(id, replaced).await?;
-            removing.end(not_removed);
+            end_held(removing, not_removed);
         } else {
             core.store
                 .set_workspace_state(id.clone(), WorkspaceState::Error)
                 .await?;
-            removing.end(Report::WorkspaceRemovalFailed { workspace: id });
+            end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
         }
         return Err(e.into());
     }
@@ -916,12 +923,27 @@ pub(super) async fn workspace_remove(
     // nothing begins on them until Core has let go of them.
     let quiet = core.sessions.quiet_found(&id).await;
     core.store.delete_workspace(id.clone()).await?;
-    removing.end(Report::WorkspaceRemoved {
-        workspace: id.clone(),
-    });
+    end_held(
+        removing,
+        Report::WorkspaceRemoved {
+            workspace: id.clone(),
+        },
+    );
     core.sessions.forget_found(quiet).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
+}
+
+/// Ends a removal whose tries at the folder shared it, with `report`. A try
+/// given up on whose thread has not returned still holds it: then the
+/// removal ends when that thread lets go, which admission takes as a failed
+/// removal, as `report` then is (a try that ran out fails the removal), so
+/// the workspace stays held until then (PROTO-CORE-API-R107).
+pub(super) fn end_held(removing: Arc<admission::UnderWay>, report: Report) {
+    match Arc::try_unwrap(removing) {
+        Ok(removing) => removing.end(report),
+        Err(still_held) => drop(still_held),
+    }
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by

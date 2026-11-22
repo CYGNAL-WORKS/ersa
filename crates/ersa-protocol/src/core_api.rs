@@ -521,7 +521,8 @@ pub struct WorkspaceCreateParams {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceRemoveParams {
     pub id: String,
-    /// Remove even with uncommitted changes.
+    /// Remove even with uncommitted changes, and a folder git no longer
+    /// lists as a worktree, whose changes git cannot count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub force: Option<bool>,
 }
