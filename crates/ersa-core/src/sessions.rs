@@ -1557,7 +1557,7 @@ impl SessionManager {
     /// its subscribers.
     async fn let_go(&self, handle: &Arc<Handle>, row: &SessionRow) {
         let id = handle.id.as_str();
-        // Its scratch folder goes with it (PROTO-CORE-API-R28), once no
+        // Its scratch folder goes with it (PROTO-CORE-API-R121), once no
         // copying holds it. Never past a bound: a file system that hangs
         // leaves the folder behind, logged, rather than hold up the
         // removal.

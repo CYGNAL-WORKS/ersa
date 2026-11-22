@@ -749,7 +749,7 @@ pub fn remove_entry(path: &Path) -> io::Result<()> {
     }
 }
 
-/// Removes the session's scratch folder (PROTO-CORE-API-R28), only when
+/// Removes the session's scratch folder (PROTO-CORE-API-R121), only when
 /// every folder on the way to it is a real one, so a link at `.ersa` never
 /// leads the removal elsewhere.
 pub fn remove_scratch(workspace: &Path, session_id: &str) -> io::Result<()> {
