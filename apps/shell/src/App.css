@@ -1,4 +1,5 @@
-/* The window: the rail on the left, the transcript with the composer beneath it in the centre (LAY-SHELL). */
+/* The window: the rail on the left, the transcript with the composer beneath it in the centre, and the workbench at
+   the right while it is open (LAY-SHELL). */
 
 /* The window's whole viewport, edge to edge. */
 .app {
@@ -38,8 +39,24 @@
   gap: var(--space-sm);
 }
 
+/* Beside the rail: the stage, then the workbench at the right while it is open. The workbench's width is a share of
+   this region's, the width it shares with the transcript area (FLOW-READ-RAW-LOG-R16). */
+.work {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The stage takes what the workbench leaves; its pages (the sessions page over the session behind it) share one cell. */
+.stages {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .stage {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
   display: grid;
   grid-template-rows: 1fr auto;

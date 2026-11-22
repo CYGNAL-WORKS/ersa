@@ -81,7 +81,8 @@ export function mergePatch(target: unknown, patch: unknown): unknown {
   return out;
 }
 
-function objectOr(value: unknown): Record<string, unknown> | undefined {
+/** `value` as a JSON object, or undefined when it is anything else. */
+export function objectOr(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 

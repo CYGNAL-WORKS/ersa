@@ -179,3 +179,10 @@
     animation: none;
   }
 }
+
+/* An item that turns something on and off shows a check at its trailing edge while it is on, size-icon-sm in ink. */
+.menu-on {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-ink);
+}

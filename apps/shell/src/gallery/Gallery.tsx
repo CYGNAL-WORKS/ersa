@@ -10,6 +10,7 @@ import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
 import { ArchivedNote } from "../components/ArchivedNote";
+import { Workbench } from "../components/Workbench";
 import { AgentLink, AgentText, CodeBlock } from "../components/AgentText";
 import { AttachmentChip } from "../components/AttachmentChip";
 import { Composer } from "../components/Composer";
@@ -287,7 +288,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {}, workbenchOpen: true, onDeveloperPane: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -782,6 +783,13 @@ const oneBackend = { local: [claudeCode] };
 
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
+/** The workbench open at the right of a region standing in for the window beside the rail, in a resize edge's state. */
+const workbench = (force?: "hover" | "pressed" | "focus") => (
+  <div className="gallery-workbench">
+    <div className="gallery-workbench-stage" />
+    <Workbench open width={undefined} eases={false} onResize={() => {}} onClose={() => {}} focusAfterClose={() => null} force={force} />
+  </div>
+);
 /** Room above a composer for its status line, which grows upward over what is above it. */
 const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
 /** Room above a composer for its attach menu, which opens upward from attach. */
@@ -1562,6 +1570,17 @@ const entries: Entry[] = [
           <ContextRing used={0.3} windows={[weeklyWindow, fiveHourWindow, overageWindow]} now={galleryNow} force="focus" />
         </div>,
       ],
+    ],
+  },
+  {
+    // The workbench at the window's right with the developer pane's head (docs/design/WORKBENCH.md, The workbench).
+    name: "Workbench",
+    wide: true,
+    states: [
+      ["Open", workbench()],
+      ["Resize edge under the pointer", workbench("hover")],
+      ["Resize edge dragged", workbench("pressed")],
+      ["Resize edge, keyboard focus", workbench("focus")],
     ],
   },
   {
