@@ -166,3 +166,15 @@
   position-area: block-start span-inline-end;
   position-try-fallbacks: none;
 }
+
+/* A region standing in for the window beside the rail: the stage on the canvas, and the workbench at its right. */
+.gallery-workbench {
+  display: flex;
+  height: var(--size-card-max);
+  background: var(--material-wash);
+}
+
+.gallery-workbench-stage {
+  flex: 1;
+  min-width: 0;
+}

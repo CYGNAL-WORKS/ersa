@@ -17,8 +17,9 @@ export type MenuEntry =
       /** A key that does the same, at the item's trailing edge. */
       keyHint?: string;
       /**
-       * In a submenu: whether it is the chosen option, marked with a check. Left out, the item is an action rather than
-       * an option, as Move to section's New section… is.
+       * In a submenu: whether it is the chosen option, marked with a check before its label. Left out, the item is an
+       * action rather than an option, as Move to section's New section… is. In a menu of its own: the item turns
+       * something on and off, as Developer pane does, and shows a check at its trailing edge while it is on.
        */
       checked?: boolean;
     }
@@ -209,6 +210,9 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
         const sub = entry.kind === "submenu";
         const subOpen = sub && submenu === i;
         const anchor = `--menu-${anchors}-${i}`;
+        // An option in a submenu is one of a set; an item with a check in a menu of its own turns something on and off.
+        const checked = entry.kind === "item" ? entry.checked : undefined;
+        const option = checked !== undefined;
         return (
           <li key={i} role="none">
             <button
@@ -216,7 +220,7 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
                 itemRefs.current[i] = el;
               }}
               type="button"
-              role={nested && entry.kind === "item" && entry.checked !== undefined ? "menuitemradio" : "menuitem"}
+              role={option ? (nested ? "menuitemradio" : "menuitemcheckbox") : "menuitem"}
               className="menu-item"
               data-takes={takes(entry) || undefined}
               data-danger={(entry.kind === "item" && entry.danger) || undefined}
@@ -224,7 +228,7 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
               aria-disabled={off || undefined}
               aria-haspopup={sub ? "menu" : undefined}
               aria-expanded={sub ? subOpen : undefined}
-              aria-checked={nested && entry.kind === "item" && entry.checked !== undefined ? entry.checked : undefined}
+              aria-checked={checked}
               style={sub ? ({ anchorName: anchor } as CSSProperties) : undefined}
               onPointerEnter={(event) => {
                 // Keyboard focus in the submenu the pointer is about to close comes back to the item under the pointer,
@@ -266,6 +270,11 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
                 <span className="menu-label">{entry.label}</span>
                 {entry.kind === "item" && entry.keyHint && <span className="menu-key">{entry.keyHint}</span>}
                 {sub && entry.current && <span className="menu-current">{entry.current}</span>}
+                {!nested && checked && (
+                  <span className="menu-on">
+                    <Icon icon={Check} size="icon-sm" />
+                  </span>
+                )}
                 {sub && (
                   <span className="menu-chevron">
                     <Icon icon={ChevronRight} size="icon-sm" />
