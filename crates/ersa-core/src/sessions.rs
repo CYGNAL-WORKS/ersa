@@ -359,9 +359,16 @@ struct Handle {
     /// What the session's record says of it, as last read.
     presented: Mutex<Presented>,
     hub: Mutex<Hub>,
-    /// The lines exchanged with the backend since Core started it, for the
-    /// developer pane.
+    /// The lines exchanged with the backend while Core holds the session
+    /// open, across every run of its backend, for the developer pane
+    /// (PROTO-CORE-API-R137).
     raw: Mutex<RawLog>,
+    /// The index the session's next raw line gets. Kept here rather than in
+    /// a run's sink or in the raw log, since the handle lasts as long as
+    /// Core holds the session: a backend started again, or a raw log let go
+    /// and held again, goes on from here and never uses an index twice
+    /// (PROTO-CORE-API-R136).
+    raw_next: Arc<AtomicU64>,
     /// The fact that ended the backend the last time Core ran it, and when
     /// Core learnt it: shown again at the end of a view opened afresh, since
     /// it is Core's knowledge and never in the record.
@@ -801,6 +808,7 @@ impl Handle {
             }),
             hub: Mutex::default(),
             raw: Mutex::default(),
+            raw_next: Arc::default(),
             ending: Mutex::new(None),
             record_read: tokio::sync::Mutex::new(None),
             version_check: tokio::sync::Mutex::new(None),
@@ -1379,6 +1387,7 @@ impl SessionManager {
             &handle.id,
             Arc::clone(&self.app_log),
             Arc::clone(&self.admission),
+            Arc::clone(&handle.raw_next),
             fed_tx,
         ));
         let (started_tx, started_rx) = watch::channel(Started::Pending);
@@ -2107,19 +2116,21 @@ impl SessionManager {
         bounded(async move { session.answer_question(&request_id, reply).await }).await
     }
 
-    /// Raw lines `from..=to` of the session's in-memory raw log, at most
-    /// `limit` of them and about `max_bytes` of text.
-    pub fn raw_log(
+    /// Entries for raw lines `from..=to` of the session's in-memory raw log,
+    /// at most `limit` of them and `max_bytes` by the cost `entry` gives
+    /// each ([`RawLog::read`]).
+    pub fn raw_log<T>(
         &self,
         id: &str,
         from: u64,
         to: u64,
         limit: usize,
         max_bytes: usize,
-    ) -> Result<Vec<RawLine>, SessionError> {
+        entry: impl FnMut(&RawLine) -> (T, usize),
+    ) -> Result<Vec<T>, SessionError> {
         let handle = self.handle(id)?;
         let raw = lock(&handle.raw);
-        Ok(raw.read(from, to, limit, max_bytes))
+        Ok(raw.read(from, to, limit, max_bytes, entry))
     }
 
     /// Subscribes a connection to a session's events from `from_seq` on
@@ -2772,7 +2783,10 @@ fn counting_host_lines<F: std::future::Future>(
 }
 
 struct SinkInner {
-    next_index: u64,
+    /// The session's count of raw lines ([`Handle::raw_next`]), shared with
+    /// the runs before and after this one. Only taken from under the sink's
+    /// lock, so lines get their indices in the order they are recorded.
+    next_index: Arc<AtomicU64>,
     /// `None` once Core has closed the sink, which ends the pipeline.
     fed: Option<mpsc::UnboundedSender<Fed>>,
     start_done: bool,
@@ -2794,6 +2808,7 @@ impl CoreSink {
         session_id: &str,
         app_log: Arc<AppLog>,
         admission: Arc<Admission>,
+        next_index: Arc<AtomicU64>,
         fed: mpsc::UnboundedSender<Fed>,
     ) -> Self {
         CoreSink {
@@ -2801,7 +2816,7 @@ impl CoreSink {
             app_log,
             admission,
             inner: Mutex::new(SinkInner {
-                next_index: 0,
+                next_index,
                 fed: Some(fed),
                 start_done: false,
                 deferred_exit: None,
@@ -2825,12 +2840,11 @@ impl CoreSink {
     /// Stamps and queues one line.
     fn push_line(inner: &mut SinkInner, dir: Direction, line: String) {
         let raw = RawLine {
-            index: inner.next_index,
+            index: inner.next_index.fetch_add(1, Ordering::SeqCst),
             ts: now_rfc3339(),
             dir,
             line,
         };
-        inner.next_index += 1;
         if dir == Direction::Host {
             // Counted for the adapter call recording it, when one counts.
             let _ = HOST_LINES_WRITTEN.try_with(|written| written.fetch_add(1, Ordering::SeqCst));
@@ -2868,7 +2882,7 @@ impl CoreSink {
 
     /// The index the next line will get.
     fn next_index(&self) -> u64 {
-        lock(&self.inner).next_index
+        lock(&self.inner).next_index.load(Ordering::SeqCst)
     }
 
     fn exit_fact(&self, exit: io::Result<ProcessExit>) -> LifecycleFact {
@@ -4019,6 +4033,7 @@ mod tests {
             "s-gated",
             Arc::clone(&manager.app_log),
             Arc::clone(&manager.admission),
+            Arc::default(),
             mpsc::unbounded_channel().0,
         ));
         let finished = watch::Sender::new(false);
@@ -4109,7 +4124,7 @@ mod tests {
             fed.send(Fed::Line(line)).unwrap();
             // In the raw log once projected, under the hub's lock.
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while lock(&handle.raw).read(0, 1, 1, usize::MAX).is_empty() {
+            while lock(&handle.raw).is_empty() {
                 assert!(std::time::Instant::now() < deadline, "never projected");
                 std::thread::sleep(Duration::from_millis(5));
             }

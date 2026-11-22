@@ -278,7 +278,20 @@ fn result_examples() -> Vec<(Method, Value)> {
                 index: 0,
                 ts: "2026-10-31T12:00:00Z".into(),
                 dir: RawDirection::Host,
-                line: r#"{"type":"user"}"#.into(),
+                line: Some(r#"{"type":"user"}"#.into()),
+                head: None,
+                size: None,
+            }]),
+        ),
+        (
+            Method::SessionRawLog,
+            to_value(&vec![RawLogEntry {
+                index: 1,
+                ts: "2026-10-31T12:00:00Z".into(),
+                dir: RawDirection::Backend,
+                line: None,
+                head: Some("{\"type\":".into()),
+                size: Some(2048),
             }]),
         ),
         (
@@ -592,6 +605,7 @@ fn params_examples() -> Vec<(Method, Value)> {
                 id: "s-1".into(),
                 from: Some(0),
                 to: None,
+                clip: Some(1024),
             }),
         ),
         (
