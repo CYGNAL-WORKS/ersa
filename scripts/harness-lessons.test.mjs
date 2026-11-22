@@ -1,4 +1,4 @@
-// scripts/harness-lessons.mjs: the per-reviewer count the harness pass starts from.
+// scripts/harness-lessons.mjs: the per-reviewer counts, all and alone, the harness pass starts from.
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,10 +59,10 @@ test("each blocking new finding by this account is counted against the reviewers
       ["medium", "crates/ersa-core/src/stale.rs:1", []],
     ],
   );
-  assert.deepEqual(tally([got]), [["code", 2], ["spec", 1], ["unnamed", 1]], "a finding two reviewers reported counts for each");
+  assert.deepEqual(tally([got]), [["code", 2, 1], ["spec", 1, 0], ["unnamed", 1, 1]], "a finding two reviewers reported counts for each, and is alone for neither");
   const text = report([got], ME);
   assert.match(text, /1 pull request\(s\) merged since the last pass; 1 counted, from merge reviews posted by KPandaK; 3 blocking finding\(s\) at merge\./);
-  assert.match(text, /Blocking findings by reviewer: code 2, spec 1, unnamed 1\./);
+  assert.match(text, /Blocking findings by reviewer: code 2 \(1 alone\), spec 1 \(0 alone\), unnamed 1 \(1 alone\)\./);
   assert.match(text, /send\.rs:40 \(aaaaaaa\), found by code, spec: hangs\./);
   assert.match(text, /stale\.rs:1 \(ccccccc\), found by unnamed/);
 });

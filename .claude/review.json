@@ -16,6 +16,7 @@
       "scripts/hooks/**",
       "scripts/manifest.mjs",
       "scripts/queue-merge-review.mjs",
+      "deps-policy.toml",
       "**/CLAUDE.md",
       "**/CLAUDE.local.md",
       "**/.claude/**",

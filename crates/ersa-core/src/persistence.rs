@@ -24,6 +24,7 @@ use serde_json::{Map, Value};
 
 use crate::admission::{Existing, ExistingWorkspace, Folder, WorkspacePhase};
 use crate::settings;
+use crate::workspace::Checkout;
 
 mod sections;
 mod sessions;
@@ -48,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0012_session_unseen.sql"),
     include_str!("persistence/0013_section_names_exact.sql"),
     include_str!("persistence/0014_session_last_activity_dropped.sql"),
+    include_str!("persistence/0015_workspace_put_away.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -372,6 +374,7 @@ impl Store {
                 let kind: WorkspaceKind = from_sql_enum(row, 2)?;
                 let phase = match from_sql_enum(row, 3)? {
                     WorkspaceState::Ready => WorkspacePhase::Ready,
+                    WorkspaceState::PutAway => WorkspacePhase::PutAway,
                     WorkspaceState::Creating | WorkspaceState::Removing | WorkspaceState::Error => {
                         WorkspacePhase::Error
                     }
@@ -395,13 +398,77 @@ impl Store {
 
     /// Marks every workspace a previous Core left `creating` or `removing` as
     /// `error`, and returns how many there were. Run at startup, before any
-    /// request, when no operation can still be in flight.
+    /// request, when no operation can still be in flight. A put-away
+    /// workspace whose `workspace.remove` was stopped part way had no folder
+    /// to lose, so it is `put_away` again, its sessions still resumable
+    /// (PROTO-CORE-API-R135): it is the one `removing` workspace with what
+    /// its folder had checked out stored.
     pub async fn reconcile_workspaces(&self) -> Result<usize> {
         self.call(|conn| {
             Ok(conn.execute(
-                "UPDATE workspaces SET state = 'error' WHERE state IN ('creating', 'removing')",
+                "UPDATE workspaces
+                 SET state = CASE
+                     WHEN state = 'removing'
+                          AND (put_away_branch IS NOT NULL OR put_away_commit IS NOT NULL)
+                     THEN 'put_away' ELSE 'error' END
+                 WHERE state IN ('creating', 'removing')",
                 [],
             )?)
+        })
+        .await
+    }
+
+    /// Puts the workspace away in the store: what its folder has checked
+    /// out, and the state `put_away`, in one transaction, before anything of
+    /// the folder is removed (FLOW-CLEAN-UP-R02).
+    pub async fn put_workspace_away(&self, id: String, checkout: Checkout) -> Result<()> {
+        let (branch, commit) = match checkout {
+            Checkout::Branch(branch) => (Some(branch), None),
+            Checkout::Commit(commit) => (None, Some(commit)),
+        };
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces
+                 SET state = 'put_away', put_away_branch = ?2, put_away_commit = ?3
+                 WHERE id = ?1",
+                params![id, branch, commit],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The workspace is `ready` again, nothing stored of a put-away: one
+    /// refused before anything of its folder was removed.
+    pub async fn set_workspace_ready(&self, id: String) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces
+                 SET state = 'ready', put_away_branch = NULL, put_away_commit = NULL
+                 WHERE id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// What the workspace's folder had checked out when it was put away;
+    /// `None` for a workspace that was not put away, or is gone.
+    pub async fn put_away_checkout(&self, id: String) -> Result<Option<Checkout>> {
+        self.call(move |conn| {
+            let stored: Option<(Option<String>, Option<String>)> = conn
+                .query_row(
+                    "SELECT put_away_branch, put_away_commit FROM workspaces WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            Ok(match stored {
+                Some((Some(branch), _)) => Some(Checkout::Branch(branch)),
+                Some((None, Some(commit))) => Some(Checkout::Commit(commit)),
+                Some((None, None)) | None => None,
+            })
         })
         .await
     }
@@ -991,6 +1058,135 @@ mod tests {
             store.insert_workspace(second).await,
             Err(Error::Conflict(_))
         ));
+    }
+
+    /// Migration 15 rebuilds the workspaces table, which sessions refer to,
+    /// keeping every row, its order and the root index, and lets a
+    /// workspace be put away with what it had checked out.
+    #[tokio::test]
+    async fn migration_15_keeps_every_workspace_and_lets_one_be_put_away() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        let conn = database_at(&path, 14);
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't0', 1);
+             INSERT INTO workspaces (id, project_id, path, vcs_ref, state, created_at, kind)
+                 VALUES ('w-root', 'p', '/r', '', 'ready', 't0', 'root'),
+                        ('w-b', 'p', '/w/b', 'ersa/w-b', 'ready', 't1', 'isolated'),
+                        ('w-a', 'p', '/w/a', 'ersa/w-a', 'error', 't1', 'isolated');
+             INSERT INTO sessions (id, workspace_id, host_id, backend)
+                 VALUES ('s', 'w-b', 'local', 'claude-code');",
+        )
+        .expect("old rows");
+        drop(conn);
+
+        let store = Store::open(&path).expect("migrates");
+        let listed: Vec<(String, WorkspaceState)> = store
+            .workspaces("p".into())
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|w| (w.id, w.state))
+            .collect();
+        let expected = [
+            ("w-root", WorkspaceState::Ready),
+            ("w-a", WorkspaceState::Error),
+            ("w-b", WorkspaceState::Ready),
+        ];
+        let expected: Vec<(String, WorkspaceState)> =
+            expected.map(|(id, state)| (id.to_string(), state)).into();
+        assert_eq!(listed, expected);
+        assert!(store.session("s".into()).await.expect("get").is_some());
+        let dangling: i64 = store
+            .call(|conn| {
+                Ok(
+                    conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .await
+            .expect("checked");
+        assert_eq!(dangling, 0);
+
+        let checkout = Checkout::Commit("abc".into());
+        store
+            .put_workspace_away("w-b".into(), checkout.clone())
+            .await
+            .expect("put away");
+        let workspace = store.workspace("w-b".into()).await.expect("get").unwrap();
+        assert_eq!(workspace.state, WorkspaceState::PutAway);
+        let stored = store.put_away_checkout("w-b".into()).await.expect("read");
+        assert_eq!(stored, Some(checkout));
+        let second_root = Workspace {
+            id: "w-2".into(),
+            kind: WorkspaceKind::Root,
+            ..workspace
+        };
+        assert!(matches!(
+            store.insert_workspace(second_root).await,
+            Err(Error::Conflict(_))
+        ));
+    }
+
+    /// At startup a `removing` workspace that was put away is put away again
+    /// (PROTO-CORE-API-R135); any other `creating` or `removing` one is
+    /// `error`. A put-away one stays put away.
+    #[tokio::test]
+    async fn startup_puts_a_put_away_workspaces_stopped_removal_back_to_put_away() {
+        let (_dir, store) = temp_store();
+        store.ensure_local_host("pc".into()).await.expect("host");
+        store
+            .insert_project(
+                Project {
+                    id: "p".into(),
+                    host_id: LOCAL_HOST_ID.into(),
+                    path: "/r".into(),
+                    name: "r".into(),
+                    vcs: Vcs::Git,
+                    trusted: false,
+                },
+                "w-root".into(),
+                "/r".into(),
+            )
+            .await
+            .expect("project");
+        for id in ["w-away", "w-removing", "w-stays"] {
+            let workspace = Workspace {
+                id: id.into(),
+                project_id: "p".into(),
+                kind: WorkspaceKind::Isolated,
+                path: format!("/w/{id}"),
+                vcs_ref: format!("ersa/{id}"),
+                state: WorkspaceState::Ready,
+            };
+            store.insert_workspace(workspace).await.expect("insert");
+        }
+        let branch = Checkout::Branch("ersa/w-away".into());
+        for id in ["w-away", "w-stays"] {
+            store
+                .put_workspace_away(id.into(), branch.clone())
+                .await
+                .expect("put away");
+        }
+        for id in ["w-away", "w-removing"] {
+            store
+                .set_workspace_state(id.into(), WorkspaceState::Removing)
+                .await
+                .expect("removing");
+        }
+
+        assert_eq!(store.reconcile_workspaces().await.expect("reconcile"), 2);
+
+        for (id, state) in [
+            ("w-away", WorkspaceState::PutAway),
+            ("w-removing", WorkspaceState::Error),
+            ("w-stays", WorkspaceState::PutAway),
+        ] {
+            let workspace = store.workspace(id.into()).await.expect("get").unwrap();
+            assert_eq!(workspace.state, state, "{id}");
+        }
     }
 
     #[tokio::test]

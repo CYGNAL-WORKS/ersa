@@ -297,6 +297,7 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         | Refusal::RootWorkspace
         | Refusal::WorkspaceBusy
         | Refusal::WorkspaceHasSessions
+        | Refusal::SessionInUse
         | Refusal::NoSection
         | Refusal::NoSendToCancel
         // A fork's own refusal, worded where the fork asks.

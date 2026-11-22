@@ -36,7 +36,7 @@ pub const SEND_SILENCE: Duration = Duration::from_secs(30);
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The Core API versions this Shell's Interface speaks.
-pub const API_VERSIONS: &[u32] = &[6];
+pub const API_VERSIONS: &[u32] = &[7];
 
 /// The longest line we read from Core: the same cap Core puts on the lines it reads.
 const MAX_LINE_BYTES: usize = ersa_core::state::MAX_LINE_BYTES;
