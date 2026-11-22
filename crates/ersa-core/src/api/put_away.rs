@@ -31,9 +31,10 @@ use crate::workspace::{self, VcsError};
 ///
 /// A refusal before anything was removed (no turn in time, a checkout that
 /// can't be read, a lock, local changes, a folder git does not list)
-/// leaves the workspace `ready`, as it was: put away, a later pass would
-/// finish it without asking. Any other failure leaves it `put_away`, with
-/// what is left of the folder for the next put-away to finish.
+/// leaves the workspace `ready`, as it was (PROTO-CORE-API-R140): put
+/// away, its whole folder would go unchecked when it is put back. Any
+/// other failure leaves it `put_away` (R141), what is left of the folder
+/// going when it is put back (FLOW-CLEAN-UP-R03).
 pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
     let workspace = core
         .store
