@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import type { SessionValues } from "./controls";
 import { StartStop, lastUsedFrom, readChoices, rememberPatch, startSession } from "./start";
@@ -290,6 +290,27 @@ describe("stop while a new session starts", () => {
     expect(await started).toMatchObject({ ok: true, session: { id: "s1" } });
     expect(methods()).not.toContain("session.remove");
     expect(methods()).not.toContain("workspace.remove");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R08
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("creates no session when stopped while the workspace is made, and removes that workspace", async () => {
+    let made: (workspace: typeof isolated) => void = () => {};
+    const { client, methods } = fakeClient({
+      ...working,
+      "workspace.create": () => new Promise((resolve) => (made = resolve)),
+      "workspace.remove": () => ({}),
+    });
+    const placed = vi.fn();
+    const stop = new StartStop(client);
+    const started = startSession(client, values("isolated"), "Fix the build", stop, [], placed);
+    await new Promise((r) => setTimeout(r, 0));
+    stop.stop();
+    made(isolated);
+    expect(await started).toEqual({ ok: false, stopped: true });
+    expect(methods()).toEqual(["workspace.create", "workspace.remove"]);
+    // The rail is never told of a workspace for a start that was stopped, so no tile flashes in it.
+    expect(placed).not.toHaveBeenCalled();
   });
 
   // verifies: FLOW-SEND-MESSAGE-R03
