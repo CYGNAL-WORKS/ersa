@@ -36,7 +36,7 @@ The transcript header shows the active session's title. The title is renamed in 
 From top to bottom: New session with the arrange button beside it, the groups of tiles, and the foot. The rail has no way to add a project: the new-session screen's project chip is the only one (FLOW-NEW-SESSION). The design documents say how each part and each state looks. How the user pins, renames and sections sessions, and groups, sorts and filters the rail, is FLOW-ORGANIZE-SESSIONS; archiving and deleting is FLOW-ARCHIVE-DELETE-SESSION; forking is FLOW-FORK-SESSION; cleaning up is FLOW-CLEAN-UP.
 
 - **New session** opens the new-session screen.
-- **The arrange button** is an icon button beside New session that opens the arrange menu: Group by ▸, Sort by ▸ and Show ▸, each naming its current choice and its submenu marking it, then New section, Reset to defaults and View all. Until the title bar is built, Settings is its last item, apart from the rest (The settings page, below). The choices and their defaults are FLOW-ORGANIZE-SESSIONS's.
+- **The arrange button** is an icon button beside New session that opens the arrange menu: Group by ▸, Sort by ▸ and Show ▸, each naming its current choice and its submenu marking it, then New section, Reset to defaults and View all. Until the title bar is built, Developer pane and Settings are its last items, apart from the rest (The workbench and The settings page, below). The choices and their defaults are FLOW-ORGANIZE-SESSIONS's.
 - **The sessions page**, opened by View all, fills the transcript area: the heading "Sessions"; Active and Archived tabs; at the trailing side a search button that opens a search field, and New session; then one row per session with its title, the mark its tile shows when it shows one, its project (and host, when not local), and when it was last active. Its time is the last activity, else the creation. A row's menu is the tile's menu. While the sessions are being read the page says so; when they can't be read it says so with the reason; with nothing to list it says so. While the page shows, the composer, the session controls and the transcript header are hidden; the active session stays active, its tile keeps its highlight, and nothing typed reaches it. The session the transcript area was showing stays laid out behind the page, unseen and out of reach, so a message being written and the transcript's place are there when the same session is chosen again. Choosing a row opens the session (FLOW-ORGANIZE-SESSIONS).
 - **The settings page.** Settings has a menu of its own in the title bar, as Claude Desktop's has (owner, 2026-11-21). The title bar is not specified yet, so until it is built the arrange menu's last item opens the page, and that item goes when the title bar's menu arrives. The page fills the transcript area as the sessions page does: the heading "Settings", the names of its sections, and the chosen section's controls. Storage is its first section and the one it opens on; what Storage holds is FLOW-CLEAN-UP's. A setting takes effect when it is changed: the page has no Save. While the page shows, what the sessions page hides is hidden, and the active session stays active and laid out behind it in the same way. Choosing a tile, New session or View all leaves it.
 - **Groups.** Tiles sit in groups under headings, by the arrangement. Pinned sessions lead in a Pinned group, whatever the grouping, which is absent while nothing pinned is shown. Grouped by none, the rest are one list with no heading.
@@ -59,6 +59,10 @@ From top to bottom: New session with the arrange button beside it, the groups of
 
 The shelf pulls out of the tile it belongs to, at the tile's height, and lies over the edge of the transcript: it never pushes the transcript aside, narrows it, or scrolls it. It is the width the design documents give it, and when it would run past the foot of the window it rises to fit. `FLOW-APPROVE-PERMISSION` says when it opens and closes, what it holds, and how it answers.
 
+## The workbench
+
+The workbench is closed until the user opens it, and nothing a person does in Ersa needs it. Open, it fills the window's height at the right, beside the transcript and the composer, which narrow to make room; the rail keeps its width. It holds one pane at a time, and the Developer pane is the only one until M2, so it has no tabs. Its opener is Developer pane in the arrange menu, above Settings, and like Settings it is there until the title bar is built. While the sessions page or the settings page shows, the workbench stays, and its pane still shows the active session. `FLOW-READ-RAW-LOG` says how the workbench opens, closes, resizes and is remembered, and what the developer pane does; `docs/design/WORKBENCH.md` says how both look.
+
 ## Development
 
 A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses its own Core: the daily build's, on the label `daily` (ADR 0035), launched and quit as the user's own, with the foot empty.
@@ -66,7 +70,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 ## Open questions
 
 - Minimum window size, and which region collapses first when narrow.
-- Whether the workbench shows one pane at a time (tabs) or allows splits.
+- How M2's panes share the workbench: one at a time behind tabs, or splits. With one pane it has neither.
 - Where global status (connected hosts, usage today) lives, and where Core's version and API version are shown now that the rail's foot is silent while all is well.
 - Whether a turn too short for a tile to show as working should still leave its session unseen.
 - Whether the tree keeps its tiles, marked as out of date, while Ersa can't reach Core, so a short drop doesn't empty the rail.
@@ -88,6 +92,7 @@ Of the rail described above, what is built is the tree grouped by project, by se
 
 ## Changes
 
+- 2026-11-22: the workbench specified for its first pane, by the owner's decision of 2026-11-22 that the developer pane lives in the main window (The workbench): closed by default, at the right, one pane, its opener in the arrange menu until the title bar is built; how it opens, resizes and is remembered is FLOW-READ-RAW-LOG's. The open question on tabs or splits is now M2's. No requirement IDs changed.
 - 2026-11-21: owner's direction of 2026-11-21 that Ersa has a settings page and that cleaning up lives there (The rail): the settings page fills the transcript area as the sessions page does, with Storage as its first section (FLOW-CLEAN-UP). Settings opens from a menu of its own in a title bar Ersa will have, like Claude Desktop's (owner, 2026-11-21); the title bar is an open question, so until it is built the arrange menu's last item opens the page. No requirement IDs changed.
 - 2026-11-20: (The rail) Copy session ID is unavailable until the backend's own tools can find the session, a fork until its first message (FLOW-RESUME-SESSION-R16, R18). No requirement IDs changed.
 - 2026-11-19: from #340 inbox (The rail): Copy session ID is unavailable while Core lists no backend id for the session, following FLOW-RESUME-SESSION-R07's retirement for R15 and R16. No requirement IDs changed.
