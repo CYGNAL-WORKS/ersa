@@ -1149,7 +1149,10 @@ impl Drop for LetAddsGo {
 /// [`RefusedFork`], its cleanup under way. With `held_turn`, another
 /// `workspace.create` asked for the project's turn while the fork's add
 /// held it, and once the fork's add is done takes the turn and keeps it,
-/// its own add stopped, longer than the cleanup's 300 ms wait.
+/// its own add stopped, longer than the cleanup's wait. Every wait for a
+/// turn is 10 seconds: the second create waits from before Core begins
+/// shutting down until the fork's add is done, which must stay under it
+/// however busy the machine is, and the cleanup gives up after it.
 async fn refused_fork(removal: support::deleting::Removal, held_turn: bool) -> RefusedFork {
     use support::deleting::FailingGit;
     let fake = Arc::new(FakeAdapter::new(1));
@@ -1161,7 +1164,7 @@ async fn refused_fork(removal: support::deleting::Removal, held_turn: bool) -> R
         move |config| {
             support::detecting(config);
             config.command_transport = Some(ersa_core::CommandTransport(failing));
-            config.worktree_turn_wait = Duration::from_millis(300);
+            config.worktree_turn_wait = Duration::from_secs(10);
         },
         adapters,
     )
@@ -1171,7 +1174,7 @@ async fn refused_fork(removal: support::deleting::Removal, held_turn: bool) -> R
     let repo = core.dir.path().join("repo");
     let create = json!({ "project_id": project["id"] });
     let made = client.request("workspace.create", create.clone()).await;
-    adds.reached().await;
+    reached(&adds).await;
     adds.go();
     let original = client.response(made).await["result"].clone();
     let id = idle_in(&mut client, &original).await;
@@ -1181,7 +1184,7 @@ async fn refused_fork(removal: support::deleting::Removal, held_turn: bool) -> R
     let store = ersa_core::persistence::Store::open(&db).expect("open");
 
     let _fork = client.request("session.fork", json!({ "id": id })).await;
-    adds.reached().await;
+    reached(&adds).await;
     if held_turn {
         let mut holder = core.client().await;
         let _holding = holder.request("workspace.create", create).await;
@@ -1211,6 +1214,13 @@ async fn refused_fork(removal: support::deleting::Removal, held_turn: bool) -> R
         store,
         adds,
     }
+}
+
+/// Waits, up to a minute, for a request to stop at `gate`.
+async fn reached(gate: &ersa_core::Gate) {
+    tokio::time::timeout(Duration::from_secs(60), gate.reached())
+        .await
+        .expect("a request reached the gate in time");
 }
 
 /// Every stored workspace's id and state, in the order they were made.
@@ -1308,7 +1318,7 @@ async fn a_fork_cleanup_refused_its_turn_leaves_the_workspace_as_it_was() {
     let fork = refused_fork(support::deleting::Removal::DropsRecordThenFails, true).await;
     let _let_go = LetAddsGo(Arc::clone(&fork.adds));
     // The second create took the turn: its add stopped.
-    fork.adds.reached().await;
+    reached(&fork.adds).await;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     while !log.warned(
