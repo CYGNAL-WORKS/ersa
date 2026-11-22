@@ -230,3 +230,39 @@ test("the trust question about a long folder fits again when the window is narro
     }).toPass({ timeout: 2_000 });
   }
 });
+
+// #376: why a folder could not be added stays only until the user chooses another project from the chip.
+test("a failed add's reason leaves once another project is chosen", async ({ ersa }) => {
+  const { page } = ersa;
+  const first = path.join(ersa.dir, "first");
+  const second = path.join(ersa.dir, "second");
+  mkdirSync(first);
+  mkdirSync(second);
+  const screen = page.getByRole("region", { name: "New session" });
+  const chip = screen.getByRole("button", { name: /^Project:/ });
+  const words = screen.getByRole("textbox", { name: "Message" });
+  const question = screen.getByRole("region", { name: /^Trust / });
+  for (const folder of [first, second]) {
+    const answered = ersa.answerDialog(folder);
+    await words.press("Control+o");
+    await answered;
+    await question.getByRole("button", { name: "Trust" }).click();
+    await expect(chip).toHaveAccessibleName(`Project: ${path.basename(folder)}`);
+  }
+
+  // A folder that is gone by the time Core reads it: Core refuses it, before or after the trust question.
+  const answered = ersa.answerDialog(path.join(ersa.dir, "gone"));
+  await words.press("Control+o");
+  await answered;
+  const problem = screen.getByRole("alert");
+  await expect(question.or(problem)).toBeVisible();
+  if (await question.isVisible()) await question.getByRole("button", { name: "Trust" }).click();
+  await expect(problem).toBeVisible();
+  await ersa.shot("add-failed");
+
+  await chip.click();
+  await screen.getByRole("option", { name: /first/ }).click();
+  await expect(chip).toHaveAccessibleName("Project: first");
+  await expect(problem).toHaveCount(0);
+  await ersa.shot("another-project-chosen");
+});
