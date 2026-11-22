@@ -49,7 +49,7 @@ pub struct CoreConfig {
     /// a run winds down.
     pub wind_down_pause: Duration,
     /// Where the folder inspection of `project.add` and `project.find`, and
-    /// each try of `session.delete` at a workspace's folder, stops, on its
+    /// each try at a workspace's folder (every removal, PROTO-CORE-API-R122), stops, on its
     /// own thread before it touches the folder, until a test lets it go: a
     /// folder that does not answer. `None`, except in tests.
     pub folder_gate: Option<Arc<Gate>>,
@@ -61,13 +61,13 @@ pub struct CoreConfig {
     /// session's record before it gives up and calls the deletion off.
     /// [`RECORD_DELETION_LIMIT`], except in tests that let it run out.
     pub record_deletion_limit: Duration,
-    /// How long each try of `session.delete` at a workspace's folder may
+    /// How long each try at a workspace's folder (every removal) may
     /// take before it gives up and calls the try off.
     /// [`crate::workspace::GIT_TIMEOUT`], as a git call has, except in tests
     /// that let it run out.
     pub folder_removal_limit: Duration,
-    /// How long `session.delete` goes on trying a workspace's folder that
-    /// fails to delete: no try begins later than this after the first
+    /// How long a removal goes on trying a workspace's folder that fails
+    /// to delete: no try begins later than this after the first
     /// (PROTO-CORE-API-R113). [`crate::workspace::FOLDER_TRY_WINDOW`],
     /// except in tests that let it run out.
     pub folder_try_window: Duration,
