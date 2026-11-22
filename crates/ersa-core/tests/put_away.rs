@@ -5,7 +5,6 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,168 +12,8 @@ use ersa_core::{Adapter, CoreConfig, Gate};
 use serde_json::{Value, json};
 use support::deleting::{FailingGit, Removal, hold_the_turn, with_stopping_adds};
 use support::fake::{self, FakeAdapter};
-use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
-
-/// A Core with the fake backend, a git repository added as a project, and
-/// `workspaces.root` in the test's folder.
-struct Setup {
-    core: TestCore,
-    client: Client,
-    repo: PathBuf,
-    project: Value,
-}
-
-async fn setup() -> Setup {
-    setup_with(|_| {}).await
-}
-
-async fn setup_with(configure: impl FnOnce(&mut CoreConfig)) -> Setup {
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(tempdir(), configure, adapters).await;
-    Setup::over(core).await
-}
-
-impl Setup {
-    async fn over(core: TestCore) -> Setup {
-        let mut client = core.client().await;
-        let repo = core.dir.path().join("repo");
-        git_repo(&repo);
-        let root = core.dir.path().join("worktrees").display().to_string();
-        let patch = json!({ "patch": { "workspaces": { "root": root } } });
-        client.result("settings.set", patch).await;
-        let add =
-            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false });
-        let project = client.result("project.add", add).await;
-        Setup {
-            core,
-            client,
-            repo,
-            project,
-        }
-    }
-
-    async fn workspace(&mut self) -> Value {
-        let params = json!({ "project_id": self.project["id"] });
-        self.client.result("workspace.create", params).await
-    }
-
-    /// Puts `workspace` away through Core's own interface.
-    async fn put_away(&self, workspace: &Value) -> Result<(), ersa_core::api::ApiError> {
-        let core = self.core.core();
-        ersa_core::api::put_away_workspace(&core, id(workspace)).await
-    }
-
-    /// `workspace` as `workspace.list` lists it now.
-    async fn listed(&mut self, workspace: &Value) -> Value {
-        let params = json!({ "project_id": self.project["id"] });
-        let listed = self.client.result("workspace.list", params).await;
-        listed
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|w| w["id"] == workspace["id"])
-            .cloned()
-            .unwrap_or(Value::Null)
-    }
-
-    /// What Core stored of `workspace`'s checkout.
-    async fn stored(&self, workspace: &Value) -> Option<ersa_core::workspace::Checkout> {
-        let core = self.core.core();
-        let id = id(workspace).to_string();
-        core.store.put_away_checkout(id).await.expect("read")
-    }
-
-    /// A session of the fake backend in `workspace`, started, with a turn
-    /// behind it, then stopped.
-    async fn stopped_session(&mut self, workspace: &Value) -> String {
-        let params = json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND });
-        let session = self.client.result("session.create", params).await;
-        let session = session["id"].as_str().unwrap().to_string();
-        let subscribe = json!({ "id": session, "from_seq": 0 });
-        self.client.result("session.subscribe", subscribe).await;
-        self.client.events_until("session.started").await;
-        // The fake backend finishes a turn whose message is `idle`.
-        let send = json!({ "id": session, "text": "idle" });
-        self.client.result("session.send", send).await;
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        loop {
-            let listed = self.client.result("session.list", json!({})).await;
-            let state = listed
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|x| x["id"] == session)
-                .unwrap()["state"]
-                .clone();
-            if state == "idle" {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "never idle: {state}"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        self.client
-            .result("session.stop", json!({ "id": session }))
-            .await;
-        session
-    }
-}
-
-fn id(workspace: &Value) -> &str {
-    workspace["id"].as_str().unwrap()
-}
-
-fn folder(workspace: &Value) -> PathBuf {
-    PathBuf::from(workspace["path"].as_str().unwrap())
-}
-
-fn branch(workspace: &Value) -> &str {
-    workspace["vcs_ref"].as_str().unwrap()
-}
-
-fn has_branch(repo: &Path, branch: &str) -> bool {
-    !git(repo, &["branch", "--list", branch]).trim().is_empty()
-}
-
-fn listed_by_git(repo: &Path, workspace: &Value) -> bool {
-    git(repo, &["worktree", "list", "--porcelain"]).contains(id(workspace))
-}
-
-/// Commits a new file in `dir`, and returns the commit's id.
-fn commit(dir: &Path, name: &str) -> String {
-    std::fs::write(dir.join(name), format!("{name}\n")).unwrap();
-    git(dir, &["add", name]);
-    git(dir, &["commit", "--quiet", "-m", name]);
-    git(dir, &["rev-parse", "HEAD"]).trim().to_string()
-}
-
-/// Admission has `workspace` ready too, as the store does: a session can
-/// be made there again.
-fn admitted_ready(core: &ersa_core::Core, workspace: &Value) {
-    let state = core.admission.snapshot();
-    let phase = state.workspace(id(workspace)).map(|w| w.phase);
-    assert_eq!(phase, Some(ersa_core::admission::WorkspacePhase::Ready));
-}
-
-/// Lets every stop at `gate` go however the test ends, so no try at a
-/// folder stays parked.
-struct LetGo(Arc<Gate>);
-
-impl Drop for LetGo {
-    fn drop(&mut self) {
-        for _ in 0..16 {
-            self.0.go();
-        }
-    }
-}
-
-async fn reached(gate: &Gate) {
-    tokio::time::timeout(Duration::from_secs(60), gate.reached())
-        .await
-        .expect("Core reached the gate in time");
-}
+use support::put_away::*;
+use support::{TestCore, git, git_repo, kind, start_with_adapters, tempdir};
 
 // -- What putting away does (FLOW-CLEAN-UP-R02) ----------------------------
 
@@ -405,7 +244,9 @@ fn error_kind(error: &ersa_core::api::ApiError) -> Value {
 /// `gate` and give up after 200 ms.
 async fn stuck_folder_setup(gate: &Arc<Gate>) -> Setup {
     let git_drops = Arc::new(FailingGit::new(Removal::DropsRecordThenFails, None));
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
     let configure = {
         let gate = Arc::clone(gate);
         move |config: &mut CoreConfig| {
@@ -432,6 +273,7 @@ async fn stuck_folder_setup(gate: &Arc<Gate>) -> Setup {
         client,
         repo,
         project,
+        stats,
     }
 }
 
@@ -488,24 +330,6 @@ async fn a_put_away_holds_the_workspace_while_a_try_it_gave_up_on_is_stuck() {
     // away, which nothing holds.
     gate.go();
     put_away_once_held(&s.core.core(), &workspace).await;
-}
-
-/// Waits, up to a generous limit, until nothing holds `workspace` and
-/// admission has it put away: a try at its folder given up on has ended.
-async fn put_away_once_held(core: &ersa_core::Core, workspace: &Value) {
-    let phase = || {
-        let state = core.admission.snapshot();
-        state.workspace(id(workspace)).map(|w| w.phase)
-    };
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    while phase() != Some(ersa_core::admission::WorkspacePhase::PutAway) {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the hold was never let go: {:?}",
-            phase()
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 // -- Each method with a put-away workspace (PROTO-CORE-API-R123) -----------
@@ -736,12 +560,15 @@ async fn crash_and_restart(s: Setup) -> Setup {
         client,
         repo,
         project,
+        ..
     } = s;
     drop(client);
     let TestCore { dir, task, .. } = core;
     task.abort();
     let _ = task.await;
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let client = core.client().await;
     Setup {
@@ -749,6 +576,7 @@ async fn crash_and_restart(s: Setup) -> Setup {
         client,
         repo,
         project,
+        stats,
     }
 }
 

@@ -12,6 +12,7 @@ pub mod deleting;
 pub mod fake;
 pub mod log;
 pub mod procs;
+pub mod put_away;
 pub mod schedule;
 pub mod suite;
 

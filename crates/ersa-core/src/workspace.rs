@@ -314,6 +314,115 @@ pub async fn git_checkout(transport: &dyn Transport, path: &str) -> Result<Check
     }
 }
 
+/// Whether `checkout` still names a commit in the repository at `repo`:
+/// the branch still exists, or the commit is still there. Read with
+/// [`GIT_QUERY_TIMEOUT`]. A put-away workspace is put back only from one
+/// that does (FLOW-CLEAN-UP-R04).
+pub async fn git_checkout_exists(
+    transport: &dyn Transport,
+    repo: &str,
+    checkout: &Checkout,
+) -> Result<bool, VcsError> {
+    // A full ref, so a branch is never read as a tag or a commit id; a
+    // commit id is hex, never read as an option.
+    let revision = match checkout {
+        Checkout::Branch(branch) => format!("refs/heads/{branch}"),
+        Checkout::Commit(commit) => commit.clone(),
+    };
+    Ok(git_resolve_commit(transport, repo, &revision).await?.is_some())
+}
+
+/// Whether a worktree of the repository at `repo` other than the one at
+/// `path` has `branch` checked out: git then refuses to check it out again
+/// (FLOW-CLEAN-UP-R04). A record git keeps at `path` itself, left by a
+/// put-away that stopped part way, is the workspace's own and is removed
+/// before the folder is made again.
+pub async fn git_branch_checked_out_elsewhere(
+    transport: &dyn Transport,
+    repo: &str,
+    branch: &str,
+    path: &str,
+) -> Result<bool, VcsError> {
+    let reference = format!("refs/heads/{branch}");
+    let listed = git_worktree_list(transport, repo).await?;
+    let own = find(&listed, path).await.map(|entry| entry.path);
+    Ok(listed.iter().any(|entry| {
+        entry.branch.as_deref() == Some(reference.as_str()) && Some(&entry.path) != own.as_ref()
+    }))
+}
+
+/// Makes the worktree at `path` of the repository at `repo` again, as
+/// `workspace.create` makes one, with `checkout` checked out: a branch at
+/// its tip, or a commit on no branch (FLOW-CLEAN-UP-R03).
+pub async fn git_worktree_checkout(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+    checkout: &Checkout,
+) -> Result<(), VcsError> {
+    // The branch by its short name, which git checks out as the branch;
+    // a full ref would be read as a commit and checked out on no branch.
+    // `--` ends option parsing, so a path is never read as a flag.
+    let args = match checkout {
+        Checkout::Branch(branch) => ["worktree", "add", "--", path, branch.as_str()].to_vec(),
+        Checkout::Commit(commit) => {
+            ["worktree", "add", "--detach", "--", path, commit.as_str()].to_vec()
+        }
+    };
+    let output = git(transport, repo, &args).await?;
+    check(output, "git worktree add failed")
+}
+
+/// A repository's turns of which the first is one already held: a removal
+/// asks for a turn as it begins, and gets the one its caller took before it
+/// read what it needed (a put-away's checkout, a put-back's branch).
+pub struct HeldFirst<W> {
+    pub held: std::sync::Mutex<Option<Box<dyn Send>>>,
+    pub then: W,
+}
+
+impl<W> HeldFirst<W> {
+    pub fn new(held: Box<dyn Send>, then: W) -> HeldFirst<W> {
+        HeldFirst {
+            held: std::sync::Mutex::new(Some(held)),
+            then,
+        }
+    }
+}
+
+#[ersa_adapter::async_trait]
+impl<W: Worktrees> Worktrees for HeldFirst<W> {
+    async fn turn(&self) -> Result<Box<dyn Send>, VcsError> {
+        let held = self.held.lock().expect("not poisoned").take();
+        match held {
+            Some(turn) => Ok(turn),
+            None => self.then.turn().await,
+        }
+    }
+}
+
+/// Project `project`'s turn to change its repository's worktrees, asked of
+/// admission, waiting at most `wait` while another change is under way and
+/// answering [`VcsError::WorktreesBusy`] past it (PROTO-CORE-API-R118,
+/// R119). Keep what it returns while git changes them.
+pub async fn project_turn(
+    admission: &Arc<crate::admission::Admission>,
+    project: &str,
+    wait: Duration,
+) -> Result<Box<dyn Send>, VcsError> {
+    use crate::admission::Refusal;
+    match admission.worktrees(project, wait).await {
+        Ok(under_way) => Ok(Box::new(under_way)),
+        Err(Refusal::GaveUp) => Err(VcsError::WorktreesBusy),
+        // Only a project that is gone; nothing that changes worktrees runs
+        // then, since a project with workspaces is not removed.
+        Err(refusal) => Err(VcsError::Failed {
+            message: format!("the project's worktrees cannot be changed: {refusal:?}"),
+            stderr: String::new(),
+        }),
+    }
+}
+
 /// What deleting a put-away workspace would lose (PROTO-CORE-API-R123):
 /// its folder is gone, so no uncommitted, ignored or stranded file or
 /// commit is left, and as unshared the commits that `branches` (the stored

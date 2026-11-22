@@ -38,14 +38,19 @@ const PROGRESS_GAP: Duration = Duration::from_secs(1);
 pub(super) struct Reporting {
     /// The file system job, once one runs.
     work: Option<Arc<Work>>,
+    /// Whether the session's workspace is being put back for the send, or
+    /// its put-away waited for (FLOW-CLEAN-UP-R05, PROTO-CORE-API-R134).
+    putting_back: bool,
     /// Woken when the phase changes, so progress goes out promptly.
     changed: Arc<Notify>,
 }
 
-/// The phase a send at `stage` reports: checking turns into copying once
-/// its copy job, `work`, starts copying.
-fn phase_of(stage: SendStage, work: Option<&Arc<Work>>) -> SendPhase {
+/// The phase a send at `stage` reports: checking turns into putting back
+/// while its session's workspace is put back, and into copying once its
+/// copy job, `work`, starts copying.
+fn phase_of(stage: SendStage, putting_back: bool, work: Option<&Arc<Work>>) -> SendPhase {
     match (stage, work) {
+        (SendStage::Checking, _) if putting_back => SendPhase::PuttingBack,
         (SendStage::Checking, Some(work)) if work.copying().is_some() => SendPhase::Copying,
         (SendStage::Checking, _) => SendPhase::Checking,
         (SendStage::Starting, _) => SendPhase::Starting,
@@ -61,13 +66,14 @@ impl Handle {
         let reporting = lock(&self.reporting);
         let stage = self.admission.send_stage(&self.id)?;
         let work = reporting.as_ref().and_then(|send| send.work.as_ref());
-        Some(phase_of(stage, work))
+        let putting_back = reporting.as_ref().is_some_and(|send| send.putting_back);
+        Some(phase_of(stage, putting_back, work))
     }
 }
 
 impl Reporting {
     fn progress(&self, session_id: &str, stage: SendStage) -> SendProgressParams {
-        let phase = phase_of(stage, self.work.as_ref());
+        let phase = phase_of(stage, self.putting_back, self.work.as_ref());
         let copied = match (phase, &self.work) {
             (SendPhase::Copying, Some(work)) => work.copying(),
             _ => None,
@@ -106,7 +112,7 @@ pub(super) fn in_progress() -> SessionError {
     )
 }
 
-fn stopped() -> SessionError {
+pub(super) fn stopped() -> SessionError {
     SessionError::refused(
         ErrorReason::SendStopped,
         "the message was stopped before it was sent",
@@ -261,6 +267,7 @@ impl SessionManager {
             // taken.
             *reporting = Some(Reporting {
                 work: None,
+                putting_back: false,
                 changed: Arc::clone(&changed),
             });
             slot
@@ -293,10 +300,22 @@ impl SessionManager {
         };
         admitted();
 
-        // A session to resume is refused for a folder that is gone before
-        // anything is copied into it or the backend is said to be starting
-        // (FLOW-RESUME-SESSION-R23); the resume then looks no more.
+        // A session to resume has its workspace put back first when it is
+        // put away, before anything is copied into the folder
+        // (FLOW-CLEAN-UP-R03), saying so meanwhile (FLOW-CLEAN-UP-R05); and
+        // is refused for a folder that is gone before anything is copied
+        // into it or the backend is said to be starting
+        // (FLOW-RESUME-SESSION-R23). The resume then does neither again.
         if resuming {
+            if let Some(how) = &resumption {
+                let there_is = {
+                    let handle = Arc::clone(&handle);
+                    move || set_putting_back(&handle, true)
+                };
+                self.put_back(&handle, how, there_is, Some(&mut canceled))
+                    .await?;
+                set_putting_back(&handle, false);
+            }
             resume::check_folder(&handle).await?;
         }
 
@@ -502,6 +521,15 @@ fn abandon(job: tokio::task::JoinHandle<Result<Prepared, Refused>>, work: &Work)
 fn set_stage(handle: &Handle, stage: SendStage) {
     handle.admission.send_reached(&handle.id, stage);
     if let Some(reporting) = lock(&handle.reporting).as_ref() {
+        reporting.changed.notify_one();
+    }
+}
+
+/// Says whether the send to `handle` is waiting for its workspace to be put
+/// back, and wakes its progress so the change goes out promptly.
+fn set_putting_back(handle: &Handle, putting_back: bool) {
+    if let Some(reporting) = lock(&handle.reporting).as_mut() {
+        reporting.putting_back = putting_back;
         reporting.changed.notify_one();
     }
 }

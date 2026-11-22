@@ -29,10 +29,12 @@ pub struct Resumption {
     pub project_trusted: bool,
     /// The project's root, as a path on the session's host.
     pub project_path: String,
+    /// Where the session's workspace comes back when it is put away.
+    pub put_back: PutBack,
 }
 
-/// Whether the caller has just looked at the session's folder itself, so a
-/// resume need not look again.
+/// Whether the caller has just put the session's workspace back and looked
+/// at its folder itself, so a resume need do neither again.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum FolderChecked {
     Yes,
@@ -109,6 +111,12 @@ impl SessionManager {
         };
         self.refuse_if_deleting(handle)?;
         let row = handle.row()?;
+        // A put-away workspace is put back first: one being put away, or
+        // back for another session, is waited for, not refused as busy
+        // (PROTO-CORE-API-R132). A send has put it back already.
+        if folder == FolderChecked::No {
+            self.put_back(handle, &how, || {}, None).await?;
+        }
         self.refuse_if_claimed(&row.workspace_id)?;
         if folder == FolderChecked::No {
             check_folder(handle).await?;
