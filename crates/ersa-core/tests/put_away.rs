@@ -150,6 +150,14 @@ fn commit(dir: &Path, name: &str) -> String {
     git(dir, &["rev-parse", "HEAD"]).trim().to_string()
 }
 
+/// Admission has `workspace` ready too, as the store does: a session can
+/// be made there again.
+fn admitted_ready(core: &ersa_core::Core, workspace: &Value) {
+    let state = core.admission.snapshot();
+    let phase = state.workspace(id(workspace)).map(|w| w.phase);
+    assert_eq!(phase, Some(ersa_core::admission::WorkspacePhase::Ready));
+}
+
 /// Lets every stop at `gate` go however the test ends, so no try at a
 /// folder stays parked.
 struct LetGo(Arc<Gate>);
@@ -275,6 +283,7 @@ async fn a_folder_with_changes_is_not_put_away() {
     assert!(refused.is_err());
     assert!(path.join("unsaved.txt").exists());
     assert_eq!(s.listed(&workspace).await["state"], "ready");
+    admitted_ready(&s.core.core(), &workspace);
     assert_eq!(s.stored(&workspace).await, None);
 }
 
@@ -293,6 +302,7 @@ async fn a_locked_worktree_is_not_put_away() {
     assert!(refused.is_err());
     assert!(path.join("README.md").exists());
     assert_eq!(s.listed(&workspace).await["state"], "ready");
+    admitted_ready(&s.core.core(), &workspace);
     assert_eq!(s.stored(&workspace).await, None);
 }
 
@@ -321,6 +331,7 @@ async fn a_folder_whose_checkout_git_cannot_read_is_not_put_away() {
         assert!(error.0.message.contains("checked out"), "{error:?}");
         assert!(folder(workspace).exists());
         assert_eq!(s.listed(workspace).await["state"], "ready");
+        admitted_ready(&s.core.core(), workspace);
         assert_eq!(s.stored(workspace).await, None);
     }
 }
@@ -378,6 +389,7 @@ async fn a_put_away_that_waited_too_long_for_its_turn_removes_nothing() {
         .iter()
         .find(|w| w["id"] == workspace["id"]);
     assert_eq!(listed.unwrap()["state"], "ready");
+    admitted_ready(&core.core(), &workspace);
     gate.go();
     client.response(holding).await;
 }
