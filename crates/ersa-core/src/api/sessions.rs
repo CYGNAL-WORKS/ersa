@@ -24,7 +24,7 @@ use crate::admission::{Command, Report};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::raw_log;
-use crate::sessions::{Forkable, Resumption};
+use crate::sessions::{Forkable, PutBack, Resumption};
 use crate::state::Core;
 use crate::workspace;
 
@@ -544,17 +544,29 @@ pub(super) async fn resume(core: &Core, params: IdParams) -> Result<Session, Api
 /// project's trust as it is now.
 async fn resumption(core: &Core, id: &str) -> Result<Resumption, ApiError> {
     let row = core.sessions.row(id)?;
-    let (_, project) = workspace_and_project(core, &row.workspace_id).await?;
+    let (workspace, project) = workspace_and_project(core, &row.workspace_id).await?;
     let Starting {
         transport,
         backend_version,
         ..
     } = starting(core, &project, &row.backend).await?;
+    // The folder's tries hold nothing until the put-back gives them its
+    // own hold.
+    let folder_tries = workspace::FolderTries::from_config(&core.config, Arc::new(()));
+    let put_back = PutBack {
+        project_id: project.id.clone(),
+        repo: project.path.clone(),
+        workspace_id: workspace.id,
+        path: workspace.path,
+        turn_wait: core.config.worktree_turn_wait,
+        folder_tries,
+    };
     Ok(Resumption {
         transport,
         backend_version,
         project_trusted: project.trusted,
         project_path: project.path,
+        put_back,
     })
 }
 

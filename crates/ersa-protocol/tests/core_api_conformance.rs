@@ -849,6 +849,8 @@ fn error_reasons_are_exactly_the_schemas() {
         SendInProgress,
         SendStopped,
         FolderGone,
+        BranchGone,
+        BranchInUse,
         BackendUnnamed,
         RecordGone,
         OpenElsewhere,
@@ -868,6 +870,39 @@ fn error_reasons_are_exactly_the_schemas() {
     assert!(validate_core_api("error_data", &data).is_err());
     data["reason"] = json!("folder_gone");
     validate_core_api("error_data", &data).expect("folder_gone is a reason");
+}
+
+/// A put-back's refusals are reasons the Interface can word: the branch is
+/// gone, or another worktree has it.
+// verifies: FLOW-CLEAN-UP-R04
+#[test]
+fn a_put_back_refusal_names_its_reason() {
+    for (reason, wire) in [
+        (ErrorReason::BranchGone, "branch_gone"),
+        (ErrorReason::BranchInUse, "branch_in_use"),
+    ] {
+        assert_eq!(to_value(&reason), json!(wire));
+        let data = json!({ "kind": "invalid_state", "reason": wire });
+        validate_core_api("error_data", &data).expect("a reason the schema takes");
+    }
+}
+
+/// Every phase a send reports serializes to a value the schema takes, and
+/// the schema takes no other: `putting_back` among them.
+// verifies: FLOW-CLEAN-UP-R05
+#[test]
+fn send_phases_are_exactly_the_schemas() {
+    use SendPhase::*;
+    let all = [Checking, PuttingBack, Copying, Starting, HandingOver];
+    let ours: BTreeSet<String> = all.iter().map(|p| to_value(p).to_string()).collect();
+    let theirs: BTreeSet<String> = schema()["$defs"]["send_phase"]["enum"]
+        .as_array()
+        .expect("send_phase is an enum")
+        .iter()
+        .map(Value::to_string)
+        .collect();
+    assert_eq!(ours, theirs);
+    assert_eq!(to_value(&PuttingBack), json!("putting_back"));
 }
 
 /// The new shapes stay closed: what only a model has is refused on an
