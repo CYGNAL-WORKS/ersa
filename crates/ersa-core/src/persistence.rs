@@ -1060,6 +1060,135 @@ mod tests {
         ));
     }
 
+    /// Migration 15 rebuilds the workspaces table, which sessions refer to,
+    /// keeping every row, its order and the root index, and lets a
+    /// workspace be put away with what it had checked out.
+    #[tokio::test]
+    async fn migration_15_keeps_every_workspace_and_lets_one_be_put_away() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        let conn = database_at(&path, 14);
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't0', 1);
+             INSERT INTO workspaces (id, project_id, path, vcs_ref, state, created_at, kind)
+                 VALUES ('w-root', 'p', '/r', '', 'ready', 't0', 'root'),
+                        ('w-b', 'p', '/w/b', 'ersa/w-b', 'ready', 't1', 'isolated'),
+                        ('w-a', 'p', '/w/a', 'ersa/w-a', 'error', 't1', 'isolated');
+             INSERT INTO sessions (id, workspace_id, host_id, backend)
+                 VALUES ('s', 'w-b', 'local', 'claude-code');",
+        )
+        .expect("old rows");
+        drop(conn);
+
+        let store = Store::open(&path).expect("migrates");
+        let listed: Vec<(String, WorkspaceState)> = store
+            .workspaces("p".into())
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|w| (w.id, w.state))
+            .collect();
+        let expected = [
+            ("w-root", WorkspaceState::Ready),
+            ("w-a", WorkspaceState::Error),
+            ("w-b", WorkspaceState::Ready),
+        ];
+        let expected: Vec<(String, WorkspaceState)> =
+            expected.map(|(id, state)| (id.to_string(), state)).into();
+        assert_eq!(listed, expected);
+        assert!(store.session("s".into()).await.expect("get").is_some());
+        let dangling: i64 = store
+            .call(|conn| {
+                Ok(
+                    conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .await
+            .expect("checked");
+        assert_eq!(dangling, 0);
+
+        let checkout = Checkout::Commit("abc".into());
+        store
+            .put_workspace_away("w-b".into(), checkout.clone())
+            .await
+            .expect("put away");
+        let workspace = store.workspace("w-b".into()).await.expect("get").unwrap();
+        assert_eq!(workspace.state, WorkspaceState::PutAway);
+        let stored = store.put_away_checkout("w-b".into()).await.expect("read");
+        assert_eq!(stored, Some(checkout));
+        let second_root = Workspace {
+            id: "w-2".into(),
+            kind: WorkspaceKind::Root,
+            ..workspace
+        };
+        assert!(matches!(
+            store.insert_workspace(second_root).await,
+            Err(Error::Conflict(_))
+        ));
+    }
+
+    /// At startup a `removing` workspace that was put away is put away again
+    /// (PROTO-CORE-API-R135); any other `creating` or `removing` one is
+    /// `error`. A put-away one stays put away.
+    #[tokio::test]
+    async fn startup_puts_a_put_away_workspaces_stopped_removal_back_to_put_away() {
+        let (_dir, store) = temp_store();
+        store.ensure_local_host("pc".into()).await.expect("host");
+        store
+            .insert_project(
+                Project {
+                    id: "p".into(),
+                    host_id: LOCAL_HOST_ID.into(),
+                    path: "/r".into(),
+                    name: "r".into(),
+                    vcs: Vcs::Git,
+                    trusted: false,
+                },
+                "w-root".into(),
+                "/r".into(),
+            )
+            .await
+            .expect("project");
+        for id in ["w-away", "w-removing", "w-stays"] {
+            let workspace = Workspace {
+                id: id.into(),
+                project_id: "p".into(),
+                kind: WorkspaceKind::Isolated,
+                path: format!("/w/{id}"),
+                vcs_ref: format!("ersa/{id}"),
+                state: WorkspaceState::Ready,
+            };
+            store.insert_workspace(workspace).await.expect("insert");
+        }
+        let branch = Checkout::Branch("ersa/w-away".into());
+        for id in ["w-away", "w-stays"] {
+            store
+                .put_workspace_away(id.into(), branch.clone())
+                .await
+                .expect("put away");
+        }
+        for id in ["w-away", "w-removing"] {
+            store
+                .set_workspace_state(id.into(), WorkspaceState::Removing)
+                .await
+                .expect("removing");
+        }
+
+        assert_eq!(store.reconcile_workspaces().await.expect("reconcile"), 2);
+
+        for (id, state) in [
+            ("w-away", WorkspaceState::PutAway),
+            ("w-removing", WorkspaceState::Error),
+            ("w-stays", WorkspaceState::PutAway),
+        ] {
+            let workspace = store.workspace(id.into()).await.expect("get").unwrap();
+            assert_eq!(workspace.state, state, "{id}");
+        }
+    }
+
     #[tokio::test]
     async fn a_project_comes_and_goes_with_its_root_workspace() {
         let (_dir, store) = temp_store();

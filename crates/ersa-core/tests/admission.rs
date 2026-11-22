@@ -4459,3 +4459,210 @@ async fn a_change_to_the_worktrees_waits_its_turn_or_gives_up_at_its_limit() {
     drop(next);
     assert!(!admission.snapshot().project(P).unwrap().worktrees);
 }
+
+// -- Putting a workspace away (FLOW-CLEAN-UP-R02) ----------------------------
+
+/// The world with session `s1`, Ersa's, stored and stopped in the isolated
+/// workspace.
+fn with_a_stopped_session() -> State {
+    let mut existing = existing();
+    existing.sessions.push(row("s1", W, false));
+    State::restored(existing)
+}
+
+/// A put-away is never held: it is refused while the workspace is being
+/// made, removed or put away, while a delete holds it, and while anything
+/// is under way on a session there or may begin, a start among them; and
+/// for the project's own folder.
+#[test]
+fn putting_away_is_refused_while_anything_is_under_way_there() {
+    let refused = |mut state: State, workspace: &str| command(&mut state, put_away(workspace));
+
+    assert_eq!(
+        refused(with_a_stopped_session(), ROOT),
+        Outcome::Refused(Refusal::RootWorkspace)
+    );
+    // Being made.
+    let mut state = world();
+    let create = Command::CreateWorkspace {
+        project: P.into(),
+        workspace: "w2".into(),
+    };
+    command(&mut state, create);
+    assert_eq!(
+        refused(state, "w2"),
+        Outcome::Refused(Refusal::WorkspaceBusy)
+    );
+    // Being removed.
+    let mut state = world();
+    command(&mut state, remove_workspace(W));
+    assert_eq!(refused(state, W), Outcome::Refused(Refusal::WorkspaceBusy));
+    // Held by a delete.
+    let mut state = with_a_stopped_session();
+    command(&mut state, delete_session("s1"));
+    assert_eq!(refused(state, W), Outcome::Refused(Refusal::WorkspaceHeld));
+    // Started in: the start's turn, then its run.
+    let mut state = with_a_stopped_session();
+    command(&mut state, begin_start("s1"));
+    assert_eq!(
+        refused(state.clone(), W),
+        Outcome::Refused(Refusal::SessionInUse)
+    );
+    report(&mut state, Report::Ended(Operation::Exclusive("s1".into())));
+    command(&mut state, launch("s1"));
+    assert_eq!(
+        refused(state.clone(), W),
+        Outcome::Refused(Refusal::SessionInUse)
+    );
+    // Its run winding down.
+    report(&mut state, run_ending("s1"));
+    assert_eq!(refused(state, W), Outcome::Refused(Refusal::SessionInUse));
+    // A message on its way, a fork starting, a removal of the session, and
+    // a session admitted whose row is not stored yet.
+    for under_way in [send("s1"), fork("s1"), remove_session("s1")] {
+        let mut state = with_a_stopped_session();
+        command(&mut state, under_way.clone());
+        assert_eq!(
+            refused(state, W),
+            Outcome::Refused(Refusal::SessionInUse),
+            "{under_way:?}"
+        );
+    }
+    let mut state = world();
+    command(&mut state, create_session(W, "s1"));
+    assert_eq!(refused(state, W), Outcome::Refused(Refusal::SessionInUse));
+
+    // With nothing under way, it is admitted and holds the workspace.
+    let mut state = with_a_stopped_session();
+    assert_eq!(
+        command(&mut state, put_away(W)),
+        admitted(Operation::PutAway(W.into()))
+    );
+    assert_eq!(phase(&state, W), Some(WorkspacePhase::PuttingAway));
+}
+
+/// While a put-away holds the workspace, or a try at its folder it gave up
+/// on, nothing else removes the folder or the workspace, nothing is made
+/// or started there, and no second put-away begins.
+// verifies once #560 lands: PROTO-CORE-API-R131
+#[test]
+fn a_put_away_holds_its_workspace_against_every_other_removal() {
+    let mut state = with_a_stopped_session();
+    command(&mut state, put_away(W));
+    for (asked, answer) in [
+        (remove_workspace(W), Refusal::WorkspaceBusy),
+        (put_away(W), Refusal::WorkspaceBusy),
+        (delete_session("s1"), Refusal::WorkspaceHeld),
+        (remove_session("s1"), Refusal::WorkspaceHeld),
+        (fork("s1"), Refusal::WorkspaceHeld),
+        (create_session(W, "s2"), Refusal::WorkspaceNotReady),
+        (find_session(W, "s2"), Refusal::WorkspaceNotReady),
+    ] {
+        let mut asked_now = state.clone();
+        assert_eq!(
+            command(&mut asked_now, asked.clone()),
+            Outcome::Refused(answer),
+            "{asked:?}"
+        );
+    }
+    let mut starting = state.clone();
+    command(&mut starting, begin_start("s1"));
+    assert_eq!(
+        command(&mut starting, launch("s1")),
+        Outcome::Refused(Refusal::WorkspaceHeld)
+    );
+
+    // Ended however it ends, but refused, it is put away: the store says so
+    // from before anything was removed.
+    let mut ended = state.clone();
+    report(&mut ended, Report::Ended(Operation::PutAway(W.into())));
+    assert_eq!(phase(&ended, W), Some(WorkspacePhase::PutAway));
+    let workspace = || W.to_string();
+    let mut done = state.clone();
+    report(
+        &mut done,
+        Report::WorkspacePutAway {
+            workspace: workspace(),
+        },
+    );
+    assert_eq!(phase(&done, W), Some(WorkspacePhase::PutAway));
+    let mut refused = state;
+    report(
+        &mut refused,
+        Report::PutAwayRefused {
+            workspace: workspace(),
+        },
+    );
+    assert_eq!(phase(&refused, W), Some(WorkspacePhase::Ready));
+}
+
+/// A put-away workspace takes no new session of Ersa's, but goes on taking
+/// those found in its folder's records; a fork of a session there and its
+/// delete go on; no backend starts there until its folder is back.
+// verifies: PROTO-CORE-API-R123
+#[test]
+fn what_a_put_away_workspace_takes() {
+    let mut existing = existing();
+    existing.workspaces[1].phase = WorkspacePhase::PutAway;
+    existing.sessions.push(row("s1", W, false));
+    let state = State::restored(existing);
+
+    let mut asked = state.clone();
+    assert_eq!(
+        command(&mut asked, create_session(W, "s2")),
+        Outcome::Refused(Refusal::WorkspaceNotReady)
+    );
+    let mut asked = state.clone();
+    assert_eq!(
+        command(&mut asked, find_session(W, "s2")),
+        admitted(Operation::CreateSession("s2".into()))
+    );
+    let mut asked = state.clone();
+    assert_eq!(
+        command(&mut asked, fork("s1")),
+        admitted(Operation::Fork("s1".into()))
+    );
+    let mut asked = state.clone();
+    assert_eq!(
+        command(&mut asked, delete_session("s1")),
+        admitted(Operation::DeleteSession("s1".into()))
+    );
+    let mut asked = state;
+    command(&mut asked, begin_start("s1"));
+    assert_eq!(
+        command(&mut asked, launch("s1")),
+        Outcome::Refused(Refusal::WorkspaceNotReady)
+    );
+}
+
+/// A removal of a put-away workspace that is refused, or fails, or ends
+/// without saying, leaves it put away.
+// verifies once #560 lands: PROTO-CORE-API-R133
+#[test]
+fn a_removal_of_a_put_away_workspace_that_does_not_happen_leaves_it_put_away() {
+    let mut existing = existing();
+    existing.workspaces[1].phase = WorkspacePhase::PutAway;
+    let mut state = State::restored(existing);
+    assert_eq!(
+        command(&mut state, remove_workspace(W)),
+        admitted(Operation::RemoveWorkspace(W.into()))
+    );
+    let workspace = || W.to_string();
+    for ending in [
+        Report::WorkspaceRemovalRefused {
+            workspace: workspace(),
+        },
+        Report::WorkspaceRemovalFailed {
+            workspace: workspace(),
+        },
+        Report::Ended(Operation::RemoveWorkspace(workspace())),
+    ] {
+        let mut ended = state.clone();
+        report(&mut ended, ending.clone());
+        assert_eq!(
+            phase(&ended, W),
+            Some(WorkspacePhase::PutAway),
+            "{ending:?}"
+        );
+    }
+}

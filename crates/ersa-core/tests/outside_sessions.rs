@@ -570,3 +570,44 @@ async fn a_removal_git_refuses_leaves_the_error_a_delete_set() {
     let listed = workspaces(&mut client, &project["id"]).await;
     assert_eq!(listed[1]["state"], "error", "{listed:#?}");
 }
+
+/// Sessions started in the backend's own tools in an isolated workspace's
+/// folder stay listed once the workspace is put away, under the same id
+/// and with their arrangement, and one recorded there since is listed too:
+/// the records outlive the folder.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn a_put_away_workspaces_sessions_stay_listed_with_their_arrangement() {
+    let backend = Backend::default();
+    let core = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let project = project(&mut client, core.dir.path()).await;
+    let isolated = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    backend.record("rec-before", "before", path(&isolated), path(&isolated));
+    let found = titled(&sessions(&mut client).await, "before")
+        .cloned()
+        .expect("listed");
+    client
+        .result(
+            "session.arrange",
+            json!({ "id": found["id"], "pinned": true }),
+        )
+        .await;
+
+    let core_now = core.core();
+    ersa_core::api::put_away_workspace(&core_now, isolated["id"].as_str().unwrap())
+        .await
+        .expect("put away");
+    drop(core_now);
+    backend.record("rec-after", "after", path(&isolated), path(&isolated));
+
+    let listed = sessions(&mut client).await;
+    let before = titled(&listed, "before").expect("still listed");
+    assert_eq!(before["id"], found["id"]);
+    assert_eq!(before["pinned"], true);
+    assert_eq!(before["workspace_id"], isolated["id"]);
+    let after = titled(&listed, "after").expect("listed in the put-away workspace");
+    assert_eq!(after["workspace_id"], isolated["id"]);
+}

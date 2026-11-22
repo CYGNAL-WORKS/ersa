@@ -442,3 +442,352 @@ async fn a_put_away_holds_the_workspace_while_a_try_it_gave_up_on_is_stuck() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
+// -- Each method with a put-away workspace (PROTO-CORE-API-R123) -----------
+
+/// A workspace put away after a session ran and stopped in it, with a
+/// commit on its branch and one on a branch the agent switched to, and a
+/// file the repository ignores; and the session.
+async fn put_away_with_work(s: &mut Setup) -> (Value, String) {
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    let path = folder(&workspace);
+    std::fs::write(path.join(".gitignore"), "*.log\n").unwrap();
+    git(&path, &["add", ".gitignore"]);
+    git(&path, &["commit", "--quiet", "-m", "ignore logs"]);
+    std::fs::write(path.join("run.log"), "ignored\n").unwrap();
+    git(&path, &["switch", "--quiet", "-c", "agents-own"]);
+    commit(&path, "work.txt");
+    s.put_away(&workspace).await.expect("put away");
+    (workspace, session)
+}
+
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn no_session_is_created_in_a_put_away_workspace() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    s.put_away(&workspace).await.expect("put away");
+
+    let params = json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND });
+    let error = s.client.error("session.create", params).await;
+
+    assert_eq!(kind(&error), "invalid_state", "{error}");
+}
+
+/// A put-away workspace counts no uncommitted, ignored or stranded file or
+/// commit, its folder being gone, and as unshared what its branches hold
+/// that no other branch does: its own and the one it had checked out.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn workspace_changes_counts_only_what_a_put_away_workspaces_branches_hold() {
+    let mut s = setup().await;
+    let (workspace, _) = put_away_with_work(&mut s).await;
+
+    let changes = s
+        .client
+        .result("workspace.changes", json!({ "id": workspace["id"] }))
+        .await;
+
+    assert_eq!(changes["uncommitted"], 0, "{changes}");
+    assert_eq!(changes["ignored"], 0, "{changes}");
+    assert_eq!(changes["stranded"], 0, "{changes}");
+    assert_eq!(changes["unrecorded"], false, "{changes}");
+    // `ignore logs` on its own branch, and `work.txt` after it on the
+    // agent's: both held by no other branch.
+    assert_eq!(changes["unshared"], 2, "{changes}");
+    assert_eq!(changes["sessions"], 1, "{changes}");
+}
+
+/// The workspace `fork` runs in, as `workspace.list` lists it.
+async fn fork_workspace(s: &mut Setup, fork: &Value) -> Value {
+    let params = json!({ "project_id": s.project["id"] });
+    let listed = s.client.result("workspace.list", params).await;
+    listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == fork["workspace_id"])
+        .cloned()
+        .expect("the fork's workspace")
+}
+
+/// A fork of a session in a put-away workspace starts its own workspace
+/// from the tip of the branch the folder had checked out.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_starts_from_the_branch_a_put_away_workspace_stored() {
+    let mut s = setup().await;
+    let (_, session) = put_away_with_work(&mut s).await;
+    let tip = git(&s.repo, &["rev-parse", "refs/heads/agents-own"]);
+
+    let fork = s
+        .client
+        .result("session.fork", json!({ "id": session }))
+        .await;
+
+    let made = fork_workspace(&mut s, &fork).await;
+    let head = git(&folder(&made), &["rev-parse", "HEAD"]);
+    assert_eq!(head.trim(), tip.trim());
+}
+
+/// A fork of a session in a put-away workspace that was on no branch starts
+/// from the commit it stored.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_starts_from_the_commit_a_put_away_workspace_stored() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    let path = folder(&workspace);
+    git(&path, &["switch", "--quiet", "--detach"]);
+    let detached = commit(&path, "detached.txt");
+    s.put_away(&workspace).await.expect("put away");
+
+    let fork = s
+        .client
+        .result("session.fork", json!({ "id": session }))
+        .await;
+
+    let made = fork_workspace(&mut s, &fork).await;
+    let head = git(&folder(&made), &["rev-parse", "HEAD"]);
+    assert_eq!(head.trim(), detached);
+}
+
+/// Deleting the last session of a put-away workspace deletes no folder,
+/// since there is none, and says so; its branch goes as a delete's does.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_session_in_a_put_away_workspace_deletes_no_folder() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    s.put_away(&workspace).await.expect("put away");
+    let token = s
+        .client
+        .result("workspace.changes", json!({ "id": workspace["id"] }))
+        .await["token"]
+        .clone();
+
+    let deleted = s
+        .client
+        .result("session.delete", json!({ "id": session, "token": token }))
+        .await;
+
+    assert_eq!(deleted["workspace_deleted"], false, "{deleted}");
+    assert_eq!(deleted["branch_kept"], false, "{deleted}");
+    assert!(!has_branch(&s.repo, branch(&workspace)));
+    assert_eq!(
+        s.listed(&workspace).await,
+        Value::Null,
+        "the workspace went"
+    );
+}
+
+/// `workspace.remove` of a put-away workspace removes its branch, as every
+/// removal does, and the workspace.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn removing_a_put_away_workspace_removes_its_branch_and_the_workspace() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    s.put_away(&workspace).await.expect("put away");
+
+    let removed = s
+        .client
+        .result("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+
+    assert_eq!(removed["state"], "removing");
+    assert!(!has_branch(&s.repo, branch(&workspace)));
+    assert_eq!(s.listed(&workspace).await, Value::Null);
+}
+
+/// A file named by a path where a put-away workspace's folder was is
+/// copied, as for a host: nothing is inside a folder that is not there.
+/// The same file inside a ready workspace is not.
+// verifies: PROTO-CORE-API-R123
+#[tokio::test(flavor = "multi_thread")]
+async fn attachment_inspect_reports_a_copy_for_a_put_away_workspace() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let path = folder(&workspace);
+    let inside = path.join("notes.md");
+    let inspect = json!({ "workspace_id": workspace["id"], "path": inside.display().to_string() });
+    std::fs::write(&inside, "notes\n").unwrap();
+    let ready = s.client.result("attachment.inspect", inspect.clone()).await;
+    assert_eq!(ready["copied"], false, "{ready}");
+    std::fs::remove_file(&inside).unwrap();
+    s.put_away(&workspace).await.expect("put away");
+    // Something else made a file where the folder was.
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(&inside, "notes\n").unwrap();
+
+    let inspected = s.client.result("attachment.inspect", inspect).await;
+
+    assert_eq!(inspected["copied"], true, "{inspected}");
+}
+
+// -- What a put-away workspace's removal leaves (R133, R135) ---------------
+
+/// A `workspace.remove` of a put-away workspace that fails, here on what a
+/// put-away left of the folder, leaves it `put_away`, not `error`: it had no
+/// folder of its own to lose, and its sessions can still be resumed.
+// verifies once #560 lands: PROTO-CORE-API-R133
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_removal_of_a_put_away_workspace_leaves_it_put_away() {
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let mut s = stuck_folder_setup(&gate).await;
+    let workspace = s.workspace().await;
+    // The put-away gives up on its try at the folder, which then ends
+    // without deleting anything.
+    let putting = tokio::spawn({
+        let core = s.core.core();
+        let id = id(&workspace).to_string();
+        async move { ersa_core::api::put_away_workspace(&core, &id).await }
+    });
+    reached(&gate).await;
+    assert!(putting.await.unwrap().is_err());
+    gate.go();
+    let remove = json!({ "id": workspace["id"], "force": true });
+    // Admitted once the try has returned; its own try at the folder then
+    // stops at the gate and runs out.
+    let started = std::time::Instant::now();
+    let answer = loop {
+        let request = s.client.request("workspace.remove", remove.clone()).await;
+        let stopped = tokio::time::timeout(Duration::from_secs(2), gate.reached()).await;
+        let answer = s.client.response(request).await;
+        if stopped.is_ok() {
+            break answer;
+        }
+        assert!(started.elapsed() < Duration::from_secs(30), "{answer}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+
+    assert_eq!(kind(&answer["error"]), "vcs_error", "{answer}");
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+    gate.go();
+}
+
+/// Restarts `s`'s Core over the same data directory, its task stopped as
+/// a crash would stop it.
+async fn crash_and_restart(s: Setup) -> Setup {
+    let Setup {
+        core,
+        client,
+        repo,
+        project,
+    } = s;
+    drop(client);
+    let TestCore { dir, task, .. } = core;
+    task.abort();
+    let _ = task.await;
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let client = core.client().await;
+    Setup {
+        core,
+        client,
+        repo,
+        project,
+    }
+}
+
+/// A `workspace.remove` of a put-away workspace that Core stops part way
+/// through leaves it `put_away` after the restart.
+// verifies once #560 lands: PROTO-CORE-API-R135
+#[tokio::test(flavor = "multi_thread")]
+async fn a_put_away_workspace_whose_removal_was_stopped_is_put_away_after_a_restart() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    s.put_away(&workspace).await.expect("put away");
+    // What a Core that stopped during the removal left: the row `removing`.
+    let core = s.core.core();
+    let state = ersa_protocol::core_api::WorkspaceState::Removing;
+    core.store
+        .set_workspace_state(id(&workspace).to_string(), state)
+        .await
+        .unwrap();
+    drop(core);
+
+    let mut s = crash_and_restart(s).await;
+
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+}
+
+/// A put-away that Core stops part way through, git's removal under way,
+/// is `put_away` after the restart, with what the folder had checked out.
+// verifies: FLOW-CLEAN-UP-R02
+#[tokio::test(flavor = "multi_thread")]
+async fn a_put_away_stopped_part_way_is_put_away_after_a_restart() {
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let git_stops =
+        Arc::new(FailingGit::new(Removal::Fails, None).stopping_removals(Arc::clone(&gate)));
+    let mut s = setup_with(|config| {
+        config.command_transport = Some(ersa_core::CommandTransport(git_stops));
+    })
+    .await;
+    let workspace = s.workspace().await;
+    let core = s.core.core();
+    let putting = tokio::spawn({
+        let id = id(&workspace).to_string();
+        async move { ersa_core::api::put_away_workspace(&core, &id).await }
+    });
+    reached(&gate).await;
+    putting.abort();
+
+    let mut s = crash_and_restart(s).await;
+
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+    let checkout = ersa_core::workspace::Checkout::Branch(branch(&workspace).into());
+    assert_eq!(s.stored(&workspace).await, Some(checkout));
+}
+
+// -- A session's copies go with the folder (PROTO-CORE-API-R121) -----------
+
+/// The copies of a session's attachments live in its workspace's folder,
+/// so putting the workspace away removes them with it, the session staying;
+/// removing the session afterwards finds nothing left to remove.
+// verifies: PROTO-CORE-API-R121
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sessions_copies_go_with_a_put_away_folder() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    let outside = s.core.dir.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let notes = outside.join("notes.md");
+    std::fs::write(&notes, "notes\n").unwrap();
+    let send = json!({
+        "id": session,
+        "text": "idle",
+        "attachments": [{ "kind": "file", "path": notes.display().to_string() }],
+    });
+    s.client.result("session.send", send).await;
+    let scratch = folder(&workspace)
+        .join(".ersa")
+        .join("attachments")
+        .join(&session);
+    assert!(scratch.exists(), "the copy was made");
+    s.client
+        .result("session.stop", json!({ "id": session }))
+        .await;
+
+    s.put_away(&workspace).await.expect("put away");
+
+    assert!(!scratch.exists(), "the copies went with the folder");
+    assert!(notes.exists(), "the file they were copied from stays");
+    let sessions = s.client.result("session.list", json!({})).await;
+    assert!(
+        sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["id"] == session)
+    );
+    s.client
+        .result("session.remove", json!({ "id": session }))
+        .await;
+}
