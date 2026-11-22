@@ -265,13 +265,15 @@ async fn workspace_lifecycle() {
         .await;
     assert_eq!(kind(&error), "invalid_state");
 
-    // Removal deletes the folder and keeps the branch.
+    // Removal deletes the folder, and the branch, which holds nothing of
+    // its own (PROTO-CORE-API-R122).
     let removed = client
         .result("workspace.remove", json!({ "id": first["id"] }))
         .await;
     assert_eq!(removed["id"], first["id"]);
+    assert_eq!(removed["state"], "removing");
     assert!(!first_path.exists(), "the worktree folder is gone");
-    assert!(git(&repo, &["branch", "--list", &format!("ersa/{id}")]).contains(id));
+    assert_eq!(git(&repo, &["branch", "--list", &format!("ersa/{id}")]), "");
 
     // Local changes block removal without force, and the workspace stays ready.
     std::fs::write(named_path.join("notes.txt"), "uncommitted").unwrap();
@@ -1101,4 +1103,171 @@ async fn a_change_that_waited_too_long_for_its_turn_runs_no_git_and_answers_vcs_
     gate.go();
     let made = holder.response(holding).await;
     assert_eq!(made["result"]["state"], json!("ready"), "{made}");
+}
+
+// -- Removing a folder, as every removal does (PROTO-CORE-API-R122) --------
+
+/// Whether `repo` has the local branch `branch`.
+fn has_branch(repo: &Path, branch: &str) -> bool {
+    !git(repo, &["branch", "--list", branch]).trim().is_empty()
+}
+
+/// `workspace.remove` deletes the branch of a workspace when it holds no
+/// commit of its own and no other worktree has it checked out, and keeps
+/// one that holds a commit no other branch does, and one checked out in
+/// another worktree.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn workspace_remove_deletes_the_branch_unless_it_holds_work_or_is_checked_out() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let create = json!({ "project_id": project["id"] });
+    let plain = client.result("workspace.create", create.clone()).await;
+    let ahead = client.result("workspace.create", create.clone()).await;
+    let elsewhere = client.result("workspace.create", create).await;
+    let branch = |w: &Value| w["vcs_ref"].as_str().unwrap().to_string();
+    let folder = |w: &Value| Path::new(w["path"].as_str().unwrap()).to_path_buf();
+
+    // A commit only its branch holds.
+    let ahead_folder = folder(&ahead);
+    std::fs::write(ahead_folder.join("work.txt"), "work\n").unwrap();
+    git(&ahead_folder, &["add", "work.txt"]);
+    git(&ahead_folder, &["commit", "--quiet", "-m", "Work of its own"]);
+    // Its branch let go of in its own folder and checked out in the
+    // project's.
+    git(&folder(&elsewhere), &["switch", "--quiet", "--detach"]);
+    git(&repo, &["switch", "--quiet", &branch(&elsewhere)]);
+
+    for workspace in [&plain, &ahead, &elsewhere] {
+        client
+            .result("workspace.remove", json!({ "id": workspace["id"] }))
+            .await;
+        assert!(!folder(workspace).exists());
+    }
+
+    assert!(!has_branch(&repo, &branch(&plain)), "nothing of its own: deleted");
+    assert!(has_branch(&repo, &branch(&ahead)), "unshared commits: kept");
+    assert!(has_branch(&repo, &branch(&elsewhere)), "checked out: kept");
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(isolated(&listed), json!([]));
+}
+
+/// Core's git, as [`setup_with_git_that_drops_its_record`] has it.
+fn git_that_drops_its_record(config: &mut ersa_core::CoreConfig) {
+    use support::deleting::{FailingGit, Removal};
+    let git = std::sync::Arc::new(FailingGit::new(Removal::DropsRecordThenFails, None));
+    config.command_transport = Some(ersa_core::CommandTransport(git));
+}
+
+/// A Core whose git deletes its record of a worktree and then fails to
+/// remove it, as git on Windows does on a file in use, with
+/// `workspaces.root` in the test's folder.
+async fn setup_with_git_that_drops_its_record() -> (TestCore, Client, std::path::PathBuf) {
+    let core = support::start_with(support::tempdir(), git_that_drops_its_record).await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let root = core.dir.path().join("worktrees").display().to_string();
+    client
+        .result(
+            "settings.set",
+            json!({ "patch": { "workspaces": { "root": root } } }),
+        )
+        .await;
+    (core, client, repo)
+}
+
+/// git's removal fails after it dropped its record of the worktree:
+/// `workspace.remove` goes on to the folder itself, as a delete does, and
+/// then deletes the branch, leaving nothing behind.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn workspace_remove_goes_on_to_the_folder_when_git_fails_after_dropping_its_record() {
+    let (_core, mut client, repo) = setup_with_git_that_drops_its_record().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    let branch = workspace["vcs_ref"].as_str().unwrap().to_string();
+
+    let removed = client
+        .result("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+
+    assert_eq!(removed["state"], "removing");
+    assert!(!path.exists(), "the folder is gone");
+    assert!(!has_branch(&repo, &branch), "the branch is gone");
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(isolated(&listed), json!([]));
+    let worktrees = git(&repo, &["worktree", "list", "--porcelain"]);
+    assert!(!worktrees.contains(workspace["id"].as_str().unwrap()), "{worktrees}");
+}
+
+/// A folder git no longer lists, which nothing could remove before, goes
+/// with `force`, as a delete's does, and its branch with it. Without
+/// `force` it stays refused: git cannot say what it holds.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_git_does_not_list_goes_with_force() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    let branch = workspace["vcs_ref"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(admin_dir(&path)).unwrap();
+
+    let error = client
+        .error("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error");
+    assert!(path.exists());
+
+    client
+        .result(
+            "workspace.remove",
+            json!({ "id": workspace["id"], "force": true }),
+        )
+        .await;
+    assert!(!path.exists());
+    assert!(!has_branch(&repo, &branch));
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(isolated(&listed), json!([]));
+}
+
+/// A workspace whose add was killed, its `initializing` lock left: the
+/// discard git does for it can drop git's record and leave the files, and
+/// `workspace.remove` then goes on to the folder, as every removal does.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn a_killed_adds_files_left_by_git_go_as_a_folder() {
+    let (core, mut client, repo) = setup_with_git_that_drops_its_record().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    std::fs::write(admin_dir(&path).join("locked"), "initializing").unwrap();
+    // A Core that died making it left the row `creating`; the next start
+    // marks it `error`.
+    client.result("core.shutdown", json!({})).await;
+    core.task.await.expect("joined").expect("stopped cleanly");
+    set_state(core.dir.path(), &workspace["id"], "creating").await;
+    let core = support::start_with(core.dir, git_that_drops_its_record).await;
+    let mut client = core.client().await;
+
+    client
+        .result("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+
+    assert!(!path.exists(), "the files git left are gone");
+    assert!(!has_branch(&repo, workspace["vcs_ref"].as_str().unwrap()));
 }

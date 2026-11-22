@@ -871,31 +871,35 @@ pub(super) async fn workspace_remove(
         return Err(e.into());
     }
 
-    let force = params.force.unwrap_or(false);
-    let turns = RepositoryTurns {
-        core,
-        project: &project.id,
+    // As every removal (PROTO-CORE-API-R122): the folder, git's record and
+    // the branch, unless the branch holds work of its own or another
+    // worktree has it checked out. Whether it was kept is not reported.
+    let checks = workspace::RemovalChecks {
+        force: params.force.unwrap_or(false),
+        // An `error` workspace may be an add that was killed mid-way; its
+        // leftover `initializing` lock must not block removal.
+        after_failed_add: replaced == WorkspaceState::Error,
     };
-    let removed = match turns.turn().await {
-        // Kept until git is done with the repository's worktrees.
-        Ok(_turn) => {
-            workspace::git_worktree_remove(
-                transport.as_ref(),
-                &project.path,
-                &workspace.path,
-                force,
-                // An `error` workspace may be an add that was killed mid-way;
-                // its leftover `initializing` lock must not block removal.
-                replaced == WorkspaceState::Error,
-            )
-            .await
-        }
-        Err(e) => Err(e),
-    };
+    let removed = workspace::git_worktree_delete(
+        transport.as_ref(),
+        &project.path,
+        &workspace.path,
+        &workspace.vcs_ref,
+        checks,
+        // The removal's operation ends with what happened, reported below,
+        // so a try left stuck holds nothing of it.
+        workspace::FolderTries::from_config(&core.config, Arc::new(())),
+        &RepositoryTurns {
+            core,
+            project: &project.id,
+        },
+    )
+    .await;
     if let Err(e) = removed {
-        // A refusal (locked, local changes without `force`, or a folder git
-        // does not list) leaves the worktree as it was, so it goes back to
-        // the state it had; any other failure leaves it in an unknown state.
+        // A refusal (locked, local changes or a folder git does not list
+        // without `force`, or no turn at the worktrees in time) leaves the
+        // worktree as it was, so it goes back to the state it had; any other
+        // failure leaves it in an unknown state.
         // Stored, then said: with the report the hold goes, and the found
         // sessions are theirs again.
         if e.is_refusal() {
