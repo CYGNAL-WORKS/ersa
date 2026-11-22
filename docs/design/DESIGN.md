@@ -115,6 +115,12 @@ size:
   shelf: 320px
   # The widest a dialog grows, such as the delete question.
   dialog: 360px
+  # The workbench: its width when first opened, the least it narrows to, and the most it takes of the width it shares with the transcript.
+  workbench: 480px
+  workbench-min: 320px
+  workbench-max: 50%
+  # A row of the developer pane's list: one line of `mono` with room to tell rows apart.
+  log-row: 24px
 stack:
   # Custom group. Stacking orders, lowest first: a menu sits above the page it opens over; a dialog above everything.
   menu: 10
@@ -269,6 +275,7 @@ Component style tokens are added here as component briefs reach `ready`. Each co
 - **The rail, a project heading and a tile**: `docs/design/RAIL.md`. Read it before changing any of them.
 - **The composer and the session controls**: `docs/design/COMPOSER.md`. Read it before changing either.
 - **The transcript's formatted text, tool cards and diff cards**: `docs/design/TRANSCRIPT.md`. Read it before changing any of them.
+- **The workbench and the developer pane**: `docs/design/WORKBENCH.md`. Read it before changing either.
 
 ## Do's and Don'ts
 
