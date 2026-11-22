@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import { type WidthLimits, clampWidth, limitsOf } from "../session/workbench";
 import { milliseconds, reducedMotion } from "../theme/motion";
@@ -103,6 +103,15 @@ export function Workbench({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, shown]);
 
+  // The window resizing moves the drawn width and its limits, through the stylesheet's clamp: measured again, so
+  // assistive technology hears what is drawn.
+  useEffect(() => {
+    if (!open) return;
+    const remeasure = () => aside.current && setMeasured(shownWidth(aside.current, width));
+    window.addEventListener("resize", remeasure);
+    return () => window.removeEventListener("resize", remeasure);
+  }, [open, width]);
+
   // The width the user chose, within its limits, from where it is drawn now: a kept width wider than the window
   // allows starts from what is shown, so the first step moves it.
   const resize = useCallback(
@@ -182,7 +191,8 @@ export function Workbench({
         aria-valuemin={measured?.limits.least}
         aria-valuemax={measured?.limits.most}
         tabIndex={0}
-        data-force={force}
+        // Dragged, the pointer is on the edge too, as it is in a real drag.
+        data-force={force === "pressed" ? "hover" : force}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
