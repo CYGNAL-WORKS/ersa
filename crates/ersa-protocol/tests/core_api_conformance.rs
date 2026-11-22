@@ -179,6 +179,14 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::ProjectFind, to_value(&Some(project()))),
         (Method::ProjectFind, to_value(&None::<Project>)),
         (Method::WorkspaceList, to_value(&vec![workspace()])),
+        // A put-away workspace is listed with its own state (FLOW-CLEAN-UP-R02).
+        (
+            Method::WorkspaceList,
+            to_value(&vec![Workspace {
+                state: WorkspaceState::PutAway,
+                ..workspace()
+            }]),
+        ),
         (Method::WorkspaceCreate, to_value(&workspace())),
         (Method::WorkspaceRemove, to_value(&workspace())),
         (

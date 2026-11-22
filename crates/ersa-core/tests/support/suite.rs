@@ -60,10 +60,10 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
     let hello = client
         .result(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [6, 7] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [7, 8] }),
         )
         .await;
-    assert_eq!(hello["api_version"], json!(6), "the highest shared version");
+    assert_eq!(hello["api_version"], json!(7), "the highest shared version");
     assert_eq!(hello["event_projection_version"], json!(PROJECTION_VERSION));
     assert_eq!(hello["host"]["id"], json!("local"));
     assert_eq!(hello["host"]["platform"], json!(std::env::consts::OS));
@@ -73,7 +73,7 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
     let error = client
         .error(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [6] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [7] }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
@@ -82,21 +82,21 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
 pub async fn hello_without_a_shared_version_names_the_supported_ones_and_closes(target: Target) {
     let core = target.start().await;
     let mut client = Client::connect(&core.endpoint).await;
-    // A client of a version before `branch.list` was removed speaks no
+    // A client of a version before `put_away` was added speaks no
     // version Core does.
     let error = client
         .error(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [4, 5] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [5, 6] }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
     let message = error["message"].as_str().unwrap();
-    assert!(message.contains("supports [6]"), "{message}");
-    assert!(message.contains("[4, 5]"), "{message}");
+    assert!(message.contains("supports [7]"), "{message}");
+    assert!(message.contains("[5, 6]"), "{message}");
     assert_eq!(
         error["data"]["detail"],
-        json!("supported api_versions: [6]"),
+        json!("supported api_versions: [7]"),
         "the detail names them too"
     );
 

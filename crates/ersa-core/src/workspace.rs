@@ -267,6 +267,82 @@ async fn resolve_commit(
     Err(failed())
 }
 
+/// What a worktree's folder has checked out: a branch, or a commit when it
+/// is on none. Stored when the workspace is put away, so the folder comes
+/// back as it was (FLOW-CLEAN-UP-R02).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Checkout {
+    /// A local branch, by its name (`main`, not `refs/heads/main`).
+    Branch(String),
+    /// A commit id: the folder was on no branch.
+    Commit(String),
+}
+
+/// What the worktree at `path` has checked out, read with
+/// [`GIT_QUERY_TIMEOUT`]: its branch, else the commit it is on. Fails for
+/// a folder that is not a worktree, and for one whose branch has no commit
+/// yet, since nothing could put that back.
+pub async fn git_checkout(transport: &dyn Transport, path: &str) -> Result<Checkout, VcsError> {
+    let deadline = deadline();
+    // `-q` exits 1, saying nothing, when HEAD is detached.
+    let symbolic = ["symbolic-ref", "-q", "HEAD"];
+    let output = query(transport, path, &symbolic, deadline).await?;
+    let branch = match output.exit.code {
+        Some(0) => output
+            .stdout
+            .first()
+            .and_then(|line| line.trim().strip_prefix("refs/heads/"))
+            .map(str::to_string),
+        Some(1) => None,
+        _ => {
+            return Err(VcsError::Failed {
+                message: "git could not read what the workspace has checked out".into(),
+                stderr: output.stderr_text(),
+            });
+        }
+    };
+    let head = ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"];
+    let output = query(transport, path, &head, deadline).await?;
+    let output = checked(output, "the workspace has no commit checked out")?;
+    match (branch, output.stdout.first()) {
+        (Some(branch), Some(_)) => Ok(Checkout::Branch(branch)),
+        (None, Some(commit)) => Ok(Checkout::Commit(commit.trim().to_string())),
+        (_, None) => Err(VcsError::Failed {
+            message: "the workspace has no commit checked out".into(),
+            stderr: String::new(),
+        }),
+    }
+}
+
+/// What deleting a put-away workspace would lose (PROTO-CORE-API-R123):
+/// its folder is gone, so no uncommitted, ignored or stranded file or
+/// commit is left, and as unshared the commits that `branches` (the stored
+/// branch and the workspace's own) hold and no other local or
+/// remote-tracking branch does. A branch already gone holds nothing.
+pub async fn git_put_away_changes(
+    transport: &dyn Transport,
+    repo: &str,
+    branches: &[&str],
+) -> Result<WorktreeChanges, VcsError> {
+    let deadline = Deadline::after(CHANGES_TIMEOUT);
+    let own: Vec<&str> = branches.iter().copied().filter(|b| !b.is_empty()).collect();
+    let tips: Vec<String> = own.iter().map(|b| format!("refs/heads/{b}")).collect();
+    let unshared = if tips.is_empty() {
+        BTreeSet::new()
+    } else {
+        unshared_from(transport, repo, &tips, &own, deadline).await?
+    };
+    let mut changes = WorktreeChanges {
+        unshared: unshared.len() as u64,
+        ..WorktreeChanges::default()
+    };
+    changes.evidence.push("put away".to_string());
+    changes
+        .evidence
+        .extend(unshared.iter().map(|c| format!("unshared {c}")));
+    Ok(changes)
+}
+
 /// When the git queries for one answer must all have finished, and the
 /// limit that was set from, to name in the error. `Copy`, so each query
 /// takes it by value.
@@ -974,12 +1050,12 @@ async fn count_commits(
         BTreeSet::new()
     } else {
         let tip = [format!("refs/heads/{branch}")];
-        unshared_from(transport, repo, &tip, branch, deadline).await?
+        unshared_from(transport, repo, &tip, &[branch], deadline).await?
     };
     let tips: Vec<String> = tips.into_iter().collect();
     let mut stranded = BTreeSet::new();
     for batch in tips.chunks(REVISIONS_PER_CALL) {
-        stranded.extend(unshared_from(transport, repo, batch, branch, deadline).await?);
+        stranded.extend(unshared_from(transport, repo, batch, &[branch], deadline).await?);
     }
     stranded.retain(|commit| !on_branch.contains(commit));
 
@@ -991,13 +1067,13 @@ async fn count_commits(
     Ok(())
 }
 
-/// The commits reachable from `tips` that no local branch but `branch`,
-/// and no remote-tracking branch, holds.
+/// The commits reachable from `tips` that no local branch but those in
+/// `own`, and no remote-tracking branch, holds.
 async fn unshared_from(
     transport: &dyn Transport,
     repo: &str,
     tips: &[String],
-    branch: &str,
+    own: &[&str],
     deadline: Deadline,
 ) -> Result<BTreeSet<String>, VcsError> {
     // `--ignore-missing` skips a tip that no longer exists: a branch
@@ -1005,13 +1081,15 @@ async fn unshared_from(
     let mut args = vec!["rev-list", "--ignore-missing"];
     args.extend(tips.iter().map(String::as_str));
     // Everything after `--not` is subtracted. `--exclude` leaves the
-    // workspace's own branch out of the `--branches` that follows it; a
+    // workspace's own branches out of the `--branches` that follows it; a
     // branch name can hold no glob character, so it matches only itself.
     args.push("--not");
-    let exclude = format!("--exclude={branch}");
-    if !branch.is_empty() {
-        args.push(&exclude);
-    }
+    let excludes: Vec<String> = own
+        .iter()
+        .filter(|branch| !branch.is_empty())
+        .map(|branch| format!("--exclude={branch}"))
+        .collect();
+    args.extend(excludes.iter().map(String::as_str));
     args.extend(["--branches", "--remotes"]);
     let output = query(transport, repo, &args, deadline).await?;
     let output = checked(output, "git could not list the workspace's commits")?;
@@ -1361,7 +1439,7 @@ pub async fn git_worktree_delete(
         transport,
         repo,
         std::slice::from_ref(&reference),
-        branch,
+        &[branch],
         deadline,
     )
     .await?;
