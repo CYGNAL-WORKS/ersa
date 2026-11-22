@@ -6,10 +6,13 @@
 //! - This module: turns one request into one response, enforcing the
 //!   handshake and the reserved methods.
 //! - `handlers`: one function per implemented method.
+//! - [`put_away_workspace`]: putting a workspace away, which no method asks
+//!   for yet (FLOW-CLEAN-UP).
 
 mod delete;
 mod handlers;
 mod lines;
+mod put_away;
 mod sections;
 pub mod server;
 mod sessions;
@@ -30,6 +33,8 @@ use crate::persistence;
 use crate::sessions::{Kick, SessionError, Subscription};
 use crate::state::Core;
 use crate::workspace::VcsError;
+
+pub use put_away::put_away_workspace;
 
 /// A failed request: the JSON-RPC error to answer with.
 #[derive(Debug, Clone, PartialEq, Eq)]

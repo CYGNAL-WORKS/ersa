@@ -82,8 +82,12 @@ impl SessionManager {
             };
             for workspace in self.store.workspaces(project.id.clone()).await? {
                 // A workspace still being made, or being removed, gains no
-                // session; one in error is left as it is.
-                if workspace.state != WorkspaceState::Ready {
+                // session; one in error is left as it is. A put-away one's
+                // folder held sessions that stay listed (PROTO-CORE-API-R123).
+                if !matches!(
+                    workspace.state,
+                    WorkspaceState::Ready | WorkspaceState::PutAway
+                ) {
                     continue;
                 }
                 for adapter in &self.adapters {

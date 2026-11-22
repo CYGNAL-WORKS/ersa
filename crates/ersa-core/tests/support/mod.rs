@@ -44,6 +44,9 @@ pub struct TestCore {
     pub dir: tempfile::TempDir,
     pub endpoint: String,
     pub task: JoinHandle<io::Result<()>>,
+    /// The Core the server runs, for what no request asks for yet; weak, so
+    /// a test never keeps a stopped Core alive.
+    pub core: std::sync::Weak<ersa_core::Core>,
 }
 
 /// A unique endpoint per test, labelled with the process id and a counter,
@@ -157,11 +160,13 @@ pub async fn start_with_adapters(
     let mut config = test_config(&dir.path().join("data"), &endpoint);
     configure(&mut config);
     let server = Server::bind_with(config, adapters).await.expect("bind");
+    let core = Arc::downgrade(&server.core());
     let task = tokio::spawn(server.run());
     TestCore {
         dir,
         endpoint,
         task,
+        core,
     }
 }
 
@@ -173,11 +178,13 @@ pub async fn start_replay_of(replay: Replay, configure: impl FnOnce(&mut CoreCon
     let mut config = test_config(&dir.path().join("data"), &endpoint);
     configure(&mut config);
     let server = Server::bind_replay(config, replay).await.expect("bind");
+    let core = Arc::downgrade(&server.core());
     let task = tokio::spawn(server.run());
     TestCore {
         dir,
         endpoint,
         task,
+        core,
     }
 }
 
@@ -199,6 +206,11 @@ impl TestCore {
 
     pub fn data_dir(&self) -> PathBuf {
         self.dir.path().join("data")
+    }
+
+    /// The running Core.
+    pub fn core(&self) -> Arc<ersa_core::Core> {
+        self.core.upgrade().expect("the Core is running")
     }
 }
 
@@ -270,7 +282,7 @@ impl Client {
     pub async fn hello(&mut self) -> Value {
         self.result(
             "core.hello",
-            json!({ "client": "ersa-core-tests", "client_version": "0", "api_versions": [6] }),
+            json!({ "client": "ersa-core-tests", "client_version": "0", "api_versions": [7] }),
         )
         .await
     }
