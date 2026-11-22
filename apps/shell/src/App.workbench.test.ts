@@ -54,7 +54,8 @@ function fakeCore(kept: unknown = {}, { refuse = false } = {}) {
     },
   };
   const writes = () => calls.filter((c) => c.method === "settings.set").map((c) => (c.params as { patch: unknown }).patch);
-  return { client, writes, settings: () => settings, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })) };
+  const reads = () => calls.filter((c) => c.method === "settings.get").length;
+  return { client, writes, reads, settings: () => settings, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })) };
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -198,8 +199,10 @@ describe("keeping the workbench across restarts", () => {
     expect(rail().textContent).not.toContain("a replay keeps no settings");
 
     // Core's settings, read again on reconnecting, still hold nothing: what the user set stays.
+    expect(core.reads()).toBe(1);
     core.drop();
-    await act(() => new Promise((r) => setTimeout(r, 700)));
+    // Waits on the read the new connection makes, then on its answer being applied.
+    await vi.waitFor(() => expect(core.reads()).toBe(2), { timeout: 10_000 });
     await settle();
     await settle();
     expect(workbench()).not.toBeNull();
@@ -208,6 +211,18 @@ describe("keeping the workbench across restarts", () => {
 });
 
 describe("resizing the workbench", () => {
+  // verifies: FLOW-READ-RAW-LOG-R16
+  it("tells assistive technology the width drawn once the window resizes", async () => {
+    await start(fakeCore({ workbench: { open: true, width: 600 } }));
+    expect(edge().getAttribute("aria-valuenow")).toBe("600");
+    shared = 800;
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(edge().getAttribute("aria-valuenow")).toBe("400");
+    expect(edge().getAttribute("aria-valuemax")).toBe("400");
+  });
+
   const width = () => Number(edge().getAttribute("aria-valuenow"));
 
   // verifies: FLOW-READ-RAW-LOG-R16

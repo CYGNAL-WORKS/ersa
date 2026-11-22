@@ -6,13 +6,13 @@ import { useCallback, useRef, useState } from "react";
 import { objectOr } from "./arrangement";
 
 /** What the window keeps of the workbench: whether it is open, and the width the user chose; undefined is the design's. */
-export interface WorkbenchState {
+interface WorkbenchState {
   open: boolean;
   width: number | undefined;
 }
 
 /** Closed and at the design's width: what a window with nothing kept starts with (R02). */
-export const CLOSED: WorkbenchState = { open: false, width: undefined };
+const CLOSED: WorkbenchState = { open: false, width: undefined };
 
 /** A JSON merge patch (RFC 7386) for the workbench, as `settings.set` takes it. */
 export type WorkbenchPatch = { workbench: { open: boolean } | { width: number } };
@@ -21,7 +21,7 @@ export type WorkbenchPatch = { workbench: { open: boolean } | { width: number } 
  * The workbench as kept in `settings`. Settings are the user's and may hold anything: it is open only when `open` is
  * exactly true, and a width is kept only when it is a positive number.
  */
-export function workbenchOf(settings: unknown): WorkbenchState {
+function workbenchOf(settings: unknown): WorkbenchState {
   const kept = objectOr(objectOr(settings)?.workbench);
   const width = kept?.width;
   return { open: kept?.open === true, width: typeof width === "number" && Number.isFinite(width) && width > 0 ? width : undefined };
