@@ -62,6 +62,11 @@ interface NewSessionScreenProps {
   away?: Extract<Unavailable, "reconnecting" | "unreachable">;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
+  /**
+   * The user moved past a failed add, by choosing another project or host or by sending (FLOW-NEW-SESSION-R44): App
+   * drops the failure, which it keeps across New session.
+   */
+  onPassAddFailure?: () => void;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
   autoFocus?: boolean;
   forceFocus?: boolean;
@@ -99,6 +104,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   // The folder the trust question asks about, while it is open.
   const [asking, setAsking] = useState(props.initialAsking);
+  const addFailed = adding?.state === "failed" ? adding : undefined;
   // While the dialog is open, or a folder is being found or added, another Add project does nothing.
   const choosing = useRef(false);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -275,6 +281,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {
+    // Another project or host chosen moves past a failed add: its reason no longer applies (FLOW-NEW-SESSION-R44).
+    if (addFailed && (key === "host" || key === "project")) props.onPassAddFailure?.();
     if (key === "host") {
       // A host's own projects follow it; its most recently used one, at what was last used there.
       const next = startingProject(projects, id);
@@ -331,9 +339,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
               forceCancelFocus={props.forceCancelFocus}
             />
           )}
-          {asking === undefined && adding?.state === "failed" && (
+          {asking === undefined && addFailed && (
             <p className="problem new-session-problem" role="alert">
-              {adding.message}
+              {addFailed.message}
             </p>
           )}
         </div>
@@ -341,7 +349,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           inputRef={words}
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
           // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
-          statusTaken={asking !== undefined || adding?.state === "failed"}
+          statusTaken={asking !== undefined || addFailed !== undefined}
           // Nothing is sent while a picked folder is found, asked about or added, so no session starts in the project
           // chosen before it (FLOW-NEW-SESSION-R42); the words stay the user's to edit. A failed add frees send again.
           held={asking !== undefined || adding?.state === "sending"}
@@ -359,6 +367,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           workspace={attachTo}
           onSend={(text, attachments) => {
             hold();
+            // A send moves past a failed add, whose reason holds the status line's place where the send has its own
+            // progress or failure to show (FLOW-NEW-SESSION-R44).
+            if (addFailed) props.onPassAddFailure?.();
             // With no project, sending opens the folder dialog and the message stays for the user to send (R19).
             if (!project) {
               void addProject();
