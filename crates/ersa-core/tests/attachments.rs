@@ -514,7 +514,7 @@ async fn a_session_found_stopped_after_its_line_was_written_is_delivery_unknown(
     assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
 }
 
-// verifies: PROTO-CORE-API-R28
+// verifies: PROTO-CORE-API-R121
 #[tokio::test]
 async fn removing_a_session_removes_its_scratch_folder_only() {
     let mut s = setup(FakeAdapter::new(1)).await;
