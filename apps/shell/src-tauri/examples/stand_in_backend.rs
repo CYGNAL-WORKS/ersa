@@ -102,10 +102,13 @@ fn write_record() {
     }
     // A bookkeeping entry the CLI writes first, which holds no prompt: the
     // record then gives the session no title, as the stand-in's stream does.
+    // Stamped with the time it is written, as the CLI stamps it: Core takes
+    // the session's creation time from it, so two sessions started one after
+    // the other are as old as they are, and the newer one is the newest.
     let line = serde_json::json!({
         "type": "queue-operation",
         "operation": "enqueue",
-        "timestamp": "2026-11-20T09:00:00.000Z",
+        "timestamp": ersa_core::persistence::now_rfc3339(),
         "sessionId": id,
     });
     let _ = std::fs::create_dir_all(&dir);
