@@ -16,7 +16,10 @@ use ersa_adapter::OutgoingAttachment;
 use ersa_core::{Adapter, CoreConfig};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Stats};
-use support::{Client, TestCore, git_repo, kind, start_with_adapters, tempdir};
+use support::{
+    Client, TestCore, assert_valid, assert_valid_notification, git_repo, kind, start_with_adapters,
+    tempdir,
+};
 
 /// The first bytes of a PNG, and of a GIF: enough to tell each by.
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
@@ -841,13 +844,14 @@ async fn progress_reaches_the_client_while_a_phase_lasts() {
         .client
         .request("session.send", json!({ "id": id, "text": "hi" }))
         .await;
-    // The phase stays `starting` for 12 s, and its reports reach the client
-    // while it lasts: the first at once, then at least every 5 s until the
-    // answer, which ends the phase. Their exact pace is tested on a paused
-    // clock in `send_progress.rs`; the slack here leaves room for a busy
-    // machine. Timed up to the phase's own end rather than within a window
-    // of the test's, which a machine slow by a second shifts out of.
-    let mut starting = Vec::new();
+    // The phase stays `starting` for 12 s, and reports reach the client
+    // while it lasts: the first at once (`checking`, then `starting`), then
+    // one at least every 5 s until the answer, which ends the phase. Their
+    // exact pace is tested on a paused clock in `send_progress.rs`; the slack
+    // here leaves room for a busy machine. Timed up to the phase's own end
+    // rather than within a window of the test's, which a machine slow by a
+    // second shifts out of.
+    let mut reports = Vec::new();
     let (response, answered) = loop {
         let line = s
             .client
@@ -856,32 +860,46 @@ async fn progress_reaches_the_client_while_a_phase_lasts() {
             .expect("the connection stays open");
         let now = tokio::time::Instant::now();
         if line["id"] == send {
+            assert_valid("session.send", &line);
             break (line, now);
         }
-        if line["method"] == "session.send_progress"
-            && line["params"]["session_id"] == id.as_str()
-            && line["params"]["phase"] == "starting"
+        if line.get("id").is_none() {
+            assert_valid_notification(&line);
+        }
+        if line["method"] == "session.send_progress" && line["params"]["session_id"] == id.as_str()
         {
-            starting.push(now);
+            let phase = line["params"]["phase"].as_str().unwrap().to_string();
+            reports.push((phase, now));
         }
     };
     assert!(response.get("result").is_some(), "{response:#}");
-    let reported: Vec<Duration> = starting.iter().map(|at| at.duration_since(sent)).collect();
+    let reported: Vec<(&str, Duration)> = reports
+        .iter()
+        .map(|(phase, at)| (phase.as_str(), at.duration_since(sent)))
+        .collect();
     let answered_after = answered.duration_since(sent);
-    let first = starting.first().expect("a report while the phase lasted");
+    let (_, first) = reports.first().expect("a report while the send waited");
     assert!(
         first.duration_since(sent) <= Duration::from_millis(1500),
         "{reported:?}"
     );
-    let times: Vec<tokio::time::Instant> = starting.iter().copied().chain([answered]).collect();
+    let times: Vec<tokio::time::Instant> = reports
+        .iter()
+        .map(|(_, at)| *at)
+        .chain([answered])
+        .collect();
     for pair in times.windows(2) {
         assert!(
             pair[1].duration_since(pair[0]) <= Duration::from_millis(6500),
             "{reported:?}, answered after {answered_after:?}"
         );
     }
-    // Twelve seconds, a report at least every five: three at the least.
-    assert!(starting.len() >= 3, "{reported:?}");
+    // The phase lasted: reported again while it did, not only as it began.
+    let starting = reports
+        .iter()
+        .filter(|(phase, _)| phase == "starting")
+        .count();
+    assert!(starting >= 2, "{reported:?}");
 }
 
 impl Setup {
