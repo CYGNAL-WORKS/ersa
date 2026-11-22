@@ -1622,9 +1622,15 @@ impl SessionManager {
         // exclusive operation: a start under way is waited for, and none
         // begins meanwhile, so the backend never starts on a record being
         // rewritten. A live session is renamed through its backend, which
-        // needs no turn of Core's.
+        // needs no turn of Core's. A session stops being live once its
+        // `session.ended` is sent, and a client may see that before Core
+        // lets go of the run: a run that is only winding down is waited for
+        // first, held in admission up to the stop limit, and the rename is
+        // then a stopped session's.
         let (live, exclusive) = loop {
-            if let Some(live) = handle.live() {
+            if self.runs_once_settled(&handle).await?
+                && let Some(live) = handle.live()
+            {
                 break (Some(live), None);
             }
             let exclusive = self.exclusive(id).await?;
