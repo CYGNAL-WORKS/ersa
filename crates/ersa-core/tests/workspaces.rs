@@ -1280,3 +1280,94 @@ async fn a_killed_adds_files_left_by_git_go_as_a_folder() {
     assert!(!path.exists(), "the files git left are gone");
     assert!(!has_branch(&repo, workspace["vcs_ref"].as_str().unwrap()));
 }
+
+/// A `workspace.remove` that gave up on a try at the folder that has not
+/// returned keeps its hold on the workspace until the try has ended, as a
+/// delete does: each try again meanwhile is refused `busy` and begins no
+/// second removal beside the stuck one. Once it returns, trying again
+/// removes the folder.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_holds_the_workspace_while_a_try_it_gave_up_on_is_stuck() {
+    use ersa_core::Gate;
+    use std::sync::Arc;
+    use std::time::Duration;
+    /// Lets every stop go however the test ends, so no try stays parked.
+    struct LetGo(Arc<Gate>);
+    impl Drop for LetGo {
+        fn drop(&mut self) {
+            for _ in 0..16 {
+                self.0.go();
+            }
+        }
+    }
+    async fn reached(gate: &Gate) {
+        tokio::time::timeout(Duration::from_secs(60), gate.reached())
+            .await
+            .expect("Core reached the gate in time");
+    }
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let core = support::start_with(support::tempdir(), {
+        let gate = Arc::clone(&gate);
+        move |config| {
+            config.folder_gate = Some(gate);
+            config.folder_removal_limit = Duration::from_millis(200);
+        }
+    })
+    .await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    // The project's folder is inspected at the gate too.
+    let add = client
+        .request(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
+        )
+        .await;
+    reached(&gate).await;
+    gate.go();
+    let project = client.response(add).await["result"].clone();
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    // git loses its record, so the removal deletes the folder as a folder.
+    std::fs::remove_dir_all(admin_dir(&path)).unwrap();
+    let remove = json!({ "id": workspace["id"], "force": true });
+
+    let first = client.request("workspace.remove", remove.clone()).await;
+    reached(&gate).await;
+    let answer = client.response(first).await;
+    assert_eq!(kind(&answer["error"]), "vcs_error", "{answer}");
+
+    for _ in 0..3 {
+        let error = client.error("workspace.remove", remove.clone()).await;
+        assert_eq!(kind(&error), "invalid_state", "{error}");
+        assert!(
+            error["message"].as_str().unwrap().contains("is busy"),
+            "{error}"
+        );
+    }
+    assert!(path.exists());
+
+    // The stuck try returns, and the try again that follows goes through.
+    gate.go();
+    gate.go();
+    let started = std::time::Instant::now();
+    loop {
+        let answer = client.call("workspace.remove", remove.clone()).await;
+        if answer.get("result").is_some() {
+            break;
+        }
+        let message = answer["error"]["message"].as_str().unwrap_or_default();
+        assert!(message.contains("is busy"), "{answer}");
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the hold was never let go: {answer}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(!path.exists());
+}
