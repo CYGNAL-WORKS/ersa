@@ -1127,8 +1127,8 @@ async fn a_fork_of_a_root_session_shares_its_workspace() {
 // verifies: PROTO-CORE-API-R122
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
-    use support::deleting::{FailingGit, Removal};
     use ersa_core::Gate;
+    use support::deleting::{FailingGit, Removal};
     let fake = Arc::new(FakeAdapter::new(1));
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
     let adds = Arc::new(Gate::default());
@@ -1165,7 +1165,10 @@ async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
     let _shutdown = other.request("core.shutdown", json!({})).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     while fake.stats.stops.load(std::sync::atomic::Ordering::SeqCst) == 0 {
-        assert!(tokio::time::Instant::now() < deadline, "Core never began to shut down");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "Core never began to shut down"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     adds.go();
@@ -1177,9 +1180,11 @@ async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
     loop {
         let rows = store
             .call(|conn| {
-                Ok(conn.query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
-                    row.get::<_, i64>(0)
-                })?)
+                Ok(
+                    conn.query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                )
             })
             .await
             .expect("count");

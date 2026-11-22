@@ -1132,7 +1132,10 @@ async fn workspace_remove_deletes_the_branch_unless_it_holds_work_or_is_checked_
     let ahead_folder = folder(&ahead);
     std::fs::write(ahead_folder.join("work.txt"), "work\n").unwrap();
     git(&ahead_folder, &["add", "work.txt"]);
-    git(&ahead_folder, &["commit", "--quiet", "-m", "Work of its own"]);
+    git(
+        &ahead_folder,
+        &["commit", "--quiet", "-m", "Work of its own"],
+    );
     // Its branch let go of in its own folder and checked out in the
     // project's.
     git(&folder(&elsewhere), &["switch", "--quiet", "--detach"]);
@@ -1145,7 +1148,10 @@ async fn workspace_remove_deletes_the_branch_unless_it_holds_work_or_is_checked_
         assert!(!folder(workspace).exists());
     }
 
-    assert!(!has_branch(&repo, &branch(&plain)), "nothing of its own: deleted");
+    assert!(
+        !has_branch(&repo, &branch(&plain)),
+        "nothing of its own: deleted"
+    );
     assert!(has_branch(&repo, &branch(&ahead)), "unshared commits: kept");
     assert!(has_branch(&repo, &branch(&elsewhere)), "checked out: kept");
     let listed = client
@@ -1205,7 +1211,10 @@ async fn workspace_remove_goes_on_to_the_folder_when_git_fails_after_dropping_it
         .await;
     assert_eq!(isolated(&listed), json!([]));
     let worktrees = git(&repo, &["worktree", "list", "--porcelain"]);
-    assert!(!worktrees.contains(workspace["id"].as_str().unwrap()), "{worktrees}");
+    assert!(
+        !worktrees.contains(workspace["id"].as_str().unwrap()),
+        "{worktrees}"
+    );
 }
 
 /// A folder git no longer lists, which nothing could remove before, goes
