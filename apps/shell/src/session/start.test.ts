@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import type { SessionValues } from "./controls";
 import { StartStop, lastUsedFrom, readChoices, rememberPatch, startSession } from "./start";
@@ -293,13 +293,32 @@ describe("stop while a new session starts", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R03
+  it("creates no session when stopped while the workspace is made, and removes that workspace", async () => {
+    let made: (workspace: typeof isolated) => void = () => {};
+    const { client, methods } = fakeClient({
+      ...working,
+      "workspace.create": () => new Promise((resolve) => (made = resolve)),
+      "workspace.remove": () => ({}),
+    });
+    const placed = vi.fn();
+    const stop = new StartStop(client);
+    const started = startSession(client, values("isolated"), "Fix the build", stop, [], placed);
+    await new Promise((r) => setTimeout(r, 0));
+    stop.stop();
+    made(isolated);
+    expect(await started).toEqual({ ok: false, stopped: true });
+    expect(methods()).toEqual(["workspace.create", "workspace.remove"]);
+    // The Interface is never told of a workspace the stopped start removed.
+    expect(placed).not.toHaveBeenCalled();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
   it("sends nothing when stopped before the session exists", async () => {
-    const { client, methods } = fakeClient({ ...working, "session.stop": () => ({}), "session.remove": () => ({}), "workspace.remove": () => ({}) });
+    const { client, methods } = fakeClient({ ...working, "workspace.remove": () => ({}) });
     const stop = new StartStop(client);
     stop.stop();
     expect(await startSession(client, values("isolated"), "Fix the build", stop)).toEqual({ ok: false, stopped: true });
-    expect(methods()).not.toContain("session.send");
-    expect(methods()).toContain("workspace.remove");
+    expect(methods()).toEqual(["workspace.create", "workspace.remove"]);
   });
 });
 
