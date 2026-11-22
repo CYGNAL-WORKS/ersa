@@ -51,10 +51,13 @@ test("Mark as unread keeps a session unseen across a restart until it is opened"
   await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "true");
   await ersa.shot("marked-unread");
 
-  // Quit and open again, Core too: Core kept the mark.
+  // Quit and open again, Core too: Core kept the mark. The window opens on the newest session, as it does at every
+  // start, and only then is the mark read: until a session is open, the one marked could still be opened, and seen.
   await ersa.restart();
   page = ersa.page;
-  await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "true", { timeout: 60_000 });
+  const activeTile = () => rail(page).locator(`[data-session-id="${activeId}"] .session`);
+  await expect(activeTile()).toHaveAttribute("aria-current", "true", { timeout: 60_000 });
+  await expect(otherTile().locator(".session-title")).toHaveAttribute("data-unseen", "true");
   await ersa.shot("unseen-after-restart");
 
   // Opened, it is seen, and stays seen through another restart.
