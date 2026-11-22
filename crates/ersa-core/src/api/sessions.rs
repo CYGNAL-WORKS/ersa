@@ -436,48 +436,40 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     )
     .await;
     let id = workspace.id.clone();
-    let e = match deleted {
+    let failed = match deleted {
         Ok(_) => match core.store.delete_workspace(id.clone()).await {
             Ok(()) => {
                 return handlers::end_held(removing, Report::WorkspaceRemoved { workspace: id });
             }
-            // Its row is as it was, `ready` and listed.
-            Err(e) => {
-                handlers::end_held(
-                    removing,
-                    Report::WorkspaceRemovalRefused {
-                        workspace: id.clone(),
-                    },
-                );
-                e.to_string()
-            }
+            // Its folder and branch went, its row did not: a failed removal.
+            Err(e) => e.to_string(),
         },
-        // Refused before git touched it (no turn in time among them): its
-        // row is as it was, `ready` and listed.
+        // Refused before git changed anything (a lock, no turn in time):
+        // its row is as it was, `ready` and listed (PROTO-CORE-API-R127).
         Err(e) if e.is_refusal() => {
             tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
             return handlers::end_held(removing, Report::WorkspaceRemovalRefused { workspace: id });
         }
-        // Part of it may be gone, its folder among them: `error`, as a
-        // failed `workspace.remove` leaves one, so no session starts in it.
-        Err(e) => {
-            if let Err(stored) = core
-                .store
-                .set_workspace_state(id.clone(), WorkspaceState::Error)
-                .await
-            {
-                tracing::warn!(workspace = %id, error = %stored, "could not mark a fork's workspace error");
-            }
-            handlers::end_held(
-                removing,
-                Report::WorkspaceRemovalFailed {
-                    workspace: id.clone(),
-                },
-            );
-            e.to_string()
-        }
+        Err(e) => e.to_string(),
     };
-    tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
+    // Part of it may be gone, its folder among them: `error`, as a failed
+    // `workspace.remove` leaves one, so no session starts in it
+    // (PROTO-CORE-API-R128). Admission holds it as `error` even when the
+    // store cannot say so.
+    if let Err(stored) = core
+        .store
+        .set_workspace_state(id.clone(), WorkspaceState::Error)
+        .await
+    {
+        tracing::warn!(workspace = %id, error = %stored, "could not mark a fork's workspace error");
+    }
+    handlers::end_held(
+        removing,
+        Report::WorkspaceRemovalFailed {
+            workspace: id.clone(),
+        },
+    );
+    tracing::warn!(workspace = %id, error = %failed, "could not remove a fork's workspace");
 }
 
 /// Refuses a `field` value that is not one of `offered`; absent is the
