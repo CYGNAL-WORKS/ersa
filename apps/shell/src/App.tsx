@@ -1104,6 +1104,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               away={away}
               onStop={() => startStop.current?.stop()}
               adding={adding}
+              onPassAddFailure={() => setAdding((was) => (was?.state === "failed" ? undefined : was))}
             />
           </ErrorBoundary>
         </main>

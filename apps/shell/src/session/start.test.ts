@@ -314,12 +314,11 @@ describe("stop while a new session starts", () => {
 
   // verifies: FLOW-SEND-MESSAGE-R03
   it("sends nothing when stopped before the session exists", async () => {
-    const { client, methods } = fakeClient({ ...working, "session.stop": () => ({}), "session.remove": () => ({}), "workspace.remove": () => ({}) });
+    const { client, methods } = fakeClient({ ...working, "workspace.remove": () => ({}) });
     const stop = new StartStop(client);
     stop.stop();
     expect(await startSession(client, values("isolated"), "Fix the build", stop)).toEqual({ ok: false, stopped: true });
-    expect(methods()).not.toContain("session.send");
-    expect(methods()).toContain("workspace.remove");
+    expect(methods()).toEqual(["workspace.create", "workspace.remove"]);
   });
 });
 

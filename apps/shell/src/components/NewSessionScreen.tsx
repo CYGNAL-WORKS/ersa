@@ -62,6 +62,8 @@ interface NewSessionScreenProps {
   away?: Extract<Unavailable, "reconnecting" | "unreachable">;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
+  /** The user chose a project or host after a failed add: App drops the failure, which it keeps across New session. */
+  onPassAddFailure?: () => void;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
   autoFocus?: boolean;
   forceFocus?: boolean;
@@ -99,10 +101,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   // The folder the trust question asks about, while it is open.
   const [asking, setAsking] = useState(props.initialAsking);
-  // A failed add the user moved past by choosing a project or host from the chips: its reason no longer applies.
-  // App gives each failure its own object, so a later failure is shown again.
-  const [passed, setPassed] = useState<Sending>();
-  const addFailed = adding?.state === "failed" && adding !== passed ? adding : undefined;
+  const addFailed = adding?.state === "failed" ? adding : undefined;
   // While the dialog is open, or a folder is being found or added, another Add project does nothing.
   const choosing = useRef(false);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -279,7 +278,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {
-    if (key === "host" || key === "project") setPassed(adding);
+    // A project or host chosen moves past a failed add: its reason no longer applies.
+    if (addFailed && (key === "host" || key === "project")) props.onPassAddFailure?.();
     if (key === "host") {
       // A host's own projects follow it; its most recently used one, at what was last used there.
       const next = startingProject(projects, id);
