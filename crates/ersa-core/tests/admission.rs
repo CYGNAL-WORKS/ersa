@@ -4544,7 +4544,7 @@ fn putting_away_is_refused_while_anything_is_under_way_there() {
 /// While a put-away holds the workspace, or a try at its folder it gave up
 /// on, nothing else removes the folder or the workspace, nothing is made
 /// or started there, and no second put-away begins.
-// verifies once #560 lands: PROTO-CORE-API-R131
+// verifies: PROTO-CORE-API-R131
 #[test]
 fn a_put_away_holds_its_workspace_against_every_other_removal() {
     let mut state = with_a_stopped_session();
@@ -4637,7 +4637,7 @@ fn what_a_put_away_workspace_takes() {
 
 /// A removal of a put-away workspace that is refused, or fails, or ends
 /// without saying, leaves it put away.
-// verifies once #560 lands: PROTO-CORE-API-R133
+// verifies: PROTO-CORE-API-R133
 #[test]
 fn a_removal_of_a_put_away_workspace_that_does_not_happen_leaves_it_put_away() {
     let mut existing = existing();
