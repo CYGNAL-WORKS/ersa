@@ -178,6 +178,20 @@ describe("adding a project from the project chip", () => {
     await addFromChip();
     expect(chosen()).toBe("Project: beyond");
   });
+
+  it("drops why a folder could not be added once the user chooses another project, and shows a later failure", () => {
+    const failed = { state: "failed", message: "Core could not read D:/clones/stranger." } as const;
+    const { rerender } = render(createElement(NewSessionScreen, props([alpha, beta], { adding: failed })));
+    expect(screen.getByRole("alert").textContent).toBe(failed.message);
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /beta/ }));
+    expect(chosen()).toBe("Project: beta");
+    expect(screen.queryByText(failed.message)).toBeNull();
+    // The next add that fails is a new failure, and says so.
+    const again = { state: "failed", message: "Core could not read D:/clones/other." } as const;
+    rerender(createElement(NewSessionScreen, props([alpha, beta], { adding: again })));
+    expect(screen.getByRole("alert").textContent).toBe(again.message);
+  });
 });
 
 describe("what the user chose on the new-session screen when the project changes", () => {
