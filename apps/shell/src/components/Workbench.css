@@ -26,9 +26,10 @@
   --workbench-width: var(--size-workbench);
 }
 
-/* The hairline is the resize edge: ink-faint under the pointer, ink while dragged and with keyboard focus. */
-.workbench:has(.workbench-edge:hover),
-.workbench:has(.workbench-edge[data-force="hover"]) {
+/* The hairline is the resize edge: ink-faint under the pointer, ink while dragged and with keyboard focus. A drag keeps
+   the pointer on the edge, so the pointer's tone gives way while it is dragged. */
+.workbench:not([data-dragging]):has(.workbench-edge:hover),
+.workbench:not([data-dragging]):has(.workbench-edge[data-force="hover"]) {
   --workbench-line: var(--color-ink-faint);
 }
 
