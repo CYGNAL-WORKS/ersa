@@ -453,10 +453,17 @@ fn starting_a_found_session_against_the_removal_of_its_workspace(
                 }
                 (Err(refused), Ok(_)) => {
                     // Refused as busy while the removal holds the
-                    // workspace, as while a delete does; gone after. No
-                    // backend was started in the folder about to go.
+                    // workspace, as while a delete does; as `folder_gone`
+                    // once the folder went and the removal still deletes the
+                    // branch (FLOW-RESUME-SESSION-R23, PROTO-CORE-API-R122);
+                    // gone after. No backend was started in the folder about
+                    // to go.
+                    let data = &refused["data"];
                     match kind(refused) {
-                        "invalid_state" => assert_eq!(refused["data"]["detail"], "busy"),
+                        "invalid_state" => assert!(
+                            data["detail"] == "busy" || data["reason"] == "folder_gone",
+                            "{refused:#}"
+                        ),
                         gone => assert_eq!(gone, "not_found", "{refused:#}"),
                     }
                     assert!(!still_there);

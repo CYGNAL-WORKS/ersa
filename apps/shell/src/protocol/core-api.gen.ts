@@ -528,7 +528,7 @@ export interface WorkspaceCreateParams {
 export interface WorkspaceRemoveParams {
   id: Id;
   /**
-   * Remove even with uncommitted changes.
+   * Remove even with uncommitted changes, and a folder git no longer lists as a worktree, whose changes git cannot count.
    */
   force?: boolean;
 }
