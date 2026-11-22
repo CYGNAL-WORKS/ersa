@@ -292,7 +292,6 @@ describe("stop while a new session starts", () => {
     expect(methods()).not.toContain("workspace.remove");
   });
 
-  // verifies: FLOW-NEW-SESSION-R08
   // verifies: FLOW-SEND-MESSAGE-R03
   it("creates no session when stopped while the workspace is made, and removes that workspace", async () => {
     let made: (workspace: typeof isolated) => void = () => {};
@@ -309,7 +308,7 @@ describe("stop while a new session starts", () => {
     made(isolated);
     expect(await started).toEqual({ ok: false, stopped: true });
     expect(methods()).toEqual(["workspace.create", "workspace.remove"]);
-    // The rail is never told of a workspace for a start that was stopped, so no tile flashes in it.
+    // The Interface is never told of a workspace the stopped start removed.
     expect(placed).not.toHaveBeenCalled();
   });
 

@@ -103,8 +103,8 @@ export async function startSession(
       if (!root) return { ok: false, message: "This project has no root workspace in Core." };
       workspace = root;
     }
-    // Stopped while the workspace was made: no session is created, so no backend starts and no tile reaches the
-    // rail; the cleanup below removes the workspace this start made (FLOW-NEW-SESSION-R08).
+    // Stopped while the workspace was made: no session is created, so no backend starts, the Interface never learns
+    // of the workspace, and the cleanup below removes the workspace this start made (FLOW-SEND-MESSAGE-R03).
     if (stop?.stopped) throw STOPPED;
     onWorkspace?.(workspace);
     const params: SessionCreateParams = { workspace_id: workspace.id, backend };
