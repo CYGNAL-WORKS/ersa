@@ -31,7 +31,11 @@ test("a session stopped by quitting Ersa continues in the same record when writt
   await ersa.restart();
   page = ersa.page;
   const rail = page.getByRole("navigation", { name: "Rail" });
-  await rail.getByRole("button", { name: /word one/ }).first().click();
+  // Claude Code titles the session itself, so its tile's name need not hold the first message's words; it is the only
+  // session this check's Core has, so take the one tile there is.
+  const tile = rail.locator(".session");
+  await expect(tile).toHaveCount(1, { timeout: 60_000 });
+  await tile.click();
   transcript = page.getByRole("region", { name: "Transcript" });
   await expect(transcript.getByText("one", { exact: true })).toBeVisible({ timeout: 60_000 });
   await ersa.shot("reopened");
