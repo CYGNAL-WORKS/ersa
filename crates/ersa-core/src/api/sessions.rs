@@ -378,6 +378,8 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
 
 /// A new isolated workspace on a new branch at the commit `from` has checked
 /// out, made as `workspace.create` makes one; uncommitted changes stay behind.
+/// For a put-away `from`, the tip of the branch it stored, or the commit
+/// (PROTO-CORE-API-R123).
 async fn new_workspace_at_head(
     core: &Core,
     project: &Project,
@@ -386,7 +388,23 @@ async fn new_workspace_at_head(
     let git = core
         .transport_for(&project.host_id)
         .ok_or_else(|| handlers::unreachable_host(&project.host_id))?;
-    let head = workspace::git_resolve_commit(git.as_ref(), &from.path, "HEAD")
+    let stored = match from.state {
+        WorkspaceState::PutAway => core.store.put_away_checkout(from.id.clone()).await?,
+        WorkspaceState::Ready
+        | WorkspaceState::Creating
+        | WorkspaceState::Removing
+        | WorkspaceState::Error => None,
+    };
+    // Resolved in the project's repository, which has every branch, since
+    // the put-away folder is gone.
+    let (at, revision) = match &stored {
+        Some(workspace::Checkout::Branch(branch)) => {
+            (&project.path, format!("refs/heads/{branch}"))
+        }
+        Some(workspace::Checkout::Commit(commit)) => (&project.path, commit.clone()),
+        None => (&from.path, "HEAD".to_string()),
+    };
+    let head = workspace::git_resolve_commit(git.as_ref(), at, &revision)
         .await?
         .ok_or_else(|| {
             ApiError::invalid_state(format!("workspace {} has no commit to start from", from.id))
@@ -675,7 +693,9 @@ async fn resolve_workspace(path: String) -> Option<Result<std::path::PathBuf, ()
 /// only one Core reaches yet. With a workspace, it also answers whether
 /// sending would copy the path, by send's own decision.
 pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
-    // A workspace reads the path on its own host.
+    // A workspace reads the path on its own host. A put-away one has no
+    // folder for anything to be inside: as for a host, every file and
+    // folder is copied (PROTO-CORE-API-R123).
     let (host, workspace) = match (params.workspace_id, params.host_id) {
         (Some(id), None) => {
             let workspace = core
@@ -690,7 +710,8 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
                 .ok_or_else(|| {
                     ApiError::not_found(format!("no project {}", workspace.project_id))
                 })?;
-            (project.host_id, Some(workspace.path))
+            let inside = (workspace.state != WorkspaceState::PutAway).then_some(workspace.path);
+            (project.host_id, inside)
         }
         (None, Some(host)) => (host, None),
         _ => {

@@ -108,10 +108,14 @@ impl SessionManager {
     ) -> Result<Forkable, SessionError> {
         let handle = self.handle(id)?;
         let row = handle.row()?;
-        // A session is forked only from a ready workspace (PROTO-CORE-API,
-        // Workspaces).
+        // A session is forked only from a ready or put-away workspace
+        // (PROTO-CORE-API, Workspaces): a put-away one's fork starts from
+        // what it stored (PROTO-CORE-API-R123).
         let workspace = self.store.workspace(row.workspace_id.clone()).await?;
-        if let Some(workspace) = workspace.filter(|w| w.state != WorkspaceState::Ready) {
+        let forkable = |w: &ersa_protocol::core_api::Workspace| {
+            matches!(w.state, WorkspaceState::Ready | WorkspaceState::PutAway)
+        };
+        if let Some(workspace) = workspace.filter(|w| !forkable(w)) {
             return Err(SessionError::InvalidState(format!(
                 "workspace {} is not ready",
                 workspace.id
