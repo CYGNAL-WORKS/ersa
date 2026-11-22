@@ -836,30 +836,52 @@ async fn lines_are_counted_in_a_text_file_of_at_most_10_mib() {
 async fn progress_reaches_the_client_while_a_phase_lasts() {
     let mut s = setup(FakeAdapter::slow_start(Duration::from_secs(12))).await;
     let id = s.session().await;
+    let sent = tokio::time::Instant::now();
     let send = s
         .client
         .request("session.send", json!({ "id": id, "text": "hi" }))
         .await;
-    // The phase stays `starting` for 12 s, and its reports reach the
-    // client while it lasts. Their exact pace is tested on a paused clock
-    // in `send_progress.rs`; the bound here leaves room for a busy machine.
-    let began = tokio::time::Instant::now();
-    let deadline = began + Duration::from_secs(11);
+    // The phase stays `starting` for 12 s, and its reports reach the client
+    // while it lasts: the first at once, then at least every 5 s until the
+    // answer, which ends the phase. Their exact pace is tested on a paused
+    // clock in `send_progress.rs`; the slack here leaves room for a busy
+    // machine. Timed up to the phase's own end rather than within a window
+    // of the test's, which a machine slow by a second shifts out of.
     let mut starting = Vec::new();
-    while let Ok(Some(n)) = tokio::time::timeout_at(deadline, s.client.notification()).await {
-        if n["method"] == "session.send_progress" && n["params"]["phase"] == "starting" {
-            starting.push(began.elapsed());
+    let (response, answered) = loop {
+        let line = s
+            .client
+            .read_line()
+            .await
+            .expect("the connection stays open");
+        let now = tokio::time::Instant::now();
+        if line["id"] == send {
+            break (line, now);
         }
-    }
-    assert!(starting.len() >= 3, "{starting:?}");
-    for pair in starting.windows(2) {
+        if line["method"] == "session.send_progress"
+            && line["params"]["session_id"] == id.as_str()
+            && line["params"]["phase"] == "starting"
+        {
+            starting.push(now);
+        }
+    };
+    assert!(response.get("result").is_some(), "{response:#}");
+    let reported: Vec<Duration> = starting.iter().map(|at| at.duration_since(sent)).collect();
+    let answered_after = answered.duration_since(sent);
+    let first = starting.first().expect("a report while the phase lasted");
+    assert!(
+        first.duration_since(sent) <= Duration::from_millis(1500),
+        "{reported:?}"
+    );
+    let times: Vec<tokio::time::Instant> = starting.iter().copied().chain([answered]).collect();
+    for pair in times.windows(2) {
         assert!(
-            pair[1] - pair[0] <= Duration::from_millis(6500),
-            "{starting:?}"
+            pair[1].duration_since(pair[0]) <= Duration::from_millis(6500),
+            "{reported:?}, answered after {answered_after:?}"
         );
     }
-    let response = s.client.response(send).await;
-    assert!(response.get("result").is_some(), "{response:#}");
+    // Twelve seconds, a report at least every five: three at the least.
+    assert!(starting.len() >= 3, "{reported:?}");
 }
 
 impl Setup {
