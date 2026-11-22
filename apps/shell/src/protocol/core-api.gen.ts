@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 6;
+export const CORE_API_VERSION = 7;
 
 /**
  * Any line on the socket.
@@ -984,7 +984,10 @@ export interface Workspace {
    * The branch (git) an isolated workspace has checked out; empty for the root workspace.
    */
   vcs_ref: string;
-  state: "ready" | "creating" | "removing" | "error";
+  /**
+   * put_away: an isolated workspace whose folder Core removed, keeping the workspace, its branch and what the folder had checked out; its path is where the folder comes back when a session there is resumed.
+   */
+  state: "ready" | "creating" | "removing" | "error" | "put_away";
 }
 /**
  * What deleting an isolated workspace would lose.
@@ -1205,7 +1208,10 @@ export interface Workspace1 {
    * The branch (git) an isolated workspace has checked out; empty for the root workspace.
    */
   vcs_ref: string;
-  state: "ready" | "creating" | "removing" | "error";
+  /**
+   * put_away: an isolated workspace whose folder Core removed, keeping the workspace, its branch and what the folder had checked out; its path is where the folder comes back when a session there is resumed.
+   */
+  state: "ready" | "creating" | "removing" | "error" | "put_away";
 }
 export interface Workspace2 {
   id: Id;
@@ -1222,7 +1228,10 @@ export interface Workspace2 {
    * The branch (git) an isolated workspace has checked out; empty for the root workspace.
    */
   vcs_ref: string;
-  state: "ready" | "creating" | "removing" | "error";
+  /**
+   * put_away: an isolated workspace whose folder Core removed, keeping the workspace, its branch and what the folder had checked out; its path is where the folder comes back when a session there is resumed.
+   */
+  state: "ready" | "creating" | "removing" | "error" | "put_away";
 }
 /**
  * What deleting an isolated workspace would lose.

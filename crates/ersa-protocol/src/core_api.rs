@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 6;
+pub const API_VERSION: u32 = 7;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -491,6 +491,10 @@ pub enum WorkspaceState {
     Creating,
     Removing,
     Error,
+    /// An isolated workspace whose folder Core removed, keeping the
+    /// workspace, its branch and what the folder had checked out
+    /// (FLOW-CLEAN-UP-R02). Its `path` is where the folder comes back.
+    PutAway,
 }
 
 /// `workspace.list` params.
