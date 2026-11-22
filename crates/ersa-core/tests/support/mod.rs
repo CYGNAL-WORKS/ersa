@@ -10,6 +10,7 @@
 
 pub mod deleting;
 pub mod fake;
+pub mod log;
 pub mod procs;
 pub mod schedule;
 pub mod suite;

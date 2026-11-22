@@ -133,6 +133,9 @@ pub struct FailingGit {
     stop: Option<Arc<Gate>>,
     /// The worktrees whose first removal has been.
     stopped: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// When set, every `git worktree add` stops here, before git runs,
+    /// until the test lets it go.
+    adds: Option<Arc<Gate>>,
     inner: LocalTreeTransport,
 }
 
@@ -146,8 +149,16 @@ impl FailingGit {
             held: std::sync::Mutex::new(None),
             stop: None,
             stopped: std::sync::Mutex::new(std::collections::HashSet::new()),
+            adds: None,
             inner: LocalTreeTransport::for_commands(),
         }
+    }
+
+    /// Every `git worktree add` also stops at `gate`, before git runs,
+    /// until the test lets it go.
+    pub fn stopping_adds(mut self, gate: Arc<Gate>) -> FailingGit {
+        self.adds = Some(gate);
+        self
     }
 
     /// Each worktree's first removal also stops at `gate`, before git
@@ -164,6 +175,10 @@ impl ersa_adapter::Transport for FailingGit {
         &self,
         mut spec: ersa_adapter::ProcessSpec,
     ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+        let adds = spec.args.windows(2).any(|pair| pair == ["worktree", "add"]);
+        if let (Some(gate), true) = (&self.adds, spec.program == "git" && adds) {
+            gate.stop().await;
+        }
         let removes = spec
             .args
             .windows(2)
