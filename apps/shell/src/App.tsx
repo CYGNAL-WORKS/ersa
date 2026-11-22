@@ -18,6 +18,7 @@ import { RailTree } from "./components/RailTree";
 import { besideIn } from "./components/useFocusRestore";
 import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
+import { Workbench } from "./components/Workbench";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
@@ -35,6 +36,7 @@ import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
 import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
+import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -128,6 +130,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     read: readArrangement,
     readFailed: arrangementUnread,
   } = useRailArrangement(saveArrangement, describeError);
+  // The workbench, open or closed and its width, kept in Core's settings for the window (FLOW-READ-RAW-LOG-R02).
+  const saveWorkbench = useCallback((patch: WorkbenchPatch) => client.call("settings.set", { patch }), [client]);
+  const workbench = useWorkbench(saveWorkbench);
+  const readWorkbench = workbench.read;
   // Today, moved on at local midnight, so the date groups move with the passing of days alone (R07).
   const today = useLocalDay();
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
@@ -333,7 +339,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     // Read once and shared: the new-session screen's remembered values, and the rail's arrangement (R13).
     const settings = client.call("settings.get");
     settings.then(
-      (read) => live && readArrangement(read),
+      (read) => {
+        if (!live) return;
+        readArrangement(read);
+        readWorkbench(read);
+      },
       (error) => live && arrangementUnread(describeError(error)),
     );
     readChoices(client, hostId, settings).then((choices) => {
@@ -346,7 +356,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return () => {
       live = false;
     };
-  }, [client, link, hostId, readArrangement, arrangementUnread]);
+  }, [client, link, hostId, readArrangement, arrangementUnread, readWorkbench]);
 
   // Each host's name, by id, read on each new connection: the rail names a project's host when it is not this
   // machine. Best effort: a host not listed, or a read that failed or has not answered, is named by its id.
@@ -889,6 +899,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             newSectionUnavailable: sectionsUnavailable(sections.view),
             onReset: () => arrange(RESET_PATCH),
             onAllSessions: () => dispatch({ type: "allSessions" }),
+            workbenchOpen: workbench.open,
+            onDeveloperPane: () => workbench.setOpen(!workbench.open),
           }}
         />
         <div className="rail-body">
@@ -957,6 +969,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </div>
       </nav>
+      {/* Beside the rail: the stage, and the workbench at the right, which the stage narrows to make room for
+          (LAY-SHELL, The workbench). The workbench is outside the stage, so the sessions page leaves it in place. */}
+      <div className="work">
+      <div className="stages">
       {sessionsPage && (
         // The page stands over the stage: the composer, the session controls and the header are hidden and out of reach,
         // so nothing typed reaches the active session, which stays active (FLOW-ORGANIZE-SESSIONS-R20).
@@ -1111,6 +1127,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       ) : (
         <main className="stage stage-empty" hidden={sessionsPage} inert={behind || sessionsPage}>No session open. Start one from a project in the rail.</main>
       )}
+      </div>
+      <Workbench
+        open={workbench.open}
+        width={workbench.width}
+        eases={workbench.eases}
+        inert={behind}
+        onResize={workbench.resize}
+        onClose={() => workbench.setOpen(false)}
+        focusAfterClose={() => document.querySelector<HTMLElement>(".rail-arrange")}
+      />
+      </div>
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
         <DeleteQuestion
           title={deleteAsk.title}

@@ -1,0 +1,90 @@
+/* The workbench (docs/design/WORKBENCH.md, The workbench): the window's full height at its right, on surface, with a
+   line hairline at its leading edge and no radius, since panes meet at lines. */
+
+.workbench {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  box-sizing: border-box;
+  /* The user's width, or the design's, kept within its limits: at most size-workbench-max of the width it shares with
+     the transcript area (its parent's), and at least size-workbench-min while that allows it (FLOW-READ-RAW-LOG-R16). */
+  width: clamp(
+    min(var(--size-workbench-min), var(--size-workbench-max)),
+    var(--workbench-width),
+    var(--size-workbench-max)
+  );
+  min-height: 0;
+  /* Nothing drawn past it while its width grows or runs back, but for the half of the resize edge over the transcript. */
+  overflow: clip;
+  overflow-clip-margin: var(--space-xs);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border-left: var(--line-hairline) solid var(--workbench-line);
+  --workbench-line: var(--color-line);
+  /* The width the user chose, set on the element; the design's until they choose one. */
+  --workbench-width: var(--size-workbench);
+}
+
+/* The hairline is the resize edge: ink-faint under the pointer, ink while dragged and with keyboard focus. */
+.workbench:has(.workbench-edge:hover),
+.workbench:has(.workbench-edge[data-force="hover"]) {
+  --workbench-line: var(--color-ink-faint);
+}
+
+.workbench[data-dragging],
+.workbench:has(.workbench-edge:focus-visible),
+.workbench:has(.workbench-edge[data-force="focus"]) {
+  --workbench-line: var(--color-ink);
+}
+
+/* A strip space-sm wide, centred on the hairline, takes the pointer. It lies over the line and takes no space; placed,
+   it is drawn above the pane, which is not. */
+.workbench-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* space-xs is half of space-sm on the scale, so the strip is centred on the line. */
+  left: calc(-1 * var(--space-xs));
+  width: var(--space-sm);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.workbench-edge:focus-visible {
+  outline: none;
+}
+
+/* The pane fills the region; its head is size-control high, padded space-sm by space-md, a line hairline beneath. */
+.workbench-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.workbench-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: content-box;
+  height: var(--size-control);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: var(--line-hairline) solid var(--color-line);
+}
+
+/* The pane's name in ui at the heading weight, in ink. */
+.workbench-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-ink);
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  font-weight: var(--type-heading-weight);
+  line-height: var(--type-ui-leading);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
