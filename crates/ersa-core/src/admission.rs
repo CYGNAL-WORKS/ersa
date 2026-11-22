@@ -681,7 +681,8 @@ pub enum Report {
         workspace: Id,
     },
     /// The put-away ended with the workspace `put_away`: its folder gone,
-    /// or what is left of it for the next put-away to finish.
+    /// or what is left of it, which goes when the workspace is put back
+    /// (FLOW-CLEAN-UP-R03).
     WorkspacePutAway {
         workspace: Id,
     },
@@ -1986,7 +1987,8 @@ fn fail_removal(state: &mut State, workspace: &str) -> Outcome {
 
 /// A put-away that did not end in a refusal leaves its workspace put away,
 /// as the store has had it since before anything was removed: its folder
-/// gone, or what is left of it for the next put-away to finish.
+/// gone, or what is left of it, which goes when the workspace is put back
+/// (PROTO-CORE-API-R141).
 fn put_away_ended(state: &mut State, workspace: &str) -> Outcome {
     set_workspace(state, workspace, |phase| match phase {
         WorkspacePhase::PuttingAway => Some(WorkspacePhase::PutAway),
