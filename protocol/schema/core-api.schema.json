@@ -2167,34 +2167,75 @@
       ]
     },
     "raw_log_entry": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "index",
-        "ts",
-        "dir",
-        "line"
-      ],
-      "properties": {
-        "index": {
-          "type": "integer",
-          "minimum": 0
+      "description": "One line of a session's raw log: whole as `line`, or, when it is longer than the request's `clip`, as `head` and `size` in place of `line`.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "ts",
+            "dir",
+            "line"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ts": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "dir": {
+              "enum": [
+                "backend",
+                "host"
+              ]
+            },
+            "line": {
+              "type": "string",
+              "description": "The line verbatim, without its terminator."
+            }
+          }
         },
-        "ts": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "dir": {
-          "enum": [
-            "backend",
-            "host"
-          ]
-        },
-        "line": {
-          "type": "string",
-          "description": "The line verbatim, without its terminator."
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "index",
+            "ts",
+            "dir",
+            "head",
+            "size"
+          ],
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "ts": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "dir": {
+              "enum": [
+                "backend",
+                "host"
+              ]
+            },
+            "head": {
+              "type": "string",
+              "description": "The longest start of the line that is at most `clip` bytes and ends on a whole character."
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "The whole line's length in bytes."
+            }
+          }
         }
-      }
+      ]
     },
     "settings": {
       "type": "object",
@@ -3136,6 +3177,12 @@
           "type": "integer",
           "minimum": 0,
           "description": "Last raw-log index, inclusive; the end of the log when absent."
+        },
+        "clip": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "description": "Bytes: a line longer than this comes back as `head` and `size` in place of `line`. Every line comes back whole when absent."
         }
       }
     },

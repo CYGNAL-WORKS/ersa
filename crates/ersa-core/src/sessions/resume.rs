@@ -143,8 +143,8 @@ impl SessionManager {
         if let Some(view) = lock(&handle.hub).view.as_mut() {
             view.resume(adapter.projector());
         }
-        // The raw log holds the lines since Core last started the backend.
-        *lock(&handle.raw) = RawLog::default();
+        // The raw log keeps the backend's earlier runs, and this run's lines
+        // go on from their last index (PROTO-CORE-API-R136, R137).
 
         // Weighed against what the record's turns ran with since Core's
         // requests (PROTO-CORE-API-R71).
