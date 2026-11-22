@@ -8,7 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-22 PROTO-CORE-API: "A session stops being live once its `session.ended` is sent" is prose in the `session.remove` bullet, and only R41 (remove) gives that window a requirement. `session.set_title` in that window now does the same as remove: it waits for Core to let go of the run, up to the stop limit, then renames the record (or refuses for what the record lacks), and answers `internal` with nothing changed if the wait runs out. A requirement for the rename's behavior in that window would let a test cite it; meanwhile the test cites R12 and R79.
 
 
 ## Resolved recently (optional, trimmed in planning passes)
