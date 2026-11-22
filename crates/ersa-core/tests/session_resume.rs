@@ -219,7 +219,7 @@ async fn a_send_to_a_stopped_session_resumes_it_reporting_starting() {
     assert_eq!(records.lock().unwrap()[&backend_id].len(), 4);
 }
 
-// verifies: FLOW-RESUME-SESSION-R03
+// verifies: FLOW-RESUME-SESSION-R23
 // verifies: PROTO-CORE-API-R43
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_whose_folder_is_gone_is_neither_resumed_nor_sent_to() {
@@ -781,7 +781,7 @@ async fn a_session_resumed_unread_is_read_from_its_record_then_live() {
 
 /// A message with attachments to a session whose folder is gone is refused
 /// before anything is copied or the backend is said to be starting.
-// verifies: FLOW-RESUME-SESSION-R03
+// verifies: FLOW-RESUME-SESSION-R23
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_with_attachments_to_a_session_whose_folder_is_gone_copies_nothing() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
