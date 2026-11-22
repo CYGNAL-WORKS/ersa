@@ -24,6 +24,7 @@ use serde_json::{Map, Value};
 
 use crate::admission::{Existing, ExistingWorkspace, Folder, WorkspacePhase};
 use crate::settings;
+use crate::workspace::Checkout;
 
 mod sections;
 mod sessions;
@@ -48,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0012_session_unseen.sql"),
     include_str!("persistence/0013_section_names_exact.sql"),
     include_str!("persistence/0014_session_last_activity_dropped.sql"),
+    include_str!("persistence/0015_workspace_put_away.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -372,6 +374,7 @@ impl Store {
                 let kind: WorkspaceKind = from_sql_enum(row, 2)?;
                 let phase = match from_sql_enum(row, 3)? {
                     WorkspaceState::Ready => WorkspacePhase::Ready,
+                    WorkspaceState::PutAway => WorkspacePhase::PutAway,
                     WorkspaceState::Creating | WorkspaceState::Removing | WorkspaceState::Error => {
                         WorkspacePhase::Error
                     }
@@ -395,13 +398,77 @@ impl Store {
 
     /// Marks every workspace a previous Core left `creating` or `removing` as
     /// `error`, and returns how many there were. Run at startup, before any
-    /// request, when no operation can still be in flight.
+    /// request, when no operation can still be in flight. A put-away
+    /// workspace whose `workspace.remove` was stopped part way had no folder
+    /// to lose, so it is `put_away` again, its sessions still resumable
+    /// (PROTO-CORE-API-R135): it is the one `removing` workspace with what
+    /// its folder had checked out stored.
     pub async fn reconcile_workspaces(&self) -> Result<usize> {
         self.call(|conn| {
             Ok(conn.execute(
-                "UPDATE workspaces SET state = 'error' WHERE state IN ('creating', 'removing')",
+                "UPDATE workspaces
+                 SET state = CASE
+                     WHEN state = 'removing'
+                          AND (put_away_branch IS NOT NULL OR put_away_commit IS NOT NULL)
+                     THEN 'put_away' ELSE 'error' END
+                 WHERE state IN ('creating', 'removing')",
                 [],
             )?)
+        })
+        .await
+    }
+
+    /// Puts the workspace away in the store: what its folder has checked
+    /// out, and the state `put_away`, in one transaction, before anything of
+    /// the folder is removed (FLOW-CLEAN-UP-R02).
+    pub async fn put_workspace_away(&self, id: String, checkout: Checkout) -> Result<()> {
+        let (branch, commit) = match checkout {
+            Checkout::Branch(branch) => (Some(branch), None),
+            Checkout::Commit(commit) => (None, Some(commit)),
+        };
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces
+                 SET state = 'put_away', put_away_branch = ?2, put_away_commit = ?3
+                 WHERE id = ?1",
+                params![id, branch, commit],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The workspace is `ready` again, nothing stored of a put-away: one
+    /// refused before anything of its folder was removed.
+    pub async fn set_workspace_ready(&self, id: String) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces
+                 SET state = 'ready', put_away_branch = NULL, put_away_commit = NULL
+                 WHERE id = ?1",
+                [id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// What the workspace's folder had checked out when it was put away;
+    /// `None` for a workspace that was not put away, or is gone.
+    pub async fn put_away_checkout(&self, id: String) -> Result<Option<Checkout>> {
+        self.call(move |conn| {
+            let stored: Option<(Option<String>, Option<String>)> = conn
+                .query_row(
+                    "SELECT put_away_branch, put_away_commit FROM workspaces WHERE id = ?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            Ok(match stored {
+                Some((Some(branch), _)) => Some(Checkout::Branch(branch)),
+                Some((None, Some(commit))) => Some(Checkout::Commit(commit)),
+                Some((None, None)) | None => None,
+            })
         })
         .await
     }

@@ -234,7 +234,7 @@ async fn call(core: Arc<Core>, method: &'static str, params: Value) -> Answer {
     let (outbound, _unread) = tokio::sync::mpsc::channel(4096);
     let kick = Arc::new(tokio::sync::watch::Sender::new(false));
     let mut client = ConnectionState::new(outbound, kick);
-    let hello = json!({ "client": "schedules", "client_version": "0", "api_versions": [6] });
+    let hello = json!({ "client": "schedules", "client_version": "0", "api_versions": [7] });
     for (id, method, params) in [(0, "core.hello", hello), (1, method, params)] {
         let request = Request::new(RequestId::Number(id), method, params);
         let (response, _) = api::handle(&core, &mut client, request).await;
