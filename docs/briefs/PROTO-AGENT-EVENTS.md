@@ -80,7 +80,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Passthrough
 
-- `backend.passthrough`: `backend`, `kind` (the backend's own type and subtype joined with `/`), `payload` (the raw object, or the verbatim line as a string when it is not valid JSON). Every raw log line that maps to no other event maps to exactly one of these. The Interface shows them only in the developer pane.
+- `backend.passthrough`: `backend`, `kind` (the backend's own type and subtype joined with `/`), `payload` (the raw object, or the verbatim line as a string when it is not valid JSON). Every raw log line that maps to no other event maps to exactly one of these. The Interface shows them nowhere: the developer pane lists the raw lines themselves (FLOW-READ-RAW-LOG).
 
 ## Projection rules
 
@@ -163,6 +163,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-22: the Interface shows `backend.passthrough` nowhere, since the developer pane lists raw lines, not events (FLOW-READ-RAW-LOG). No requirement IDs changed.
 - 2026-11-15: owner's decision that the context ring also reads the plan's usage limits: `usage.updated.rate_limit` gains `windows`, the usage windows a backend reports. A shape change, so the ticket that builds it bumps `v`. No requirement IDs changed.
 - 2026-11-15: from #398: `usage.updated` says what `context_tokens` and `context_window` count, and that they arrive while a turn runs and before the first turn ends as well as at a turn's end (PROTO-CLAUDE-CODE-STREAM-R71, R72). No shape change; no requirement IDs changed.
 - 2026-11-14: from #386 inbox: `user.message` for a message written during a turn is emitted when the backend takes it in, which can be inside the running turn, and comes from the backend's echo, not the host line (PROTO-CLAUDE-CODE-STREAM-R63). No requirement IDs changed.

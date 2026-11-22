@@ -53,6 +53,10 @@
   --size-icon-xs: 12px;
   --size-shelf: 320px;
   --size-dialog: 360px;
+  --size-workbench: 480px;
+  --size-workbench-min: 320px;
+  --size-workbench-max: 50%;
+  --size-log-row: 24px;
   --stack-menu: 10;
   --stack-shelf: 20;
   --stack-dialog: 30;
