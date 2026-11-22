@@ -418,6 +418,7 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     let Ok(removing) = core.admission.command(removal).await else {
         return;
     };
+    let removing = Arc::new(removing);
     let deleted = workspace::git_worktree_delete(
         git.as_ref(),
         &project.path,
@@ -425,9 +426,9 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         &workspace.vcs_ref,
         // Forced: the fork never started, so nothing in it is the user's.
         workspace::RemovalChecks::FORCED,
-        // The removal's operation ends with what happened, reported below,
-        // so a try left stuck holds nothing of it.
-        workspace::FolderTries::from_config(&core.config, Arc::new(())),
+        // Kept by each try at the folder until its thread returns, as
+        // `workspace.remove` keeps it (PROTO-CORE-API-R107).
+        workspace::FolderTries::from_config(&core.config, Arc::clone(&removing) as _),
         &handlers::RepositoryTurns {
             core,
             project: &project.id,
@@ -437,12 +438,17 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     let id = workspace.id.clone();
     let e = match deleted {
         Ok(_) => match core.store.delete_workspace(id.clone()).await {
-            Ok(()) => return removing.end(Report::WorkspaceRemoved { workspace: id }),
+            Ok(()) => {
+                return handlers::end_held(removing, Report::WorkspaceRemoved { workspace: id });
+            }
             // Its row is as it was, `ready` and listed.
             Err(e) => {
-                removing.end(Report::WorkspaceRemovalRefused {
-                    workspace: id.clone(),
-                });
+                handlers::end_held(
+                    removing,
+                    Report::WorkspaceRemovalRefused {
+                        workspace: id.clone(),
+                    },
+                );
                 e.to_string()
             }
         },
@@ -450,7 +456,7 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         // row is as it was, `ready` and listed.
         Err(e) if e.is_refusal() => {
             tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
-            return removing.end(Report::WorkspaceRemovalRefused { workspace: id });
+            return handlers::end_held(removing, Report::WorkspaceRemovalRefused { workspace: id });
         }
         // Part of it may be gone, its folder among them: `error`, as a
         // failed `workspace.remove` leaves one, so no session starts in it.
@@ -462,9 +468,12 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
             {
                 tracing::warn!(workspace = %id, error = %stored, "could not mark a fork's workspace error");
             }
-            removing.end(Report::WorkspaceRemovalFailed {
-                workspace: id.clone(),
-            });
+            handlers::end_held(
+                removing,
+                Report::WorkspaceRemovalFailed {
+                    workspace: id.clone(),
+                },
+            );
             e.to_string()
         }
     };
