@@ -230,8 +230,7 @@ pub(super) fn refused(refusal: Refusal, named: &str) -> ApiError {
         )),
         Refusal::SessionInUse => ApiError::invalid_state(format!(
             "a session in workspace {named} is running, starting or being changed"
-        ))
-        .with_reason(ersa_protocol::core_api::ErrorReason::SessionBusy),
+        )),
         // Answers to a session's admission, or an id used twice: Core's fault.
         Refusal::WorkspaceNotReady
         | Refusal::WorkspaceExists
