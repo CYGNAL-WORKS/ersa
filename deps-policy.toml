@@ -35,6 +35,23 @@ min_age_days = 7
 # reason = "No fixed release yet; Ersa never calls the affected function."
 # expires = 2026-12-01
 
+# The Shell, every platform: Tauri 2 parses addresses with url. 2.5.9 fixes
+# RUSTSEC-2026-0592 and needs form_urlencoded 1.2.3, released with it from the
+# same repository. Remove both once they are a week old (2026-11-28).
+[[age_exception]]
+ecosystem = "crates.io"
+package = "url"
+version = "2.5.9"
+reason = "Fixes RUSTSEC-2026-0592 (a crafted blob: address overflows the stack in Url::origin and ends the process) against 2.5.8, which Tauri 2 brings in; every pull request fails the vulnerability check until it is in. Ends when 2.5.9 is a week old."
+expires = 2026-12-01
+
+[[age_exception]]
+ecosystem = "crates.io"
+package = "form_urlencoded"
+version = "1.2.3"
+reason = "url 2.5.9 requires it; published with it from the same repository (servo/rust-url). Ends with the url exception above."
+expires = 2026-12-01
+
 # The Shell (apps/shell/src-tauri) on Linux: Tauri 2 draws its window with
 # gtk-rs 0.18, which pins both of these. Neither has a fix Tauri 2 can take.
 [[vulnerability_exception]]
@@ -59,13 +76,4 @@ id = "RUSTSEC-2026-0543"
 package = "chrono"
 version = "0.4.45"
 reason = "Unmaintained, not vulnerable: listed in Cargo.lock only as an optional dependency of serde_with 3.24 (through Tauri 2's tauri-utils) whose feature is off, so it is never built. Ends when Tauri or serde_with drops the entry, or the advisory is withdrawn."
-expires = 2027-01-30
-
-# The Interface's build and test tooling: Vite, Vitest and tinyglobby match
-# globs with picomatch. None of it ships in Ersa.
-[[vulnerability_exception]]
-id = "GHSA-fc5q-39xc-vjpf"
-package = "picomatch"
-version = "4.0.7"
-reason = "ReDoS from a crafted glob pattern, with no fixed release yet. picomatch is only in build and test tooling (Vite, Vitest, tinyglobby), which match patterns from the repository's own configuration, never untrusted input, and none of it ships. Ends when a fixed picomatch is released."
 expires = 2027-01-30
