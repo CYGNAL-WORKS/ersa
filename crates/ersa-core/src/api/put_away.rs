@@ -7,28 +7,30 @@
 //! `cleanup.remove` will, each checking first that the workspace holds no
 //! unsaved work (FLOW-CLEAN-UP-R01).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::{ApiError, handlers};
 use crate::admission::{Command, Report};
 use crate::state::Core;
-use crate::workspace;
+use crate::workspace::{self, VcsError};
 
 /// Puts workspace `id` away (FLOW-CLEAN-UP-R02).
 ///
 /// 1. Admission lets it begin only while nothing is under way on the
 ///    workspace or a session there; it then holds the workspace, so nothing
 ///    starts there and nothing else removes it.
-/// 2. What the folder has checked out is read: a branch, or the commit when
-///    it is on none.
-/// 3. That and the state `put_away` are stored together, before anything
+/// 2. It waits its turn at the project's worktrees (PROTO-CORE-API-R124).
+/// 3. What the folder has checked out is read: a branch, or the commit when
+///    it is on none. Read in the turn, so it is what the folder has when
+///    its removal begins.
+/// 4. That and the state `put_away` are stored together, before anything
 ///    is removed, so however Core stops from here the workspace is put away
 ///    with its checkout known.
-/// 4. The folder goes as every removal takes one (PROTO-CORE-API-R122), in
-///    the project's turns (R124), keeping every branch.
+/// 5. The folder goes as every removal takes one (PROTO-CORE-API-R122),
+///    starting in the turn already held, keeping every branch.
 ///
-/// A refusal before anything was removed (a lock, local changes, a folder
-/// git does not list, no turn in time, a checkout that can't be read)
+/// A refusal before anything was removed (no turn in time, a checkout that
+/// can't be read, a lock, local changes, a folder git does not list)
 /// leaves the workspace `ready`, as it was: put away, a later pass would
 /// finish it without asking. Any other failure leaves it `put_away`, with
 /// what is left of the folder for the next put-away to finish.
@@ -56,8 +58,23 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
     let refused = || Report::PutAwayRefused {
         workspace: id.to_string(),
     };
+    let put_away = || Report::WorkspacePutAway {
+        workspace: id.to_string(),
+    };
 
-    // (2) A read, which changes no worktree, so it needs no turn.
+    // (2) Past the wait, no git work begins and nothing was stored.
+    let turns = handlers::RepositoryTurns {
+        core,
+        project: &project.id,
+    };
+    let turn = match workspace::Worktrees::turn(&turns).await {
+        Ok(turn) => turn,
+        Err(e) => {
+            putting_away.end(refused());
+            return Err(e.into());
+        }
+    };
+    // (3) A read, done in the turn.
     let checkout = match workspace::git_checkout(transport.as_ref(), &workspace.path).await {
         Ok(checkout) => checkout,
         Err(e) => {
@@ -65,7 +82,7 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
             return Err(e.into());
         }
     };
-    // (3) Before anything is removed.
+    // (4) Before anything is removed.
     if let Err(e) = core
         .store
         .put_workspace_away(id.to_string(), checkout)
@@ -75,11 +92,15 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
         return Err(e.into());
     }
 
-    // (4) The folder and git's record; no branch is deleted, since the
+    // (5) The folder and git's record; no branch is deleted, since the
     // branch is how the folder comes back. Not forced: whoever puts away has
     // checked that nothing in the folder is unsaved, and a change since then
     // refuses the removal rather than lose it.
     let putting_away = Arc::new(putting_away);
+    let turns = HeldFirst {
+        held: Mutex::new(Some(turn)),
+        then: turns,
+    };
     let removed = workspace::git_worktree_delete(
         transport.as_ref(),
         &project.path,
@@ -90,38 +111,49 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
             after_failed_add: false,
         },
         workspace::FolderTries::from_config(&core.config, Arc::clone(&putting_away) as _),
-        &handlers::RepositoryTurns {
-            core,
-            project: &project.id,
-        },
+        &turns,
     )
     .await;
-    match removed {
+    let failed = match removed {
         Ok(_) => {
-            handlers::end_held(
-                putting_away,
-                Report::WorkspacePutAway {
-                    workspace: id.to_string(),
-                },
-            );
-            Ok(())
+            handlers::end_held(putting_away, put_away());
+            return Ok(());
         }
-        Err(e) if e.is_refusal() => {
-            tracing::warn!(workspace = %id, error = %e, "the workspace was not put away");
-            // Stored, then said, as every way out of an operation is.
-            core.store.set_workspace_ready(id.to_string()).await?;
-            handlers::end_held(putting_away, refused());
-            Err(e.into())
+        Err(e) => e,
+    };
+    if failed.is_refusal() {
+        tracing::warn!(workspace = %id, error = %failed, "the workspace was not put away");
+        // Stored, then said, as every way out of an operation is. Not
+        // stored, it stays put away, as the store has it.
+        match core.store.set_workspace_ready(id.to_string()).await {
+            Ok(()) => handlers::end_held(putting_away, refused()),
+            Err(e) => {
+                tracing::warn!(workspace = %id, error = %e, "could not put the workspace back to ready");
+                handlers::end_held(putting_away, put_away());
+            }
         }
-        Err(e) => {
-            tracing::warn!(workspace = %id, error = %e, "putting the workspace away failed part way");
-            handlers::end_held(
-                putting_away,
-                Report::WorkspacePutAway {
-                    workspace: id.to_string(),
-                },
-            );
-            Err(e.into())
+    } else {
+        tracing::warn!(workspace = %id, error = %failed, "putting the workspace away failed part way");
+        handlers::end_held(putting_away, put_away());
+    }
+    Err(failed.into())
+}
+
+/// The project's turns, the first of them one already held: the removal
+/// asks for a turn as it begins, and gets the one the put-away took before
+/// it read and stored the checkout.
+struct HeldFirst<'a> {
+    held: Mutex<Option<Box<dyn Send>>>,
+    then: handlers::RepositoryTurns<'a>,
+}
+
+#[ersa_adapter::async_trait]
+impl workspace::Worktrees for HeldFirst<'_> {
+    async fn turn(&self) -> Result<Box<dyn Send>, VcsError> {
+        let held = self.held.lock().expect("not poisoned").take();
+        match held {
+            Some(turn) => Ok(turn),
+            None => self.then.turn().await,
         }
     }
 }
