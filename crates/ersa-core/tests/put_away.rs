@@ -377,7 +377,7 @@ async fn stuck_folder_setup(gate: &Arc<Gate>) -> Setup {
 /// no other removal of the folder or of the workspace begins: a
 /// `workspace.remove` and a `session.delete` answer `busy`, and a second
 /// put-away is refused. Once the try ends, the workspace can be removed.
-// verifies once #560 lands: PROTO-CORE-API-R131
+// verifies: PROTO-CORE-API-R131
 #[tokio::test(flavor = "multi_thread")]
 async fn a_put_away_holds_the_workspace_while_a_try_it_gave_up_on_is_stuck() {
     let gate = Arc::new(Gate::default());
@@ -636,7 +636,7 @@ async fn attachment_inspect_reports_a_copy_for_a_put_away_workspace() {
 /// A `workspace.remove` of a put-away workspace that fails, here on what a
 /// put-away left of the folder, leaves it `put_away`, not `error`: it had no
 /// folder of its own to lose, and its sessions can still be resumed.
-// verifies once #560 lands: PROTO-CORE-API-R133
+// verifies: PROTO-CORE-API-R133
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_removal_of_a_put_away_workspace_leaves_it_put_away() {
     let gate = Arc::new(Gate::default());
@@ -692,7 +692,7 @@ async fn crash_and_restart(s: Setup) -> Setup {
 
 /// A `workspace.remove` of a put-away workspace that Core stops part way
 /// through leaves it `put_away` after the restart.
-// verifies once #560 lands: PROTO-CORE-API-R135
+// verifies: PROTO-CORE-API-R135
 #[tokio::test(flavor = "multi_thread")]
 async fn a_put_away_workspace_whose_removal_was_stopped_is_put_away_after_a_restart() {
     let mut s = setup().await;
