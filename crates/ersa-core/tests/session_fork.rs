@@ -1119,27 +1119,49 @@ async fn a_fork_of_a_root_session_shares_its_workspace() {
     assert_eq!(workspaces.as_array().unwrap().len(), 1, "{workspaces:#}");
 }
 
-/// A fork whose session Core refuses to record once its workspace is made
-/// (Core began shutting down while git made it), with git's removal of
-/// that workspace failing after git dropped its record: the cleanup goes on
-/// to the folder, as a delete does, and leaves no workspace, folder or
-/// branch.
-// verifies: PROTO-CORE-API-R122
-#[tokio::test(flavor = "multi_thread")]
-async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
-    use ersa_core::Gate;
-    use support::deleting::{FailingGit, Removal};
+/// A fork whose session Core refuses to record once its workspace is made,
+/// so its cleanup runs: Core began shutting down while git made the
+/// workspace, and from then admission records no new session. Core's git
+/// fails worktree removals as the test says.
+struct RefusedFork {
+    core: TestCore,
+    repo: std::path::PathBuf,
+    /// The original's workspace; the fork's is made beside it.
+    original: Value,
+    folders_before: Vec<std::path::PathBuf>,
+    branches_before: String,
+    store: ersa_core::persistence::Store,
+    /// Where every `git worktree add` stops.
+    adds: Arc<ersa_core::Gate>,
+}
+
+/// Lets every add go however the test ends, so no request stays parked.
+struct LetAddsGo(Arc<ersa_core::Gate>);
+
+impl Drop for LetAddsGo {
+    fn drop(&mut self) {
+        for _ in 0..16 {
+            self.0.go();
+        }
+    }
+}
+
+/// [`RefusedFork`], its cleanup under way. With `held_turn`, another
+/// `workspace.create` asked for the project's turn while the fork's add
+/// held it, and once the fork's add is done takes the turn and keeps it,
+/// its own add stopped, longer than the cleanup's 300 ms wait.
+async fn refused_fork(removal: support::deleting::Removal, held_turn: bool) -> RefusedFork {
+    use support::deleting::FailingGit;
     let fake = Arc::new(FakeAdapter::new(1));
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
-    let adds = Arc::new(Gate::default());
-    let failing = Arc::new(
-        FailingGit::new(Removal::DropsRecordThenFails, None).stopping_adds(Arc::clone(&adds)),
-    );
+    let adds = Arc::new(ersa_core::Gate::default());
+    let failing = Arc::new(FailingGit::new(removal, None).stopping_adds(Arc::clone(&adds)));
     let core = start_with_adapters(
         tempdir(),
         move |config| {
             support::detecting(config);
             config.command_transport = Some(ersa_core::CommandTransport(failing));
+            config.worktree_turn_wait = Duration::from_millis(300);
         },
         adapters,
     )
@@ -1147,20 +1169,28 @@ async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
     let mut client = core.client().await;
     let project = project(&mut client, core.dir.path()).await;
     let repo = core.dir.path().join("repo");
-    let create = client
-        .request("workspace.create", json!({ "project_id": project["id"] }))
-        .await;
+    let create = json!({ "project_id": project["id"] });
+    let made = client.request("workspace.create", create.clone()).await;
     adds.reached().await;
     adds.go();
-    let workspace = client.response(create).await["result"].clone();
-    let id = idle_in(&mut client, &workspace).await;
-    let folders_before = workspace_folders(&workspace);
+    let original = client.response(made).await["result"].clone();
+    let id = idle_in(&mut client, &original).await;
+    let folders_before = workspace_folders(&original);
     let branches_before = git(&repo, &["branch", "--list", "--format=%(refname)"]);
+    let db = core.dir.path().join("data").join("ersa.db");
+    let store = ersa_core::persistence::Store::open(&db).expect("open");
 
-    // The fork's workspace is being made when Core begins to shut down:
-    // from then on admission records no new session.
     let _fork = client.request("session.fork", json!({ "id": id })).await;
     adds.reached().await;
+    if held_turn {
+        let mut holder = core.client().await;
+        let _holding = holder.request("workspace.create", create).await;
+        // Its row is stored as `creating` just before it asks for the turn.
+        until(&store, "the second create to wait for its turn", |rows| {
+            rows.iter().filter(|(_, state)| state == "creating").count() == 2
+        })
+        .await;
+    }
     let mut other = core.client().await;
     let _shutdown = other.request("core.shutdown", json!({})).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -1172,25 +1202,67 @@ async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     adds.go();
+    RefusedFork {
+        core,
+        repo,
+        original,
+        folders_before,
+        branches_before,
+        store,
+        adds,
+    }
+}
 
-    // The fork's cleanup runs on: its workspace's folder, branch and row go.
-    let db = core.dir.path().join("data").join("ersa.db");
-    let store = ersa_core::persistence::Store::open(&db).expect("open");
+/// Every stored workspace's id and state, in the order they were made.
+async fn workspace_rows(store: &ersa_core::persistence::Store) -> Vec<(String, String)> {
+    store
+        .call(|conn| {
+            let mut rows = conn.prepare("SELECT id, state FROM workspaces ORDER BY rowid")?;
+            let rows = rows
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await
+        .expect("read the workspaces")
+}
+
+/// Waits, up to a minute, until the stored workspaces satisfy `done`.
+async fn until(
+    store: &ersa_core::persistence::Store,
+    what: &str,
+    done: impl Fn(&[(String, String)]) -> bool,
+) -> Vec<(String, String)> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        let rows = store
-            .call(|conn| {
-                Ok(
-                    conn.query_row("SELECT COUNT(*) FROM workspaces", [], |row| {
-                        row.get::<_, i64>(0)
-                    })?,
-                )
-            })
-            .await
-            .expect("count");
-        let folders = workspace_folders(&workspace);
-        let branches = git(&repo, &["branch", "--list", "--format=%(refname)"]);
-        if rows == 2 && folders == folders_before && branches == branches_before {
+        let rows = workspace_rows(store).await;
+        if done(&rows) {
+            return rows;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "waited in vain for {what}: {rows:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A fork that fails to start, with git's removal of its new workspace
+/// failing after git dropped its record: the cleanup goes on to the folder,
+/// as a delete does, and leaves no workspace, folder or branch.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
+    let fork = refused_fork(support::deleting::Removal::DropsRecordThenFails, false).await;
+    let _let_go = LetAddsGo(Arc::clone(&fork.adds));
+
+    // The fork's cleanup runs on: its workspace's folder, branch and row go.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let rows = workspace_rows(&fork.store).await.len();
+        let folders = workspace_folders(&fork.original);
+        let branches = git(&fork.repo, &["branch", "--list", "--format=%(refname)"]);
+        if rows == 2 && folders == fork.folders_before && branches == fork.branches_before {
             break;
         }
         assert!(
@@ -1199,8 +1271,66 @@ async fn a_fork_that_fails_to_start_leaves_no_workspace_folder_or_branch() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let worktrees = git(&repo, &["worktree", "list", "--porcelain"]);
+    let worktrees = git(&fork.repo, &["worktree", "list", "--porcelain"]);
     assert_eq!(worktrees.matches("worktree ").count(), 2, "{worktrees}");
+    drop(fork.core);
+}
+
+/// A fork's cleanup whose git removal fails with the worktree still listed
+/// leaves the fork's workspace `error`, its folder still there, so no
+/// session starts in it.
+// verifies: PROTO-CORE-API-R128
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_cleanup_that_fails_leaves_the_workspace_error() {
+    let fork = refused_fork(support::deleting::Removal::Fails, false).await;
+    let _let_go = LetAddsGo(Arc::clone(&fork.adds));
+    let original = fork.original["id"].as_str().unwrap().to_string();
+
+    let rows = until(&fork.store, "the fork's workspace to be error", |rows| {
+        rows.iter()
+            .any(|(id, state)| id != &original && state == "error")
+    })
+    .await;
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    let (forks, _) = rows.iter().find(|(_, state)| state == "error").unwrap();
+    let folders = workspace_folders(&fork.original);
+    assert!(folders.iter().any(|f| f.ends_with(forks)), "{folders:?}");
+    drop(fork.core);
+}
+
+/// A fork's cleanup that never had its turn at the project's worktrees
+/// (another change held it past the wait) ran no git: the fork's workspace
+/// is left as it was, `ready`, with its folder.
+// verifies: PROTO-CORE-API-R127
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_cleanup_refused_its_turn_leaves_the_workspace_as_it_was() {
+    let log = support::log::Log::installed();
+    let fork = refused_fork(support::deleting::Removal::DropsRecordThenFails, true).await;
+    let _let_go = LetAddsGo(Arc::clone(&fork.adds));
+    // The second create took the turn: its add stopped.
+    fork.adds.reached().await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while !log.warned(
+        "could not remove a fork's workspace",
+        "did not finish in time",
+    ) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the cleanup never gave up its wait: {:#?}",
+            log.warnings()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // Root, original, the fork's, and the second create's, still `creating`.
+    let rows = workspace_rows(&fork.store).await;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    let (forks, state) = &rows[2];
+    assert_eq!(state, "ready", "{rows:?}");
+    let folders = workspace_folders(&fork.original);
+    assert!(folders.iter().any(|f| f.ends_with(forks)), "{folders:?}");
+    drop(fork.core);
 }
 
 /// The folders beside `workspace`'s under the workspaces root.
