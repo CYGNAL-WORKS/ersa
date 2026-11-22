@@ -1338,7 +1338,7 @@ async fn a_session_its_backend_never_named_cannot_be_renamed() {
 /// rename a client asks for after seeing it is a stopped session's: written
 /// to the record, or refused for what the record lacks, never refused as
 /// not running while Core is still letting go of the run.
-// verifies: PROTO-CORE-API-R12
+// verifies: PROTO-CORE-API-R130
 // verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rename_after_session_ended_is_a_stopped_sessions_while_the_run_winds_down() {

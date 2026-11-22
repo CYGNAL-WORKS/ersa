@@ -3805,6 +3805,8 @@ mod tests {
         summary: Notify,
         /// A rename of a record waits here until the test lets it go.
         rename: Notify,
+        /// Renames of a record begun.
+        renames: std::sync::atomic::AtomicUsize,
         forgets: std::sync::atomic::AtomicUsize,
         stats_hang: AtomicBool,
         hung_stats: std::sync::atomic::AtomicUsize,
@@ -3869,6 +3871,7 @@ mod tests {
             _backend_session_id: &str,
             _title: &str,
         ) -> Result<(), AdapterError> {
+            self.renames.fetch_add(1, Ordering::SeqCst);
             self.rename.notified().await;
             Ok(())
         }
@@ -4730,6 +4733,35 @@ mod tests {
                 .is_some()
         );
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 0);
+    }
+
+    // verifies: PROTO-CORE-API-R130
+    // Paused time: the wait runs out as soon as nothing else can happen.
+    #[tokio::test(start_paused = true)]
+    async fn a_rename_of_an_ended_session_that_never_winds_down_is_internal_and_renames_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = gated_manager(dir.path(), &adapter);
+        // Its end is queued, so a client may have seen `session.ended`, and
+        // Core never lets go of the run.
+        let (sink, _finished, _run) = make_live(&manager);
+        sink.start_finished(Ok(()));
+        sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+        // A rename that reached the record would not be held up there.
+        adapter.rename.notify_one();
+        let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+        let renamed = manager
+            .set_title("s-gated", "Renamed", |_| Some(transport))
+            .await;
+        match renamed {
+            Err(SessionError::Internal(message)) => {
+                assert!(message.contains("has ended"), "{message}");
+            }
+            other => panic!("expected an internal error, got {other:?}"),
+        }
+        // Nothing renamed: not the record, and not the title Core shows.
+        assert_eq!(adapter.renames.load(Ordering::SeqCst), 0);
+        assert_eq!(manager.get("s-gated").unwrap().title, None);
     }
 
     #[tokio::test]
