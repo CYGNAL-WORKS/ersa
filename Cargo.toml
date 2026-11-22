@@ -36,7 +36,7 @@ clap = { version = "4", features = ["derive"] }
 jsonschema = { version = "0.60", default-features = false }
 # SQLite for Core's database. `bundled` compiles SQLite from source into the
 # binary, so there is no system library to install on Windows.
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.42", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # SHA-256, for `workspace.changes`'s token and the content of the files it
