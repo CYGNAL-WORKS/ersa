@@ -62,7 +62,10 @@ interface NewSessionScreenProps {
   away?: Extract<Unavailable, "reconnecting" | "unreachable">;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
-  /** The user chose a project or host after a failed add: App drops the failure, which it keeps across New session. */
+  /**
+   * The user moved past a failed add, by choosing another project or host or by sending (FLOW-NEW-SESSION-R44): App
+   * drops the failure, which it keeps across New session.
+   */
   onPassAddFailure?: () => void;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
   autoFocus?: boolean;
@@ -278,7 +281,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {
-    // A project or host chosen moves past a failed add: its reason no longer applies.
+    // Another project or host chosen moves past a failed add: its reason no longer applies (FLOW-NEW-SESSION-R44).
     if (addFailed && (key === "host" || key === "project")) props.onPassAddFailure?.();
     if (key === "host") {
       // A host's own projects follow it; its most recently used one, at what was last used there.
@@ -364,6 +367,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           workspace={attachTo}
           onSend={(text, attachments) => {
             hold();
+            // A send moves past a failed add, whose reason holds the status line's place where the send has its own
+            // progress or failure to show (FLOW-NEW-SESSION-R44).
+            if (addFailed) props.onPassAddFailure?.();
             // With no project, sending opens the folder dialog and the message stays for the user to send (R19).
             if (!project) {
               void addProject();
