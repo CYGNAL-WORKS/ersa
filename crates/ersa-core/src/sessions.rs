@@ -3199,7 +3199,7 @@ async fn run_pipeline(pipeline: Pipeline) {
                 *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
             }
         }
-        let (events, tile, turn, announced, retitled, reported) = {
+        let (events, tile, turn, announced, title_changed, reported) = {
             let mut hub = lock(&handle.hub);
             let Some(view) = hub.view.as_mut() else {
                 // Never: a live session's view is open from its start.
@@ -3229,8 +3229,18 @@ async fn run_pipeline(pipeline: Pipeline) {
                 .announced_title()
                 .filter(|(count, _)| title_before != Some(*count))
                 .map(|(_, title)| title.to_string());
+            // A title the backend announced is the session's from now on,
+            // until a newer one or its record says otherwise
+            // (PROTO-CLAUDE-CODE-STREAM-R36). Written before the hub's lock
+            // goes: `session.set_title` takes that lock to see whether an
+            // announcement came while its rename was out, and leaves the
+            // title to one that did, so one it sees is already the title.
+            let title_changed = retitled.is_some();
+            if let Some(title) = retitled {
+                lock(&handle.presented).title = Some(title);
+            }
             let (tile, turn) = (view.tile().clone(), view.turn());
-            (events, tile, turn, announced, retitled, reported)
+            (events, tile, turn, announced, title_changed, reported)
         };
 
         // What the stream reports of the model and permission mode is the
@@ -3244,13 +3254,6 @@ async fn run_pipeline(pipeline: Pipeline) {
             if reported.permission_mode.is_some() {
                 presented.reported.permission_mode = reported.permission_mode;
             }
-        }
-
-        // A title the backend announced is the session's from now on, until
-        // a newer one or its record says otherwise (PROTO-CLAUDE-CODE-STREAM-R36).
-        let title_changed = retitled.is_some();
-        if let Some(title) = retitled {
-            lock(&handle.presented).title = Some(title);
         }
 
         // The backend's own id finds the session's record later; it is the
@@ -4027,6 +4030,105 @@ mod tests {
         let attached: Attached = Arc::new(live);
         let run = manager.admission.launch("s-gated", attached).unwrap();
         (sink, finished, run)
+    }
+
+    /// Announces a title for each line `title:<name>`, as Claude Code's
+    /// `session_title_changed` does, and passes every line through.
+    #[derive(Default)]
+    struct Titling {
+        announced: Option<(u64, String)>,
+    }
+
+    impl ersa_adapter::Projector for Titling {
+        fn version(&self) -> u32 {
+            1
+        }
+        fn project(&mut self, line: &RawLine) -> Vec<ersa_adapter::Projected> {
+            if let Some(title) = line.line.strip_prefix("title:") {
+                let count = self.announced.as_ref().map_or(0, |(n, _)| *n);
+                self.announced = Some((count + 1, title.to_string()));
+            }
+            let passthrough = ersa_protocol::events::BackendPassthrough {
+                backend: "gated".into(),
+                kind: "line".into(),
+                payload: serde_json::Value::String(line.line.clone()),
+            };
+            vec![ersa_adapter::Projected::from_line(
+                line,
+                Event::BackendPassthrough(passthrough),
+            )]
+        }
+        fn announced_title(&self) -> Option<(u64, &str)> {
+            self.announced.as_ref().map(|(n, t)| (*n, t.as_str()))
+        }
+    }
+
+    /// `session.set_title` looks, under the hub's lock, at whether the
+    /// backend announced a title while the rename was out, and leaves the
+    /// title to that announcement when it did. So an announcement counted
+    /// there must already be the session's title, or the rename answers
+    /// with none.
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R36
+    // verifies: PROTO-CORE-API-R12
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_announced_title_is_the_sessions_by_the_time_it_is_counted() {
+        let adapter = Arc::new(GatedReads::default());
+        let dir = tempfile::tempdir().unwrap();
+        let manager = gated_manager(dir.path(), &adapter);
+        let handle = manager.handle("s-gated").unwrap();
+        let projector: Box<dyn ersa_adapter::Projector> = Box::<Titling>::default();
+        let (view, events) = View::open("s-gated", "gated", Some(projector), &[]);
+        lock(&handle.hub).install("s-gated", view, &events);
+        let (fed, fed_rx) = mpsc::unbounded_channel();
+        let pipeline = tokio::spawn(run_pipeline(Pipeline {
+            store: manager.store.clone(),
+            handle: Arc::clone(&handle),
+            fed: fed_rx,
+            progress: watch::channel(Progress::default()).0,
+            tiles: manager.tiles.clone(),
+            adapter: Arc::clone(&adapter) as Arc<dyn Adapter>,
+            transport: Arc::new(ersa_adapter::LocalTransport),
+        }));
+
+        // Held on a thread of its own, the session's title cannot be
+        // written: the pipeline gets as far as writing it, and waits.
+        let looking = Arc::clone(&handle);
+        let looked = tokio::task::spawn_blocking(move || {
+            let handle = looking;
+            let presented = lock(&handle.presented);
+            let line = RawLine {
+                index: 0,
+                ts: now_rfc3339(),
+                dir: Direction::Backend,
+                line: "title:Named".into(),
+            };
+            fed.send(Fed::Line(line)).unwrap();
+            // In the raw log once projected, under the hub's lock.
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while lock(&handle.raw).read(0, 1, 1, usize::MAX).is_empty() {
+                assert!(std::time::Instant::now() < deadline, "never projected");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // From then until the title is written, nobody who takes the
+            // hub's lock finds the announcement counted.
+            let until = std::time::Instant::now() + Duration::from_millis(500);
+            while std::time::Instant::now() < until {
+                if let Ok(hub) = handle.hub.try_lock() {
+                    assert_eq!(
+                        announced(&hub),
+                        None,
+                        "the announcement was counted before its title was the session's"
+                    );
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            drop(presented);
+        });
+        if let Err(e) = looked.await {
+            std::panic::resume_unwind(e.into_panic());
+        }
+        pipeline.await.unwrap();
+        assert_eq!(lock(&handle.presented).title.as_deref(), Some("Named"));
     }
 
     #[tokio::test]
