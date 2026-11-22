@@ -9,15 +9,16 @@ use serde::{Deserialize, Serialize};
 /// Core creates these, not adapters: an adapter hands Core the direction and
 /// text through [`AdapterSink::record`](crate::AdapterSink::record), and Core
 /// assigns `index` and `ts` as it receives them. One writer stamping every
-/// line is what keeps `index` gap-free and in the order the lines happened when
-/// the read loop and a host write race each other.
+/// line is what keeps `index` in the order the lines happened when the read
+/// loop and a host write race each other.
 ///
 /// The serialized form is the `session.raw_log` entry in `PROTO-CORE-API`:
 /// `{ index, ts, dir, line }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawLine {
-    /// Position in the session's raw log: 0, 1, 2, … with no gaps, across both
-    /// directions.
+    /// Position in the session's raw log, across both directions and every
+    /// run of its backend: rising, and never used twice for one session while
+    /// Core runs.
     pub index: u64,
     /// RFC 3339 UTC time at which Core received the line. An event projected
     /// from it takes its `ts` from here, never from the clock at projection

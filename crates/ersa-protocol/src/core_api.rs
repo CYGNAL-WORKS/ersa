@@ -981,7 +981,16 @@ pub struct RawLogParams {
     /// The end of the log when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<u64>,
+    /// Bytes, from [`RAW_LOG_CLIP_MIN`] to [`RAW_LOG_CLIP_MAX`]: a line
+    /// longer than this comes back as `head` and `size` in place of `line`
+    /// (PROTO-CORE-API-R138). Every line comes back whole when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<u64>,
 }
+
+/// The least and the most a `session.raw_log` `clip` may be, inclusive.
+pub const RAW_LOG_CLIP_MIN: u64 = 1024;
+pub const RAW_LOG_CLIP_MAX: u64 = 1024 * 1024;
 
 /// One line of a session's raw log, for the developer pane.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -991,8 +1000,18 @@ pub struct RawLogEntry {
     /// RFC 3339.
     pub ts: String,
     pub dir: RawDirection,
-    /// The line verbatim, without its terminator.
-    pub line: String,
+    /// The line verbatim, without its terminator; absent when the line was
+    /// longer than the request's `clip`, which `head` and `size` then stand
+    /// in for (PROTO-CORE-API-R138).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+    /// The longest start of the line that is at most `clip` bytes and ends
+    /// on a whole character.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// The whole line's length in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 /// Which way a raw-log line went: emitted by the backend, or written to it
