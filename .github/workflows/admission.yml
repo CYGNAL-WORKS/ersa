@@ -1,8 +1,8 @@
 # Daily exploration of admission's whole world (ARCH-CORE-R21, ADR 0037).
 # Every check explores smaller worlds; this run applies every input to every
-# reachable state of the world that holds them all, which takes about a
-# quarter of an hour in an optimized build. A failing run opens an issue, or
-# comments on the one it opened before, so nobody has to look for it.
+# reachable state of the world that holds them all, which takes about forty
+# minutes in an optimized build. A failing run opens an issue, or comments on
+# the one it opened before, so nobody has to look for it.
 name: Admission
 
 on:
@@ -25,8 +25,9 @@ jobs:
   explore:
     name: Whole world of admission
     runs-on: ubuntu-24.04
-    # With swap the exploration took 65 minutes (15 with enough memory);
-    # the limit leaves room for the world to grow to more than three times that.
+    # The exploration took 38 minutes and 3.6 GB of the runner's 16 GB on
+    # 2026-11-23 (8.2 million states): the limit and the memory leave room for
+    # the world to grow to four times that.
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -38,18 +39,6 @@ jobs:
           toolchain: stable
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      # The exploration holds every state it has reached: about 20 GB at
-      # its peak today, more than the runner's 16 GB of memory. A swap file on the
-      # runner's spare disk takes the rest, so the runner is not starved.
-      - name: Add swap
-        run: |
-          sudo swapoff -a
-          sudo fallocate -l 32G /mnt/admission.swap
-          sudo chmod 600 /mnt/admission.swap
-          sudo mkswap /mnt/admission.swap
-          sudo swapon /mnt/admission.swap
-          free -m
 
       - name: Explore every reachable state
         run: cargo test -p ersa-core --release --locked --test admission -- --ignored
