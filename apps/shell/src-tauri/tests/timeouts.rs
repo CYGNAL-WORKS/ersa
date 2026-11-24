@@ -19,3 +19,9 @@ fn a_delete_is_waited_on_for_10_minutes() {
 fn a_fork_is_waited_on_for_10_minutes() {
     assert_eq!(timeout_for("session.fork"), Duration::from_secs(10 * 60));
 }
+
+/// Temporary, for #597: shows a failing test fails the run. Reverted next commit.
+#[test]
+fn made_to_fail_for_597() {
+    panic!("made to fail for #597");
+}
