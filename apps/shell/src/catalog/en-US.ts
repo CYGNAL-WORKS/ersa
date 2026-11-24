@@ -515,6 +515,8 @@ export const enUS = {
   developer: {
     // The pane's name, in its head.
     nameHeading: "Developer",
+    // Why a read of the raw log failed when Core's answer can't be read (FLOW-READ-RAW-LOG-R15).
+    unreadableReason: "Ersa got a raw log it can't read.",
   },
   quit: {},
   trust: {
