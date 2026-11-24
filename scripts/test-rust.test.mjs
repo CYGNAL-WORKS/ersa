@@ -119,6 +119,13 @@ test("jobs run side by side, never more than the pool's size, each printed as on
   assert.equal(written.length, 5);
 });
 
+test("a job's stdout and stderr keep the order they were written in", async () => {
+  // Written one after another with no pause, as cargo writes a heading and then a result.
+  const script = `[process.stderr,process.stdout,process.stderr].forEach((w,i)=>w.write("line"+i+"\\n"));`;
+  const [result] = await runJobs([{ label: "mixed", cmd: process.execPath, args: ["-e", script] }], { size: 1, write: () => {} });
+  assert.equal(result.output, "line0\nline1\nline2\n");
+});
+
 test("tally adds every test result line", () => {
   const out = [
     "test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s",
