@@ -11,7 +11,9 @@
 //
 // Each binary runs as `cargo test` runs it: in its package's folder, with the
 // same arguments, its tests on libtest's own threads. Its output is held and
-// printed as one block when it ends, so two binaries never interleave. Unlike
+// printed as one block when it ends, so two binaries never interleave; every
+// minute the run names the binaries still running, and a run that is stopped
+// prints what they have written, so a hung test is named. Unlike
 // `cargo test`, a failing binary does not stop the others; the run fails at
 // the end, naming each binary that failed. Exit 0 when everything passed.
 
@@ -98,21 +100,54 @@ export function tally(output) {
  * Runs the jobs at most `size` at a time, in order. Each job's output is
  * held and handed to `write` in one piece when the job ends. Resolves to one
  * result per job, in the jobs' order: its exit status, output and seconds.
+ * Every `every` milliseconds it also writes which jobs are still running,
+ * with any of libtest's "has been running for over 60 seconds" lines not yet
+ * written, so a log cut off by a time limit still names a test that hung.
+ * `running` holds the jobs under way, for a caller that is stopped to report.
  */
-export function runJobs(jobs, { size, write, run = spawn }) {
+export function runJobs(jobs, { size, write, run = spawn, every = 60_000, running = new Map() }) {
   const results = new Array(jobs.length);
   let next = 0;
+  const ticker = setInterval(() => {
+    const report = stillRunning(running, false);
+    if (report) write(report);
+  }, every);
   const worker = async () => {
     while (next < jobs.length) {
       const index = next++;
-      results[index] = await runOne(jobs[index], run);
+      results[index] = await runOne(jobs[index], run, running);
       write(`\n     ${jobs[index].label}\n${results[index].output}`);
     }
   };
-  return Promise.all(Array.from({ length: Math.min(size, jobs.length) }, worker)).then(() => results);
+  return Promise.all(Array.from({ length: Math.min(size, jobs.length) }, worker)).then(() => {
+    clearInterval(ticker);
+    return results;
+  });
 }
 
-function runOne(job, run) {
+/**
+ * The jobs in `running`, each with how long it has run and, when `whole`,
+ * everything it has written so far, else only the "has been running for
+ * over" lines not reported before. Empty when nothing is running.
+ */
+export function stillRunning(running, whole) {
+  let report = "";
+  for (const entry of running.values()) {
+    const output = readFileSync(entry.file, "utf8");
+    const seconds = Math.round((Date.now() - entry.started) / 1000);
+    report += `\n     still running after ${seconds}s: ${entry.job.label}\n`;
+    if (whole) {
+      report += output;
+    } else {
+      const slow = output.split(/\r?\n/).filter((l) => l.includes("has been running for over"));
+      report += slow.slice(entry.reported).map((l) => `${l}\n`).join("");
+      entry.reported = slow.length;
+    }
+  }
+  return report;
+}
+
+function runOne(job, run, running) {
   const started = Date.now();
   // Stdout and stderr go to one file, as they would to one terminal, so
   // they keep their order: cargo writes its headings to stderr and the
@@ -120,11 +155,14 @@ function runOne(job, run) {
   const dir = mkdtempSync(join(tmpdir(), "ersa-test-rust-"));
   const file = join(dir, "output");
   const fd = openSync(file, "w");
+  const entry = { job, file, started, reported: 0 };
+  running.set(entry, entry);
   return new Promise((resolve) => {
     let ended = false;
     const done = (status, extra = "") => {
       if (ended) return;
       ended = true;
+      running.delete(entry);
       closeSync(fd);
       const output = readFileSync(file, "utf8") + extra;
       rmSync(dir, { recursive: true, force: true });
@@ -132,6 +170,8 @@ function runOne(job, run) {
     };
     const child = run(job.cmd, job.args, { cwd: job.cwd, env: { ...process.env, ...job.env }, stdio: ["ignore", fd, fd] });
     child.on("error", (e) => done(1, `\n${job.cmd} could not start: ${e.message}\n`));
+    // A binary a signal ends (an abort on a stack overflow, say) has no exit
+    // code and may print no result line: it failed.
     child.on("close", (code, signal) => done(code ?? 1, signal ? `\nended by ${signal}\n` : ""));
   });
 }
@@ -155,9 +195,9 @@ export function summarise(jobs, results, seconds) {
 }
 
 /** Builds with cargo and collects its JSON messages; cargo's own messages go to stderr as usual. */
-function build(cargo) {
+function build(cargo, run) {
   return new Promise((resolve) => {
-    const child = spawn("cargo", ["test", ...cargo, "--no-run", "--message-format=json-render-diagnostics"], {
+    const child = run("cargo", ["test", ...cargo, "--no-run", "--message-format=json-render-diagnostics"], {
       cwd: ROOT,
       stdio: ["ignore", "pipe", "inherit"],
     });
@@ -177,24 +217,47 @@ function build(cargo) {
   });
 }
 
-async function main() {
-  const args = splitArgs(process.argv.slice(2));
+/**
+ * The whole run for one command line: build, run, summarise. Resolves to
+ * the exit code: the build's when it failed, else 1 when any job failed.
+ */
+export async function testRust(argv, options = {}) {
+  const {
+    run = spawn,
+    write = (s) => process.stdout.write(s),
+    // At most three binaries at once. Each binary already runs its own tests
+    // on one thread per logical processor, and a run can be no shorter than
+    // its slowest binary (admission's exploration, about three and a half
+    // minutes in a debug build); the rest fit in two lines beside it. More
+    // at once only adds load, and Core's 10-second budget for its git
+    // queries runs out under load: in 28 tests at 24 at a time on a
+    // 24-processor machine, in 2 at four at a time.
+    size = Math.min(3, availableParallelism()),
+    every,
+    running,
+  } = options;
+  const args = splitArgs(argv);
   const started = Date.now();
-  const built = await build(args.cargo);
-  if (built.status !== 0) process.exit(built.status);
+  const built = await build(args.cargo, run);
+  if (built.status !== 0) return built.status;
   const jobs = planJobs(built.messages, args);
-  // At most three binaries at once. Each binary already runs its own tests
-  // on one thread per logical processor, and a run can be no shorter than
-  // its slowest binary (admission's exploration, about three and a half
-  // minutes in a debug build); the rest fit in two lines beside it. More at
-  // once only adds load, and Core's 10-second budget for its git queries
-  // runs out under load: in 28 tests at 24 at a time on a 24-processor
-  // machine, in 2 at four at a time.
-  const size = Math.min(3, availableParallelism());
-  process.stdout.write(`\n== running ${jobs.length} jobs, ${size} at a time\n`);
-  const results = await runJobs(jobs, { size, write: (s) => process.stdout.write(s) });
-  process.stdout.write(summarise(jobs, results, (Date.now() - started) / 1000));
-  process.exit(results.some((r) => r.status !== 0) ? 1 : 0);
+  write(`\n== running ${jobs.length} jobs, ${size} at a time\n`);
+  const results = await runJobs(jobs, { size, write, run, every, running });
+  write(summarise(jobs, results, (Date.now() - started) / 1000));
+  return results.some((r) => r.status !== 0) ? 1 : 0;
+}
+
+async function main() {
+  const running = new Map();
+  // Stopped (CI's time limit, Ctrl+C): first write what each binary still
+  // running has written so far, so the log names the one that hung.
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      process.stdout.write(stillRunning(running, true));
+      process.exit(130);
+    });
+  }
+  process.exit(await testRust(process.argv.slice(2), { running }));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
