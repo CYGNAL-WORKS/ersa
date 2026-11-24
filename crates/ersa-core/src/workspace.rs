@@ -329,7 +329,9 @@ pub async fn git_checkout_exists(
         Checkout::Branch(branch) => format!("refs/heads/{branch}"),
         Checkout::Commit(commit) => commit.clone(),
     };
-    Ok(git_resolve_commit(transport, repo, &revision).await?.is_some())
+    Ok(git_resolve_commit(transport, repo, &revision)
+        .await?
+        .is_some())
 }
 
 /// Whether a worktree of the repository at `repo` other than the one at

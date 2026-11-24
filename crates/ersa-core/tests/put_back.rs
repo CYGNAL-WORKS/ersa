@@ -60,7 +60,10 @@ async fn put_away_session(s: &mut Setup) -> (Value, String) {
 /// The folder is back where it was, git lists it there, and the workspace
 /// is `ready`, in the store and in admission.
 async fn assert_back(s: &mut Setup, workspace: &Value) {
-    assert!(folder(workspace).join("README.md").exists(), "the folder is back");
+    assert!(
+        folder(workspace).join("README.md").exists(),
+        "the folder is back"
+    );
     assert!(listed_by_git(&s.repo, workspace), "git lists it");
     assert_eq!(s.listed(workspace).await["state"], "ready");
     assert_eq!(s.listed(workspace).await["path"], workspace["path"]);
@@ -147,7 +150,10 @@ async fn what_a_put_away_left_at_the_path_is_removed_first() {
     let (workspace, session) = put_away_session(&mut s).await;
     let path = folder(&workspace);
     let path_text = path.display().to_string();
-    git(&s.repo, &["worktree", "add", "--quiet", "--detach", &path_text]);
+    git(
+        &s.repo,
+        &["worktree", "add", "--quiet", "--detach", &path_text],
+    );
     std::fs::write(path.join("left.txt"), "left\n").unwrap();
     s.client
         .result("session.resume", json!({ "id": session }))
@@ -264,7 +270,10 @@ async fn a_branch_checked_out_elsewhere_refuses_the_resume() {
     let elsewhere = s.core.dir.path().join("elsewhere");
     let elsewhere_text = elsewhere.display().to_string();
     let branch = branch(&workspace).to_string();
-    git(&s.repo, &["worktree", "add", "--quiet", &elsewhere_text, &branch]);
+    git(
+        &s.repo,
+        &["worktree", "add", "--quiet", &elsewhere_text, &branch],
+    );
 
     for method in ["session.resume", "session.send"] {
         let error = refused(&mut s, method, &session, &workspace).await;
@@ -284,8 +293,8 @@ async fn a_branch_checked_out_elsewhere_refuses_the_resume() {
 /// drops git's record of it and fails, so the put-away goes on to the folder
 /// and finishes; with `wait` for each wait at the project's worktrees.
 async fn stopping_put_away(gate: &Arc<Gate>, wait: Duration) -> Setup {
-    let git = FailingGit::new(Removal::DropsRecordThenFails, None)
-        .stopping_removals(Arc::clone(gate));
+    let git =
+        FailingGit::new(Removal::DropsRecordThenFails, None).stopping_removals(Arc::clone(gate));
     let git = Arc::new(git);
     setup_with(move |config| {
         config.command_transport = Some(ersa_core::CommandTransport(git));
@@ -330,8 +339,7 @@ async fn a_resume_or_send_during_a_put_away_waits_for_it() {
             let report = s
                 .client
                 .notification_where(|n| {
-                    n["method"] == "session.send_progress"
-                        && n["params"]["phase"] == "putting_back"
+                    n["method"] == "session.send_progress" && n["params"]["phase"] == "putting_back"
                 })
                 .await;
             assert_eq!(report["params"]["session_id"], session.as_str());
@@ -434,7 +442,10 @@ async fn stopping_a_send_that_waits_for_a_put_back_answers_at_once() {
         .await;
     let answer = s.client.response(sending).await;
 
-    assert_eq!(answer["error"]["data"]["reason"], "send_stopped", "{answer:#}");
+    assert_eq!(
+        answer["error"]["data"]["reason"], "send_stopped",
+        "{answer:#}"
+    );
     gate.go();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     while s.listed(&workspace).await["state"] != "ready" {
