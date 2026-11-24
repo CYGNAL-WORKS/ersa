@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "83a8092b95077d011d0c2c130545d39f4de478f8",
+  "ersa_commit": "9288453415e2a6bf64314703495981788ef49b53",
   "notifications": [
     {
       "kind": "notification",
@@ -2271,7 +2271,7 @@
           "event": {
             "context_tokens": 44576,
             "context_window": 1000000,
-            "cost_usd_total": 0.1150202,
+            "cost_usd_total": 0.11502019999999999,
             "turns": 1,
             "type": "usage.updated"
           },
