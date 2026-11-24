@@ -229,7 +229,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
         ) : (
           <>
             {/* Always in the row, so nothing shifts when a listing arrives. Under a session it is the session's backend,
-                which reads its id until its host lists it with a label, as a held model does (FLOW-NEW-SESSION-R48). */}
+                which reads its id until a listing names it (FLOW-NEW-SESSION-R48, R49). */}
             <Chip
               name="Backend"
               value={values.backend}
