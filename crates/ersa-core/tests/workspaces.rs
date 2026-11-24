@@ -7,7 +7,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 use support::deleting::{hold_the_turn, made_through, with_stopping_adds};
-use support::{Client, TestCore, git, git_repo, git_repo_on, kind, normalized, start};
+use support::{Client, TestCore, git, git_repo, git_repo_on, kind, normalized, shut_down, start};
 
 /// A started Core with a client, a git repository, and `workspaces.root`
 /// pointed into the test's temporary directory.
@@ -161,10 +161,9 @@ async fn a_project_is_trusted_only_when_said_and_stays_so_across_a_restart() {
     assert_eq!(kind(&error), "not_found");
 
     let before = client.result("project.list", json!({})).await;
-    client.result("core.shutdown", json!({})).await;
-    core.task.await.expect("joined").expect("stopped cleanly");
+    let dir = shut_down(core).await;
 
-    let core = support::start_with(core.dir, |_| {}).await;
+    let core = support::start_with(dir, |_| {}).await;
     let mut client = core.client().await;
     let after = client.result("project.list", json!({})).await;
     assert_eq!(after, before);
@@ -478,11 +477,10 @@ async fn interrupted_workspaces_become_error_at_startup() {
     let removing = client
         .result("workspace.create", json!({ "project_id": project["id"] }))
         .await;
-    client.result("core.shutdown", json!({})).await;
-    core.task.await.expect("joined").expect("stopped cleanly");
+    let dir = shut_down(core).await;
 
     // Leave the rows as a Core that died mid-operation would have.
-    let db = core.dir.path().join("data").join("ersa.db");
+    let db = dir.path().join("data").join("ersa.db");
     let store = ersa_core::persistence::Store::open(&db).expect("open");
     let ids = (
         creating["id"].as_str().unwrap().to_string(),
@@ -504,7 +502,7 @@ async fn interrupted_workspaces_become_error_at_startup() {
         .expect("update");
     drop(store);
 
-    let core = support::start_with(core.dir, |_| {}).await;
+    let core = support::start_with(dir, |_| {}).await;
     let mut client = core.client().await;
     let listed = client
         .result("workspace.list", json!({ "project_id": project["id"] }))
@@ -575,10 +573,9 @@ async fn a_killed_add_leaves_a_lock_that_only_an_error_workspace_overrides() {
     // On one that never finished, it is the add's leftover: a Core that
     // died making it left the row `creating`, which the next start marks
     // `error`.
-    client.result("core.shutdown", json!({})).await;
-    core.task.await.expect("joined").expect("stopped cleanly");
-    set_state(core.dir.path(), &workspace["id"], "creating").await;
-    let core = support::start_with(core.dir, |_| {}).await;
+    let dir = shut_down(core).await;
+    set_state(dir.path(), &workspace["id"], "creating").await;
+    let core = support::start_with(dir, |_| {}).await;
     let mut client = core.client().await;
     client
         .result("workspace.remove", json!({ "id": workspace["id"] }))
@@ -1271,10 +1268,9 @@ async fn a_killed_adds_files_left_by_git_go_as_a_folder() {
     std::fs::write(admin_dir(&path).join("locked"), "initializing").unwrap();
     // A Core that died making it left the row `creating`; the next start
     // marks it `error`.
-    client.result("core.shutdown", json!({})).await;
-    core.task.await.expect("joined").expect("stopped cleanly");
-    set_state(core.dir.path(), &workspace["id"], "creating").await;
-    let core = support::start_with(core.dir, git_that_drops_its_record).await;
+    let dir = shut_down(core).await;
+    set_state(dir.path(), &workspace["id"], "creating").await;
+    let core = support::start_with(dir, git_that_drops_its_record).await;
     let mut client = core.client().await;
 
     client
