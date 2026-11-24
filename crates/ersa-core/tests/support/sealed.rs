@@ -13,16 +13,19 @@ use std::sync::Arc;
 
 use ersa_adapter::{Process, ProcessSpec, Transport};
 
-/// The one configuration file sealed git reads as its global one.
-pub const GITCONFIG: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/gitconfig");
-
-/// The variables that seal git: the global configuration is our own file,
-/// and neither the system configuration (Git for Windows' `etc/gitconfig`
-/// and `ProgramData` file included) nor the system attributes are read.
-pub const SET: [(&str, &str); 3] = [
-    ("GIT_CONFIG_GLOBAL", GITCONFIG),
+/// The variables that seal git. The global configuration is empty (Git for
+/// Windows reads `/dev/null` as its null device too), and neither the system
+/// configuration (Git for Windows' `etc/gitconfig` and `ProgramData` file
+/// included) nor the system attributes are read. The identity a commit needs
+/// comes from git's own identity variables, not from any configuration.
+pub const SET: [(&str, &str); 7] = [
+    ("GIT_CONFIG_GLOBAL", "/dev/null"),
     ("GIT_CONFIG_NOSYSTEM", "1"),
     ("GIT_ATTR_NOSYSTEM", "1"),
+    ("GIT_AUTHOR_NAME", "Ersa Tests"),
+    ("GIT_AUTHOR_EMAIL", "tests@ersa.invalid"),
+    ("GIT_COMMITTER_NAME", "Ersa Tests"),
+    ("GIT_COMMITTER_EMAIL", "tests@ersa.invalid"),
 ];
 
 /// Variables that would carry configuration in from the environment the

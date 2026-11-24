@@ -532,8 +532,8 @@ pub fn kind(error: &Value) -> &str {
 /// `std::process` directly: the rule that VCS commands go through the
 /// transport is for Core.
 pub fn git(dir: &Path, args: &[&str]) -> String {
-    // Sealed from the user's git configuration; the sealed one carries the
-    // identity commits need.
+    // Sealed from the user's git configuration, with the identity commits
+    // need (support/sealed.rs).
     let output = sealed::git_command(dir)
         .args(args)
         .output()

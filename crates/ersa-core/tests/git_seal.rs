@@ -30,11 +30,7 @@ fn hostile_home(dir: &Path) -> BTreeMap<String, String> {
     std::fs::create_dir_all(&hooks).unwrap();
     for hook in ["pre-commit", "post-checkout"] {
         let path = hooks.join(hook);
-        std::fs::write(
-            &path,
-            "#!/bin/sh\necho the global hook ran >&2\nexit 1\n",
-        )
-        .unwrap();
+        std::fs::write(&path, "#!/bin/sh\necho the global hook ran >&2\nexit 1\n").unwrap();
         // Git runs a hook only when it is executable.
         #[cfg(unix)]
         {
