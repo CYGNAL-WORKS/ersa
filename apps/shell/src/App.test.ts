@@ -666,7 +666,11 @@ describe("the effort App starts a new session with", () => {
   const marking: BackendInfo = {
     ...claude,
     models: [{ id: "default", label: "Default (recommended)", default: true, efforts: levels }],
-    efforts: levels.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1), default: id === "medium" })),
+    efforts: [
+      { id: "low", label: "Low", default: false },
+      { id: "medium", label: "Medium", default: true },
+      { id: "high", label: "High", default: false },
+    ],
   };
   const starting = {
     "backend.list": () => [marking],
