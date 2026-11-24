@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use super::{ApiError, handlers};
-use crate::admission::{Command, Report};
+use crate::admission::{Command, Report, end_held};
 use crate::state::Core;
 use crate::workspace;
 
@@ -114,7 +114,7 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
     .await;
     let failed = match removed {
         Ok(_) => {
-            handlers::end_held(putting_away, put_away());
+            end_held(putting_away, put_away());
             return Ok(());
         }
         Err(e) => e,
@@ -124,15 +124,15 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
         // Stored, then said, as every way out of an operation is. Not
         // stored, it stays put away, as the store has it.
         match core.store.set_workspace_ready(id.to_string()).await {
-            Ok(()) => handlers::end_held(putting_away, refused()),
+            Ok(()) => end_held(putting_away, refused()),
             Err(e) => {
                 tracing::warn!(workspace = %id, error = %e, "could not put the workspace back to ready");
-                handlers::end_held(putting_away, put_away());
+                end_held(putting_away, put_away());
             }
         }
     } else {
         tracing::warn!(workspace = %id, error = %failed, "putting the workspace away failed part way");
-        handlers::end_held(putting_away, put_away());
+        end_held(putting_away, put_away());
     }
     Err(failed.into())
 }

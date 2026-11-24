@@ -15,7 +15,7 @@ use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
 
 use super::{After, Answer, ApiError, ConnectionState, lock};
-use crate::admission::{self, Command, Refusal, Replaced, Report};
+use crate::admission::{self, Command, Refusal, Replaced, Report, end_held};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
 use crate::settings;
@@ -949,8 +949,6 @@ pub(super) async fn workspace_remove(
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
 }
-
-pub(super) use crate::admission::end_held;
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by
 /// project so the folder is readable, unique by id. Checked to lie under
