@@ -183,8 +183,8 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true, ...(event.declined ? { declined: true as const } : {}) }));
     case "error":
       return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
-    // Shown elsewhere (the tile carries usage), or nowhere outside the
-    // developer pane (passthrough), or implied by the items around them.
+    // Shown elsewhere (the tile carries usage), or nowhere (passthrough: the developer pane lists the raw log's lines,
+    // not events), or implied by the items around them.
     case "turn.completed": {
       // A call with no result when its turn ends never will have one: it has stopped (FLOW-READ-TRANSCRIPT-R16). The
       // backend sends every result of a turn before the turn's end, which only the live stream carries.
