@@ -3,13 +3,15 @@
 //! exist. No Core runs here and nothing waits: an ordering is a list of
 //! inputs.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasher, BuildHasherDefault, Hash};
 use std::sync::Arc;
 
 use ersa_core::admission::{
-    Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Input, Operation, Outcome,
-    ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase, SendIs, SendStage,
-    Sending, Setting, State, WorkspacePhase, step,
+    Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Id, Input, Operation,
+    Outcome, ProjectEntry, ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase,
+    SendIs, SendStage, Sending, SessionEntry, Setting, State, WorkspaceEntry, WorkspacePhase, step,
 };
 use ersa_core::persistence::SessionRow;
 use ersa_protocol::core_api::Deleting;
@@ -3311,11 +3313,6 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     }
 }
 
-/// Applies the inputs of [`every_input`] over `sessions` (and the one
-/// project and its two workspaces) to every state reachable from nothing
-/// and from [`world`], checking each state and each step, and returns the
-/// states. States with more than `held` commands held are not explored
-/// further.
 /// Whether `before` and `after` differ in nothing but the rows of the
 /// sessions `changed` names.
 fn same_but_rows(before: &State, after: &State, changed: impl Fn(&str) -> bool) -> bool {
@@ -3363,66 +3360,149 @@ fn check_released(input: &Input, stepped: &ersa_core::admission::Step) {
     }
 }
 
+/// Numbers each distinct value it is given: equal values, one number.
+struct Numbering<T>(HashMap<T, u32>);
+
+impl<T: Hash + Eq> Numbering<T> {
+    fn of(&mut self, value: T) -> u32 {
+        let next = u32::try_from(self.0.len()).expect("fewer than 2^32 values");
+        *self.0.entry(value).or_insert(next)
+    }
+}
+
+impl<T> Default for Numbering<T> {
+    fn default() -> Self {
+        Numbering(HashMap::new())
+    }
+}
+
+fn owned<K: Clone, V: Clone>((key, value): (&K, &V)) -> (K, V) {
+    (key.clone(), value.clone())
+}
+
+/// The states an exploration has reached, each kept as the numbers of its
+/// parts. A whole state takes kilobytes and the whole world reaches
+/// millions, while each part repeats across thousands of states: kept
+/// whole, they need more memory than a CI runner has. Two states are the
+/// same exactly when their parts are.
+#[derive(Default)]
+struct Reached {
+    projects: Numbering<Vec<(Id, ProjectEntry)>>,
+    workspaces: Numbering<Vec<(Id, WorkspaceEntry)>>,
+    sessions: Numbering<Vec<(Id, SessionEntry)>>,
+    sections: Numbering<Vec<(Id, SectionPhase)>>,
+    held: Numbering<Vec<Command>>,
+    states: HashSet<([u32; 5], bool)>,
+}
+
+impl Reached {
+    /// Whether `state` is reached for the first time.
+    fn insert(&mut self, state: &State) -> bool {
+        let projects: Vec<_> = state.projects().map(owned).collect();
+        let workspaces: Vec<_> = state.workspaces().map(owned).collect();
+        let sessions: Vec<_> = state.sessions().map(owned).collect();
+        let sections: Vec<_> = state.sections().map(owned).collect();
+        let held = state.held().to_vec();
+        let closing = state.closing();
+        // The parts are the whole state: in its fields' order they hash as
+        // it does. A part the state gains and these leave out fails here
+        // rather than make two states one.
+        let hashing = BuildHasherDefault::<DefaultHasher>::default();
+        let parts = (&projects, &workspaces, &sessions, &sections, closing, &held);
+        assert_eq!(hashing.hash_one(parts), hashing.hash_one(state));
+        let numbers = [
+            self.projects.of(projects),
+            self.workspaces.of(workspaces),
+            self.sessions.of(sessions),
+            self.sections.of(sections),
+            self.held.of(held),
+        ];
+        self.states.insert((numbers, closing))
+    }
+}
+
 /// Every state `inputs` reach with at most `held` commands held, each
-/// checked, with every input applied in it. `sends`: whether the inputs
-/// hold the writes a send's row reads, which are then explored from.
-fn explore_with(inputs: Vec<Input>, held: usize, sends: bool) -> HashSet<State> {
-    let mut seen: HashSet<State> = HashSet::new();
-    let mut queue: VecDeque<State> = VecDeque::new();
+/// checked and shown to `visit` once, with every input applied in it.
+/// `sends`: whether the inputs hold the writes a send's row reads, which
+/// are then explored from. Returns how many states there are.
+fn explore(inputs: &[Input], held: usize, sends: bool, mut visit: impl FnMut(&State)) -> usize {
+    let mut reached = Reached::default();
+    // Depth first: only the states on the way to the one being explored
+    // are kept whole, each with the next input to apply in it.
+    let mut path: Vec<(State, usize)> = Vec::new();
+    let mut arrive = |state: State, path: &mut Vec<(State, usize)>| {
+        check_state(&state);
+        check_every_held_command_is_answered(&state);
+        visit(&state);
+        path.push((state, 0));
+    };
     for start in [State::default(), world()] {
-        if seen.insert(start.clone()) {
-            queue.push_back(start);
+        if reached.insert(&start) {
+            arrive(start, &mut path);
         }
     }
     let mut steps = 0usize;
-    while let Some(before) = queue.pop_front() {
-        check_state(&before);
-        check_every_held_command_is_answered(&before);
-        for input in &inputs {
-            let mut after = before.clone();
-            // Every input has an answer in every state: `step` never panics.
-            let stepped = step(&mut after, input.clone());
-            steps += 1;
-            check_step(&before, input, &stepped.outcome, &after);
-            check_released(input, &stepped);
-            // A write changes one session's row and nothing else, answers no
-            // held command, and no row of the table reads a row's contents:
-            // the state it leads to decides every input as this one does, so
-            // it is checked here and not explored again.
-            match input {
-                // So is how a start ended: it changes why the session's
-                // last start failed, which no row of the table reads.
-                Input::Report(Report::StartEnded { session, .. }) => {
-                    assert!(stepped.released.is_empty(), "{input:?}");
-                    let mut same = after.clone();
-                    let forgotten = Input::Report(Report::StartEnded {
-                        session: session.clone(),
-                        failure: None,
-                    });
-                    step(&mut same, forgotten);
-                    assert_eq!(&same, &before, "{input:?}");
-                    continue;
-                }
-                Input::Report(Report::RowWritten { session, change })
-                    if !sends || !read_by_a_send(change) =>
-                {
-                    assert!(stepped.released.is_empty(), "{input:?}");
-                    assert!(
-                        same_but_rows(&before, &after, |id| id == session),
-                        "{input:?}"
-                    );
-                    check_state(&after);
-                    continue;
-                }
-                Input::Command(_) | Input::Report(_) => {}
+    while let Some((before, next)) = path.last_mut() {
+        let Some(input) = inputs.get(*next) else {
+            path.pop();
+            continue;
+        };
+        *next += 1;
+        let before: &State = before;
+        let mut after = before.clone();
+        // Every input has an answer in every state: `step` never panics.
+        let stepped = step(&mut after, input.clone());
+        steps += 1;
+        check_step(before, input, &stepped.outcome, &after);
+        check_released(input, &stepped);
+        // A write changes one session's row and nothing else, answers no
+        // held command, and no row of the table reads a row's contents:
+        // the state it leads to decides every input as this one does, so
+        // it is checked here and not explored again.
+        match input {
+            // So is how a start ended: it changes why the session's
+            // last start failed, which no row of the table reads.
+            Input::Report(Report::StartEnded { session, .. }) => {
+                assert!(stepped.released.is_empty(), "{input:?}");
+                let mut same = after.clone();
+                let forgotten = Input::Report(Report::StartEnded {
+                    session: session.clone(),
+                    failure: None,
+                });
+                step(&mut same, forgotten);
+                assert_eq!(&same, before, "{input:?}");
+                continue;
             }
-            if after.held().len() <= held && seen.insert(after.clone()) {
-                queue.push_back(after);
+            Input::Report(Report::RowWritten { session, change })
+                if !sends || !read_by_a_send(change) =>
+            {
+                assert!(stepped.released.is_empty(), "{input:?}");
+                assert!(
+                    same_but_rows(before, &after, |id| id == session),
+                    "{input:?}"
+                );
+                check_state(&after);
+                continue;
             }
+            Input::Command(_) | Input::Report(_) => {}
+        }
+        if after.held().len() <= held && reached.insert(&after) {
+            arrive(after, &mut path);
         }
     }
-    assert!(steps > seen.len());
-    seen
+    let states = reached.states.len();
+    assert!(steps > states);
+    states
+}
+
+/// The states [`explore`] reaches, for a small world's checks of what is
+/// among them.
+fn explore_with(inputs: Vec<Input>, held: usize, sends: bool) -> HashSet<State> {
+    let mut states = HashSet::new();
+    explore(&inputs, held, sends, |state| {
+        states.insert(state.clone());
+    });
+    states
 }
 
 /// `input` with the second session's name for the first's: an input about
@@ -3837,15 +3917,15 @@ fn a_walk_over_the_whole_world_keeps_what_admission_promises() {
 }
 
 // The whole world, exhaustively: one session and one command held, with
-// every input. 2.8 million states, a quarter of an hour in an optimized
-// build, so it is not part of every check:
+// every input. 8.2 million states and 820 million steps, about 40 minutes
+// and 4 GB on a CI runner, too long for every check:
 // `cargo test -p ersa-core --release --test admission -- --ignored`.
 // verifies: ARCH-CORE-R21
 #[test]
-#[ignore = "about fifteen minutes in an optimized build"]
+#[ignore = "about forty minutes in an optimized build"]
 fn every_input_in_every_reachable_state_of_the_whole_world() {
-    let whole = explore_with(every_input_of_the_whole_world(&["s1"]), 1, true);
-    assert!(whole.len() > 2_000_000, "only {} states", whole.len());
+    let states = explore(&every_input_of_the_whole_world(&["s1"]), 1, true, |_| {});
+    assert!(states > 8_000_000, "only {states} states");
 }
 
 // -- One change to a repository's worktrees at a time ----------------------
