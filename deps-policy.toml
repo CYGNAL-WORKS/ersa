@@ -52,6 +52,15 @@ version = "1.2.3"
 reason = "url 2.5.9 requires it; published with it from the same repository (servo/rust-url). Ends with the url exception above."
 expires = 2026-12-01
 
+# The Shell, every platform: Tauri 2 and wry bring in cookie. 0.18.3 fixes
+# RUSTSEC-2026-0594. Remove once it is a week old (2026-11-30).
+[[age_exception]]
+ecosystem = "crates.io"
+package = "cookie"
+version = "0.18.3"
+reason = "Fixes RUSTSEC-2026-0594 (private cookie nonces can repeat in a process that forks) against 0.18.2, which Tauri 2 and wry bring in; Ersa adds no private cookies, but every pull request fails the vulnerability check until it is in. Ends when 0.18.3 is a week old."
+expires = 2026-12-03
+
 # The Shell (apps/shell/src-tauri) on Linux: Tauri 2 draws its window with
 # gtk-rs 0.18, which pins both of these. Neither has a fix Tauri 2 can take.
 [[vulnerability_exception]]
