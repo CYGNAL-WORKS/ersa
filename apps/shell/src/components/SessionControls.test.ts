@@ -44,7 +44,7 @@ describe("the how chips as Claude Desktop shows them", () => {
       { id: "medium", label: "Medium", default: false },
       { id: "high", label: "High", default: false },
     ],
-    permission_modes: [{ id: "default", label: "Ask", default: true }],
+    permission_modes: [{ id: "default", label: "Manual", default: true }],
   };
   const render = (effort?: string) =>
     renderToStaticMarkup(
@@ -75,6 +75,6 @@ describe("the how chips as Claude Desktop shows them", () => {
   it("shows the default model by the model it resolves to, and the permission mode by its name", () => {
     const html = render();
     expect(shown(html, "Model")).toBe("Default (Opus 5.5)");
-    expect(shown(html, "Permission mode")).toBe("Ask");
+    expect(shown(html, "Permission mode")).toBe("Manual");
   });
 });

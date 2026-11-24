@@ -41,7 +41,7 @@ const claudeCode: BackendInfo = {
     { id: "high", label: "High", default: false },
   ],
   permission_modes: [
-    { id: "default", label: "Ask", default: true },
+    { id: "default", label: "Manual", default: true },
     { id: "plan", label: "Plan only", default: false },
   ],
 };
