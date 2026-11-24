@@ -556,6 +556,35 @@ async fn tile_carrying(client: &mut Client, id: &str, backend_id: &str) -> Value
         .expect("no session.tile carried the backend's id")
 }
 
+/// Waits for the turn's end and a `session.tile` for session `id` carrying
+/// `backend_id`, in either order. Core publishes the end to the stream and
+/// then looks for the record apart from it, so on a busy machine the look's
+/// tile can reach the client first; waiting for the end alone would read
+/// past the tile and drop it.
+async fn turn_end_and_tile_carrying(client: &mut Client, id: &str, backend_id: &str) {
+    let (mut ended, mut carried) = (false, false);
+    let both = async {
+        while !(ended && carried) {
+            let n = client
+                .notification()
+                .await
+                .expect("the connection stays open");
+            ended |= n["method"] == "session.event"
+                && n["params"]["event"]["event"]["type"] == "turn.completed";
+            carried |= n["method"] == "session.tile"
+                && n["params"]["session_id"] == id
+                && n["params"]["backend_session_id"] == backend_id;
+        }
+    };
+    let finished = tokio::time::timeout(Duration::from_secs(10), both)
+        .await
+        .is_ok();
+    assert!(
+        finished,
+        "within 10 seconds: turn ended {ended}, a tile carried the backend's id {carried}"
+    );
+}
+
 /// Claude Code starts a session under an id Core chose, but has a record
 /// under it only from the session's first message: until then the id finds
 /// nothing in its own tools, so Core carries none, in the answer or the list.
@@ -598,9 +627,8 @@ async fn a_session_carries_the_id_core_chose_once_a_turn_ends_with_its_record_wr
     client
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
-    client.events_until("turn.completed").await;
     // The turn's end looked, and a tile carries the id with no list read.
-    tile_carrying(&mut client, &id, &named).await;
+    turn_end_and_tile_carrying(&mut client, &id, &named).await;
     assert_eq!(listed_backend_id(&mut client, &id).await, json!(named));
 
     // Still running, its record gone: the next list's look finds nothing,
@@ -641,8 +669,7 @@ async fn a_look_that_fails_or_runs_out_of_time_leaves_the_id_carried() {
     client
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
-    client.events_until("turn.completed").await;
-    tile_carrying(&mut client, &id, &named).await;
+    turn_end_and_tile_carrying(&mut client, &id, &named).await;
     assert_eq!(listed_backend_id(&mut client, &id).await, json!(named));
 
     for kind in [SummaryFault::Fails, SummaryFault::Hangs] {
