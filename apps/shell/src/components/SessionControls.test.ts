@@ -4,28 +4,43 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { BackendInfo, ModelChoice, Project } from "../protocol/core-api.gen";
-import { SessionControls, modelOptions } from "./SessionControls";
+import { SessionControls, modelChip } from "./SessionControls";
 
 const project: Project = { id: "p1", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "git", trusted: true };
 const host = { id: "local", name: "devbox", platform: "windows" } as const;
 
-// The default model's name, as Claude Desktop's model chip gives it: Default, then the model the default resolves to.
+// The model chip and the backend's default (FLOW-NEW-SESSION-R46): where a listed model stands for the default, the chip
+// reads and marks that model and the list has no row for the default; otherwise the default keeps the backend's label.
 describe("the model chip's default", () => {
   const fallback: ModelChoice = { id: "default", label: "Default (recommended)", default: true, resolved: "claude-opus-5-5" };
   const sonnet: ModelChoice = { id: "sonnet", label: "Sonnet 5.5", default: false, resolved: "claude-sonnet-5-5" };
-  const listed: ModelChoice[] = [fallback, sonnet, { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5" }];
-  const labels = (models: ModelChoice[]) => modelOptions(models).map((o) => o.label);
+  const opus: ModelChoice = { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5" };
+  const opusFull: ModelChoice = { id: "claude-opus-5-5", label: "Opus 5.5 (full id)", default: false, resolved: "claude-opus-5-5" };
+  const listed: ModelChoice[] = [fallback, sonnet, opus, opusFull];
+  const labels = (models: ModelChoice[], model: string) => modelChip(models, model).options.map((o) => o.label);
 
-  it("names the listed model the default resolves to, and leaves every other label as the backend gives it", () => {
-    expect(labels(listed)).toEqual(["Default (Opus 5.5)", "Sonnet 5.5", "Opus 5.5"]);
+  // verifies: FLOW-NEW-SESSION-R46
+  it("leaves the default out of the list, and reads and marks the first listed model that stands for it", () => {
+    expect(labels(listed, "default")).toEqual(["Sonnet 5.5", "Opus 5.5", "Opus 5.5 (full id)"]);
+    expect(modelChip(listed, "default").value).toBe("opus");
+    // A model the user chose reads as chosen, the one that stands for the default included, and the list is the same.
+    expect(modelChip(listed, "sonnet").value).toBe("sonnet");
+    expect(modelChip(listed, "claude-opus-5-5").value).toBe("claude-opus-5-5");
+    expect(labels(listed, "sonnet")).toEqual(["Sonnet 5.5", "Opus 5.5", "Opus 5.5 (full id)"]);
   });
 
+  // verifies: FLOW-NEW-SESSION-R46
   it("keeps the backend's label for a default whose resolved id no other listed model has", () => {
-    expect(labels([{ ...fallback, resolved: "claude-fable-5-2" }, sonnet])).toEqual(["Default (recommended)", "Sonnet 5.5"]);
+    const models = [{ ...fallback, resolved: "claude-fable-5-2" }, sonnet];
+    expect(labels(models, "default")).toEqual(["Default (recommended)", "Sonnet 5.5"]);
+    expect(modelChip(models, "default").value).toBe("default");
   });
 
+  // verifies: FLOW-NEW-SESSION-R46
   it("keeps the backend's label for a default with no resolved id", () => {
-    expect(labels([{ id: "auto", label: "Auto", default: true }, sonnet])).toEqual(["Auto", "Sonnet 5.5"]);
+    const models = [{ id: "auto", label: "Auto", default: true }, sonnet];
+    expect(labels(models, "auto")).toEqual(["Auto", "Sonnet 5.5"]);
+    expect(modelChip(models, "auto").value).toBe("auto");
   });
 });
 
@@ -72,9 +87,13 @@ describe("the how chips as Claude Desktop shows them", () => {
     expect(none).toContain('aria-label="Effort: Default"');
   });
 
-  it("shows the default model by the model it resolves to, and the permission mode by its name", () => {
+  // verifies: FLOW-NEW-SESSION-R46
+  // verifies: FLOW-NEW-SESSION-R48
+  it("names the lone backend, the default model by the listed model it stands for, and the permission mode", () => {
     const html = render();
-    expect(shown(html, "Model")).toBe("Default (Opus 5.5)");
+    expect(shown(html, "Backend")).toBe("Claude Code");
+    expect(shown(html, "Model")).toBe("Opus 5.5");
     expect(shown(html, "Permission mode")).toBe("Manual");
   });
 });
+
