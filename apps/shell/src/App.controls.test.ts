@@ -434,15 +434,24 @@ describe("the session controls of a session at the backend's default model", () 
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
   });
 
-  // Before its host lists its backends, or when the listing failed, the chip is already in its place and reads the
-  // session's backend by its id, as a held model does, so nothing shifts when the label arrives (an open question in
-  // FLOW-NEW-SESSION).
+  // Before a listing names the session's backend, the chip is already in its place and reads the backend by its id, so
+  // nothing shifts when the label arrives, and the session's controls say nothing of detection (FLOW-NEW-SESSION-R49).
+  /** Neither the detecting line nor the detection-failed line, nor a chip that says detection failed. */
+  const saysNothingOfDetection = () => {
+    expect(statusLine()).toBeNull();
+    expect(document.body.textContent).not.toContain("Detecting the backends");
+    expect(document.body.textContent).not.toContain("couldn't detect the backends");
+    expect(chip("Backend").getAttribute("aria-label")).not.toContain("Detection failed");
+  };
+
+  // verifies: FLOW-NEW-SESSION-R49
   it("holds the backend chip's place under the session's backend id until its host lists it", async () => {
     let listing: (backends: BackendInfo[]) => void = () => {};
     const core = fakeCore(session(), { "backend.list": () => new Promise<BackendInfo[]>((resolve) => (listing = resolve)) });
     await start(core);
     const names = () => within(controls()).getAllByRole("button").map((b) => b.getAttribute("aria-label")?.split(":")[0]);
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    saysNothingOfDetection();
     const before = names();
     await act(async () => listing([claudeCode]));
     await settle();
@@ -450,8 +459,17 @@ describe("the session controls of a session at the backend's default model", () 
     expect(names()).toEqual(before);
   });
 
+  // verifies: FLOW-NEW-SESSION-R49
   it("reads the session's backend by its id when its host's listing failed", async () => {
     await start(fakeCore(session(), { "backend.list": () => Promise.reject(refusal("backend.list: the host did not answer")) }));
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    saysNothingOfDetection();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R49
+  it("reads the session's backend by its id when its host lists none by that name", async () => {
+    await start(fakeCore(session(), { "backend.list": () => [{ ...claudeCode, name: "copilot", label: "GitHub Copilot" }] }));
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    saysNothingOfDetection();
   });
 });
