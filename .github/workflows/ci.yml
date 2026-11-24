@@ -95,8 +95,11 @@ jobs:
       - name: Clippy without adapters
         run: cargo clippy -p ersa-cli --no-default-features --all-targets --locked -- -D warnings
 
+      # scripts/test-rust.mjs builds what `cargo test --locked` builds, then
+      # runs the test binaries side by side and the doctests beside them;
+      # scripts/check.mjs runs the same command.
       - name: Test
-        run: cargo test --locked
+        run: node scripts/test-rust.mjs --locked
 
       - name: Script tests
         # Every script test, found by the shell's glob, so a new test file runs
@@ -199,6 +202,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      # For scripts/test-rust.mjs, which runs the tests.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
       # The Shell embeds the Interface's build output (apps/shell/dist) at
       # compile time; these checks need a page there, not the real build.
       - name: Placeholder Interface build
@@ -211,7 +219,7 @@ jobs:
         run: cargo build -p ersa-cli --locked
 
       - name: Test
-        run: cargo test -p ersa-shell --locked
+        run: node scripts/test-rust.mjs -p ersa-shell --locked
 
   # Decides whether a pull request, a merge queue entry, or a push to main
   # touches anything the Windows build or tests read. A skipped `windows` job
@@ -249,7 +257,7 @@ jobs:
             echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if grep -qE '^(crates/|protocol/|docs/briefs/protocol/fixtures/|\.cargo/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.?clippy\.toml$|\.?rustfmt\.toml$|deny\.toml$|\.gitattributes$|\.github/workflows/ci\.yml$|apps/shell/src-tauri/)' <<< "$changed"; then
+          if grep -qE '^(crates/|protocol/|docs/briefs/protocol/fixtures/|\.cargo/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.?clippy\.toml$|\.?rustfmt\.toml$|deny\.toml$|\.gitattributes$|\.github/workflows/ci\.yml$|scripts/test-rust\.mjs$|apps/shell/src-tauri/)' <<< "$changed"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -274,11 +282,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      # For scripts/test-rust.mjs, which runs the tests.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --locked
+        run: node scripts/test-rust.mjs --locked
 
       # The Shell, as in the Linux shell job; WebView2 ships with Windows.
       - name: Shell clippy
@@ -292,4 +305,4 @@ jobs:
         shell: bash
         run: |
           cargo build -p ersa-cli --locked
-          cargo test -p ersa-shell --locked
+          node scripts/test-rust.mjs -p ersa-shell --locked
