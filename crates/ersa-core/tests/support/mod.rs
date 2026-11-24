@@ -14,12 +14,12 @@ pub mod log;
 pub mod procs;
 pub mod put_away;
 pub mod schedule;
+pub mod sealed;
 pub mod suite;
 
 use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
@@ -28,7 +28,7 @@ use ersa_adapter::{Process, ProcessSpec, Transport};
 use ersa_core::platform::{self, BoxStream};
 use ersa_core::replay::Replay;
 use ersa_core::transport::LocalTreeTransport;
-use ersa_core::{Adapter, CoreConfig, Gate, Server};
+use ersa_core::{Adapter, CommandTransport, CoreConfig, Gate, Server};
 use ersa_protocol::schema::{validate_notification, validate_response};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf};
@@ -158,8 +158,7 @@ pub async fn start_with_adapters(
     adapters: Vec<Arc<dyn Adapter>>,
 ) -> TestCore {
     let endpoint = unique_endpoint();
-    let mut config = test_config(&dir.path().join("data"), &endpoint);
-    configure(&mut config);
+    let config = sealed_config(&dir.path().join("data"), &endpoint, configure);
     let server = Server::bind_with(config, adapters).await.expect("bind");
     let core = Arc::downgrade(&server.core());
     let task = tokio::spawn(server.run());
@@ -171,13 +170,81 @@ pub async fn start_with_adapters(
     }
 }
 
+/// The configuration every test Core starts with: [`test_config`], then the
+/// test's `configure`, then its git sealed ([`sealed`]). The command
+/// transport the test chose, or Core's own local one, is wrapped so every
+/// process it starts reads no global or system git configuration.
+pub fn sealed_config(
+    data_dir: &Path,
+    endpoint: &str,
+    configure: impl FnOnce(&mut CoreConfig),
+) -> CoreConfig {
+    let mut config = test_config(data_dir, endpoint);
+    configure(&mut config);
+    let inner = match config.command_transport.take() {
+        Some(CommandTransport(chosen)) => chosen,
+        None => Arc::new(LocalTreeTransport::for_commands()),
+    };
+    config.command_transport = Some(CommandTransport(Arc::new(sealed::SealedTransport {
+        inner,
+    })));
+    config
+}
+
+/// Shuts `core` down as the Shell does and hands back its directory, for
+/// the next Core to start over.
+pub async fn shut_down(core: TestCore) -> tempfile::TempDir {
+    let mut client = core.client().await;
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    dir
+}
+
+/// Restarts `core` on the same data directory with `adapter`, as a user
+/// closing and opening Ersa would: the new Core knows only what its store,
+/// and the adapter's records, kept.
+pub async fn restarted(core: TestCore, adapter: impl Adapter + 'static) -> (TestCore, Client) {
+    let dir = shut_down(core).await;
+    let core = start_with_adapters(dir, |_| {}, vec![Arc::new(adapter)]).await;
+    let client = core.client().await;
+    (core, client)
+}
+
+/// The session's row in `session.list`, if it is listed.
+pub async fn listed(client: &mut Client, id: &str) -> Option<Value> {
+    let sessions = client.result("session.list", json!({})).await;
+    sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .cloned()
+}
+
+/// Waits until `session.list` reports the session in `state`, failing after
+/// 10 seconds.
+pub async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let row = listed(client, id).await;
+        if row.as_ref().is_some_and(|row| row["state"] == state) {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {id} never became {state}; last listed as {row:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// A replay server for `replay` in a temporary data directory, with
 /// `configure` applied to its configuration.
 pub async fn start_replay_of(replay: Replay, configure: impl FnOnce(&mut CoreConfig)) -> TestCore {
     let dir = tempdir();
     let endpoint = unique_endpoint();
-    let mut config = test_config(&dir.path().join("data"), &endpoint);
-    configure(&mut config);
+    let config = sealed_config(&dir.path().join("data"), &endpoint, configure);
     let server = Server::bind_replay(config, replay).await.expect("bind");
     let core = Arc::downgrade(&server.core());
     let task = tokio::spawn(server.run());
@@ -470,17 +537,9 @@ pub fn kind(error: &Value) -> &str {
 /// `std::process` directly: the rule that VCS commands go through the
 /// transport is for Core.
 pub fn git(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        // Commits need an identity; these keep the test independent of the
-        // user's git configuration.
-        .args([
-            "-c",
-            "user.name=Ersa Tests",
-            "-c",
-            "user.email=tests@ersa.invalid",
-        ])
+    // Sealed from the user's git configuration, with the identity commits
+    // need (support/sealed.rs).
+    let output = sealed::git_command(dir)
         .args(args)
         .output()
         .expect("git runs");

@@ -11,7 +11,10 @@ use ersa_adapter::{ConversationEnd, OpenElsewhere, SessionConfig};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter};
-use support::{Client, TestCore, git, kind, project, start_with_adapters, tempdir, workspace};
+use support::{
+    Client, TestCore, git, kind, project, restarted, start_with_adapters, tempdir, wait_for_state,
+    workspace,
+};
 
 async fn start(fake: &Arc<FakeAdapter>) -> (TestCore, Client) {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
@@ -39,14 +42,6 @@ async fn row(client: &mut Client, id: &str) -> Value {
         .find(|s| s["id"] == id)
         .cloned()
         .unwrap()
-}
-
-async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while row(client, id).await["state"] != state {
-        assert!(tokio::time::Instant::now() < deadline, "never {state}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
 }
 
 /// A started session whose backend has named it, with a turn behind it.
@@ -132,19 +127,6 @@ fn without_a_record_of_its_own_now(fake: &FakeAdapter, original_backend_id: &str
         .lock()
         .unwrap()
         .retain(|id, _| id == original_backend_id);
-}
-
-/// Core started again over the same folder and records.
-async fn restarted(core: TestCore, client: &mut Client, fake: &FakeAdapter) -> (TestCore, Client) {
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let again: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(Arc::clone(
-        &fake.records,
-    )))];
-    let core = start_with_adapters(dir, |_| {}, again).await;
-    let client = core.client().await;
-    (core, client)
 }
 
 /// The refusal of a fork asked for now.
@@ -708,7 +690,8 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .unwrap()
         .push(fake::recorded_title("Later"));
 
-    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+    let (_core, mut client) =
+        restarted(core, FakeAdapter::with_records(Arc::clone(&fake.records))).await;
 
     client
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
@@ -752,12 +735,14 @@ async fn a_forks_link_to_its_original_goes_once_it_has_a_record() {
     fork_started(&fake).await;
 
     // Seen with a record of its own, as Core starts.
-    let (core, mut client) = restarted(core, &mut client, &fake).await;
+    let (core, mut client) =
+        restarted(core, FakeAdapter::with_records(Arc::clone(&fake.records))).await;
     assert_eq!(row(&mut client, &fork_id).await["id"], fork_id.as_str());
 
     // With that record gone there is nothing left to fall back on.
     without_a_record_of_its_own_now(&fake, &original);
-    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+    let (_core, mut client) =
+        restarted(core, FakeAdapter::with_records(Arc::clone(&fake.records))).await;
     client
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
         .await;
@@ -795,7 +780,8 @@ async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
         }
     }
 
-    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+    let (_core, mut client) =
+        restarted(core, FakeAdapter::with_records(Arc::clone(&fake.records))).await;
 
     let listed = row(&mut client, &fork_id).await;
     assert_eq!(listed["title"], "From the backend");
@@ -823,14 +809,8 @@ async fn a_fork_whose_conversation_is_gone_says_so() {
     // went with its delete.
     fake.records.lock().unwrap().clear();
 
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let again: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(Arc::clone(
-        &fake.records,
-    )))];
-    let core = start_with_adapters(dir, |_| {}, again).await;
-    let mut client = core.client().await;
+    let (_core, mut client) =
+        restarted(core, FakeAdapter::with_records(Arc::clone(&fake.records))).await;
 
     client
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
@@ -1108,7 +1088,8 @@ async fn an_untitled_originals_later_title_is_not_its_forks() {
         .unwrap()
         .push(fake::recorded_title("Later"));
 
-    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+    let (_core, mut client) =
+        restarted(core, FakeAdapter::with_records(Arc::clone(&fake.records))).await;
 
     assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
 }

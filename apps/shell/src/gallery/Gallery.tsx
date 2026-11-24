@@ -754,7 +754,7 @@ const claudeCode: BackendInfo = {
   ],
   efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], ""),
   permission_modes: choices(
-    [["default", "Ask"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]],
+    [["auto", "Auto"], ["default", "Manual"], ["acceptEdits", "Accept edits"], ["plan", "Plan"]],
     "default",
   ),
 };
@@ -820,7 +820,7 @@ const galleryAttachments: [Attached, Attached, Attached] = [
 const attachProps = { autoFocus: false, onSend: async () => false, onAttach: async () => [], workspace: galleryWorkspace } as const;
 
 const chipOptions = [
-  { id: "default", label: "Ask" },
+  { id: "default", label: "Manual" },
   { id: "acceptEdits", label: "Accept edits" },
 ];
 const chip = { name: "Permission mode", value: "default", options: chipOptions, onChoose: () => {} };
@@ -1437,6 +1437,8 @@ const entries: Entry[] = [
       // FLOW-NEW-SESSION-R11: the listing failed, which is not a host without backends.
       ["Backend detection failed", <NewSessionScreen {...newSession} backends={{ local: [] }} backendFailures={{ local: "The host didn't answer in time." }} />],
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
+      // FLOW-NEW-SESSION-R46: the default reads as the listed model it stands for, marked, with no Default row.
+      ["The model chip open, at the default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="model" />)],
       // docs/design/COMPOSER.md: with no level chosen the effort reads Default, the first row of its list.
       ["The effort chip open, at Default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="effort" />)],
       // A model that takes no effort leaves the effort chip in its place, unavailable, reading None.

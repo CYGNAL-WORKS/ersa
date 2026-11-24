@@ -13,30 +13,18 @@ use std::time::Duration;
 use ersa_adapter::OpenElsewhere;
 use ersa_core::{Adapter, Gate};
 use serde_json::{Value, json};
-use support::deleting::{
-    FailingGit, Removal, idle_session, isolated, listed, project, root, token,
-};
+use support::deleting::{FailingGit, Removal, idle_session, isolated, project, root, token};
 use support::fake::{self, FakeAdapter, Records};
 use support::log::Log;
-use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
+use support::{
+    Client, TestCore, git, git_repo, kind, listed, restarted, shut_down, start_with_adapters,
+    tempdir,
+};
 
 /// A started Core with `fake` as its backend, and a client.
 async fn start(fake: &Arc<FakeAdapter>) -> (TestCore, Client) {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
-    let client = core.client().await;
-    (core, client)
-}
-
-/// Restarts `core` on the same data directory with a fake backend that
-/// keeps its records in `records`, as a user closing and opening Ersa would.
-async fn restarted(core: TestCore, records: Records) -> (TestCore, Client) {
-    let mut client = core.client().await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
     let client = core.client().await;
     (core, client)
 }
@@ -107,7 +95,7 @@ async fn a_session_alone_in_its_workspace_goes_with_its_folder_branch_and_record
 
     // Never listed again, across a restart either.
     let records = Arc::clone(&fake.records);
-    let (_core, mut client) = restarted(core, records).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::with_records(records)).await;
     assert!(listed(&mut client, &id).await.is_none());
 }
 
@@ -896,10 +884,7 @@ async fn a_restart_marks_a_running_delete_failed_and_deletes_nothing_more() {
     // (as they would for a workspace shared at the time of the mark).
     let db = core.data_dir().join("ersa.db");
     let records = Arc::clone(&fake.records);
-    let mut client_gone = client;
-    client_gone.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
+    let dir = shut_down(core).await;
     {
         let conn = rusqlite::Connection::open(&db).unwrap();
         let marked = conn

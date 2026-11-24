@@ -15,7 +15,9 @@ use ersa_core::Adapter;
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records, Stats};
-use support::{Client, TestCore, app_log_facts, kind, start_with_adapters, tempdir, workspace};
+use support::{
+    Client, TestCore, app_log_facts, kind, restarted, start_with_adapters, tempdir, workspace,
+};
 
 async fn start_fake(adapter: FakeAdapter) -> (TestCore, Arc<Stats>) {
     let stats = Arc::clone(&adapter.stats);
@@ -1181,14 +1183,9 @@ async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa(
     let row = titled_row(&mut client, &id).await;
     assert_eq!(row["title"], "hello");
     assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
 
     // A later Core reads them from the record again; the mode is Ersa's own.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    let (_core, mut client) = restarted(core, FakeAdapter::with_records(records)).await;
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["title"], "hello");
     assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
@@ -1255,14 +1252,9 @@ async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
         !events.iter().any(|e| e.to_string().contains("Renamed")),
         "{events:#?}"
     );
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
 
     // Ersa keeps no title of its own: a later Core finds it in the record.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    let (_core, mut client) = restarted(core, FakeAdapter::with_records(records)).await;
     assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
 }
 
@@ -1411,14 +1403,9 @@ async fn the_tile_sent_when_a_stopped_session_opens_carries_its_title() {
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     client.result("session.stop", json!({ "id": id })).await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
 
     // A later Core, whose view of the session opens on a subscription.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    let (core, mut client) = restarted(core, FakeAdapter::with_records(records)).await;
     let mut other = core.client().await;
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
@@ -1716,7 +1703,7 @@ async fn a_failed_session_still_lists_as_failed_after_core_restarts() {
     drop(client);
 
     // Listed, not opened: its state comes from how Core saw it end.
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["state"], "error");
     assert_eq!(row["tile"]["state"], "error");
@@ -1836,19 +1823,6 @@ async fn a_session_in_the_root_workspace_keeps_its_project() {
         folder.is_dir(),
         "the project's own folder is left as it was"
     );
-}
-
-/// Restarts `core` on the same data directory, as a user closing and
-/// opening Ersa would: the new Core knows only what its store kept.
-async fn restarted(core: TestCore) -> (TestCore, Client) {
-    let mut client = core.client().await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let client = core.client().await;
-    (core, client)
 }
 
 /// Whether `workspace.list` still lists the workspace `workspace_id`, in
@@ -2040,7 +2014,7 @@ async fn an_archived_session_is_still_archived_after_core_restarts() {
     client.result("session.stop", json!({ "id": kept })).await;
     drop(client);
 
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     assert_eq!(session_row(&mut client, &archived).await["archived"], true);
     assert_eq!(session_row(&mut client, &kept).await["archived"], false);
 }
@@ -2078,7 +2052,7 @@ async fn a_message_to_an_archived_session_is_refused() {
 
     // Still refused after a restart, which kept the mark.
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     let error = client
         .error("session.send", json!({ "id": id, "text": "hello" }))
         .await;
@@ -2225,7 +2199,7 @@ async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
     client.result("session.stop", json!({ "id": id })).await;
 
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     assert_eq!(session_row(&mut client, &id).await["archived"], false);
 }
 

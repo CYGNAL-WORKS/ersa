@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BackendInfo, Choice, Project } from "../protocol/core-api.gen";
 import type { Session } from "../protocol/core-api.gen";
-import { type SessionValues, effortsFor, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
+import { type SessionValues, effortsFor, projectOrder, recentFirst, seedScreen, sessionShown, startingProject, valuesFor, workspaceKinds } from "./controls";
 
 const project = (vcs: Project["vcs"]): Project => ({ id: "p1", host_id: "local", path: "D:\\Projects\\p", name: "p", vcs, trusted: true });
 
@@ -14,7 +14,7 @@ const backend = (name: string, status: BackendInfo["status"] = "available"): Bac
   tested: { min: "1.0.0", max: "2.0.0" },
   models: choices([`${name}-small`, `${name}-large`], `${name}-large`).map((m) => ({ ...m, efforts: ["low", "high"] })),
   efforts: choices(["low", "high"], "high"),
-  permission_modes: choices(["ask", "edits", "bypass"], "ask"),
+  permission_modes: choices(["manual", "edits", "bypass"], "manual"),
 });
 
 describe("the session controls' starting values", () => {
@@ -28,7 +28,7 @@ describe("the session controls' starting values", () => {
       backend: "claude-code",
       model: "claude-code-large",
       effort: "high",
-      permission_mode: "ask",
+      permission_mode: "manual",
     });
   });
 
@@ -103,19 +103,6 @@ describe("the workspace choices", () => {
     expect(workspaceKinds(project("git"))).toEqual(["isolated", "root"]);
     expect(workspaceKinds(project("perforce"))).toEqual(["root"]);
     expect(workspaceKinds(project("none"))).toEqual(["root"]);
-  });
-});
-
-describe("the backend chip", () => {
-  it("shows when the host has more than one backend, and hides with one", () => {
-    expect(showsBackend([backend("claude-code"), backend("copilot")])).toBe(true);
-    expect(showsBackend([backend("claude-code")])).toBe(false);
-  });
-
-  // verifies: FLOW-NEW-SESSION-R07
-  it("shows a lone backend that is missing, so its status is not hidden", () => {
-    expect(showsBackend([backend("claude-code", "missing")])).toBe(true);
-    expect(showsBackend([backend("claude-code", "error")])).toBe(true);
   });
 });
 

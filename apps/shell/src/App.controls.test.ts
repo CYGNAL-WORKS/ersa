@@ -41,7 +41,7 @@ const claudeCode: BackendInfo = {
     { id: "high", label: "High", default: false },
   ],
   permission_modes: [
-    { id: "default", label: "Ask", default: true },
+    { id: "default", label: "Manual", default: true },
     { id: "plan", label: "Plan only", default: false },
   ],
 };
@@ -398,5 +398,78 @@ describe("the session controls' ring", () => {
     fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
     await settle();
     expect(ring().getAttribute("aria-label")).toBe("Context: none used yet");
+  });
+});
+
+// A running session nobody chose a model for, whose default a listed model stands for (FLOW-NEW-SESSION-R46), and its
+// backend chip (FLOW-NEW-SESSION-R48).
+describe("the session controls of a session at the backend's default model", () => {
+  // verifies: FLOW-NEW-SESSION-R46
+  it.each([
+    ["before the backend reports its model", undefined],
+    ["once the backend reports the model the default resolved to", "claude-opus-5-5"],
+  ])("read and mark the listed model %s, list no Default, and send a change only for another row", async (_when, reported) => {
+    const core = fakeCore(session({ model: reported, model_request: undefined }), {
+      "session.set_model": () => core.becomes({ model: "claude-sonnet-5-5", model_request: "sonnet" }),
+    });
+    await start(core);
+    expect(chip("Model").getAttribute("aria-label")).toBe("Model: Opus 5.5");
+    fireEvent.click(chip("Model"));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Opus 5.5", "Sonnet 5.5"]);
+    expect(screen.getByRole("option", { selected: true }).textContent).toBe("Opus 5.5");
+    // The marked row changes nothing.
+    fireEvent.click(screen.getByRole("option", { name: "Opus 5.5" }));
+    await settle();
+    expect(core.calls.some((c) => c.method === "session.set_model")).toBe(false);
+    // Another row is named to the backend by its own choice.
+    fireEvent.click(chip("Model"));
+    fireEvent.click(screen.getByRole("option", { name: "Sonnet 5.5" }));
+    await settle();
+    expect(core.calls.find((c) => c.method === "session.set_model")?.params).toEqual({ id: "s1", model: "sonnet" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R48
+  it("names the session's backend by its label though the host has one backend", async () => {
+    await start(fakeCore(session()));
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+  });
+
+  // Before a listing names the session's backend, the chip is already in its place and reads the backend by its id, so
+  // nothing shifts when the label arrives, and the session's controls say nothing of detection (FLOW-NEW-SESSION-R49).
+  /** Neither the detecting line nor the detection-failed line, nor a chip that says detection failed. */
+  const saysNothingOfDetection = () => {
+    expect(statusLine()).toBeNull();
+    expect(document.body.textContent).not.toContain("Detecting the backends");
+    expect(document.body.textContent).not.toContain("couldn't detect the backends");
+    expect(chip("Backend").getAttribute("aria-label")).not.toContain("Detection failed");
+  };
+
+  // verifies: FLOW-NEW-SESSION-R49
+  it("holds the backend chip's place under the session's backend id until its host lists it", async () => {
+    let listing: (backends: BackendInfo[]) => void = () => {};
+    const core = fakeCore(session(), { "backend.list": () => new Promise<BackendInfo[]>((resolve) => (listing = resolve)) });
+    await start(core);
+    const names = () => within(controls()).getAllByRole("button").map((b) => b.getAttribute("aria-label")?.split(":")[0]);
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    saysNothingOfDetection();
+    const before = names();
+    await act(async () => listing([claudeCode]));
+    await settle();
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+    expect(names()).toEqual(before);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R49
+  it("reads the session's backend by its id when its host's listing failed", async () => {
+    await start(fakeCore(session(), { "backend.list": () => Promise.reject(refusal("backend.list: the host did not answer")) }));
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    saysNothingOfDetection();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R49
+  it("reads the session's backend by its id when its host lists none by that name", async () => {
+    await start(fakeCore(session(), { "backend.list": () => [{ ...claudeCode, name: "copilot", label: "GitHub Copilot" }] }));
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    saysNothingOfDetection();
   });
 });
