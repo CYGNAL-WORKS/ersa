@@ -59,7 +59,7 @@ describe("the how chips as Claude Desktop shows them", () => {
       { id: "medium", label: "Medium", default: false },
       { id: "high", label: "High", default: false },
     ],
-    permission_modes: [{ id: "default", label: "Ask", default: true }],
+    permission_modes: [{ id: "default", label: "Manual", default: true }],
   };
   const render = (effort?: string) =>
     renderToStaticMarkup(
@@ -93,7 +93,7 @@ describe("the how chips as Claude Desktop shows them", () => {
     const html = render();
     expect(shown(html, "Backend")).toBe("Claude Code");
     expect(shown(html, "Model")).toBe("Opus 5.5");
-    expect(shown(html, "Permission mode")).toBe("Ask");
+    expect(shown(html, "Permission mode")).toBe("Manual");
   });
 });
 
