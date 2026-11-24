@@ -179,9 +179,10 @@ const DEFAULT_MODEL: &str = "default";
 /// accepts, since the CLI reports no list of either. The CLI marks no
 /// default effort, so none is marked here: a session given none runs at the
 /// CLI's own. `default` asks before every action outside the allow rules
-/// (FLOW-NEW-SESSION-R02); each mode reads by its name, as Claude
-/// Desktop's chip does, so `default` reads Ask (R75). `bypassPermissions` is not
-/// offered. The models are the CLI's own report ([`read_models`]).
+/// (FLOW-NEW-SESSION-R02). The CLI names no mode, so each is named and
+/// ordered as Claude Desktop's permission menu does: Auto first, and
+/// `default` reads Manual (R80). The default is the mark, not the first
+/// place. `bypassPermissions` is not offered. The models are the CLI's own report ([`read_models`]).
 fn choices() -> BackendChoices {
     let list = |items: &[(&str, &str)], default: Option<&str>| -> Vec<Choice> {
         items
@@ -206,10 +207,10 @@ fn choices() -> BackendChoices {
         ),
         permission_modes: list(
             &[
-                ("default", "Ask"),
+                ("auto", "Auto"),
+                ("default", "Manual"),
                 ("acceptEdits", "Accept edits"),
                 ("plan", "Plan"),
-                ("auto", "Auto"),
             ],
             Some("default"),
         ),

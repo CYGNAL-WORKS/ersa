@@ -754,7 +754,7 @@ const claudeCode: BackendInfo = {
   ],
   efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], ""),
   permission_modes: choices(
-    [["default", "Ask"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]],
+    [["auto", "Auto"], ["default", "Manual"], ["acceptEdits", "Accept edits"], ["plan", "Plan"]],
     "default",
   ),
 };
@@ -820,7 +820,7 @@ const galleryAttachments: [Attached, Attached, Attached] = [
 const attachProps = { autoFocus: false, onSend: async () => false, onAttach: async () => [], workspace: galleryWorkspace } as const;
 
 const chipOptions = [
-  { id: "default", label: "Ask" },
+  { id: "default", label: "Manual" },
   { id: "acceptEdits", label: "Accept edits" },
 ];
 const chip = { name: "Permission mode", value: "default", options: chipOptions, onChoose: () => {} };
