@@ -110,26 +110,35 @@ export function modelChip(models: readonly ModelChoice[], model: string | undefi
 export const DEFAULT_EFFORT = "";
 
 /**
- * The effort chip (docs/design/COMPOSER.md, The session controls): the levels the chosen model takes, the level alone
- * on the chip as Claude Desktop shows it, while its accessible name still says it is the effort. With none chosen
- * it reads Default, and before the session starts Default is its list's first row; a running session's list holds only
- * the levels. A model that takes no effort leaves the chip in its place, unavailable, reading None.
+ * The effort chip's value and options (FLOW-NEW-SESSION-R47), from the levels the model takes. With none chosen it reads
+ * and marks the level the backend marks as its default, in a list of the levels alone, and `value` stays absent so that
+ * choosing that level names it: a session started so names none, and the backend runs at its own, which a project's
+ * settings may set. Where none of the levels is marked it reads Default, and before a session starts Default is the
+ * list's first row, which chooses no level; a running session's list holds only the levels.
+ */
+export function effortChip(levels: readonly Choice[], effort: string | undefined, running: boolean): { value?: string; marked?: string; reads?: string; options: ChipOption[] } {
+  const options = choiceOptions(levels);
+  const marked = levels.find((c) => c.default);
+  if (marked) return { value: effort, marked: marked.id, options };
+  const defaultRow: ChipOption = { id: DEFAULT_EFFORT, label: t("sessionControls.effort.defaultLabel") };
+  return {
+    value: effort ?? DEFAULT_EFFORT,
+    reads: effort === undefined ? t("sessionControls.effort.defaultLabel") : undefined,
+    options: running ? options : [defaultRow, ...options],
+  };
+}
+
+/**
+ * The effort chip (docs/design/COMPOSER.md, The session controls): the level alone on the chip as Claude Desktop shows
+ * it, while its accessible name still says it is the effort, its value and list as `effortChip` gives them. A model that
+ * takes no effort leaves the chip in its place, unavailable, reading None.
  */
 function EffortChip({ backend, values, readOnly, chip }: { backend: BackendInfo; values: SessionValues; readOnly?: boolean; chip: ChipHandlers }) {
-  const levels = choiceOptions(effortsFor(backend, values.model));
+  const levels = effortsFor(backend, values.model);
   if (levels.length === 0) {
     return <Chip name="Effort" reads={t("sessionControls.effort.noneLabel")} options={[]} {...chip} disabled />;
   }
-  const defaultRow: ChipOption = { id: DEFAULT_EFFORT, label: t("sessionControls.effort.defaultLabel") };
-  return (
-    <Chip
-      name="Effort"
-      value={values.effort ?? DEFAULT_EFFORT}
-      reads={values.effort === undefined ? t("sessionControls.effort.defaultLabel") : undefined}
-      options={readOnly ? levels : [defaultRow, ...levels]}
-      {...chip}
-    />
-  );
+  return <Chip name="Effort" {...effortChip(levels, values.effort, readOnly ?? false)} {...chip} />;
 }
 
 /**

@@ -8,7 +8,9 @@
 //!   variable's value to stderr, as a CLI says why it cannot run, and exits 1.
 //! - With `ERSA_STAND_IN_ANSWER` set, it answers the host's `initialize`
 //!   request with one model, the CLI's own `default` entry, so detection
-//!   lists it and the session starts and takes messages; it then accepts
+//!   lists it and the session starts and takes messages; it answers
+//!   `get_settings` with `low` as the effort a session given none runs
+//!   with, so detection marks it the default effort; it then accepts
 //!   each change of model, permission mode or effort as the CLI does.
 //!   With `CLAUDE_CONFIG_DIR` set, its first message writes a session record
 //!   under the `--session-id` it was started with, as the CLI does, so
@@ -149,8 +151,9 @@ fn report_limits() {
 
 /// Reads the host's lines, answering `initialize` with success and the
 /// CLI's `default` model entry (PROTO-CLAUDE-CODE-STREAM, the handshake),
-/// and each change of model, permission mode or effort with success, the
-/// mode echoed as the CLI answers it; anything else is read and ignored.
+/// `get_settings` with `low` applied as the effort, and each change of
+/// model, permission mode or effort with success, the mode echoed as the
+/// CLI answers it; anything else is read and ignored.
 fn answer_initialize() {
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
@@ -173,6 +176,7 @@ fn answer_initialize() {
                 serde_json::json!({ "mode": message["request"]["mode"] })
             }
             Some("set_model" | "apply_flag_settings") => serde_json::json!({}),
+            Some("get_settings") => serde_json::json!({ "applied": { "effort": "low" } }),
             _ => serde_json::Value::Null,
         };
         if !response.is_null() {

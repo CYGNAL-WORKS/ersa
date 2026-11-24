@@ -658,6 +658,54 @@ describe("the tree App draws in the rail", () => {
   });
 });
 
+// The effort a new session names (FLOW-NEW-SESSION-R47): the host's backend marks Medium as its default effort, as
+// Claude Code does, which the chip reads; a session started with none chosen names none, so the backend's own setting
+// stands, and a level chosen, the marked one included, is named.
+describe("the effort App starts a new session with", () => {
+  const levels = ["low", "medium", "high"];
+  const marking: BackendInfo = {
+    ...claude,
+    models: [{ id: "default", label: "Default (recommended)", default: true, efforts: levels }],
+    efforts: levels.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1), default: id === "medium" })),
+  };
+  const starting = {
+    "backend.list": () => [marking],
+    "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: params.workspace_id }),
+    "session.send": () => ({ turn: 1 }),
+  };
+  const effort = () => screen.getByRole("button", { name: /^Effort:/ });
+  const send = async (text: string) => {
+    fireEvent.change(words(), { target: { value: text } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+  };
+
+  // verifies: FLOW-NEW-SESSION-R47
+  it("names none with none chosen, while the chip reads the marked level", async () => {
+    const core = await screenWith([{ ...project("alpha"), vcs: "none" }], undefined, starting);
+    expect(effort().getAttribute("aria-label")).toBe("Effort: Medium");
+    fireEvent.click(effort());
+    // The levels alone, the marked one marked.
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Low", "Medium", "High"]);
+    expect(screen.getByRole("option", { name: "Medium" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(screen.getByRole("option", { name: "Medium" }), { key: "Escape" });
+    await send("Fix the build");
+    expect(paramsOf(core, "session.create")).toMatchObject({ workspace_id: "w-alpha" });
+    expect(paramsOf(core, "session.create")).not.toHaveProperty("effort");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R47
+  it("names the marked level once the user chooses it", async () => {
+    const core = await screenWith([{ ...project("alpha"), vcs: "none" }], undefined, starting);
+    fireEvent.click(effort());
+    fireEvent.click(screen.getByRole("option", { name: "Medium" }));
+    expect(effort().getAttribute("aria-label")).toBe("Effort: Medium");
+    await send("Fix the build");
+    expect(paramsOf(core, "session.create")).toMatchObject({ workspace_id: "w-alpha", effort: "medium" });
+  });
+});
+
 // The Worktree checkbox (issue 412): checked, App asks Core for a new workspace and names no base branch, so Core makes it
 // from the repository's default branch; unchecked, the session starts in the project's own folder.
 describe("the workspace App starts a new session in", () => {

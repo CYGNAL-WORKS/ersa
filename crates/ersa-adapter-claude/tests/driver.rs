@@ -238,11 +238,43 @@ fn models_answer() -> String {
         .expect("fixture 25 answers initialize with its models")
 }
 
-/// A probe CLI that answers `initialize` and exits once its stdin closes.
+/// The recording of the model probe's exchange: `initialize`, then
+/// `get_settings`, and no message.
+const PROBE_FIXTURE: &str = "2.1.330/00-probe-get-settings";
+
+/// The recorded answer to `get_settings`, its `response` changed by
+/// `change` and its `request_id` set to the one the probe sends: the
+/// probe's second request, after `initialize`.
+fn settings_answer(change: impl FnOnce(&mut Value)) -> String {
+    let mut answer = fixture(PROBE_FIXTURE)
+        .stdout
+        .iter()
+        .map(|line| parse(line))
+        .find(|m| m["response"]["response"]["applied"].is_object())
+        .expect("the recording answers get_settings");
+    answer["response"]["request_id"] = json!("ersa-get_settings-2");
+    change(&mut answer["response"]);
+    answer.to_string()
+}
+
+fn is_get_settings(v: &Value) -> bool {
+    v["type"] == "control_request" && v["request"]["subtype"] == "get_settings"
+}
+
+/// A probe CLI that answers `initialize` with `answer`, then
+/// `get_settings` as the recording does, and exits once its stdin closes.
 fn probe_stub(answer: String) -> FakeTransport {
+    probe_stub_with(answer, settings_answer(|_| {}))
+}
+
+/// A probe CLI that answers `initialize` with `answer` and
+/// `get_settings` with `settings`.
+fn probe_stub_with(answer: String, settings: String) -> FakeTransport {
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(expect("initialize", is_initialize))
         .then_stdout([answer])
+        .wait_for_stdin(expect("get_settings", is_get_settings))
+        .then_stdout([settings])
         .hold_open()
 }
 
@@ -258,7 +290,8 @@ async fn models_come_from_the_initialize_answer_of_a_cli_sent_no_message() {
         .with_stop_grace(WAIT)
         .models(Arc::new(transport.clone()))
         .await
-        .expect("models");
+        .expect("models")
+        .models;
 
     let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(
@@ -311,15 +344,109 @@ async fn models_come_from_the_initialize_answer_of_a_cli_sent_no_message() {
     );
 
     // One CLI, started as a new session under an id of its own, with no
-    // model, given `initialize` and nothing else.
+    // model, given `initialize`, then `get_settings`, and no message.
     let spawned = transport.spawned();
     assert_eq!(spawned.len(), 1);
     assert!(!spawned[0].args.iter().any(|a| a == "--model"));
     assert!(flag_value(&spawned[0].args, "--session-id").is_some());
     assert!(!spawned[0].args.iter().any(|a| a == "--resume"));
     let sent = transport.stdin_lines();
-    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent.len(), 2, "{sent:?}");
     assert!(is_initialize(&parse(&sent[0])));
+    assert!(is_get_settings(&parse(&sent[1])));
+}
+
+/// Once the CLI has answered `initialize`, the probe asks `get_settings`
+/// and reports `applied.effort` as the default effort: `medium` in the
+/// recording, and whatever level a CLI names that the adapter lists.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R82
+#[tokio::test]
+async fn the_probe_reports_the_effort_get_settings_applies_as_the_default() {
+    let transport = probe_stub(models_answer());
+    let report = adapter()
+        .models(Arc::new(transport.clone()))
+        .await
+        .expect("models");
+    assert_eq!(report.default_effort.as_deref(), Some("medium"));
+    assert_eq!(report.models.len(), 14);
+    let sent = transport.stdin_lines();
+    assert_eq!(
+        parse(&sent[1])["request"],
+        json!({ "subtype": "get_settings" })
+    );
+
+    let xhigh = settings_answer(|r| r["response"]["applied"]["effort"] = json!("xhigh"));
+    let report = adapter()
+        .models(Arc::new(probe_stub_with(models_answer(), xhigh)))
+        .await
+        .expect("models");
+    assert_eq!(report.default_effort.as_deref(), Some("xhigh"));
+}
+
+/// A CLI that refuses `get_settings`, exits before answering it, or names
+/// a level the adapter does not list, or none, marks no default effort,
+/// and its models still stand.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R82
+#[tokio::test]
+async fn a_cli_that_does_not_say_its_effort_marks_no_default_and_keeps_its_models() {
+    let refused = settings_answer(|r| {
+        r["subtype"] = json!("error");
+        r["error"] = json!("Unknown control request");
+        r.as_object_mut().unwrap().remove("response");
+    });
+    let unlisted = settings_answer(|r| r["response"]["applied"]["effort"] = json!("turbo"));
+    let unnamed = settings_answer(|r| {
+        r["response"]["applied"]
+            .as_object_mut()
+            .unwrap()
+            .remove("effort");
+    });
+    for settings in [refused, unlisted, unnamed] {
+        let report = adapter()
+            .models(Arc::new(probe_stub_with(models_answer(), settings.clone())))
+            .await
+            .unwrap_or_else(|e| panic!("{e}: {settings}"));
+        assert_eq!(report.default_effort, None, "{settings}");
+        assert_eq!(report.models.len(), 14, "{settings}");
+    }
+
+    // Exits as soon as `get_settings` arrives, without answering.
+    let exits = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([models_answer()])
+        .wait_for_stdin(expect("get_settings", is_get_settings))
+        .with_exit_code(0);
+    let report = adapter().models(Arc::new(exits)).await.expect("models");
+    assert_eq!(report.default_effort, None);
+    assert_eq!(report.models.len(), 14);
+}
+
+/// A CLI that never answers `get_settings` is given what is left of the
+/// probe's one limit, 60 seconds from its start, and no more: it marks no
+/// default effort, and its models still stand. On a paused clock, so the
+/// test takes no time; the CLI answers `initialize` 20 seconds in.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R82
+#[tokio::test(start_paused = true)]
+async fn the_probe_gives_up_on_get_settings_60_seconds_after_it_started() {
+    let silent = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_pause(Duration::from_secs(20))
+        .then_stdout([models_answer()])
+        .hold_open();
+    let started = tokio::time::Instant::now();
+    let report = ClaudeAdapter::new()
+        .with_stop_grace(Duration::from_millis(200))
+        .models(Arc::new(silent))
+        .await
+        .expect("models");
+    let waited = started.elapsed();
+    assert_eq!(report.default_effort, None);
+    assert_eq!(report.models.len(), 14);
+    // The one limit, then at most the stop grace to end the CLI.
+    assert!(
+        waited >= Duration::from_secs(60) && waited < Duration::from_secs(61),
+        "{waited:?}"
+    );
 }
 
 /// A CLI that never answers is one that cannot report its models.
