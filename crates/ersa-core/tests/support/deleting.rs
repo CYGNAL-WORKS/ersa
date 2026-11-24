@@ -10,7 +10,7 @@ use ersa_core::transport::LocalTreeTransport;
 use serde_json::{Value, json};
 
 use super::fake;
-use super::{Client, git_repo};
+use super::{Client, git_repo, wait_for_state};
 
 /// A git repository at `dir/repo`, added as a project; returns the project
 /// and the repository's folder.
@@ -68,35 +68,6 @@ pub async fn idle_session(client: &mut Client, workspace: &Value) -> String {
         .await;
     wait_for_state(client, &id, "idle").await;
     id
-}
-
-/// Waits until `session.list` reports the session in `state`.
-pub async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if listed(client, id)
-            .await
-            .is_some_and(|row| row["state"] == state)
-        {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {id} never became {state}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
-/// The session's row in `session.list`, if it is listed.
-pub async fn listed(client: &mut Client, id: &str) -> Option<Value> {
-    let sessions = client.result("session.list", json!({})).await;
-    sessions
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["id"] == id)
-        .cloned()
 }
 
 /// The token of the workspace's `workspace.changes` now.

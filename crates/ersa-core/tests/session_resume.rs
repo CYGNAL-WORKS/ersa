@@ -13,7 +13,7 @@ use ersa_adapter::OpenElsewhere;
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records, Stats};
-use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
+use support::{Client, TestCore, kind, start_with_adapters, tempdir, wait_for_state, workspace};
 
 async fn start_fake(adapter: FakeAdapter) -> (TestCore, Arc<Stats>) {
     let stats = Arc::clone(&adapter.stats);
@@ -381,23 +381,6 @@ async fn recordless_fork(
     records.lock().unwrap().remove(&fork_backend_id);
     client.result("session.stop", json!({ "id": fork })).await;
     (original, fork, original_backend_id, fork_backend_id)
-}
-
-/// Waits until `session.list` says session `id` is in `state`.
-async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let row = session_row(client, id).await;
-        if row["state"] == state {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {id} stayed {}",
-            row["state"]
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
 }
 
 /// A fork stopped before its first message has no record of its own: it

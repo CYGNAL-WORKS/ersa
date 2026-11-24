@@ -14,7 +14,7 @@ use ersa_adapter::{
 use ersa_protocol::events::{BackendPassthrough, Event};
 use serde_json::{Value, json};
 use support::procs::{eventually_gone, parent_of_a_grandchild, running};
-use support::{Client, TestCore, start_with_adapters, tempdir, workspace};
+use support::{Client, TestCore, shut_down, start_with_adapters, tempdir, workspace};
 use tokio::sync::watch;
 
 /// An adapter whose "backend" is a process that starts a grandchild and
@@ -151,10 +151,8 @@ async fn stopping_a_session_leaves_no_grandchild_behind() {
 // verifies: PROTO-CORE-API-R03
 #[tokio::test(flavor = "multi_thread")]
 async fn core_shutdown_stops_running_sessions_and_their_trees() {
-    let (core, mut client, id, grandchild) = tree_session().await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
+    let (core, _client, id, grandchild) = tree_session().await;
+    let dir = shut_down(core).await;
     eventually_gone(grandchild).await;
 
     // The next Core finds the session ended by the user, not cut off: the

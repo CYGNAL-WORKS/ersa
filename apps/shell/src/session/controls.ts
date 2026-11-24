@@ -128,14 +128,6 @@ export function available(backends: readonly BackendInfo[]): BackendInfo[] {
   return backends.filter((b) => b.status === "available");
 }
 
-/**
- * Whether the backend chip shows: when the host has more than one backend (LAY-SHELL), and also when it has none
- * to run, so a single missing backend is shown with its status rather than hidden (FLOW-NEW-SESSION-R07).
- */
-export function showsBackend(backends: readonly BackendInfo[]): boolean {
-  return backends.length > 1 || available(backends).length === 0;
-}
-
 /** The choice marked default, else the first; absent when there is none. */
 function defaultOf(choices: readonly Choice[]): string | undefined {
   return (choices.find((c) => c.default) ?? choices[0])?.id;

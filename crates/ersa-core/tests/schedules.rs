@@ -31,7 +31,7 @@ use ersa_protocol::core_api::rpc::{Request, RequestId};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Filed, FiledRecord, Records, Stats};
 use support::schedule::{Choices, Operation, Schedule, drive, every_schedule, replaying};
-use support::{git_repo, kind, tempdir, test_config};
+use support::{git_repo, kind, sealed_config, tempdir};
 
 /// Core's command transport here: a command waits at the schedule's point,
 /// then runs to its end on a blocking thread, which holds the paused clock
@@ -91,14 +91,15 @@ impl World {
         let filed = Arc::clone(&adapter.filed);
         let stats = Arc::clone(&adapter.stats);
 
-        let mut config = test_config(&dir.path().join("data"), "never listened on");
         let commands = OrderedCommands {
             schedule: Arc::clone(&schedule),
         };
-        config.command_transport = Some(CommandTransport(Arc::new(commands)));
-        // The backends are detected once, in set-up, and not again while
-        // the clock is the test's.
-        config.failed_detection_ttl = Duration::from_secs(24 * 60 * 60);
+        let config = sealed_config(&dir.path().join("data"), "never listened on", |config| {
+            config.command_transport = Some(CommandTransport(Arc::new(commands)));
+            // The backends are detected once, in set-up, and not again while
+            // the clock is the test's.
+            config.failed_detection_ttl = Duration::from_secs(24 * 60 * 60);
+        });
         std::fs::create_dir_all(&config.data_dir).unwrap();
         let store = Store::open(&config.db_path()).unwrap();
         // The app log writes on a thread of its own, which the paused clock

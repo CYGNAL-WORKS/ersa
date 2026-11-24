@@ -12,6 +12,9 @@ members = ["crates/*", "apps/shell/src-tauri"]
 default-members = ["crates/*"]
 # Resolver 2 picks dependency features per target and per build kind
 # (normal, build script, dev), so a dev-only feature never leaks into release builds.
+# A command that builds tests, though (`cargo test --workspace`), builds every
+# target in it, binaries included, with its dev-dependencies' features on, so a
+# feature a binary relies on is named here, not left to one (issue #599).
 resolver = "2"
 
 # Metadata every crate inherits with `field.workspace = true`, so the version
@@ -38,7 +41,11 @@ jsonschema = { version = "0.61", default-features = false }
 # binary, so there is no system library to install on Windows.
 rusqlite = { version = "0.42", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: read every decimal number exactly, so Core passes on a
+# number the backend reports (a cost, say) as the backend wrote it. Without
+# it serde_json can round the last digit, and only builds that also compile
+# `jsonschema` (a dev-dependency) would read exactly (issue #599).
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # SHA-256, for `workspace.changes`'s token and the content of the files it
 # counts.
 sha2 = "0.11"

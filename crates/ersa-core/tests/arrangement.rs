@@ -12,24 +12,14 @@ use std::sync::atomic::Ordering;
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter};
-use support::{Client, TestCore, assert_valid, kind, start_with_adapters, tempdir, workspace};
+use support::{
+    Client, TestCore, assert_valid, kind, restarted, shut_down, start_with_adapters, tempdir,
+    workspace,
+};
 
 async fn start() -> (TestCore, Client) {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
     let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
-    let client = core.client().await;
-    (core, client)
-}
-
-/// Restarts `core` on the same data directory, as a user closing and
-/// opening Ersa would: the new Core knows only what its store kept.
-async fn restarted(core: TestCore) -> (TestCore, Client) {
-    let mut client = core.client().await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
     let client = core.client().await;
     (core, client)
 }
@@ -142,7 +132,7 @@ async fn arrange_sets_only_the_fields_given_and_each_outlives_core() {
     assert_eq!(row["section_id"], later["id"]);
 
     drop(client);
-    let (core, mut client) = restarted(core).await;
+    let (core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["pinned"], false);
     assert_eq!(row["section_id"], later["id"]);
@@ -162,7 +152,7 @@ async fn arrange_sets_only_the_fields_given_and_each_outlives_core() {
     assert!(arranged.get("section_id").is_none(), "{arranged:#}");
 
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     let row = session_row(&mut client, &other).await;
     assert_eq!(row["pinned"], true);
     assert!(row.get("section_id").is_none(), "{row:#}");
@@ -206,7 +196,7 @@ async fn unseen_is_set_only_when_given_and_outlives_core() {
     assert_eq!(arranged["unseen"], true);
 
     drop(client);
-    let (core, mut client) = restarted(core).await;
+    let (core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["unseen"], true, "kept across the restart");
     assert_eq!(row["pinned"], false);
@@ -217,7 +207,7 @@ async fn unseen_is_set_only_when_given_and_outlives_core() {
     assert_eq!(arranged["unseen"], false);
     arrange(&mut client, json!({ "id": other, "unseen": true })).await;
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     assert_eq!(session_row(&mut client, &id).await["unseen"], false);
     assert_eq!(session_row(&mut client, &other).await["unseen"], true);
 }
@@ -346,7 +336,7 @@ async fn section_names_follow_claude_desktops_rules() {
     // The rules hold after a restart: the names Core stored are compared
     // exactly.
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     assert_eq!(create_section(&mut client, "work").await, lower);
     assert_eq!(create_section(&mut client, "WORK").await, renamed);
     assert_eq!(
@@ -373,7 +363,7 @@ async fn a_section_made_before_core_restarted_takes_a_session_and_is_removed() {
     drop(client);
 
     // The new Core knows the section from its store.
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     arrange(&mut client, json!({ "id": id, "section_id": work["id"] })).await;
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["section_id"], work["id"]);
@@ -439,7 +429,7 @@ async fn removing_a_section_leaves_its_sessions_in_no_section() {
     create_section(&mut client, "work").await;
 
     drop(client);
-    let (_core, mut client) = restarted(core).await;
+    let (_core, mut client) = restarted(core, FakeAdapter::new(1)).await;
     assert_eq!(check(session_row(&mut client, &held).await), None);
     assert_eq!(check(session_row(&mut client, &pinned).await), None);
     assert_eq!(
@@ -455,15 +445,6 @@ async fn start_on(dir: tempfile::TempDir, records: &fake::Records) -> (TestCore,
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let client = core.client().await;
     (core, client)
-}
-
-/// Shuts `core` down and hands back its data directory.
-async fn shut_down(core: TestCore) -> tempfile::TempDir {
-    let mut client = core.client().await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    dir
 }
 
 /// Lists sessions until session `id`'s `last_activity_at` is `want`,
@@ -828,14 +809,8 @@ async fn the_tile_sent_on_opening_a_stored_session_carries_its_last_activity() {
         .await;
     tile_with_activity(&mut client, &id).await;
     client.result("session.stop", json!({ "id": id })).await;
-    client.result("core.shutdown", json!({})).await;
-    drop(client);
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
 
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    let (_core, mut client) = restarted(core, FakeAdapter::with_records(records)).await;
     let listed = session_row(&mut client, &id).await["last_activity_at"].clone();
     assert_eq!(listed, json!(RECORDED_REPLY_AT), "from the record");
     client
