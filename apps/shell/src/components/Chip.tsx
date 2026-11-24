@@ -37,6 +37,11 @@ interface ChipProps {
   icon?: LucideIcon;
   /** The chosen option's id; absent when nothing can be chosen. */
   value?: string;
+  /**
+   * While `value` is absent, the option the chip reads and marks as the one in use, such as the backend's default effort;
+   * unlike the chosen option, choosing it passes it on (FLOW-NEW-SESSION-R47).
+   */
+  marked?: string;
   /** What the chip reads in place of the chosen option's label: "New workspace from main". */
   reads?: string;
   /** Shown in place of a value when `value` is absent: "No backend". */
@@ -77,7 +82,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, icon, value, reads, placeholder, problem, pending, readOnly, keepsChevron, waiting, onOpen, options, onChoose, action, wide, disabled, initialOpen = false, force, forceOption, invites }: ChipProps) {
+export function Chip({ name, icon, value, marked, reads, placeholder, problem, pending, readOnly, keepsChevron, waiting, onOpen, options, onChoose, action, wide, disabled, initialOpen = false, force, forceOption, invites }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -86,7 +91,9 @@ export function Chip({ name, icon, value, reads, placeholder, problem, pending, 
   const listId = useId();
   // The list is anchored to its chip by this name: beneath it where the window has room, else above (Chip.css).
   const anchor = `--chip-${listId.replace(/[^a-zA-Z0-9]/g, "")}`;
-  const chosen = options.find((o) => o.id === value);
+  // The option shown as in use: the chosen one, else the one marked in its place.
+  const inUse = value ?? marked;
+  const chosen = options.find((o) => o.id === inUse);
   const shown = reads ?? chosen?.label ?? placeholder ?? "";
 
   // Focus the chosen option as the list opens from the keyboard or a click, so the arrows start from it.
@@ -96,8 +103,8 @@ export function Chip({ name, icon, value, reads, placeholder, problem, pending, 
     if (!open || !focusOnOpen.current) return;
     focusOnOpen.current = false;
     const items = optionsIn(list.current);
-    (items.find((el) => el.dataset.id === value) ?? items[0])?.focus({ preventScroll: true });
-  }, [open, value]);
+    (items.find((el) => el.dataset.id === inUse) ?? items[0])?.focus({ preventScroll: true });
+  }, [open, inUse]);
 
   // A press anywhere outside closes the list, leaving focus where the press put it.
   useEffect(() => {
@@ -124,7 +131,7 @@ export function Chip({ name, icon, value, reads, placeholder, problem, pending, 
   // An arrow on the chip while its list is already open goes into the list at once.
   const enter = () => {
     const items = optionsIn(list.current);
-    (items.find((el) => el.dataset.id === value) ?? items[0])?.focus({ preventScroll: true });
+    (items.find((el) => el.dataset.id === inUse) ?? items[0])?.focus({ preventScroll: true });
   };
   const close = () => {
     setOpen(false);
@@ -237,7 +244,7 @@ export function Chip({ name, icon, value, reads, placeholder, problem, pending, 
               data-id={option.id}
               data-two-line={option.detail !== undefined || undefined}
               data-force={forceOption?.id === option.id ? forceOption.state : undefined}
-              aria-selected={option.id === value}
+              aria-selected={option.id === inUse}
               aria-disabled={option.unavailable || undefined}
               onClick={() => choose(option)}
             >

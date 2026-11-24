@@ -150,11 +150,12 @@ export function effortsFor(backend: BackendInfo, model: string | undefined): Cho
 }
 
 /**
- * `wanted` when the model takes it, else the effort the backend marks as its default, which for Claude Code is none:
- * the session then runs at the backend's own, which the effort chip reads as Default (docs/design/COMPOSER.md).
+ * `wanted` when the model takes it, else none, the backend's marked default included: a session started with none
+ * names none, so the backend runs at its own, which a project's settings may set; the effort chip reads the level the
+ * backend marks (FLOW-NEW-SESSION-R47).
  */
 function pickEffort(efforts: readonly Choice[], wanted: string | undefined): string | undefined {
-  return efforts.some((c) => c.id === wanted) ? wanted : efforts.find((c) => c.default)?.id;
+  return efforts.some((c) => c.id === wanted) ? wanted : undefined;
 }
 
 /**
@@ -162,7 +163,7 @@ function pickEffort(efforts: readonly Choice[], wanted: string | undefined): str
  * it, else the default. `wanted` is what the user last started a session with for the project, or what they have
  * chosen on the screen so far. The defaults: a new workspace where the project's version control has an adapter,
  * else the root; the first available backend; that backend's default model (the entry it marks, Claude Code's own
- * `default`), effort (the one it marks, else none) and permission mode, which for permission mode is the one that
+ * `default`), no effort (the chip reads the one it marks) and permission mode, which for permission mode is the one that
  * asks before every action outside the allow rules (FLOW-NEW-SESSION-R02, R06). An effort the model does not take
  * falls back to the default.
  */
@@ -229,8 +230,9 @@ function modelChoiceFor(models: readonly ModelChoice[], session: Pick<Session, "
 
 /**
  * The values a running session shows (FLOW-NEW-SESSION-R12): what `session.list` reports, never what the host offers
- * now, each under the choice that names it. A model or effort the session was not given is the backend's own, shown
- * as the choice the backend marks as its default when the host lists it. A value the host no longer lists shows under
+ * now, each under the choice that names it. A model the session was not given is the backend's own, shown as the
+ * choice the backend marks as its default when the host lists it; an effort it reports none of stays absent, and the
+ * effort chip reads the level the backend marks. A value the host no longer lists shows under
  * its id, and a model it no longer lists takes every effort, as Core accepts any for it (PROTO-CORE-API-R101).
  */
 export function sessionShown(
@@ -240,7 +242,8 @@ export function sessionShown(
 ): SessionShown {
   const listed = hostBackends.find((b) => b.name === session.backend);
   const model = modelChoiceFor(listed?.models ?? [], session);
-  const effort = session.effort ?? listed?.efforts.find((c) => c.default)?.id;
+  // None reported reads as the backend's marked level on the chip, yet stays unchosen (FLOW-NEW-SESSION-R47).
+  const effort = session.effort;
   const backend: BackendInfo = {
     ...(listed ?? { name: session.backend, label: session.backend, status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] }),
   };

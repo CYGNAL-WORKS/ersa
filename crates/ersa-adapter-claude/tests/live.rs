@@ -521,11 +521,20 @@ async fn the_model_probe_lists_the_clis_models_and_leaves_no_record() {
     let home = std::env::temp_dir().join(format!("ersa-probe-{}", std::process::id()));
     fs::create_dir_all(&home).unwrap();
     let transport = Arc::new(ScratchProbe(ScratchConfig(home.clone())));
-    let models = ClaudeAdapter::new()
+    let report = ClaudeAdapter::new()
         .models(transport)
         .await
         .expect("the CLI lists its models");
-    println!("{models:#?}");
+    println!("{report:#?}");
+    // The CLI says which effort a session given none runs with
+    // (PROTO-CLAUDE-CODE-STREAM-R82), a level the adapter offers.
+    let levels = ["low", "medium", "high", "xhigh", "max"];
+    assert!(
+        levels.contains(&report.default_effort.as_deref().unwrap_or("")),
+        "{:?}",
+        report.default_effort
+    );
+    let models = report.models;
     assert_eq!(models.first().map(|m| m.id.as_str()), Some("default"));
     assert_eq!(models.iter().filter(|m| m.default).count(), 1);
     assert!(models.iter().all(|m| !m.label.is_empty()));

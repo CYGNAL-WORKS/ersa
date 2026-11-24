@@ -110,7 +110,7 @@ pub struct HostControlRequest {
 
 /// The control requests the adapter sends (ADR 0014). `initialize`,
 /// `rename_session`, `set_model`, `set_permission_mode`,
-/// `apply_flag_settings` and `get_context_usage` are recorded; the others
+/// `apply_flag_settings`, `get_context_usage` and `get_settings` are recorded; the others
 /// follow the SDK types until fixtures exist.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
@@ -171,6 +171,10 @@ pub enum HostRequest {
         detail: Option<ContextUsageDetail>,
     },
     GetSessionCost,
+    /// Asks for the settings the CLI applies. Its answer's `applied.effort`
+    /// is the effort a session given none runs with, which the model probe
+    /// marks as the default effort (PROTO-CLAUDE-CODE-STREAM-R82).
+    GetSettings,
     /// A JSON-RPC message for an in-process MCP server declared in
     /// `initialize`'s `sdkMcpServers`.
     McpMessage {
