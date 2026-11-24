@@ -24,6 +24,12 @@ use crate::workspace::{self, Checkout, FolderTries, RemovalChecks, VcsError, Wor
 #[derive(Clone)]
 pub struct PutBack {
     pub project_id: String,
+    /// How git runs on the project's host: the transport `workspace.create`
+    /// and every other change to worktrees use. Not the one backends start
+    /// through, which kills whatever a command leaves running once it exits
+    /// (git's own helpers among it) and, on Windows, the command itself if
+    /// Core stops.
+    pub git: Arc<dyn Transport>,
     /// The project's repository, as a path on its host.
     pub repo: String,
     pub workspace_id: String,
@@ -69,7 +75,6 @@ impl SessionManager {
         let work = tokio::spawn(put_back(
             Arc::clone(&self.admission),
             self.store.clone(),
-            Arc::clone(&how.transport),
             how.put_back.clone(),
             handle.id.clone(),
             there_is,
@@ -110,12 +115,12 @@ impl SessionManager {
 async fn put_back(
     admission: Arc<Admission>,
     store: Store,
-    transport: Arc<dyn Transport>,
     spec: PutBack,
     session: String,
     there_is: impl FnOnce(),
 ) -> Result<(), SessionError> {
     let id = spec.workspace_id.clone();
+    let transport = Arc::clone(&spec.git);
     let began = Instant::now();
     // (1)
     let putting_back = match admission.put_back(&id, spec.turn_wait, there_is).await {
