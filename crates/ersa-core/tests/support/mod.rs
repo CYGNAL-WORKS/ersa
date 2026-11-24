@@ -157,9 +157,7 @@ pub async fn start_with_adapters(
     adapters: Vec<Arc<dyn Adapter>>,
 ) -> TestCore {
     let endpoint = unique_endpoint();
-    let mut config = test_config(&dir.path().join("data"), &endpoint);
-    configure(&mut config);
-    seal(&mut config);
+    let config = sealed_config(&dir.path().join("data"), &endpoint, configure);
     let server = Server::bind_with(config, adapters).await.expect("bind");
     let core = Arc::downgrade(&server.core());
     let task = tokio::spawn(server.run());
@@ -171,10 +169,17 @@ pub async fn start_with_adapters(
     }
 }
 
-/// Seals the git calls of the Core `config` starts ([`sealed`]): the command
+/// The configuration every test Core starts with: [`test_config`], then the
+/// test's `configure`, then its git sealed ([`sealed`]). The command
 /// transport the test chose, or Core's own local one, is wrapped so every
 /// process it starts reads no global or system git configuration.
-pub fn seal(config: &mut CoreConfig) {
+pub fn sealed_config(
+    data_dir: &Path,
+    endpoint: &str,
+    configure: impl FnOnce(&mut CoreConfig),
+) -> CoreConfig {
+    let mut config = test_config(data_dir, endpoint);
+    configure(&mut config);
     let inner = match config.command_transport.take() {
         Some(CommandTransport(chosen)) => chosen,
         None => Arc::new(LocalTreeTransport::for_commands()),
@@ -182,6 +187,7 @@ pub fn seal(config: &mut CoreConfig) {
     config.command_transport = Some(CommandTransport(Arc::new(sealed::SealedTransport {
         inner,
     })));
+    config
 }
 
 /// Shuts `core` down as the Shell does and hands back its directory, for
@@ -237,9 +243,7 @@ pub async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
 pub async fn start_replay_of(replay: Replay, configure: impl FnOnce(&mut CoreConfig)) -> TestCore {
     let dir = tempdir();
     let endpoint = unique_endpoint();
-    let mut config = test_config(&dir.path().join("data"), &endpoint);
-    configure(&mut config);
-    seal(&mut config);
+    let config = sealed_config(&dir.path().join("data"), &endpoint, configure);
     let server = Server::bind_replay(config, replay).await.expect("bind");
     let core = Arc::downgrade(&server.core());
     let task = tokio::spawn(server.run());
