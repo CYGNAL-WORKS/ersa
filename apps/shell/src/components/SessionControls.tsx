@@ -6,7 +6,6 @@ import {
   available,
   effortsFor,
   listedModelFor,
-  showsBackend,
   workspaceKinds,
 } from "../session/controls";
 import { isChangeable } from "../session/change";
@@ -94,15 +93,17 @@ const projectOption = (p: Project): ChipOption => ({
 const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
 
 /**
- * The model chip's options (FLOW-NEW-SESSION-R36): each model by the backend's label, except a default the backend
- * says stands for a listed model, which reads Default and that model's label, as Claude Desktop's chip does. A
- * default the backend says nothing more of keeps the backend's own label: Ersa never renames what it cannot explain.
+ * The model chip's value and options (FLOW-NEW-SESSION-R46). Where a listed model not marked default resolves to the
+ * same model as the backend's default, the default has no row of its own: while the default is the value, the chip reads
+ * and marks the first such model, so choosing that row changes nothing (the chip passes on only a different row) and a
+ * session started so still starts with the default. A default the backend says nothing more of, or one no listed model
+ * stands for, keeps its row and the backend's own label: Ersa never renames what it cannot explain.
  */
-export function modelOptions(models: readonly ModelChoice[]): ChipOption[] {
-  return models.map(({ id, label, default: isDefault, resolved }) => {
-    const listed = isDefault && resolved !== undefined ? listedModelFor(models, resolved) : undefined;
-    return { id, label: listed ? t("sessionControls.model.defaultOfLabel", { model: listed.label }) : label };
-  });
+export function modelChip(models: readonly ModelChoice[], model: string | undefined): { value: string | undefined; options: ChipOption[] } {
+  const fallback = models.find((m) => m.default);
+  const standIn = fallback?.resolved !== undefined ? listedModelFor(models, fallback.resolved) : undefined;
+  const options = models.filter((m) => !standIn || m !== fallback).map(({ id, label }) => ({ id, label }));
+  return { value: standIn && model === fallback?.id ? standIn.id : model, options };
 }
 
 /** The effort chip's Default row, which chooses no level: its id, which the screen turns back into none. */
@@ -160,8 +161,8 @@ function WorktreeCheckbox({ checked, onChange, disabled, force }: { checked: boo
 /**
  * The session controls (GLOSSARY): a chip for each of host and project, the Worktree checkbox for a project Ersa
  * can make worktrees for, and a chip for each of backend, model, effort and permission mode, with the context ring at
- * the row's end (LAY-SHELL). The backend chip shows only when the host
- * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
+ * the row's end (LAY-SHELL). The backend chip shows whenever the host's backends are listed, with one backend as with
+ * several (FLOW-NEW-SESSION-R48), and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
 export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, windows, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
@@ -227,22 +228,22 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
           <Chip name="Backend" placeholder={t("sessionControls.detectingBackendsProgress")} pending options={[]} onChoose={() => {}} disabled />
         ) : (
           <>
-            {showsBackend(backends) && (
-              <Chip
-                name="Backend"
-                value={values.backend}
-                // A listing that failed is not a host without backends (FLOW-NEW-SESSION-R11).
-                placeholder={t(detectionFailed ? "sessionControls.detectionFailedStatus" : "sessionControls.noBackendStatus")}
-                problem={available(backends).length === 0}
-                options={backends.map(backendOption)}
-                {...chip("backend")}
-                // A host with no backend at all has nothing to list; the chip says so itself.
-                disabled={disabled || backends.length === 0}
-              />
-            )}
+            {/* Always in the row, so nothing shifts when a listing arrives. Under a session it is the session's backend,
+                which reads its id until a listing names it (FLOW-NEW-SESSION-R48, R49). */}
+            <Chip
+              name="Backend"
+              value={values.backend}
+              // A listing that failed is not a host without backends (FLOW-NEW-SESSION-R11).
+              placeholder={t(detectionFailed ? "sessionControls.detectionFailedStatus" : "sessionControls.noBackendStatus")}
+              problem={available(backends).length === 0}
+              options={backends.map(backendOption)}
+              {...chip("backend")}
+              // A host with no backend at all has nothing to list; the chip says so itself.
+              disabled={disabled || backends.length === 0}
+            />
             {/* A backend that offers no choice of one has no chip for it: the backend decides. */}
             {backend && backend.models.length > 0 && (
-              <Chip name="Model" value={values.model} options={modelOptions(backend.models)} {...chip("model")} />
+              <Chip name="Model" {...modelChip(backend.models, values.model)} {...chip("model")} />
             )}
             {backend && backend.efforts.length > 0 && <EffortChip backend={backend} values={values} readOnly={readOnly} chip={chip("effort")} />}
             {backend && backend.permission_modes.length > 0 && (

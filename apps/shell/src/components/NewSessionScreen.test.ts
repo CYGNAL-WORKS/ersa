@@ -66,6 +66,7 @@ describe("the new-session screen", () => {
     expect(chips(html)).toEqual([
       "Host: Local",
       "Project: ersa",
+      "Backend: Claude Code",
       "Model: Default (recommended)",
       "Effort: Default",
       "Permission mode: Manual",
@@ -206,8 +207,9 @@ describe("the new-session screen", () => {
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 
-  it("hides the backend chip when the host has one backend", () => {
-    expect(chips(render({})).some((c) => c.startsWith("Backend"))).toBe(false);
+  // verifies: FLOW-NEW-SESSION-R48
+  it("names the backend the session will start with when the host has one backend", () => {
+    expect(chips(render({}))).toContain("Backend: Claude Code");
   });
 
   it("leaves out the chip for a choice the backend does not offer", () => {
