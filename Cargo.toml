@@ -12,6 +12,9 @@ members = ["crates/*", "apps/shell/src-tauri"]
 default-members = ["crates/*"]
 # Resolver 2 picks dependency features per target and per build kind
 # (normal, build script, dev), so a dev-only feature never leaks into release builds.
+# A command that builds tests, though (`cargo test --workspace`), builds every
+# target in it, binaries included, with its dev-dependencies' features on, so a
+# feature a binary relies on is named here, not left to one (issue #599).
 resolver = "2"
 
 # Metadata every crate inherits with `field.workspace = true`, so the version
