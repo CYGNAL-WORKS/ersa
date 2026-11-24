@@ -178,7 +178,6 @@ fn model_and_effort_are_passed_only_when_named() {
 /// The efforts and permission modes `backend.list` offers for Claude Code:
 /// the brief's effort levels with none marked, as the CLI marks none, and
 /// its permission modes, never `bypassPermissions`, each by its name.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R75
 #[test]
 fn the_choices_are_the_briefs_efforts_and_permission_modes() {
     let choices = adapter().choices();
