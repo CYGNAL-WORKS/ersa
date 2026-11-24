@@ -1142,10 +1142,6 @@ Worktree
 
 The session works in an isolated copy of the repository.
 
-### `sessionControls.model.defaultOfLabel`
-
-Default ({model})
-
 ### `sessionControls.effort.defaultLabel`
 
 Default
