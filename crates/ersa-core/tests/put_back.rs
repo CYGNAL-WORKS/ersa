@@ -419,6 +419,67 @@ async fn a_put_back_that_waited_too_long_for_its_turn_puts_nothing_back() {
     assert_back(&mut s, &workspace).await;
 }
 
+/// The wait for a put-away and the put-back's wait for its turn at the
+/// project's worktrees share one limit: a resume that spent part of it
+/// waiting for a try at the folder that the put-away gave up on, and then
+/// finds another change to the worktrees under way, answers `vcs_error`
+/// once the two waits together reach the limit, not a whole limit after
+/// the try ended.
+// verifies: PROTO-CORE-API-R132
+#[tokio::test(flavor = "multi_thread")]
+async fn the_put_away_and_the_turn_share_one_wait() {
+    const WAIT: Duration = Duration::from_secs(6);
+    // How long the stuck try holds the resume: part of `WAIT`.
+    const HELD: Duration = Duration::from_secs(4);
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let mut s = stuck_folder_setup(&gate, WAIT).await;
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    // The put-away gives up on its try at the folder, which stays stuck at
+    // the gate holding the workspace; nothing holds the project's turn.
+    let core = s.core.core();
+    let putting = tokio::spawn({
+        let core = Arc::clone(&core);
+        let id = id(&workspace).to_string();
+        async move { ersa_core::api::put_away_workspace(&core, &id).await }
+    });
+    reached(&gate).await;
+    assert!(putting.await.unwrap().is_err(), "the try ran out");
+    // Another change to the project's worktrees has the turn throughout.
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let _turn = core
+        .admission
+        .worktrees(&project, Duration::from_secs(60))
+        .await
+        .expect("the project's turn");
+
+    let began = std::time::Instant::now();
+    let asked = s
+        .client
+        .request("session.resume", json!({ "id": session }))
+        .await;
+    // The scenario, not a pause sized to pass: the stuck try holds the
+    // resume for this part of the wait, then returns.
+    tokio::time::sleep(HELD).await;
+    gate.go();
+    let answer = s.client.response(asked).await;
+    let waited = began.elapsed();
+
+    assert_eq!(kind(&answer["error"]), "vcs_error", "{answer:#}");
+    // Turned away for the turn, not for the put-away it waited out.
+    let message = answer["error"]["message"].as_str().unwrap_or_default();
+    assert!(!message.contains("still being put"), "{answer:#}");
+    // One limit in all, about `WAIT`; two would be `HELD + WAIT`.
+    assert!(waited >= HELD, "answered after {waited:?}");
+    assert!(
+        waited < WAIT + (HELD / 2),
+        "answered after {waited:?}, past one wait of {WAIT:?}"
+    );
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+    assert_eq!(starts(&s), 1);
+}
+
 /// Stop while a send waits for its workspace's put-away answers at once
 /// that the message was stopped; the put-back goes on to its end, and the
 /// backend is not started.

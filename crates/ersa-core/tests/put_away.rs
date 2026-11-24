@@ -8,12 +8,12 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_core::{Adapter, CoreConfig, Gate};
+use ersa_core::{Adapter, Gate};
 use serde_json::{Value, json};
 use support::deleting::{FailingGit, Removal, hold_the_turn, with_stopping_adds};
 use support::fake::{self, FakeAdapter};
 use support::put_away::*;
-use support::{TestCore, git, git_repo, kind, start_with_adapters, tempdir};
+use support::{TestCore, git, kind, start_with_adapters};
 
 // -- What putting away does (FLOW-CLEAN-UP-R02) ----------------------------
 
@@ -239,44 +239,6 @@ fn error_kind(error: &ersa_core::api::ApiError) -> Value {
     serde_json::to_value(data.kind).unwrap()
 }
 
-/// A Core whose git drops its record of a worktree and then fails, so a
-/// removal goes on to the folder, and whose tries at a folder stop at
-/// `gate` and give up after 200 ms.
-async fn stuck_folder_setup(gate: &Arc<Gate>) -> Setup {
-    let git_drops = Arc::new(FailingGit::new(Removal::DropsRecordThenFails, None));
-    let fake = FakeAdapter::new(1);
-    let stats = Arc::clone(&fake.stats);
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
-    let configure = {
-        let gate = Arc::clone(gate);
-        move |config: &mut CoreConfig| {
-            config.command_transport = Some(ersa_core::CommandTransport(git_drops));
-            config.folder_gate = Some(gate);
-            config.folder_removal_limit = Duration::from_millis(200);
-        }
-    };
-    let core = start_with_adapters(tempdir(), configure, adapters).await;
-    let mut client = core.client().await;
-    let repo = core.dir.path().join("repo");
-    git_repo(&repo);
-    let root = core.dir.path().join("worktrees").display().to_string();
-    let patch = json!({ "patch": { "workspaces": { "root": root } } });
-    client.result("settings.set", patch).await;
-    // The project's folder is inspected at the gate too.
-    let add = json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false });
-    let adding = client.request("project.add", add).await;
-    reached(gate).await;
-    gate.go();
-    let project = client.response(adding).await["result"].clone();
-    Setup {
-        core,
-        client,
-        repo,
-        project,
-        stats,
-    }
-}
-
 /// While a try at the folder that the put-away gave up on has not ended,
 /// no other removal of the folder or of the workspace begins: a
 /// `workspace.remove` and a `session.delete` answer `busy`, and a second
@@ -286,7 +248,7 @@ async fn stuck_folder_setup(gate: &Arc<Gate>) -> Setup {
 async fn a_put_away_holds_the_workspace_while_a_try_it_gave_up_on_is_stuck() {
     let gate = Arc::new(Gate::default());
     let _let_go = LetGo(Arc::clone(&gate));
-    let mut s = stuck_folder_setup(&gate).await;
+    let mut s = stuck_folder_setup(&gate, ersa_core::workspace::WORKTREE_TURN_WAIT).await;
     let workspace = s.workspace().await;
     let session = s.stopped_session(&workspace).await;
 
@@ -527,7 +489,7 @@ async fn attachment_inspect_reports_a_copy_for_a_put_away_workspace() {
 async fn a_failed_removal_of_a_put_away_workspace_leaves_it_put_away() {
     let gate = Arc::new(Gate::default());
     let _let_go = LetGo(Arc::clone(&gate));
-    let mut s = stuck_folder_setup(&gate).await;
+    let mut s = stuck_folder_setup(&gate, ersa_core::workspace::WORKTREE_TURN_WAIT).await;
     let workspace = s.workspace().await;
     // The put-away gives up on its try at the folder, which then ends
     // without deleting anything.

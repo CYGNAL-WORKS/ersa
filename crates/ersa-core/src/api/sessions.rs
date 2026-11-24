@@ -20,7 +20,7 @@ use ersa_protocol::core_api::{
 use serde_json::Value;
 
 use super::{ApiError, Peer, handlers};
-use crate::admission::{Command, Report};
+use crate::admission::{Command, Report, end_held};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::raw_log;
@@ -459,7 +459,7 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     let failed = match deleted {
         Ok(_) => match core.store.delete_workspace(id.clone()).await {
             Ok(()) => {
-                return handlers::end_held(removing, Report::WorkspaceRemoved { workspace: id });
+                return end_held(removing, Report::WorkspaceRemoved { workspace: id });
             }
             // Its folder and branch went, its row did not: a failed removal.
             Err(e) => e.to_string(),
@@ -468,7 +468,7 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
         // its row is as it was, `ready` and listed (PROTO-CORE-API-R127).
         Err(e) if e.is_refusal() => {
             tracing::warn!(workspace = %id, error = %e, "could not remove a fork's workspace");
-            return handlers::end_held(removing, Report::WorkspaceRemovalRefused { workspace: id });
+            return end_held(removing, Report::WorkspaceRemovalRefused { workspace: id });
         }
         Err(e) => e.to_string(),
     };
@@ -483,7 +483,7 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
     {
         tracing::warn!(workspace = %id, error = %stored, "could not mark a fork's workspace error");
     }
-    handlers::end_held(
+    end_held(
         removing,
         Report::WorkspaceRemovalFailed {
             workspace: id.clone(),

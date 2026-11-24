@@ -2371,19 +2371,31 @@ impl Admission {
             project: project.to_string(),
         };
         let (outcome, waiter) = self.apply(Input::Command(command));
-        let outcome = match waiter {
-            None => outcome,
-            Some((number, mut waiter)) => match tokio::time::timeout(limit, &mut waiter).await {
-                Ok(answer) => answer.expect("a held command is always answered"),
-                Err(_) => {
-                    self.give_up(number);
-                    // Answered now: "gave up", or what a step just before
-                    // decided.
-                    waiter.await.expect("a held command is always answered")
-                }
-            },
-        };
+        let outcome = self.answer_within(limit, outcome, waiter).await;
         self.answered(outcome)
+    }
+
+    /// The answer to a command `apply` decided as `outcome`: that, or, when
+    /// it was held (`waiter`), the answer it gets within `limit`, else "gave
+    /// up" ([`Report::GaveUp`]).
+    async fn answer_within(
+        &self,
+        limit: Duration,
+        outcome: Outcome,
+        waiter: Option<(u64, oneshot::Receiver<Outcome>)>,
+    ) -> Outcome {
+        let Some((number, mut waiter)) = waiter else {
+            return outcome;
+        };
+        match tokio::time::timeout(limit, &mut waiter).await {
+            Ok(answer) => answer.expect("a held command is always answered"),
+            Err(_) => {
+                self.give_up(number);
+                // Answered now: "gave up", or what a step just before
+                // decided.
+                waiter.await.expect("a held command is always answered")
+            }
+        }
     }
 
     /// Asks to put `workspace` back ([`Command::PutBack`]), waiting at most
@@ -2405,18 +2417,7 @@ impl Admission {
         if matches!(outcome, Outcome::Admitted(_) | Outcome::Held) {
             there_is();
         }
-        let outcome = match waiter {
-            None => outcome,
-            Some((number, mut waiter)) => match tokio::time::timeout(limit, &mut waiter).await {
-                Ok(answer) => answer.expect("a held command is always answered"),
-                Err(_) => {
-                    self.give_up(number);
-                    // Answered now: "gave up", or what a step just before
-                    // decided.
-                    waiter.await.expect("a held command is always answered")
-                }
-            },
-        };
+        let outcome = self.answer_within(limit, outcome, waiter).await;
         match outcome {
             Outcome::Done => Ok(None),
             outcome @ (Outcome::Admitted(_)

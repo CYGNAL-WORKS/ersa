@@ -121,10 +121,12 @@ async fn put_back(
     let putting_back = match admission.put_back(&id, spec.turn_wait, there_is).await {
         Ok(None) => return Ok(()),
         Ok(Some(putting_back)) => putting_back,
+        // Held behind a put-away of the workspace, or behind another
+        // session's put-back of it.
         Err(Refusal::GaveUp) => {
             return Err(SessionError::Vcs(VcsError::Failed {
                 message: format!(
-                    "the session's folder was still being put away after {} seconds; try again",
+                    "the session's folder was still being put away or put back after {} seconds; try again",
                     spec.turn_wait.as_secs()
                 ),
                 stderr: String::new(),
