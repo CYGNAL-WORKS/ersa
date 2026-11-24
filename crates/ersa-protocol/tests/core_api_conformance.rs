@@ -329,7 +329,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 }],
                 permission_modes: vec![Choice {
                     id: "default".into(),
-                    label: "Ask".into(),
+                    label: "Manual".into(),
                     default: true,
                 }],
             }]),
