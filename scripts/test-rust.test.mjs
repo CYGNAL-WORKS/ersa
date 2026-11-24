@@ -3,6 +3,8 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,15 +12,17 @@ import { fileURLToPath } from "node:url";
 import { planJobs, runJobs, splitArgs, stillRunning, summarise, tally, testRust } from "./test-rust.mjs";
 
 // A compiler-artifact message as `cargo test --no-run --message-format=json` prints it.
-function artifact(pkg, kind, name, { test = true, src = `src/${name}.rs` } = {}) {
-  const dir = join("/repo/crates", pkg);
+// `dir` is the package's folder; `executable` the path cargo reports.
+function artifact(pkg, kind, name, options = {}) {
+  const { test = true, src = `src/${name}.rs`, dir = join("/repo/crates", pkg) } = options;
+  const executable = options.executable ?? (test || kind.includes("bin") ? join("/repo/target", `${name}-${pkg}`) : null);
   return {
     reason: "compiler-artifact",
     package_id: `path+file:///repo/crates/${pkg}#0.1.0`,
     manifest_path: join(dir, "Cargo.toml"),
     target: { kind, name, src_path: join(dir, src) },
     profile: { test },
-    executable: test || kind.includes("bin") ? join("/repo/target", `${name}-${pkg}`) : null,
+    executable,
   };
 }
 
@@ -104,7 +108,6 @@ test("jobs run side by side, never more than the pool's size, each printed as on
   const written = [];
   let running = 0;
   let most = 0;
-  const { spawn } = await import("node:child_process");
   const run = (...args) => {
     const child = spawn(...args);
     most = Math.max(most, ++running);
@@ -128,33 +131,59 @@ test("a job's stdout and stderr keep the order they were written in", async () =
   assert.equal(result.output, "line0\nline1\nline2\n");
 });
 
+// A job that prints `line`, then keeps running until the test opens its gate
+// (creates the gate file), so it runs exactly as long as the test needs.
+function gated(line) {
+  const dir = mkdtempSync(join(tmpdir(), "test-rust-gate-"));
+  const gate = join(dir, "open");
+  const script = `console.log(${JSON.stringify(line)}); const fs = require("fs"); const t = setInterval(() => { if (fs.existsSync(${JSON.stringify(gate)})) clearInterval(t); }, 20);`;
+  return {
+    job: { label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", script] },
+    open: () => writeFileSync(gate, ""),
+    remove: () => rmSync(dir, { recursive: true, force: true }),
+  };
+}
+
+// Waits until `ready()` holds, failing after a generous 30 seconds.
+async function until(ready, what) {
+  const deadline = Date.now() + 30_000;
+  while (!ready()) {
+    assert.ok(Date.now() < deadline, `never ${what}`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
 test("a binary still running is named, with libtest's slow-test lines, while it runs", async () => {
   const slow = "test hung_test has been running for over 60 seconds";
-  const jobs = [
-    { label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", `console.log(${JSON.stringify(slow)}); setTimeout(() => {}, 600);`] },
-  ];
+  const hung = gated(slow);
   const written = [];
-  await runJobs(jobs, { size: 1, write: (s) => written.push(s), every: 150 });
-  const reports = written.filter((s) => s.includes("still running after"));
-  assert.ok(reports.length >= 2, written.join(""));
-  assert.match(reports[0], /still running after \d+s: Running tests\/hangs\.rs\n/);
-  // The slow-test line once, in the first report after it was written.
+  const finished = runJobs([hung.job], { size: 1, write: (s) => written.push(s), every: 50 });
+  // The report with the slow line and one more after it, which must not repeat it.
+  const reports = () => written.filter((s) => s.includes("still running after"));
+  const reportedAgain = () => {
+    const at = reports().findIndex((s) => s.includes(slow));
+    return at >= 0 && reports().length - at >= 2;
+  };
+  await until(reportedAgain, "reported again after the slow line");
+  hung.open();
+  await finished;
+  hung.remove();
+  assert.match(reports()[0], /still running after \d+s: Running tests\/hangs\.rs\n/);
   assert.equal(written.join("").split(slow).length - 1, 2, "once in a report, once in the job's block");
   // Before the job's own block, so a log cut off there still has it.
   assert.ok(written.findIndex((s) => s.includes(slow)) < written.length - 1);
 });
 
 test("a run that is stopped can report everything each running binary has written", async () => {
-  const running = new Map();
-  const jobs = [{ label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", `console.log("partial line"); setTimeout(() => {}, 800);`] }];
-  const finished = runJobs(jobs, { size: 1, write: () => {}, running });
+  const running = new Set();
+  const hung = gated("partial line");
+  const finished = runJobs([hung.job], { size: 1, write: () => {}, running });
   let report = "";
-  while (!report.includes("partial line")) {
-    await new Promise((r) => setTimeout(r, 50));
-    report = stillRunning(running, true);
-  }
+  await until(() => (report = stillRunning(running, true)).includes("partial line"), "reported the partial line");
   assert.match(report, /still running after \d+s: Running tests\/hangs\.rs\npartial line/);
+  hung.open();
   await finished;
+  hung.remove();
   assert.equal(stillRunning(running, true), "");
 });
 
@@ -167,16 +196,12 @@ test("a binary a signal ends fails the run", async () => {
 
 // The whole run, with Node standing in for cargo and for each test binary.
 function fakeCargo({ build = 0, binaries }) {
-  const manifest = join(fileURLToPath(import.meta.url), "..", "Cargo.toml");
-  const message = (name, kind) => ({
-    reason: "compiler-artifact",
-    package_id: "path+file:///repo#0.1.0",
-    manifest_path: manifest,
-    target: { kind, name, src_path: join(manifest, "..", `${name}.rs`) },
-    profile: { test: true },
-    executable: name,
-  });
-  const messages = Object.keys(binaries).map((name, i) => message(name, i === 0 ? ["lib"] : ["test"]));
+  // A folder that exists, since each binary runs in its package's folder;
+  // the executable's name is the key `run` answers by.
+  const dir = join(fileURLToPath(import.meta.url), "..");
+  const messages = Object.keys(binaries).map((name, i) =>
+    artifact("repo", i === 0 ? ["lib"] : ["test"], name, { dir, executable: name }),
+  );
   const ran = [];
   const run = (cmd, args, opts) => {
     ran.push([cmd, ...args].join(" "));

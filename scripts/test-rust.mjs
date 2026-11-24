@@ -105,7 +105,7 @@ export function tally(output) {
  * written, so a log cut off by a time limit still names a test that hung.
  * `running` holds the jobs under way, for a caller that is stopped to report.
  */
-export function runJobs(jobs, { size, write, run = spawn, every = 60_000, running = new Map() }) {
+export function runJobs(jobs, { size, write, run = spawn, every = 60_000, running = new Set() }) {
   const results = new Array(jobs.length);
   let next = 0;
   const ticker = setInterval(() => {
@@ -132,7 +132,7 @@ export function runJobs(jobs, { size, write, run = spawn, every = 60_000, runnin
  */
 export function stillRunning(running, whole) {
   let report = "";
-  for (const entry of running.values()) {
+  for (const entry of running) {
     const output = readFileSync(entry.file, "utf8");
     const seconds = Math.round((Date.now() - entry.started) / 1000);
     report += `\n     still running after ${seconds}s: ${entry.job.label}\n`;
@@ -156,7 +156,7 @@ function runOne(job, run, running) {
   const file = join(dir, "output");
   const fd = openSync(file, "w");
   const entry = { job, file, started, reported: 0 };
-  running.set(entry, entry);
+  running.add(entry);
   return new Promise((resolve) => {
     let ended = false;
     const done = (status, extra = "") => {
@@ -248,7 +248,7 @@ export async function testRust(argv, options = {}) {
 }
 
 async function main() {
-  const running = new Map();
+  const running = new Set();
   // Stopped (CI's time limit, Ctrl+C): first write what each binary still
   // running has written so far, so the log names the one that hung.
   for (const signal of ["SIGINT", "SIGTERM"]) {
