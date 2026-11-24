@@ -544,13 +544,17 @@ fn recorded_session_id(stdout: &[String]) -> String {
         .to_string()
 }
 
+/// Whether notification `n` is a `session.tile` for session `id` carrying
+/// `backend_id`.
+fn is_tile_carrying(n: &Value, id: &str, backend_id: &str) -> bool {
+    n["method"] == "session.tile"
+        && n["params"]["session_id"] == id
+        && n["params"]["backend_session_id"] == backend_id
+}
+
 /// Waits for a `session.tile` for session `id` carrying `backend_session_id`.
 async fn tile_carrying(client: &mut Client, id: &str, backend_id: &str) -> Value {
-    let wanted = |n: &Value| {
-        n["method"] == "session.tile"
-            && n["params"]["session_id"] == id
-            && n["params"]["backend_session_id"] == backend_id
-    };
+    let wanted = |n: &Value| is_tile_carrying(n, id, backend_id);
     tokio::time::timeout(Duration::from_secs(10), client.notification_where(wanted))
         .await
         .expect("no session.tile carried the backend's id")
@@ -571,9 +575,7 @@ async fn turn_end_and_tile_carrying(client: &mut Client, id: &str, backend_id: &
                 .expect("the connection stays open");
             ended |= n["method"] == "session.event"
                 && n["params"]["event"]["event"]["type"] == "turn.completed";
-            carried |= n["method"] == "session.tile"
-                && n["params"]["session_id"] == id
-                && n["params"]["backend_session_id"] == backend_id;
+            carried |= is_tile_carrying(&n, id, backend_id);
         }
     };
     let finished = tokio::time::timeout(Duration::from_secs(10), both)

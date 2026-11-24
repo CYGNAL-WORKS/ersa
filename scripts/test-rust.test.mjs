@@ -2,10 +2,12 @@
 // Run: node --test scripts/test-rust.test.mjs
 
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { planJobs, runJobs, splitArgs, summarise, tally } from "./test-rust.mjs";
+import { planJobs, runJobs, splitArgs, stillRunning, summarise, tally, testRust } from "./test-rust.mjs";
 
 // A compiler-artifact message as `cargo test --no-run --message-format=json` prints it.
 function artifact(pkg, kind, name, { test = true, src = `src/${name}.rs` } = {}) {
@@ -124,6 +126,92 @@ test("a job's stdout and stderr keep the order they were written in", async () =
   const script = `[process.stderr,process.stdout,process.stderr].forEach((w,i)=>w.write("line"+i+"\\n"));`;
   const [result] = await runJobs([{ label: "mixed", cmd: process.execPath, args: ["-e", script] }], { size: 1, write: () => {} });
   assert.equal(result.output, "line0\nline1\nline2\n");
+});
+
+test("a binary still running is named, with libtest's slow-test lines, while it runs", async () => {
+  const slow = "test hung_test has been running for over 60 seconds";
+  const jobs = [
+    { label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", `console.log(${JSON.stringify(slow)}); setTimeout(() => {}, 600);`] },
+  ];
+  const written = [];
+  await runJobs(jobs, { size: 1, write: (s) => written.push(s), every: 150 });
+  const reports = written.filter((s) => s.includes("still running after"));
+  assert.ok(reports.length >= 2, written.join(""));
+  assert.match(reports[0], /still running after \d+s: Running tests\/hangs\.rs\n/);
+  // The slow-test line once, in the first report after it was written.
+  assert.equal(written.join("").split(slow).length - 1, 2, "once in a report, once in the job's block");
+  // Before the job's own block, so a log cut off there still has it.
+  assert.ok(written.findIndex((s) => s.includes(slow)) < written.length - 1);
+});
+
+test("a run that is stopped can report everything each running binary has written", async () => {
+  const running = new Map();
+  const jobs = [{ label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", `console.log("partial line"); setTimeout(() => {}, 800);`] }];
+  const finished = runJobs(jobs, { size: 1, write: () => {}, running });
+  let report = "";
+  while (!report.includes("partial line")) {
+    await new Promise((r) => setTimeout(r, 50));
+    report = stillRunning(running, true);
+  }
+  assert.match(report, /still running after \d+s: Running tests\/hangs\.rs\npartial line/);
+  await finished;
+  assert.equal(stillRunning(running, true), "");
+});
+
+test("a binary a signal ends fails the run", async () => {
+  const jobs = [{ label: "aborts", cmd: process.execPath, args: ["-e", `process.kill(process.pid, "SIGKILL")`] }];
+  const [result] = await runJobs(jobs, { size: 1, write: () => {} });
+  assert.notEqual(result.status, 0);
+  if (process.platform !== "win32") assert.match(result.output, /ended by SIGKILL/);
+});
+
+// The whole run, with Node standing in for cargo and for each test binary.
+function fakeCargo({ build = 0, binaries }) {
+  const manifest = join(fileURLToPath(import.meta.url), "..", "Cargo.toml");
+  const message = (name, kind) => ({
+    reason: "compiler-artifact",
+    package_id: "path+file:///repo#0.1.0",
+    manifest_path: manifest,
+    target: { kind, name, src_path: join(manifest, "..", `${name}.rs`) },
+    profile: { test: true },
+    executable: name,
+  });
+  const messages = Object.keys(binaries).map((name, i) => message(name, i === 0 ? ["lib"] : ["test"]));
+  const ran = [];
+  const run = (cmd, args, opts) => {
+    ran.push([cmd, ...args].join(" "));
+    let script;
+    if (cmd === "cargo" && args.includes("--no-run")) {
+      script = `${JSON.stringify(messages)}.forEach((m) => console.log(JSON.stringify(m))); process.exit(${build});`;
+    } else if (cmd === "cargo") {
+      script = `console.log("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s")`;
+    } else {
+      script = binaries[cmd];
+    }
+    return spawn(process.execPath, ["-e", script], opts);
+  };
+  return { run, ran };
+}
+
+const passes = `console.log("test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s")`;
+const fails = `console.log("test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"); process.exit(101)`;
+
+test("the run exits 0 when every binary and the doctests pass, else 1", async () => {
+  const quiet = { write: () => {}, size: 2 };
+  const green = fakeCargo({ binaries: { lib: passes, one: passes } });
+  assert.equal(await testRust(["--locked"], { ...quiet, run: green.run }), 0);
+  assert.ok(green.ran.includes("cargo test --locked --doc"), green.ran.join("\n"));
+  assert.ok(green.ran.includes("one") && green.ran.includes("lib"));
+
+  const red = fakeCargo({ binaries: { lib: passes, one: fails, two: passes } });
+  assert.equal(await testRust(["--locked"], { ...quiet, run: red.run }), 1);
+  assert.ok(red.ran.includes("two"), "the binary after the failing one still ran");
+});
+
+test("a failed build ends the run with the build's exit code and runs nothing", async () => {
+  const broken = fakeCargo({ build: 101, binaries: { lib: passes } });
+  assert.equal(await testRust(["--locked"], { write: () => {}, run: broken.run }), 101);
+  assert.equal(broken.ran.length, 1);
 });
 
 test("tally adds every test result line", () => {
