@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BridgeError, CoreClient } from "../core/client";
 import type { RawLogEntry, SessionRawLogParams } from "../protocol/core-api.gen";
-import { RAW_LOG_CLIP, RAW_LOG_HELD, RAW_LOG_PAGE, type RawLogView, readRawLog } from "./rawLog";
+import { RAW_LOG_CLIP, RAW_LOG_HELD, type RawLogView, readRawLog } from "./rawLog";
 
 /** One `session.raw_log` call the fake client got, which the test answers or fails. */
 interface Read {
@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 describe("reading a session's raw log", () => {
-  it("asks from the line after the last it holds, once a second, with the clip", async () => {
+  it("asks from the line after the last it holds, with the clip", async () => {
     const { reader, reads, indices } = setUp();
     reader.show({ open: true, session: "s1", link: 1 });
     expect(reads).toHaveLength(1);
@@ -69,40 +69,45 @@ describe("reading a session's raw log", () => {
     expect(RAW_LOG_CLIP).toBe(262144);
     await reads[0]?.answer(entries(0, 3));
     expect(indices()).toEqual([0, 1, 2]);
-
-    // The next read is due a second after the last was sent, not before.
-    await vi.advanceTimersByTimeAsync(999);
-    expect(reads).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(reads).toHaveLength(2);
     expect(reads[1]?.params).toEqual({ id: "s1", from: 3, clip: 262144 });
     await reads[1]?.answer(entries(3, 5));
     expect(indices()).toEqual([0, 1, 2, 3, 4]);
-
-    // A read that finds nothing new still asks from the same place a second later.
-    await vi.advanceTimersByTimeAsync(1_000);
     expect(reads[2]?.params).toEqual({ id: "s1", from: 5, clip: 262144 });
-    await reads[2]?.answer([]);
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(reads[3]?.params).toEqual({ id: "s1", from: 5, clip: 262144 });
   });
 
-  it("asks again at once after a full answer, and never has two reads out", async () => {
+  it("asks again at once after a read that added a line, and a second after asking for one that added none", async () => {
     // verifies: FLOW-READ-RAW-LOG-R19
-    const { reader, reads, indices } = setUp();
+    const { reader, reads } = setUp();
+    // The first read goes at once.
     reader.show({ open: true, session: "s1", link: 1 });
-    expect(RAW_LOG_PAGE).toBe(1000);
-    await reads[0]?.answer(entries(0, 1000));
+    expect(reads).toHaveLength(1);
+    // One cut line, far short of a full answer, still adds a line: the next read goes at once.
+    await reads[0]?.answer([{ index: 0, ts: "2026-11-22T10:00:00.000Z", dir: "host", head: "{", size: 300_000 }]);
     expect(reads).toHaveLength(2);
-    expect(reads[1]?.params).toEqual({ id: "s1", from: 1000, clip: 262144 });
+    expect(reads[1]?.params).toEqual({ id: "s1", from: 1, clip: 262144 });
 
-    // A read still out when its second is up waits for its answer, and the next goes at once when it comes.
-    await vi.advanceTimersByTimeAsync(3_000);
+    // A read that adds none: the next is due a second after that one was asked for, not after its answer.
+    await vi.advanceTimersByTimeAsync(400);
+    await reads[1]?.answer([]);
+    await vi.advanceTimersByTimeAsync(599);
     expect(reads).toHaveLength(2);
-    await reads[1]?.answer(entries(1000, 1002));
+    await vi.advanceTimersByTimeAsync(1);
     expect(reads).toHaveLength(3);
-    expect(reads[2]?.params).toEqual({ id: "s1", from: 1002, clip: 262144 });
-    expect(indices()).toHaveLength(1002);
+    expect(reads[2]?.params).toEqual({ id: "s1", from: 1, clip: 262144 });
+
+    // A failed read adds none either.
+    await reads[2]?.fail(unreachable);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(reads).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reads).toHaveLength(4);
+
+    // A read still out when its second is up: never two out, and the next goes when it ends.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(reads).toHaveLength(4);
+    await reads[3]?.answer([]);
+    expect(reads).toHaveLength(5);
+    expect(reads[4]?.params).toEqual({ id: "s1", from: 1, clip: 262144 });
   });
 
   it("knows when the first answer for a session has come", async () => {
@@ -291,10 +296,11 @@ describe("reading a session's raw log", () => {
     // Try again starts a new connection that counts its links from 1 again, so the same number after none is a new
     // connection too.
     await reads[5]?.answer(entries(0, 3));
+    expect(reads[6]?.params).toEqual({ id: "s1", from: 3, clip: 262144 });
     reader.show({ open: true, session: "s1", link: undefined });
     expect(indices()).toEqual([0, 1, 2]);
     reader.show({ open: true, session: "s1", link: 3 });
-    expect(reads[6]?.params).toEqual({ id: "s1", clip: 262144 });
+    expect(reads[7]?.params).toEqual({ id: "s1", clip: 262144 });
     expect(last()).toEqual({ session: "s1", lines: [], read: false, earlier: false });
   });
 });
