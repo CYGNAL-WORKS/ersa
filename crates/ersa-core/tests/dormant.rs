@@ -11,16 +11,7 @@ use std::sync::Arc;
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records};
-use support::{Client, TestCore, kind, project, start_with_adapters, tempdir, workspace};
-
-/// Stops `core` the way the Shell does, and hands back its directory for
-/// the next Core to start over.
-async fn shut_down(core: TestCore, client: &mut Client) -> tempfile::TempDir {
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    dir
-}
+use support::{Client, kind, project, shut_down, start_with_adapters, tempdir, workspace};
 
 async fn create(client: &mut Client, workspace_id: &Value, backend: &str) -> String {
     let session = client
@@ -91,7 +82,7 @@ async fn a_session_without_its_adapter_is_hidden_and_returns_with_it() {
         )
         .await;
     let data_dir = core.data_dir();
-    let dir = shut_down(core, &mut client).await;
+    let dir = shut_down(core).await;
     let facts = facts_of(&data_dir, &id);
     assert!(!facts.is_empty());
 
@@ -120,7 +111,7 @@ async fn a_session_without_its_adapter_is_hidden_and_returns_with_it() {
         let error = client.error(method, params).await;
         assert_eq!(kind(&error), "not_found", "{method}: {error}");
     }
-    let dir = shut_down(core, &mut client).await;
+    let dir = shut_down(core).await;
     // What Core knew of it is kept, and nothing was added.
     assert_eq!(facts_of(&data_dir, &id), facts);
 
@@ -194,7 +185,7 @@ async fn a_dormant_session_still_holds_its_workspace() {
         .unwrap()
         .clone();
     let in_root = create(&mut client, &root["id"], "other").await;
-    let dir = shut_down(core, &mut client).await;
+    let dir = shut_down(core).await;
 
     let only_fake: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
     let core = start_with_adapters(dir, |_| {}, only_fake).await;

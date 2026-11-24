@@ -1,0 +1,6 @@
+# The only git configuration a test's git reads, in place of the user's
+# global and system files (support/sealed.rs). It holds just what a test
+# repository's commit needs.
+[user]
+	name = Ersa Tests
+	email = tests@ersa.invalid
