@@ -20,12 +20,10 @@ describe("the model chip's default", () => {
     expect(labels(listed)).toEqual(["Default (Opus 5.5)", "Sonnet 5.5", "Opus 5.5"]);
   });
 
-  // verifies: FLOW-NEW-SESSION-R46
   it("keeps the backend's label for a default whose resolved id no other listed model has", () => {
     expect(labels([{ ...fallback, resolved: "claude-fable-5-2" }, sonnet])).toEqual(["Default (recommended)", "Sonnet 5.5"]);
   });
 
-  // verifies: FLOW-NEW-SESSION-R46
   it("keeps the backend's label for a default with no resolved id", () => {
     expect(labels([{ id: "auto", label: "Auto", default: true }, sonnet])).toEqual(["Auto", "Sonnet 5.5"]);
   });
