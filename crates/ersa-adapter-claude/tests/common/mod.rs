@@ -74,6 +74,22 @@ pub fn fixture(name: &str) -> Fixture {
         .unwrap_or_else(|| panic!("no fixture {name}"))
 }
 
+/// The recorded answer to the model probe's `get_settings`
+/// (`2.1.330/00-probe-get-settings`), its `response` object changed by
+/// `change` and its `request_id` set to the one the probe sends: its second
+/// request, after `initialize`.
+pub fn settings_answer(change: impl FnOnce(&mut Value)) -> String {
+    let mut answer = fixture("2.1.330/00-probe-get-settings")
+        .stdout
+        .iter()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .find(|m| m["response"]["response"]["applied"].is_object())
+        .expect("the recording answers get_settings");
+    answer["response"]["request_id"] = "ersa-get_settings-2".into();
+    change(&mut answer["response"]);
+    answer.to_string()
+}
+
 impl Fixture {
     /// The lines written to stdin, in order.
     pub fn sent(&self) -> Vec<String> {

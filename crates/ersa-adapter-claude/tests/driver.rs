@@ -8,7 +8,7 @@ mod common;
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{RecordingSink, fixture, is_kind};
+use common::{RecordingSink, fixture, is_kind, settings_answer};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{
     Adapter, AdapterError, Direction, PermissionDecision, ProcessSpec, QuestionReply, SessionConfig,
@@ -236,25 +236,6 @@ fn models_answer() -> String {
         .into_iter()
         .find(|line| parse(line)["response"]["response"]["models"].is_array())
         .expect("fixture 25 answers initialize with its models")
-}
-
-/// The recording of the model probe's exchange: `initialize`, then
-/// `get_settings`, and no message.
-const PROBE_FIXTURE: &str = "2.1.330/00-probe-get-settings";
-
-/// The recorded answer to `get_settings`, its `response` changed by
-/// `change` and its `request_id` set to the one the probe sends: the
-/// probe's second request, after `initialize`.
-fn settings_answer(change: impl FnOnce(&mut Value)) -> String {
-    let mut answer = fixture(PROBE_FIXTURE)
-        .stdout
-        .iter()
-        .map(|line| parse(line))
-        .find(|m| m["response"]["response"]["applied"].is_object())
-        .expect("the recording answers get_settings");
-    answer["response"]["request_id"] = json!("ersa-get_settings-2");
-    change(&mut answer["response"]);
-    answer.to_string()
 }
 
 fn is_get_settings(v: &Value) -> bool {

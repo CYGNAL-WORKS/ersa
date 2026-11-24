@@ -10,24 +10,11 @@ use ersa_core::adapters::detect;
 use ersa_protocol::core_api::BackendState;
 use serde_json::Value;
 
-use crate::common::fixture;
+use crate::common::{fixture, settings_answer};
 
 /// The version line Claude Code 2.1.316 prints.
 fn version_check() -> FakeTransport {
     FakeTransport::new(["2.1.316 (Claude Code)"])
-}
-
-/// The recorded answer to the probe's `get_settings`, under the id the
-/// probe sends it with, its second request.
-fn settings_answer() -> String {
-    let mut answer = fixture("2.1.330/00-probe-get-settings")
-        .stdout
-        .iter()
-        .map(|line| serde_json::from_str::<Value>(line).unwrap())
-        .find(|m| m["response"]["response"]["applied"].is_object())
-        .unwrap();
-    answer["response"]["request_id"] = "ersa-get_settings-2".into();
-    answer.to_string()
 }
 
 /// A probe CLI that answers `initialize` with fixture 25's answer, which
@@ -46,7 +33,7 @@ fn probe() -> FakeTransport {
         .wait_for_stdin(|_| Ok(()))
         .then_stdout([answer])
         .wait_for_stdin(|_| Ok(()))
-        .then_stdout([settings_answer()])
+        .then_stdout([settings_answer(|_| {})])
         .hold_open()
 }
 
