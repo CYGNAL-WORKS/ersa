@@ -1075,7 +1075,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   localHostId={hello.host.id}
                   projects={[controlsFor.project]}
                   backends={[sessionControls.backend]}
-                  backendListed={backends[controlsFor.session.host_id] !== undefined}
                   values={sessionControls.values}
                   onChoose={(key, id) => {
                     if (isChangeable(key)) void change(shown.id, key, id);

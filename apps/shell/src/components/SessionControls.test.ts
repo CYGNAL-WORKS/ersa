@@ -97,23 +97,3 @@ describe("the how chips as Claude Desktop shows them", () => {
   });
 });
 
-// R48 names the backend while the host's backends are listed; under a session whose host hasn't listed them, there is
-// no label to name it by, so the chip waits for the listing (an open question in FLOW-NEW-SESSION).
-describe("the backend chip under a session whose host hasn't listed its backends", () => {
-  it("is left out until the listing arrives", () => {
-    const backend: BackendInfo = { name: "claude-code", label: "claude-code", status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] };
-    const html = renderToStaticMarkup(
-      createElement(SessionControls, {
-        hosts: [host],
-        localHostId: "local",
-        projects: [project],
-        backends: [backend],
-        backendListed: false,
-        values: { host_id: "local", project_id: "p1", workspace: "isolated", backend: "claude-code" },
-        onChoose: () => {},
-        readOnly: true,
-      }),
-    );
-    expect(html).not.toContain('aria-label="Backend:');
-  });
-});

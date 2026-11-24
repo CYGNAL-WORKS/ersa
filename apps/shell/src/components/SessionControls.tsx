@@ -44,11 +44,6 @@ interface SessionControlsProps {
   backends?: readonly BackendInfo[];
   /** Why the host could not list its backends: the backend chip says detection failed (FLOW-NEW-SESSION-R11). */
   detectionFailed?: boolean;
-  /**
-   * Under a session whose host has not listed its backends, false: the session controls have no label to name its
-   * backend by, so the backend chip waits for the listing (FLOW-NEW-SESSION-R48 names it while they are listed).
-   */
-  backendListed?: boolean;
   values: SessionValues;
   onChoose: (key: ControlKey, id: string) => void;
   /** Add project…, which ends the project chip's list; absent while it cannot be taken, as on a remote host (FLOW-NEW-SESSION-R27). */
@@ -169,7 +164,7 @@ function WorktreeCheckbox({ checked, onChange, disabled, force }: { checked: boo
  * the row's end (LAY-SHELL). The backend chip shows whenever the host's backends are listed, with one backend as with
  * several (FLOW-NEW-SESSION-R48), and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, backendListed = true, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, windows, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, windows, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey): ChipHandlers => ({
@@ -233,19 +228,19 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
           <Chip name="Backend" placeholder={t("sessionControls.detectingBackendsProgress")} pending options={[]} onChoose={() => {}} disabled />
         ) : (
           <>
-            {backendListed && (
-              <Chip
-                name="Backend"
-                value={values.backend}
-                // A listing that failed is not a host without backends (FLOW-NEW-SESSION-R11).
-                placeholder={t(detectionFailed ? "sessionControls.detectionFailedStatus" : "sessionControls.noBackendStatus")}
-                problem={available(backends).length === 0}
-                options={backends.map(backendOption)}
-                {...chip("backend")}
-                // A host with no backend at all has nothing to list; the chip says so itself.
-                disabled={disabled || backends.length === 0}
-              />
-            )}
+            {/* Always in the row, so nothing shifts when a listing arrives. Under a session it is the session's backend,
+                which reads its id until its host lists it with a label, as a held model does (FLOW-NEW-SESSION-R48). */}
+            <Chip
+              name="Backend"
+              value={values.backend}
+              // A listing that failed is not a host without backends (FLOW-NEW-SESSION-R11).
+              placeholder={t(detectionFailed ? "sessionControls.detectionFailedStatus" : "sessionControls.noBackendStatus")}
+              problem={available(backends).length === 0}
+              options={backends.map(backendOption)}
+              {...chip("backend")}
+              // A host with no backend at all has nothing to list; the chip says so itself.
+              disabled={disabled || backends.length === 0}
+            />
             {/* A backend that offers no choice of one has no chip for it: the backend decides. */}
             {backend && backend.models.length > 0 && (
               <Chip name="Model" {...modelChip(backend.models, values.model)} {...chip("model")} />
