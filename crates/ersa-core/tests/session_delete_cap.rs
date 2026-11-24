@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use ersa_core::{Adapter, CommandTransport, Gate};
 use serde_json::json;
-use support::deleting::{FailingGit, Removal, idle_session, isolated, listed, token};
+use support::deleting::{FailingGit, Removal, idle_session, isolated, token};
 use support::fake::FakeAdapter;
+use support::listed;
 use support::{git_repo, kind, start_with_adapters, tempdir};
 
 /// As many folder removals and reads as Core runs at once.
