@@ -1,6 +1,7 @@
 // Reading a session's raw log for the developer pane (FLOW-READ-RAW-LOG, steps 2, 3 and 7): the lines Ersa and the
 // session's backend exchanged, as Core holds them (PROTO-CORE-API, `session.raw_log`). Core sends no notification for
-// them, so while the pane is open the window asks once a second for the lines after the last it holds. Kept free of
+// them, so while the pane is open the window asks for the lines after the last it holds: again at once while lines
+// keep coming, else once a second (FLOW-READ-RAW-LOG-R19). Kept free of
 // React, like core/connection.ts, so the tests drive it with a fake client and a fake clock.
 
 import { t } from "../catalog";
@@ -8,10 +9,8 @@ import { rawLogEntries } from "../core/checks";
 import { type CoreClient, describeError } from "../core/client";
 import type { RawLogEntry, SessionRawLogParams } from "../protocol/core-api.gen";
 
-/** How often to ask while the pane is open (FLOW-READ-RAW-LOG-R05). */
+/** How often to ask while a read adds no line (FLOW-READ-RAW-LOG-R19). */
 export const RAW_LOG_EVERY_MS = 1_000;
-/** The most entries one answer may hold (PROTO-CORE-API, `session.raw_log`); an answer this full means more are waiting. */
-export const RAW_LOG_PAGE = 1000;
 /** The most lines the pane holds for a session; the oldest go first (FLOW-READ-RAW-LOG-R09). */
 export const RAW_LOG_HELD = 50_000;
 /** Bytes: a line longer than this comes back as its start and size (FLOW-READ-RAW-LOG-R11; PROTO-CORE-API-R138). */
@@ -67,7 +66,11 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
     update(next);
   };
 
-  /** One read, from the line after the last held; then the next, a second after this one was sent, or at once when it was full. */
+  /**
+   * One read, from the line after the last held; then the next (R19): at once when this one added a line, since an
+   * answer can end with more waiting and nothing in it says so (PROTO-CORE-API-R139); otherwise a second after this
+   * one was sent, or when it ends if that is later.
+   */
   const ask = (mine: number, session: string) => {
     timer = undefined;
     const held = view?.lines ?? [];
@@ -77,9 +80,9 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
     const params: SessionRawLogParams = last === undefined ? { id: session, clip: RAW_LOG_CLIP } : { id: session, from, clip: RAW_LOG_CLIP };
     const sent = Date.now();
     // Only one read is out at a time: the next is scheduled when this one settles.
-    const next = (full: boolean) => {
+    const next = (added: boolean) => {
       if (stopped || mine !== generation) return;
-      const wait = full ? 0 : Math.max(0, sent + RAW_LOG_EVERY_MS - Date.now());
+      const wait = added ? 0 : Math.max(0, sent + RAW_LOG_EVERY_MS - Date.now());
       timer = setTimeout(() => ask(mine, session), wait);
     };
     client.call("session.raw_log", params).then(
@@ -100,7 +103,7 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
         // Core numbers a session's lines from 0, so a first line above 0 means earlier ones are gone (PROTO-CORE-API-R136).
         const earlier = (trimmed[0]?.index ?? 0) > 0;
         report({ session, lines: trimmed, read: true, earlier });
-        next(entries.length >= RAW_LOG_PAGE);
+        next(entries.length > 0);
       },
       (error: unknown) => {
         if (stopped || mine !== generation || view === undefined) return;
