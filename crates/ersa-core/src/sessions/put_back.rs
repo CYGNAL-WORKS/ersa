@@ -97,11 +97,12 @@ impl SessionManager {
 ///    back.
 /// 2. The project's turn, within what is left of the same wait
 ///    (PROTO-CORE-API-R124).
-/// 3. The stored checkout must still exist, and a branch must not be
-///    checked out in another worktree (FLOW-CLEAN-UP-R04): refused with the
-///    reason, nothing changed.
-/// 4. What a put-away left at the path goes: git's record of the worktree
+/// 3. What a put-away left at the path goes: git's record of the worktree
 ///    and any files, every branch kept.
+/// 4. In the turn the add will use, the stored checkout must still exist,
+///    and a branch must not be checked out in another worktree
+///    (FLOW-CLEAN-UP-R04): refused with the reason, the workspace still put
+///    away.
 /// 5. The worktree is made again, and `ready` stored, then said.
 ///
 /// Every way out before step 5's store leaves the workspace put away, as
@@ -143,16 +144,6 @@ async fn put_back(
             return Err(SessionError::Vcs(e));
         }
     };
-    // (3) Read in the turn, so nothing changes the worktrees meanwhile.
-    let checked = check_checkout(&store, transport.as_ref(), &spec).await;
-    let checkout = match checked {
-        Ok(checkout) => checkout,
-        Err(e) => {
-            putting_back.end(refused());
-            return Err(e);
-        }
-    };
-
     // Shared with each try at the folder, which keeps it until its thread
     // returns: a try given up on that is still stuck holds the workspace,
     // so nothing else removes it or puts it back beside that try.
@@ -169,11 +160,11 @@ async fn put_back(
             wait: spec.turn_wait,
         },
     );
-    let made = make_again(transport.as_ref(), &spec, &checkout, tries, &turns).await;
+    let made = make_again(&store, transport.as_ref(), &spec, tries, &turns).await;
     if let Err(e) = made {
         tracing::warn!(workspace = %id, error = %e, "the workspace was not put back");
         end_held(putting_back, refused());
-        return Err(SessionError::Vcs(e));
+        return Err(e);
     }
     // (5) Stored, then said. Not stored, it stays put away as the store
     // has it, and the next put-back takes the folder just made as what was
@@ -236,17 +227,17 @@ async fn check_checkout(
     Ok(checkout)
 }
 
-/// Removes what a put-away left at the path (step 4), then makes the
-/// worktree again (step 5).
+/// Removes what a put-away left at the path (step 3), checks the stored
+/// checkout (step 4), then makes the worktree again (step 5).
 async fn make_again(
+    store: &Store,
     transport: &dyn Transport,
     spec: &PutBack,
-    checkout: &Checkout,
     tries: FolderTries,
     turns: &dyn Worktrees,
-) -> Result<(), VcsError> {
+) -> Result<(), SessionError> {
     let (repo, path) = (spec.repo.as_str(), spec.path.as_str());
-    // (4) Whatever is there is the workspace's own, left by a put-away that
+    // (3) Whatever is there is the workspace's own, left by a put-away that
     // stopped part way, so it goes unchecked (FLOW-CLEAN-UP-R03), every
     // branch kept. An add of an earlier put-back that was cut off leaves
     // its lock, which goes too.
@@ -257,10 +248,14 @@ async fn make_again(
         };
         workspace::git_worktree_delete(transport, repo, path, "", checks, tries, turns).await?;
     }
-    // (5) The turn held since step 2 when nothing was removed, else a new
-    // one.
+    // (4) The turn held since step 2 when nothing was removed, else a new
+    // one: a removal lets its turn go. The checkout is read in the turn the
+    // add uses, so no other change to the project's worktrees (another
+    // put-back on the same branch) comes between the look and the add.
     let _turn = turns.turn().await?;
-    let made = workspace::git_worktree_checkout(transport, repo, path, checkout).await;
+    let checkout = check_checkout(store, transport, spec).await?;
+    // (5)
+    let made = workspace::git_worktree_checkout(transport, repo, path, &checkout).await;
     if let Err(e) = made {
         // When git timed out or its output was lost, a half-made worktree
         // may be there: discarded as `workspace.create` discards one, and
@@ -270,7 +265,7 @@ async fn make_again(
         {
             tracing::warn!(path, error = %discard, "could not clean up a worktree half put back");
         }
-        return Err(e);
+        return Err(e.into());
     }
     Ok(())
 }
