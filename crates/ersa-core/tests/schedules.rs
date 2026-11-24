@@ -96,6 +96,8 @@ impl World {
             schedule: Arc::clone(&schedule),
         };
         config.command_transport = Some(CommandTransport(Arc::new(commands)));
+        // Sealed from the user's git configuration, as every test Core is.
+        support::seal(&mut config);
         // The backends are detected once, in set-up, and not again while
         // the clock is the test's.
         config.failed_detection_ttl = Duration::from_secs(24 * 60 * 60);
