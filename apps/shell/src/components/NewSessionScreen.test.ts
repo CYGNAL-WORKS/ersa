@@ -31,7 +31,7 @@ const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
   ],
   // The CLI marks no effort as its default.
   efforts: choices([["medium", "Medium"], ["high", "High"]], "none"),
-  permission_modes: choices([["default", "Ask"], ["acceptEdits", "Accept edits"]], "default"),
+  permission_modes: choices([["default", "Manual"], ["acceptEdits", "Accept edits"]], "default"),
 });
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   ...claude(),
@@ -66,9 +66,10 @@ describe("the new-session screen", () => {
     expect(chips(html)).toEqual([
       "Host: Local",
       "Project: ersa",
+      "Backend: Claude Code",
       "Model: Default (recommended)",
       "Effort: Default",
-      "Permission mode: Ask",
+      "Permission mode: Manual",
     ]);
     expect(html).toContain('aria-label="Context: none used yet"');
     // The Worktree checkbox, checked, in place of the workspace chip (issue 412).
@@ -206,8 +207,9 @@ describe("the new-session screen", () => {
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 
-  it("hides the backend chip when the host has one backend", () => {
-    expect(chips(render({})).some((c) => c.startsWith("Backend"))).toBe(false);
+  // verifies: FLOW-NEW-SESSION-R48
+  it("names the backend the session will start with when the host has one backend", () => {
+    expect(chips(render({}))).toContain("Backend: Claude Code");
   });
 
   it("leaves out the chip for a choice the backend does not offer", () => {

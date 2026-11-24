@@ -461,11 +461,6 @@ export const enUS = {
       label: "Worktree",
       description: "The session works in an isolated copy of the repository.",
     },
-    // The backend's default model in the model chip and its list, when the backend says which listed model it stands
-    // for: Default, then that model, as Claude Desktop names it (FLOW-NEW-SESSION-R36).
-    model: {
-      defaultOfLabel: "Default ({model})",
-    },
     // The effort chip's value with no level chosen (docs/design/COMPOSER.md, The session controls): the backend's own
     // effort, and the row that goes back to it; and what it reads for a model that takes no effort.
     effort: {
