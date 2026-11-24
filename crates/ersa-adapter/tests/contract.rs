@@ -281,9 +281,3 @@ fn detection_defaults_to_the_backends_version_flag() {
     let recording = ersa_adapter::recording::Recording::parse("", serde_json::json!({})).unwrap();
     assert!(EchoAdapter.recording_version(&recording).is_err());
 }
-
-/// Temporary, for #597: shows a failing test fails the run. Reverted next commit.
-#[test]
-fn made_to_fail_for_597() {
-    panic!("made to fail for #597");
-}
