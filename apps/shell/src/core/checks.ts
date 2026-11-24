@@ -4,13 +4,14 @@
 // the start on every launch, keep it down). Events that fail are shown as a
 // notice in the transcript; tiles and sessions are repaired to safe values.
 
-import type { Session, Tile } from "../protocol/core-api.gen";
+import type { RawLogEntry, Session, Tile } from "../protocol/core-api.gen";
 
 type Fields = Record<string, unknown>;
 
 const isObject = (v: unknown): v is Fields => typeof v === "object" && v !== null && !Array.isArray(v);
 const isString = (v: unknown): v is string => typeof v === "string";
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isCount = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
 const optional = (check: (v: unknown) => boolean) => (v: unknown) => v === undefined || check(v);
 
 /** The fields each event type's rendering reads, and what they must be. Types not listed are rendered from no fields. */
@@ -111,4 +112,26 @@ export function checkSessions(value: unknown): Session[] {
       },
     ];
   });
+}
+
+/** Whether `value` is one raw-log entry as the protocol gives it: whole, or cut to its head and size. */
+function isRawLogEntry(value: unknown): value is RawLogEntry {
+  if (!isObject(value) || !isCount(value.index) || !isString(value.ts)) return false;
+  if (value.dir !== "backend" && value.dir !== "host") return false;
+  return isString(value.line) || (isString(value.head) && isCount(value.size));
+}
+
+/**
+ * The entries of a `session.raw_log` answer to a read from `from`, or undefined when it can't be read: Core sends them
+ * oldest first, each index above the last and none before `from` (PROTO-CORE-API-R136). A Core that breaks that is a
+ * failed read, not a reason to lose the lines held.
+ */
+export function rawLogEntries(answer: unknown, from: number): RawLogEntry[] | undefined {
+  if (!Array.isArray(answer) || !answer.every(isRawLogEntry)) return undefined;
+  let last = from - 1;
+  for (const entry of answer) {
+    if (entry.index <= last) return undefined;
+    last = entry.index;
+  }
+  return answer;
 }

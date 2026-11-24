@@ -1238,6 +1238,10 @@ Close
 
 Developer
 
+### `developer.unreadableReason`
+
+Ersa got a raw log it can't read.
+
 ## `quit`
 
 ## `trust`
