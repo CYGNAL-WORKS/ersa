@@ -305,6 +305,16 @@ fn core_commit() -> String {
 }
 
 async fn check(name: &str) {
+    // The captures are compared as parsed JSON, so this test must read a
+    // number exactly: a reader that rounds can take two different numbers
+    // for one and hide a change in what Core sends (issue #599). Rust's own
+    // `parse` is exact, so serde_json must agree with it.
+    let exact = "0.11502019999999999";
+    assert_eq!(
+        serde_json::from_str::<f64>(exact).ok(),
+        exact.parse::<f64>().ok(),
+        "serde_json rounds decimal numbers in this build: the workspace's serde_json dependency needs its float_roundtrip feature"
+    );
     let built = std::env::var_os("ERSA_UPDATE_REPLAYS").map(|_| build_core());
     let program = built.map_or_else(core_program, |(program, _)| program.clone());
     let actual = received(name, &program).await;
