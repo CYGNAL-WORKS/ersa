@@ -4,6 +4,7 @@
 // React, like core/connection.ts, so the tests drive it with a fake client and a fake clock.
 
 import { t } from "../catalog";
+import { rawLogEntries } from "../core/checks";
 import { type CoreClient, describeError } from "../core/client";
 import type { RawLogEntry, SessionRawLogParams } from "../protocol/core-api.gen";
 
@@ -34,8 +35,9 @@ export interface RawLogWanted {
   open: boolean;
   session: string | undefined;
   /**
-   * `CoreView.link`: a new number means Ersa connected to Core again (R18). Undefined while the connection is lost,
-   * which changes nothing: reads fail meanwhile, and the pane keeps its lines (R15).
+   * `CoreView.link`: undefined while Ersa is not connected to Core. A number after none, or a different number, means
+   * Ersa connected to Core again (R18); a number alone can't say so, since each Try again counts its links from 1 again.
+   * Losing the connection changes nothing: reads fail meanwhile, and the pane keeps its lines (R15).
    */
   link: number | undefined;
 }
@@ -45,31 +47,6 @@ export interface RawLogReader {
   show(wanted: RawLogWanted): void;
   /** After this, the reader asks for nothing and reports nothing. */
   stop(): void;
-}
-
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const isCount = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
-
-/** Whether `value` is one entry as the protocol gives it: whole, or cut to its head and size. */
-function isEntry(value: unknown): value is RawLogEntry {
-  if (!isObject(value) || !isCount(value.index) || typeof value.ts !== "string") return false;
-  if (value.dir !== "backend" && value.dir !== "host") return false;
-  return typeof value.line === "string" || (typeof value.head === "string" && isCount(value.size));
-}
-
-/**
- * The entries of an answer to a read from `from`, or undefined when it can't be read: Core sends them oldest first,
- * each index above the last and none before `from` (PROTO-CORE-API-R136). A Core that breaks that is a failed read,
- * not a reason to lose the lines held.
- */
-function entriesOf(answer: unknown, from: number): RawLogEntry[] | undefined {
-  if (!Array.isArray(answer) || !answer.every(isEntry)) return undefined;
-  let last = from - 1;
-  for (const entry of answer) {
-    if (entry.index <= last) return undefined;
-    last = entry.index;
-  }
-  return answer;
 }
 
 /**
@@ -108,7 +85,7 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
     client.call("session.raw_log", params).then(
       (answer) => {
         if (stopped || mine !== generation || view === undefined) return;
-        const entries = entriesOf(answer, from);
+        const entries = rawLogEntries(answer, from);
         if (entries === undefined) {
           report({ ...view, read: true, failure: t("developer.unreadableReason") });
           next(false);
@@ -152,11 +129,12 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
     show(next) {
       if (stopped) return;
       const before = wanted;
-      // A lost connection keeps the last connection's number, so only a new connection starts reading again.
-      wanted = next.link === undefined ? { ...next, link: before.link } : next;
+      wanted = next;
       // Reading starts again from the first line Core holds when the pane opens or closes, the active session changes
-      // (R04), or Ersa connects to Core again (R18): a Core that restarted numbers its lines from the start.
-      if (before.open !== wanted.open || before.session !== wanted.session || before.link !== wanted.link) restart();
+      // (R04), or Ersa connects to Core again (R18): a Core that restarted numbers its lines from the start. Connecting
+      // again is a link after none, or a different one; a link going away is a lost connection, which keeps the lines.
+      const connectedAgain = next.link !== undefined && next.link !== before.link;
+      if (before.open !== next.open || before.session !== next.session || connectedAgain) restart();
     },
     stop() {
       stopped = true;
