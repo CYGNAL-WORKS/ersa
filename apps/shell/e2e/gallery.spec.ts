@@ -534,7 +534,8 @@ test("every session control is reachable and works from the keyboard", async ({ 
     .filter({ hasText: "Ready, at the defaults" });
   const chips = screen.locator("button.chip");
   const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
-  expect(names.length).toBe(5);
+  // Host and project, then backend, model, effort and permission mode: the backend shows with one (FLOW-NEW-SESSION-R48).
+  expect(names.length).toBe(6);
   const worktree = screen.getByRole("checkbox", { name: "Worktree" });
 
   // Tab from the composer reaches send, which keeps focus with nothing to send, then each control in turn: host,
