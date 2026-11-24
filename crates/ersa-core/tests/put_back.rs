@@ -10,12 +10,14 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ersa_adapter::OutgoingAttachment;
+use ersa_core::Adapter;
 use ersa_core::Gate;
 use ersa_core::workspace::Checkout;
 use serde_json::{Value, json};
-use support::deleting::{FailingGit, Removal};
+use support::deleting::{FailingGit, Removal, StoppingAdds};
+use support::fake::FakeAdapter;
 use support::put_away::*;
-use support::{git, kind};
+use support::{git, kind, start_with_adapters, tempdir};
 
 /// Session `id` as `session.list` lists it.
 async fn session_row(s: &mut Setup, id: &str) -> Value {
@@ -287,6 +289,250 @@ async fn a_branch_checked_out_elsewhere_refuses_the_resume() {
     assert_back(&mut s, &workspace).await;
 }
 
+/// git refuses to make the worktree again for a reason Core does not name,
+/// as for a stored branch another worktree is rebasing, which git lists
+/// there on no branch: a send and a resume answer `vcs_error` with git's
+/// own words, naming the other folder, and leave the workspace put away and
+/// an archived session archived.
+// verifies: FLOW-CLEAN-UP-R20
+#[tokio::test(flavor = "multi_thread")]
+async fn a_branch_another_worktree_is_rebasing_answers_with_gits_words() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    // The branch and `main` change one file each their own way, so a
+    // rebase of the branch onto `main` stops on the conflict.
+    let path = folder(&workspace);
+    std::fs::write(path.join("README.md"), "the branch's\n").unwrap();
+    git(&path, &["commit", "--quiet", "-am", "the branch's"]);
+    s.put_away(&workspace).await.expect("put away");
+    std::fs::write(s.repo.join("README.md"), "main's\n").unwrap();
+    git(&s.repo, &["commit", "--quiet", "-am", "main's"]);
+    let elsewhere = s.core.dir.path().join("rebasing-elsewhere");
+    let elsewhere_text = elsewhere.display().to_string();
+    git(
+        &s.repo,
+        &["worktree", "add", "--quiet", "--detach", &elsewhere_text],
+    );
+    // Not `git`: the rebase stopping is the point, and that helper asserts
+    // success.
+    let rebase = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&elsewhere)
+        .args([
+            "-c",
+            "user.name=Ersa Tests",
+            "-c",
+            "user.email=tests@ersa.invalid",
+        ])
+        .args(["rebase", "main", branch(&workspace)])
+        .output()
+        .expect("git runs");
+    assert!(!rebase.status.success(), "the rebase stops on the conflict");
+
+    for method in ["session.send", "session.resume"] {
+        if method == "session.resume" {
+            archive(&mut s, &session).await;
+        }
+        let params = match method {
+            "session.send" => json!({ "id": session, "text": "again" }),
+            _ => json!({ "id": session }),
+        };
+        let error = s.client.error(method, params).await;
+        assert_eq!(kind(&error), "vcs_error", "{method}: {error:#}");
+        let detail = error["data"]["detail"].as_str().unwrap_or_default();
+        assert!(detail.contains("rebasing-elsewhere"), "{method}: {error:#}");
+        assert_eq!(starts(&s), 1, "{method} started nothing");
+        assert_eq!(s.listed(&workspace).await["state"], "put_away", "{method}");
+    }
+    assert_eq!(session_row(&mut s, &session).await["archived"], true);
+}
+
+// -- What a put-back holds (PROTO-CORE-API-R143, R144) ---------------------
+
+/// A Core whose every `git worktree add` stops at `gate`; its transport,
+/// which notes each change to worktrees.
+async fn stopping_adds(gate: &Arc<Gate>) -> (Setup, Arc<StoppingAdds>) {
+    let git = Arc::new(StoppingAdds::new(gate));
+    let transport = Arc::clone(&git);
+    let s = setup_with(move |config| {
+        config.command_transport = Some(ersa_core::CommandTransport(transport));
+    })
+    .await;
+    (s, git)
+}
+
+/// A workspace made through `gate`.
+async fn workspace_through(s: &mut Setup, gate: &Gate) -> Value {
+    let params = json!({ "project_id": s.project["id"] });
+    let making = s.client.request("workspace.create", params).await;
+    reached(gate).await;
+    gate.go();
+    s.client.response(making).await["result"].clone()
+}
+
+/// Forking, deleting and removing `session` answer `busy` while its
+/// workspace is held, and removing the workspace answers `invalid_state`.
+async fn assert_held(s: &mut Setup, session: &str, workspace: &Value) {
+    let changes = json!({ "id": workspace["id"] });
+    let token = s.client.result("workspace.changes", changes).await["token"].clone();
+    for (method, params) in [
+        ("session.fork", json!({ "id": session })),
+        ("session.delete", json!({ "id": session, "token": token })),
+        ("session.remove", json!({ "id": session })),
+    ] {
+        let error = s.client.error(method, params).await;
+        assert_eq!(kind(&error), "invalid_state", "{method}: {error:#}");
+        assert_eq!(error["data"]["detail"], "busy", "{method}: {error:#}");
+    }
+    let params = json!({ "id": workspace["id"], "force": true });
+    let error = s.client.error("workspace.remove", params).await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+}
+
+/// While one session's resume puts the folder back, a fork, a delete or a
+/// removal of another session there answers `busy` and removing the
+/// workspace `invalid_state`; the other session's resume waits for the
+/// put-back and then puts nothing back.
+// verifies: PROTO-CORE-API-R143
+#[tokio::test(flavor = "multi_thread")]
+async fn a_put_back_under_way_holds_its_workspace() {
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let (mut s, git) = stopping_adds(&gate).await;
+    let workspace = workspace_through(&mut s, &gate).await;
+    let first = s.stopped_session(&workspace).await;
+    let second = s.stopped_session(&workspace).await;
+    s.put_away(&workspace).await.expect("put away");
+    let resuming = s
+        .client
+        .request("session.resume", json!({ "id": first }))
+        .await;
+    // The put-back's add, stopped.
+    reached(&gate).await;
+
+    assert_held(&mut s, &second, &workspace).await;
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+    let waiting = s
+        .client
+        .request("session.resume", json!({ "id": second }))
+        .await;
+    let core = s.core.core();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !core
+        .admission
+        .snapshot()
+        .held()
+        .iter()
+        .any(|held| matches!(held, ersa_core::admission::Command::PutBack { .. }))
+    {
+        assert!(tokio::time::Instant::now() < deadline, "never waited");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    gate.go();
+
+    assert!(s.client.response(resuming).await["result"].is_object());
+    // A second add would stop at the gate, and the answer never come.
+    let second_answer = tokio::time::timeout(Duration::from_secs(30), s.client.response(waiting));
+    let second_answer = second_answer.await.expect("answered without a second add");
+    assert!(second_answer["result"].is_object(), "{second_answer:#}");
+    assert_back(&mut s, &workspace).await;
+    let adds = git.changes().iter().filter(|c| *c == "add").count();
+    assert_eq!(adds, 2, "made once, put back once");
+    assert_eq!(starts(&s), 4);
+}
+
+/// A try at the folder that a put-back gave up on holds the workspace too,
+/// until it ends.
+// verifies: PROTO-CORE-API-R143
+#[tokio::test(flavor = "multi_thread")]
+async fn a_try_a_put_back_gave_up_on_holds_its_workspace() {
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let mut s = stuck_folder_setup(&gate, ersa_core::workspace::WORKTREE_TURN_WAIT).await;
+    let workspace = s.workspace().await;
+    let first = s.stopped_session(&workspace).await;
+    let second = s.stopped_session(&workspace).await;
+    let core = s.core.core();
+    // Put away, its try at the folder let go however long it waited.
+    let putting = tokio::spawn({
+        let core = Arc::clone(&core);
+        let id = id(&workspace).to_string();
+        async move { ersa_core::api::put_away_workspace(&core, &id).await }
+    });
+    reached(&gate).await;
+    gate.go();
+    let _ = putting.await.unwrap();
+    put_away_once_held(&core, &workspace).await;
+    // Files a put-away left at the path: the put-back's try at them stops
+    // at the gate and is given up on.
+    let path = folder(&workspace);
+    std::fs::create_dir_all(path.join("half")).unwrap();
+    std::fs::write(path.join("half").join("left.txt"), "left\n").unwrap();
+    let resuming = s
+        .client
+        .request("session.resume", json!({ "id": first }))
+        .await;
+    reached(&gate).await;
+    let answer = s.client.response(resuming).await;
+    assert_eq!(kind(&answer["error"]), "vcs_error", "{answer:#}");
+
+    assert_held(&mut s, &second, &workspace).await;
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+
+    // The try returns; then the hold goes, and admission has the workspace
+    // put away, which nothing holds.
+    gate.go();
+    put_away_once_held(&core, &workspace).await;
+}
+
+/// While a delete of one session holds a put-away workspace, a resume of
+/// another session there, or a send to it, answers `busy` and puts nothing
+/// back; once the delete ends, the resume puts the folder back.
+// verifies: PROTO-CORE-API-R144
+#[tokio::test(flavor = "multi_thread")]
+async fn nothing_is_put_back_while_a_delete_holds_the_workspace() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let stats = Arc::clone(&fake.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut s = Setup::over(core, stats).await;
+    let workspace = s.workspace().await;
+    let first = s.stopped_session(&workspace).await;
+    let second = s.stopped_session(&workspace).await;
+    s.put_away(&workspace).await.expect("put away");
+    // The delete holds the workspace while its record deletion stalls.
+    let stalled = fake.delete_gate.lock().await;
+    let changes = json!({ "id": workspace["id"] });
+    let token = s.client.result("workspace.changes", changes).await["token"].clone();
+    let params = json!({ "id": first, "token": token });
+    let deleting = s.client.request("session.delete", params).await;
+    let core = s.core.core();
+    let held = || {
+        let state = core.admission.snapshot();
+        let entry = state.workspace(id(&workspace)).cloned();
+        entry.is_some_and(|w| w.deleting.is_some())
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while !held() {
+        assert!(tokio::time::Instant::now() < deadline, "never held");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    for method in ["session.resume", "session.send"] {
+        // `refused` asserts nothing was put back: no folder, still put away.
+        let error = refused(&mut s, method, &second, &workspace).await;
+        assert_eq!(error["data"]["detail"], "busy", "{method}: {error:#}");
+    }
+
+    drop(stalled);
+    assert!(s.client.response(deleting).await["result"].is_object());
+    s.client
+        .result("session.resume", json!({ "id": second }))
+        .await;
+    assert_back(&mut s, &workspace).await;
+}
+
 // -- Waiting (PROTO-CORE-API-R124, R132, R134) ------------------------------
 
 /// A Core whose git stops each worktree's first removal at `gate`, then
@@ -483,6 +729,7 @@ async fn the_put_away_and_the_turn_share_one_wait() {
 /// Stop while a send waits for its workspace's put-away answers at once
 /// that the message was stopped; the put-back goes on to its end, and the
 /// backend is not started.
+// verifies: PROTO-CORE-API-R145
 #[tokio::test(flavor = "multi_thread")]
 async fn stopping_a_send_that_waits_for_a_put_back_answers_at_once() {
     let gate = Arc::new(Gate::default());
@@ -515,4 +762,42 @@ async fn stopping_a_send_that_waits_for_a_put_back_answers_at_once() {
     }
     assert_back(&mut s, &workspace).await;
     assert_eq!(starts(&s), 1, "the backend was not started");
+    assert_eq!(session_row(&mut s, &session).await["state"], "ended");
+}
+
+/// Stop while a send's put-back is making the folder answers at once that
+/// the message was stopped; the put-back goes on to make the folder, the
+/// workspace is then ready, and no backend starts.
+// verifies: PROTO-CORE-API-R145
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_a_send_while_its_folder_is_put_back_answers_at_once() {
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let (mut s, _git) = stopping_adds(&gate).await;
+    let workspace = workspace_through(&mut s, &gate).await;
+    let session = s.stopped_session(&workspace).await;
+    s.put_away(&workspace).await.expect("put away");
+    let params = json!({ "id": session, "text": "again" });
+    let sending = s.client.request("session.send", params).await;
+    // The put-back's add, stopped.
+    reached(&gate).await;
+
+    s.client
+        .result("session.interrupt", json!({ "id": session }))
+        .await;
+    let answer = s.client.response(sending).await;
+
+    assert_eq!(
+        answer["error"]["data"]["reason"], "send_stopped",
+        "{answer:#}"
+    );
+    gate.go();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while s.listed(&workspace).await["state"] != "ready" {
+        assert!(tokio::time::Instant::now() < deadline, "never put back");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_back(&mut s, &workspace).await;
+    assert_eq!(starts(&s), 1, "the backend was not started");
+    assert_eq!(session_row(&mut s, &session).await["state"], "ended");
 }

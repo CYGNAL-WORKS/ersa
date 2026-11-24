@@ -4724,6 +4724,7 @@ fn put_away_with_a_session() -> State {
 /// removes, deletes, forks or puts it away meanwhile, no session joins it,
 /// and no backend starts there until the folder is back.
 // verifies: FLOW-CLEAN-UP-R03
+// verifies: PROTO-CORE-API-R143
 #[test]
 fn a_put_back_holds_its_workspace_until_the_folder_is_back() {
     let mut state = put_away_with_a_session();
@@ -4737,6 +4738,7 @@ fn a_put_back_holds_its_workspace_until_the_folder_is_back() {
         (remove_workspace(W), Refusal::WorkspaceBusy),
         (put_away(W), Refusal::WorkspaceBusy),
         (delete_session("s1"), Refusal::WorkspaceHeld),
+        (remove_session("s1"), Refusal::WorkspaceHeld),
         (fork("s1"), Refusal::WorkspaceHeld),
         (create_session(W, "s2"), Refusal::WorkspaceNotReady),
         (find_session(W, "s2"), Refusal::WorkspaceNotReady),
