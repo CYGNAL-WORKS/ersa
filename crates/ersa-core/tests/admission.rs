@@ -133,6 +133,12 @@ fn put_away(workspace: &str) -> Command {
     }
 }
 
+fn put_back(workspace: &str) -> Command {
+    Command::PutBack {
+        workspace: workspace.into(),
+    }
+}
+
 fn remove_project() -> Command {
     Command::RemoveProject { project: P.into() }
 }
@@ -2577,12 +2583,14 @@ fn worlds() -> Vec<(&'static str, Vec<Input>)> {
     ]
 }
 
-/// Putting either workspace away, and every way a put-away ends.
+/// Putting either workspace away and back, and every way a put-away or a
+/// put-back ends.
 fn putting_away() -> Vec<Input> {
     let mut inputs = Vec::new();
     for workspace in [ROOT, W] {
         let workspace = || workspace.to_string();
         inputs.push(Input::Command(put_away(&workspace())));
+        inputs.push(Input::Command(put_back(&workspace())));
         for report in [
             Report::WorkspacePutAway {
                 workspace: workspace(),
@@ -2591,6 +2599,13 @@ fn putting_away() -> Vec<Input> {
                 workspace: workspace(),
             },
             Report::Ended(Operation::PutAway(workspace())),
+            Report::WorkspacePutBack {
+                workspace: workspace(),
+            },
+            Report::PutBackRefused {
+                workspace: workspace(),
+            },
+            Report::Ended(Operation::PutBack(workspace())),
         ] {
             inputs.push(Input::Report(report));
         }
@@ -2859,6 +2874,7 @@ fn about_a_place(input: &Input) -> bool {
                 | Operation::CreateWorkspace(_)
                 | Operation::RemoveWorkspace(_)
                 | Operation::PutAway(_)
+                | Operation::PutBack(_)
         )
     };
     match input {
@@ -2869,6 +2885,7 @@ fn about_a_place(input: &Input) -> bool {
                 | Command::CreateWorkspace { .. }
                 | Command::RemoveWorkspace { .. }
                 | Command::PutAway { .. }
+                | Command::PutBack { .. }
         ),
         Input::Report(Report::Ended(ended)) => operation(ended),
         Input::Report(report) => matches!(
@@ -2885,6 +2902,8 @@ fn about_a_place(input: &Input) -> bool {
                 | Report::WorkspaceDeleted { .. }
                 | Report::WorkspacePutAway { .. }
                 | Report::PutAwayRefused { .. }
+                | Report::WorkspacePutBack { .. }
+                | Report::PutBackRefused { .. }
         ),
     }
 }
@@ -2939,13 +2958,28 @@ fn check_state(state: &State) {
             | WorkspacePhase::Ready
             | WorkspacePhase::Error
             | WorkspacePhase::PutAway
-            | WorkspacePhase::PuttingAway => {
+            | WorkspacePhase::PuttingAway
+            | WorkspacePhase::PuttingBack => {
                 workspace.root && project.map(|p| p.phase) == Some(ProjectPhase::Removing)
             }
         };
         // Putting away keeps the workspace and its sessions, and takes its
-        // folder.
-        let putting_away = workspace.phase == WorkspacePhase::PuttingAway;
+        // folder; putting back makes the folder again. Either holds it.
+        let putting_away = matches!(
+            workspace.phase,
+            WorkspacePhase::PuttingAway | WorkspacePhase::PuttingBack
+        );
+        // The user's own folder is never put away, so never put back.
+        assert!(
+            !(workspace.root
+                && matches!(
+                    workspace.phase,
+                    WorkspacePhase::PutAway
+                        | WorkspacePhase::PuttingAway
+                        | WorkspacePhase::PuttingBack
+                )),
+            "root workspace {id} is put away: {state:#?}"
+        );
         // No workspace is held for removal with a session Ersa started in it.
         assert!(
             !removal || started_in(state, id) == 0,
@@ -2966,10 +3000,11 @@ fn check_state(state: &State) {
             !((removal || putting_away) && workspace.deleting.is_some()),
             "workspace {id} is held twice: {state:#?}"
         );
-        // No session Ersa starts is in a workspace with no folder.
+        // No session Ersa starts is in a workspace with no folder, or one
+        // whose folder is still being made.
         let gone = matches!(
             workspace.phase,
-            WorkspacePhase::PutAway | WorkspacePhase::PuttingAway
+            WorkspacePhase::PutAway | WorkspacePhase::PuttingAway | WorkspacePhase::PuttingBack
         );
         assert!(
             !(gone && runs),
@@ -3034,6 +3069,9 @@ fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
             }
             WorkspacePhase::PuttingAway => {
                 reports.push(Report::Ended(Operation::PutAway(id.clone())));
+            }
+            WorkspacePhase::PuttingBack => {
+                reports.push(Report::Ended(Operation::PutBack(id.clone())));
             }
             WorkspacePhase::Ready | WorkspacePhase::Error | WorkspacePhase::PutAway => {}
         }
@@ -3542,6 +3580,7 @@ fn every_input_is_in_a_world() {
                 Command::CreateWorkspace { .. } => "CreateWorkspace",
                 Command::RemoveWorkspace { .. } => "RemoveWorkspace",
                 Command::PutAway { .. } => "PutAway",
+                Command::PutBack { .. } => "PutBack",
                 Command::CreateSession { .. } => "CreateSession",
                 Command::DeleteSession { .. } => "DeleteSession",
                 Command::RemoveSession { .. } => "RemoveSession",
@@ -3572,6 +3611,8 @@ fn every_input_is_in_a_world() {
                 Report::WorkspaceDeleted { .. } => "WorkspaceDeleted",
                 Report::WorkspacePutAway { .. } => "WorkspacePutAway",
                 Report::PutAwayRefused { .. } => "PutAwayRefused",
+                Report::WorkspacePutBack { .. } => "WorkspacePutBack",
+                Report::PutBackRefused { .. } => "PutBackRefused",
                 Report::SessionStored { .. } => "SessionStored",
                 Report::RowWritten { .. } => "RowWritten",
                 Report::SectionStored { .. } => "SectionStored",
@@ -3588,7 +3629,7 @@ fn every_input_is_in_a_world() {
     };
     let whole = every_input_of_the_whole_world(&["s1"]);
     let kinds: HashSet<&str> = whole.iter().map(kind).collect();
-    assert_eq!(kinds.len(), 21 + 23, "{kinds:#?}");
+    assert_eq!(kinds.len(), 22 + 25, "{kinds:#?}");
     // Every operation's end, and every kind of write.
     let ends: HashSet<_> = whole
         .iter()
@@ -3597,7 +3638,7 @@ fn every_input_is_in_a_world() {
             Input::Command(_) | Input::Report(_) => None,
         })
         .collect();
-    assert_eq!(ends.len(), 16, "the end of every kind of operation");
+    assert_eq!(ends.len(), 17, "the end of every kind of operation");
     for change in writes("s1") {
         let (session, change) = ("s1".to_string(), change);
         let written = Input::Report(Report::RowWritten { session, change });
@@ -3723,6 +3764,7 @@ fn every_input_in_every_reachable_state_keeps_what_admission_promises() {
     for wanted in [
         WorkspacePhase::PuttingAway,
         WorkspacePhase::PutAway,
+        WorkspacePhase::PuttingBack,
         WorkspacePhase::Removing {
             replaced: Replaced::PutAway,
         },
@@ -4745,4 +4787,186 @@ fn a_removal_of_a_put_away_workspace_that_does_not_happen_leaves_it_put_away() {
             "{ending:?}"
         );
     }
+}
+
+// -- Putting a workspace back (FLOW-CLEAN-UP-R03, PROTO-CORE-API-R132) -----
+
+/// A world whose workspace `W` is put away, with a stopped session `s1`
+/// of Ersa's in it.
+fn put_away_with_a_session() -> State {
+    let mut existing = existing();
+    existing.workspaces[1].phase = WorkspacePhase::PutAway;
+    existing.sessions.push(row("s1", W, false));
+    State::restored(existing)
+}
+
+/// A put-back of a put-away workspace is admitted and holds it: nothing
+/// removes, deletes, forks or puts it away meanwhile, no session joins it,
+/// and no backend starts there until the folder is back.
+// verifies: FLOW-CLEAN-UP-R03
+// verifies: PROTO-CORE-API-R143
+#[test]
+fn a_put_back_holds_its_workspace_until_the_folder_is_back() {
+    let mut state = put_away_with_a_session();
+    command(&mut state, begin_start("s1"));
+    assert_eq!(
+        command(&mut state, put_back(W)),
+        admitted(Operation::PutBack(W.into()))
+    );
+    assert_eq!(phase(&state, W), Some(WorkspacePhase::PuttingBack));
+    for (asked, answer) in [
+        (remove_workspace(W), Refusal::WorkspaceBusy),
+        (put_away(W), Refusal::WorkspaceBusy),
+        (delete_session("s1"), Refusal::WorkspaceHeld),
+        (remove_session("s1"), Refusal::WorkspaceHeld),
+        (fork("s1"), Refusal::WorkspaceHeld),
+        (create_session(W, "s2"), Refusal::WorkspaceNotReady),
+        (find_session(W, "s2"), Refusal::WorkspaceNotReady),
+        (launch("s1"), Refusal::WorkspaceHeld),
+    ] {
+        let mut asked_now = state.clone();
+        assert_eq!(
+            command(&mut asked_now, asked.clone()),
+            Outcome::Refused(answer),
+            "{asked:?}"
+        );
+    }
+    // Back: the workspace is ready, and the backend may start there.
+    let mut back = state.clone();
+    report(
+        &mut back,
+        Report::WorkspacePutBack {
+            workspace: W.into(),
+        },
+    );
+    assert_eq!(phase(&back, W), Some(WorkspacePhase::Ready));
+    assert_eq!(
+        command(&mut back, launch("s1")),
+        admitted(Operation::Run("s1".into()))
+    );
+}
+
+/// A put-back that is refused (the branch is gone or in use) or fails, or
+/// ends without saying, leaves the workspace put away, as the store has it.
+// verifies: FLOW-CLEAN-UP-R04
+#[test]
+fn a_put_back_that_does_not_make_the_folder_leaves_it_put_away() {
+    let mut state = put_away_with_a_session();
+    command(&mut state, put_back(W));
+    for ending in [
+        Report::PutBackRefused {
+            workspace: W.into(),
+        },
+        Report::Ended(Operation::PutBack(W.into())),
+    ] {
+        let mut ended = state.clone();
+        report(&mut ended, ending.clone());
+        assert_eq!(
+            phase(&ended, W),
+            Some(WorkspacePhase::PutAway),
+            "{ending:?}"
+        );
+        // And it can be put back again.
+        assert_eq!(
+            command(&mut ended, put_back(W)),
+            admitted(Operation::PutBack(W.into())),
+            "{ending:?}"
+        );
+    }
+}
+
+/// A put-back asked for while the workspace is being put away, or while a
+/// try at its folder the put-away gave up on has not ended (the put-away's
+/// operation has not ended), is held, and decided again when the put-away
+/// ends, however it ends: so no folder is made that the put-away would
+/// still delete.
+// verifies: PROTO-CORE-API-R132
+#[test]
+fn a_put_back_waits_for_a_put_away_under_way() {
+    let mut state = with_a_stopped_session();
+    command(&mut state, put_away(W));
+    assert_eq!(command(&mut state, put_back(W)), Outcome::Held);
+    // A resume's start may have its session's turn meanwhile; the put-back
+    // still waits.
+    command(&mut state, begin_start("s1"));
+    assert_eq!(state.held().len(), 1);
+
+    let workspace = || W.to_string();
+    for (ending, answer) in [
+        (
+            Report::WorkspacePutAway {
+                workspace: workspace(),
+            },
+            admitted(Operation::PutBack(W.into())),
+        ),
+        (
+            Report::Ended(Operation::PutAway(workspace())),
+            admitted(Operation::PutBack(W.into())),
+        ),
+        // Refused before anything was removed: the folder is there, and
+        // there is nothing to put back.
+        (
+            Report::PutAwayRefused {
+                workspace: workspace(),
+            },
+            Outcome::Done,
+        ),
+    ] {
+        let mut ended = state.clone();
+        let step = step(&mut ended, Input::Report(ending.clone()));
+        assert_eq!(step.released, vec![(0, answer.clone())], "{ending:?}");
+        let expected = match answer {
+            Outcome::Done => WorkspacePhase::Ready,
+            _ => WorkspacePhase::PuttingBack,
+        };
+        assert_eq!(phase(&ended, W), Some(expected), "{ending:?}");
+        assert!(ended.held().is_empty());
+    }
+}
+
+/// Two sessions in one put-away workspace resumed at once put it back
+/// once: the second waits for the first's put-back and then finds the
+/// folder back, with nothing to do; or, the first refused, puts it back
+/// itself.
+// verifies: FLOW-CLEAN-UP-R03
+#[test]
+fn a_second_put_back_waits_for_the_first() {
+    let mut state = put_away_with_a_session();
+    command(&mut state, put_back(W));
+    assert_eq!(command(&mut state, put_back(W)), Outcome::Held);
+
+    let mut back = state.clone();
+    let done = step(
+        &mut back,
+        Input::Report(Report::WorkspacePutBack {
+            workspace: W.into(),
+        }),
+    );
+    assert_eq!(done.released, vec![(0, Outcome::Done)]);
+    let mut refused = state;
+    let again = step(
+        &mut refused,
+        Input::Report(Report::PutBackRefused {
+            workspace: W.into(),
+        }),
+    );
+    assert_eq!(
+        again.released,
+        vec![(0, admitted(Operation::PutBack(W.into())))]
+    );
+}
+
+/// A workspace that is not put away has nothing to put back, and the
+/// command begins nothing; one that is gone is refused.
+// verifies: FLOW-CLEAN-UP-R03
+#[test]
+fn a_put_back_of_a_workspace_that_has_its_folder_does_nothing() {
+    let mut state = with_a_stopped_session();
+    let before = state.clone();
+    assert_eq!(command(&mut state, put_back(W)), Outcome::Done);
+    assert_eq!(state, before);
+    assert_eq!(
+        command(&mut state, put_back("w-gone")),
+        Outcome::Refused(Refusal::NoWorkspace)
+    );
 }

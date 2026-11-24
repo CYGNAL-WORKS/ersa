@@ -67,11 +67,13 @@ use crate::raw_log::RawLog;
 
 mod fork;
 mod found;
+mod put_back;
 mod resume;
 mod send;
 mod settings;
 
 pub use fork::{Beginning, Forkable};
+pub use put_back::PutBack;
 pub use resume::Resumption;
 pub use send::{Pacer, Waiting};
 
@@ -177,6 +179,9 @@ pub enum SessionError {
     /// A `session.arrange` named a section that does not exist.
     #[error("no section {0}")]
     NoSection(String),
+    /// git could not put the session's workspace back (FLOW-CLEAN-UP-R03).
+    #[error(transparent)]
+    Vcs(#[from] crate::workspace::VcsError),
     /// A refusal the user meets: answered `invalid_state` with `reason`, so
     /// the Interface can say it in its own words; `message` is for the log
     /// (PROTO-CORE-API, Errors).
