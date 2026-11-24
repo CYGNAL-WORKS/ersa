@@ -8,6 +8,7 @@ use std::time::Duration;
 use ersa_core::{Adapter, CoreConfig, Gate};
 use serde_json::{Value, json};
 
+use super::deleting::{FailingGit, Removal};
 use super::fake::{self, FakeAdapter};
 use super::{Client, TestCore, git, git_repo, start_with_adapters, tempdir};
 
@@ -32,6 +33,46 @@ pub async fn setup_with(configure: impl FnOnce(&mut CoreConfig)) -> Setup {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
     let core = start_with_adapters(tempdir(), configure, adapters).await;
     Setup::over(core, stats).await
+}
+
+/// A Core whose git drops its record of a worktree and then fails, so a
+/// removal goes on to the folder, and whose tries at a folder stop at
+/// `gate` and give up after 200 ms; with `wait` for each wait at the
+/// project's worktrees.
+pub async fn stuck_folder_setup(gate: &Arc<Gate>, wait: Duration) -> Setup {
+    let git_drops = Arc::new(FailingGit::new(Removal::DropsRecordThenFails, None));
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
+    let configure = {
+        let gate = Arc::clone(gate);
+        move |config: &mut CoreConfig| {
+            config.command_transport = Some(ersa_core::CommandTransport(git_drops));
+            config.folder_gate = Some(gate);
+            config.folder_removal_limit = Duration::from_millis(200);
+            config.worktree_turn_wait = wait;
+        }
+    };
+    let core = start_with_adapters(tempdir(), configure, adapters).await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let root = core.dir.path().join("worktrees").display().to_string();
+    let patch = json!({ "patch": { "workspaces": { "root": root } } });
+    client.result("settings.set", patch).await;
+    // The project's folder is inspected at the gate too.
+    let add = json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false });
+    let adding = client.request("project.add", add).await;
+    reached(gate).await;
+    gate.go();
+    let project = client.response(adding).await["result"].clone();
+    Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    }
 }
 
 impl Setup {
