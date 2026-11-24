@@ -81,7 +81,11 @@ impl SessionManager {
                 Ok(_) = canceled.wait_for(|c| *c) => return Err(send::stopped()),
             },
         };
-        answer.unwrap_or_else(|e| Err(SessionError::Internal(format!("putting back panicked: {e}"))))
+        answer.unwrap_or_else(|e| {
+            Err(SessionError::Internal(format!(
+                "putting back panicked: {e}"
+            )))
+        })
     }
 }
 
@@ -217,13 +221,9 @@ async fn check_checkout(
         ));
     }
     if let Checkout::Branch(branch) = &checkout {
-        let elsewhere = workspace::git_branch_checked_out_elsewhere(
-            transport,
-            &spec.repo,
-            branch,
-            &spec.path,
-        )
-        .await;
+        let elsewhere =
+            workspace::git_branch_checked_out_elsewhere(transport, &spec.repo, branch, &spec.path)
+                .await;
         if elsewhere.map_err(SessionError::Vcs)? {
             return Err(SessionError::refused(
                 ErrorReason::BranchInUse,
