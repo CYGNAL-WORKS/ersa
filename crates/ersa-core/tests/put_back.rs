@@ -314,17 +314,9 @@ async fn a_branch_another_worktree_is_rebasing_answers_with_gits_words() {
         &s.repo,
         &["worktree", "add", "--quiet", "--detach", &elsewhere_text],
     );
-    // Not `git`: the rebase stopping is the point, and that helper asserts
-    // success.
-    let rebase = std::process::Command::new("git")
-        .arg("-C")
-        .arg(&elsewhere)
-        .args([
-            "-c",
-            "user.name=Ersa Tests",
-            "-c",
-            "user.email=tests@ersa.invalid",
-        ])
+    // Sealed as `git` is, but not `git`: the rebase stopping is the point,
+    // and that helper asserts success.
+    let rebase = support::sealed::git_command(&elsewhere)
         .args(["rebase", "main", branch(&workspace)])
         .output()
         .expect("git runs");
