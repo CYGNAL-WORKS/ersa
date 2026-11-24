@@ -61,7 +61,6 @@ afterEach(() => {
 
 describe("reading a session's raw log", () => {
   it("asks from the line after the last it holds, once a second, with the clip", async () => {
-    // verifies: FLOW-READ-RAW-LOG-R05
     const { reader, reads, indices } = setUp();
     reader.show({ open: true, session: "s1", link: 1 });
     expect(reads).toHaveLength(1);
@@ -89,7 +88,7 @@ describe("reading a session's raw log", () => {
   });
 
   it("asks again at once after a full answer, and never has two reads out", async () => {
-    // verifies: FLOW-READ-RAW-LOG-R05
+    // verifies: FLOW-READ-RAW-LOG-R19
     const { reader, reads, indices } = setUp();
     reader.show({ open: true, session: "s1", link: 1 });
     expect(RAW_LOG_PAGE).toBe(1000);
@@ -107,7 +106,6 @@ describe("reading a session's raw log", () => {
   });
 
   it("knows when the first answer for a session has come", async () => {
-    // verifies: FLOW-READ-RAW-LOG-R05
     const { reader, reads, last } = setUp();
     reader.show({ open: true, session: "s1", link: 1 });
     expect(last()).toEqual({ session: "s1", lines: [], read: false, earlier: false });
