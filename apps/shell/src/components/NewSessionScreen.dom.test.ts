@@ -189,7 +189,7 @@ describe("what the user chose on the new-session screen when the project changes
     ],
     efforts: ["low", "high"].map((id) => ({ id, label: id, default: false })),
     permission_modes: [
-      { id: "default", label: "Ask", default: true },
+      { id: "default", label: "Manual", default: true },
       { id: "plan", label: "Plan", default: false },
     ],
   };
@@ -255,7 +255,7 @@ describe("a backend chosen on the new-session screen", () => {
         { id: "opus", label: "Opus via Copilot", default: false },
       ],
       permission_modes: [
-        { id: "ask", label: "Ask", default: true },
+        { id: "manual", label: "Manual", default: true },
         { id: "plan", label: "Plan", default: false },
       ],
     };
@@ -266,7 +266,7 @@ describe("a backend chosen on the new-session screen", () => {
         { id: "opus", label: "Opus 5.5", default: false },
       ],
       permission_modes: [
-        { id: "default", label: "Ask", default: true },
+        { id: "default", label: "Manual", default: true },
         { id: "plan", label: "Plan", default: false },
       ],
     };
@@ -280,7 +280,7 @@ describe("a backend chosen on the new-session screen", () => {
     pick("Permission mode", /Plan/);
     pick("Backend", /Copilot/);
     pick("Project", /beta/);
-    expect([label("Backend"), label("Model"), label("Permission mode")]).toEqual(["Backend: Copilot", "Model: Auto", "Permission mode: Ask"]);
+    expect([label("Backend"), label("Model"), label("Permission mode")]).toEqual(["Backend: Copilot", "Model: Auto", "Permission mode: Manual"]);
   });
 });
 

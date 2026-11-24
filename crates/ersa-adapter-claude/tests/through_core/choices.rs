@@ -10,8 +10,10 @@ use crate::support::{start_with_adapters, tempdir};
 /// The efforts and permission modes are the adapter's knowledge, listed
 /// even while the CLI is missing from the host; the models are the CLI's
 /// own, so a missing CLI lists none (PROTO-CORE-API-R72). No effort is
-/// marked, as the CLI marks none.
+/// marked, as the CLI marks none. The permission modes are named and
+/// ordered as Claude Desktop's permission menu, with `default` marked.
 // verifies: PROTO-CORE-API-R72
+// verifies: PROTO-CLAUDE-CODE-STREAM-R80
 #[tokio::test(flavor = "multi_thread")]
 async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
     let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
@@ -49,6 +51,13 @@ async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
     );
     assert_eq!(
         offered("permission_modes"),
-        with_default(&["default", "acceptEdits", "plan", "auto"], "default")
+        with_default(&["auto", "default", "acceptEdits", "plan"], "default")
     );
+    let labels: Vec<&str> = claude["permission_modes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["Auto", "Manual", "Accept edits", "Plan"]);
 }
