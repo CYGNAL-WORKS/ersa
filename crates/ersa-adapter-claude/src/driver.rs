@@ -24,10 +24,10 @@ use std::time::Duration;
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, ConversationEnd,
-    Direction, ImageLimits, LineReader, LineWriter, ListedRecord, OpenElsewhere, OutgoingMessage,
-    PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, QuestionReply,
-    RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings, Removal, Requested,
-    SessionConfig, SessionControl, TitleRules, Transport, async_trait,
+    Direction, ImageLimits, LineReader, LineWriter, ListedRecord, ModelReport, OpenElsewhere,
+    OutgoingMessage, PermissionDecision, Process, ProcessExit, ProcessSpec, Projector,
+    QuestionReply, RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings, Removal,
+    Requested, SessionConfig, SessionControl, TitleRules, Transport, async_trait,
 };
 use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::PermissionBehavior;
@@ -257,6 +257,19 @@ pub fn read_models(response: &Value) -> Result<Vec<ModelChoice>, AdapterError> {
             })
         })
         .collect()
+}
+
+/// The default effort in the CLI's answer to `get_settings` (its `response`
+/// object): `applied.effort`, the effort a session given none runs with
+/// (`applied-settings-2026-11-24.txt`), when it is a level the adapter
+/// offers. Any other value marks no default (PROTO-CLAUDE-CODE-STREAM-R82).
+fn read_default_effort(settings: &Value) -> Option<String> {
+    let effort = settings["applied"]["effort"].as_str()?;
+    choices()
+        .efforts
+        .iter()
+        .any(|level| level.id == effort)
+        .then(|| effort.to_string())
 }
 
 /// A sink for the model probe's process, whose lines belong to no session:
@@ -539,11 +552,16 @@ impl Adapter for ClaudeAdapter {
     /// closes stdin (PROTO-CLAUDE-CODE-STREAM-R39). It starts under an id of
     /// its own, as every new session does: a CLI started that way and given
     /// no message writes no session record (`initialize-only-2026-11-09.txt`).
-    /// The time limit is the session handshake's.
-    async fn models(
-        &self,
-        transport: Arc<dyn Transport>,
-    ) -> Result<Vec<ModelChoice>, AdapterError> {
+    ///
+    /// Once the CLI has answered, the probe asks `get_settings` for the
+    /// effort a session given none runs with, the default effort
+    /// (PROTO-CLAUDE-CODE-STREAM-R82). The probe has one time limit, the
+    /// session handshake's, counted from its start: whatever `initialize`
+    /// leaves of it is what `get_settings` gets. A CLI that refuses it,
+    /// exits first or runs out the limit marks no default, and its models
+    /// still stand.
+    async fn models(&self, transport: Arc<dyn Transport>) -> Result<ModelReport, AdapterError> {
+        let started = tokio::time::Instant::now();
         let config = SessionConfig {
             permission_mode: "default".into(),
             backend_session_id: self.new_session_id(),
@@ -554,9 +572,28 @@ impl Adapter for ClaudeAdapter {
             .launch(transport, config, Arc::new(ProbeSink), AskContext::No)
             .await?;
         let models = read_models(&answer["response"]);
+        let default_effort = match models {
+            Ok(_) => {
+                let left = self.handshake_timeout.saturating_sub(started.elapsed());
+                match session
+                    .ask_within("get_settings", HostRequest::GetSettings, left)
+                    .await
+                {
+                    Ok(settings) => read_default_effort(&settings),
+                    Err(e) => {
+                        tracing::debug!(error = %e, "Claude Code did not say its default effort");
+                        None
+                    }
+                }
+            }
+            Err(_) => None,
+        };
         // Closes stdin, and kills the CLI should it linger.
         let _ = session.stop().await;
-        models
+        Ok(ModelReport {
+            models: models?,
+            default_effort,
+        })
     }
 
     fn projector(&self) -> Box<dyn Projector> {
@@ -1297,36 +1334,48 @@ impl ClaudeSession {
     /// refusal. The answer is recorded before it reaches this wait, so the
     /// sink has it when this returns.
     async fn ask(&self, what: &str, request: HostRequest) -> Result<(), AdapterError> {
+        self.ask_within(what, request, self.answer_timeout)
+            .await
+            .map(|_| ())
+    }
+
+    /// [`Self::ask`] with a time limit of its own, covering the write and
+    /// the wait, and the answer's `response` object on success.
+    async fn ask_within(
+        &self,
+        what: &str,
+        request: HostRequest,
+        limit: Duration,
+    ) -> Result<Value, AdapterError> {
         let request_id = self.shared.request_id(what);
         // Registered before the write, so the read loop finds the waiter
         // however soon the answer comes. An exit clears every waiter, which
         // ends this wait too.
         let (answer_tx, answer_rx) = oneshot::channel();
         lock(&self.shared.awaiting).insert(request_id.clone(), answer_tx);
-        let written = self
-            .shared
-            .write(&HostMessage::control_request(&request_id, request))
-            .await;
-        if let Err(e) = written {
-            lock(&self.shared.awaiting).remove(&request_id);
-            return Err(e);
-        }
+        let asked = async {
+            self.shared
+                .write(&HostMessage::control_request(&request_id, request))
+                .await?;
+            // The read loop dropped the waiter: the CLI exited first.
+            answer_rx.await.map_err(|_| AdapterError::NotRunning)
+        };
         // A CLI that never answers (one too old to know the request, or
         // wedged) must not keep the waiter for the rest of the session.
-        let answer = tokio::time::timeout(self.answer_timeout, answer_rx).await;
-        match answer {
-            Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(()),
+        match tokio::time::timeout(limit, asked).await {
+            Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(answer["response"].clone()),
             Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
                 "the CLI refused the {what}: {}",
                 answer["error"].as_str().unwrap_or("no reason given")
             ))),
-            // The read loop dropped the waiter: the CLI exited first.
-            Ok(Err(_)) => Err(AdapterError::NotRunning),
+            Ok(Err(e)) => {
+                lock(&self.shared.awaiting).remove(&request_id);
+                Err(e)
+            }
             Err(_) => {
                 lock(&self.shared.awaiting).remove(&request_id);
                 Err(AdapterError::Protocol(format!(
-                    "the CLI did not answer the {what} within {:?}; it may still take it",
-                    self.answer_timeout
+                    "the CLI did not answer the {what} within {limit:?}; it may still take it"
                 )))
             }
         }
