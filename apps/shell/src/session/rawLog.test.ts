@@ -289,5 +289,14 @@ describe("reading a session's raw log", () => {
     // The same values again change nothing.
     reader.show({ open: true, session: "s1", link: 3 });
     expect(reads).toHaveLength(6);
+
+    // Try again starts a new connection that counts its links from 1 again, so the same number after none is a new
+    // connection too.
+    await reads[5]?.answer(entries(0, 3));
+    reader.show({ open: true, session: "s1", link: undefined });
+    expect(indices()).toEqual([0, 1, 2]);
+    reader.show({ open: true, session: "s1", link: 3 });
+    expect(reads[6]?.params).toEqual({ id: "s1", clip: 262144 });
+    expect(last()).toEqual({ session: "s1", lines: [], read: false, earlier: false });
   });
 });
