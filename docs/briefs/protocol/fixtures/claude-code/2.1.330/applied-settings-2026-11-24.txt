@@ -1,0 +1,21 @@
+Claude Code 2.1.330 (Windows), observed 2026-11-24. The CLI was started as Ersa's model probe starts it (the stream-json formats, `--permission-mode default`, `--setting-sources user`, `--permission-prompt-tool stdio`, `--await-initialize`, `--session-id`, in an empty folder), sent `initialize` and control requests and no user message, and closed. No run left a session record. A summary of what was seen; a ticket that relies on one of these records it as a fixture, on the version it is tested against.
+
+The models in the `initialize` response:
+- Five entries, in this order: `default` ("Default (recommended)", `resolvedModel` `claude-opus-5-5`), `opus` ("Opus", `claude-opus-5-5`), `claude-fable-5-2[1m]` ("Fable", `claude-fable-5-2`), `sonnet` ("Sonnet", `claude-sonnet-5-5`) and `haiku` ("Haiku", `claude-haiku-5-5`). The `default` entry and `opus` resolve to the same id.
+- Each entry carries `value`, `resolvedModel`, `displayName`, `description`, `supportsEffort`, `supportedEffortLevels`, `supportsAdaptiveThinking`, `supportsAutoMode` and `supportsThinkingOff`, and some `supportsFastMode`. Every entry listed all five effort levels and `supportsAutoMode: true`.
+- A `description` leads with the model's name and version ("Opus 5.5 · Best for everyday, complex tasks · …"); the `default` entry's reads "Use the default model (currently Opus 5.5) · …". `displayName` carries no version.
+- No entry and no other field of the response marks a default effort.
+
+The control request `get_settings` (`{"subtype":"get_settings"}`):
+- It answers success before any message, with `effective`, `sources`, `served_settings_state` and `applied`.
+- `applied` carries `model`, a resolved model id, and `effort`, an effort level, among fields Ersa does not read. With nothing named at launch it read `model: "claude-opus-5-5"`, the `default` entry's `resolvedModel`, and `effort: "medium"`.
+- `applied.effort` is the effort a session will run with: launched with `--effort xhigh` it read `xhigh`, and after `apply_flag_settings` with `effortLevel: high` it read `high`.
+- `applied.model` follows the model: launched with `--model haiku` it read `claude-haiku-5-5`, and after each `set_model` the CLI answered it read the id that answer gave.
+- With no effort named, `applied.effort` was `medium` for every listed model: after `set_model` to `default`, `opus`, `sonnet` and `haiku`, and at launch with `--model sonnet` and with `--model claude-fable-5-2[1m]`.
+
+Permission modes:
+- `initialize`'s `current_permission_mode` read `default`, and `auto` when launched with `--permission-mode auto`.
+- `set_permission_mode` with `auto` answered `{"mode":"auto"}` and a `system/status` line carrying `permissionMode` followed, as on 2.1.316.
+- `set_permission_mode` with `bypassPermissions` was refused: "Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions" (`error_code` `bypass_not_launched`).
+
+Not observed: whether 2.1.316, the version Ersa is tested against, answers `get_settings` or carries `applied`; a model whose own default effort differs from the others'; `applied` under a project's settings; a model entry with `supportsAutoMode: false`. One `set_model` with `claude-fable-5-2[1m]` was refused ("Unable to validate model: Could not resolve authentication method"), where the same model named at launch was taken; why was not looked into.
