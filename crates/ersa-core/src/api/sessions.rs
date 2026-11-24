@@ -553,8 +553,15 @@ async fn resumption(core: &Core, id: &str) -> Result<Resumption, ApiError> {
     // The folder's tries hold nothing until the put-back gives them its
     // own hold.
     let folder_tries = workspace::FolderTries::from_config(&core.config, Arc::new(()));
+    let git = core.transport_for(&project.host_id).ok_or_else(|| {
+        ApiError::new(
+            ersa_protocol::core_api::ErrorKind::TransportError,
+            format!("host {} cannot be reached", project.host_id),
+        )
+    })?;
     let put_back = PutBack {
         project_id: project.id.clone(),
+        git,
         repo: project.path.clone(),
         workspace_id: workspace.id,
         path: workspace.path,
