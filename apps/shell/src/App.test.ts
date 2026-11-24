@@ -2271,3 +2271,52 @@ describe("New session while Core is away", () => {
     expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
   });
 });
+
+// The model chip on the new-session screen when a listed model stands for the backend's default (FLOW-NEW-SESSION-R46):
+// the chip reads that model, the list has no Default row, and a session nobody chose a model for starts with the default.
+describe("the default model on the new-session screen", () => {
+  const standsIn: BackendInfo = {
+    ...claude,
+    models: [
+      { id: "default", label: "Default (recommended)", default: true, resolved: "claude-opus-5-5" },
+      { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5" },
+      { id: "sonnet", label: "Sonnet 5.5", default: false, resolved: "claude-sonnet-5-5" },
+    ],
+  };
+  const starting = {
+    "backend.list": () => [standsIn],
+    "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+    "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: params.workspace_id }),
+    "session.send": () => ({ turn: 1 }),
+  };
+  const model = () => screen.getByRole("button", { name: /^Model:/ });
+  const send = async () => {
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+  };
+
+  // verifies: FLOW-NEW-SESSION-R46
+  it("reads and marks the listed model, lists no Default, and starts with the backend's default choice", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    expect(model().getAttribute("aria-label")).toBe("Model: Opus 5.5");
+    fireEvent.click(model());
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Opus 5.5", "Sonnet 5.5"]);
+    expect(screen.getByRole("option", { selected: true }).textContent).toBe("Opus 5.5");
+    // Choosing the marked row changes nothing: the session still starts with the default.
+    fireEvent.click(screen.getByRole("option", { name: "Opus 5.5" }));
+    await send();
+    expect(paramsOf(core, "session.create")).toMatchObject({ model: "default" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R46
+  it("starts with the row's own choice when another row is chosen", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(model());
+    fireEvent.click(screen.getByRole("option", { name: "Sonnet 5.5" }));
+    expect(model().getAttribute("aria-label")).toBe("Model: Sonnet 5.5");
+    await send();
+    expect(paramsOf(core, "session.create")).toMatchObject({ model: "sonnet" });
+  });
+});

@@ -9,3 +9,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
+- [ ] 2026-11-24 FLOW-NEW-SESSION: R48 names a session's backend by its label only while its host's backends are listed, and the brief's Open questions leaves what the row shows before then undecided; with no listing there is no label, only the id, so the backend chip under a session waits for the listing (shows once `backend.list` answers for its host) rather than reading the id. A planning pass decides whether it should instead read the id, or the chip show a detecting state.

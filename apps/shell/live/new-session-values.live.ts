@@ -6,7 +6,8 @@ import { expect, test } from "./harness";
 
 // The values chosen on the new-session screen with real Claude Code (#397; FLOW-NEW-SESSION-R02, R12, R19): chosen
 // before the project is added, they are the ones the session starts with, the CLI runs with, and the session controls
-// show, under the labels chosen, after the first turn, when Claude Code reports an alias by the id it resolved to.
+// show, under the labels chosen, after the first turn, when Claude Code reports an alias by the id it resolved to;
+// and a session left at the default model, with the host's one backend named (FLOW-NEW-SESSION-R46, R48).
 test.use({ backend: "claude" });
 
 /** What the session controls read, chip by chip. */
@@ -31,17 +32,21 @@ test("a session runs with, and shows, the model, effort and permission mode chos
   const folder = path.join(ersa.dir, "values-check");
   mkdirSync(folder);
   const chips = ["Model", "Effort", "Permission mode"];
-  const choose = async (chip: string, option: string) => {
+  const choose = async (chip: string, option: string | RegExp) => {
     await page.getByRole("button", { name: new RegExp(`^${chip}:`) }).click();
     await page.getByRole("listbox", { name: chip }).getByRole("option", { name: option, exact: true }).click();
   };
 
-  // An alias (`opus`), which Claude Code reports by the full id once a turn has run, and values none of which is a default.
+  // An alias (`sonnet`), which Claude Code reports by the full id once a turn has run, and values none of which is a
+  // default. Not `opus`: its row stands for the default, so choosing it changes nothing (FLOW-NEW-SESSION-R46). The
+  // CLI's labels carry a version on some releases and not on others, so the row is found by its first word.
   await expect(page.getByRole("button", { name: /^Model:/ })).toBeVisible({ timeout: 60_000 });
-  await choose("Model", "Opus 5.5");
+  await choose("Model", /^Sonnet\b/);
   await choose("Effort", "Low");
   await choose("Permission mode", "Plan");
-  const chosen = ["Model: Opus 5.5", "Effort: Low", "Permission mode: Plan"];
+  const [model] = await reads(page, ["Model"]);
+  expect(model).toMatch(/^Model: Sonnet\b/);
+  const chosen = [model, "Effort: Low", "Permission mode: Plan"];
   expect(await reads(page, chips)).toEqual(chosen);
 
   // R19: then the project, added from the project chip.
@@ -60,26 +65,28 @@ test("a session runs with, and shows, the model, effort and permission mode chos
   await expect(page.getByRole("region", { name: "Transcript" })).toBeVisible({ timeout: 120_000 });
   const [cli] = invocations(ersa.label);
   expect(cli).toMatch(/--permission-mode plan\b/);
-  expect(cli).toMatch(/--model opus\b/);
+  expect(cli).toMatch(/--model sonnet\b/);
   expect(cli).toMatch(/--effort low\b/);
 
-  // After the first turn: the CLI has reported the model it resolved `opus` to, which `session.list` gives as reported
+  // After the first turn: the CLI has reported the model it resolved `sonnet` to, which `session.list` gives as reported
   // beside Core's request (PROTO-CORE-API-R102), and the chips still read as chosen (FLOW-NEW-SESSION-R33).
   await expect(page.getByRole("form", { name: "Composer" }).getByRole("button", { name: "Send", exact: true })).toBeVisible({ timeout: 120_000 });
   const listed = await page.evaluate(async () => {
     const all = (await (window as any).__TAURI_INTERNALS__.invoke("core_request", { method: "session.list", params: null })) as { model?: string; model_request?: string; effort?: string; permission_mode: string }[];
     return all.map(({ model, model_request, effort, permission_mode }) => ({ model, model_request, effort, permission_mode }));
   });
-  expect(listed).toEqual([{ model: expect.stringMatching(/^claude-opus-/), model_request: "opus", effort: "low", permission_mode: "plan" }]);
+  expect(listed).toEqual([{ model: expect.stringMatching(/^claude-sonnet-/), model_request: "sonnet", effort: "low", permission_mode: "plan" }]);
   expect(await reads(page, chips)).toEqual(chosen);
   await ersa.shot("after-first-turn");
 });
 
-test("a session left at Default keeps reading Default once Claude Code reports the model it chose", async ({ ersa }) => {
+test("a session left at the default model reads as the listed model it stands for, and names its lone backend", async ({ ersa }) => {
   test.setTimeout(300_000);
   const { page } = ersa;
-  // The default reads Default and the model it resolves to, never the CLI's own "Default (recommended)".
-  const defaultNamed = /^Model: Default \((?!recommended\)).+\)$/;
+  // FLOW-NEW-SESSION-R46: the default reads as the listed model it stands for, never Default, and that row is marked in
+  // a list with no Default row. R48: the backend chip names Claude Code, the host's one backend.
+  const defaultNamed = /^Model: (?!Default\b).+$/;
+  await expect(page.getByRole("button", { name: "Backend: Claude Code" })).toBeVisible({ timeout: 60_000 });
   const folder = path.join(ersa.dir, "default-check");
   mkdirSync(folder);
   await page.getByRole("button", { name: "Project: Choose a folder" }).click();
@@ -89,6 +96,13 @@ test("a session left at Default keeps reading Default once Claude Code reports t
   await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(page.getByRole("button", { name: "Project: default-check" })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", defaultNamed);
+  const shown = (await page.getByRole("button", { name: /^Model:/ }).getAttribute("aria-label"))?.replace(/^Model: /, "");
+  await page.getByRole("button", { name: /^Model:/ }).click();
+  const list = page.getByRole("listbox", { name: "Model" });
+  await expect(list.getByRole("option", { name: /^Default\b/ })).toHaveCount(0);
+  await expect(list.getByRole("option", { selected: true })).toContainText(shown ?? "");
+  await ersa.shot("model-list-at-default");
+  await page.keyboard.press("Escape");
 
   const words = page.getByRole("textbox", { name: "Message" });
   await words.fill("Reply with the single word: ready. Do not use any tools.");

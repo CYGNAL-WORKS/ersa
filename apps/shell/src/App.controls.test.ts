@@ -400,3 +400,37 @@ describe("the session controls' ring", () => {
     expect(ring().getAttribute("aria-label")).toBe("Context: none used yet");
   });
 });
+
+// A running session nobody chose a model for, whose default a listed model stands for (FLOW-NEW-SESSION-R46), and its
+// backend chip (FLOW-NEW-SESSION-R48).
+describe("the session controls of a session at the backend's default model", () => {
+  // verifies: FLOW-NEW-SESSION-R46
+  it.each([
+    ["before the backend reports its model", undefined],
+    ["once the backend reports the model the default resolved to", "claude-opus-5-5"],
+  ])("read and mark the listed model %s, list no Default, and send a change only for another row", async (_when, reported) => {
+    const core = fakeCore(session({ model: reported, model_request: undefined }), {
+      "session.set_model": () => core.becomes({ model: "claude-sonnet-5-5", model_request: "sonnet" }),
+    });
+    await start(core);
+    expect(chip("Model").getAttribute("aria-label")).toBe("Model: Opus 5.5");
+    fireEvent.click(chip("Model"));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Opus 5.5", "Sonnet 5.5"]);
+    expect(screen.getByRole("option", { selected: true }).textContent).toBe("Opus 5.5");
+    // The marked row changes nothing.
+    fireEvent.click(screen.getByRole("option", { name: "Opus 5.5" }));
+    await settle();
+    expect(core.calls.some((c) => c.method === "session.set_model")).toBe(false);
+    // Another row is named to the backend by its own choice.
+    fireEvent.click(chip("Model"));
+    fireEvent.click(screen.getByRole("option", { name: "Sonnet 5.5" }));
+    await settle();
+    expect(core.calls.find((c) => c.method === "session.set_model")?.params).toEqual({ id: "s1", model: "sonnet" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R48
+  it("names the session's backend by its label though the host has one backend", async () => {
+    await start(fakeCore(session()));
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+  });
+});
