@@ -12,7 +12,7 @@ Compare the diff with the issue (a file whose path you are given) and every brie
 - (b) behavior nobody asked for;
 - (c) requirements that look implemented but wrong, including a value shown or sent from a different source than the one the requirement names;
 - (d) fields, ids or codes the tests assert that no brief names;
-- (e) cited requirements with no test that would fail without the change. When the issue names requirement IDs, run `node scripts/manifest.mjs --verifies <every ID written in full, comma-separated>` in your worktree; it must pass.
+- (e) cited requirements with no test that would fail without the change or, for a requirement or clause `main` already met, with `main`'s code for it undone. When the issue names requirement IDs, run `node scripts/manifest.mjs --verifies <every ID written in full, comma-separated>` in your worktree; it must pass.
 
 Then, when the diff has tests, check that they would catch what they exist to catch.
 
