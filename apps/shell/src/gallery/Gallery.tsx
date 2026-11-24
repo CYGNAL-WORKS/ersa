@@ -1437,6 +1437,8 @@ const entries: Entry[] = [
       // FLOW-NEW-SESSION-R11: the listing failed, which is not a host without backends.
       ["Backend detection failed", <NewSessionScreen {...newSession} backends={{ local: [] }} backendFailures={{ local: "The host didn't answer in time." }} />],
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
+      // FLOW-NEW-SESSION-R46: the default reads as the listed model it stands for, marked, with no Default row.
+      ["The model chip open, at the default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="model" />)],
       // docs/design/COMPOSER.md: with no level chosen the effort reads Default, the first row of its list.
       ["The effort chip open, at Default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="effort" />)],
       // A model that takes no effort leaves the effort chip in its place, unavailable, reading None.
