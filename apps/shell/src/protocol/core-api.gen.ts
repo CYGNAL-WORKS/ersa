@@ -422,14 +422,14 @@ export type Notification =
       params: TerminalOutputNotification;
     };
 /**
- * Where a send is: checking its attachments, copying them into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
+ * Where a send is: checking its attachments, putting the session's workspace back, copying the attachments into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
  */
-export type SendPhase = "checking" | "copying" | "starting" | "handing_over";
+export type SendPhase = "checking" | "putting_back" | "copying" | "starting" | "handing_over";
 export type HostStatus = "connected" | "disconnected" | "unknown";
 /**
- * Where a send is: checking its attachments, copying them into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
+ * Where a send is: checking its attachments, putting the session's workspace back, copying the attachments into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
  */
-export type SendPhase1 = "checking" | "copying" | "starting" | "handing_over";
+export type SendPhase1 = "checking" | "putting_back" | "copying" | "starting" | "handing_over";
 /**
  * An identifier Core issues.
  */
@@ -822,6 +822,8 @@ export interface ErrorData {
     | "send_in_progress"
     | "send_stopped"
     | "folder_gone"
+    | "branch_gone"
+    | "branch_in_use"
     | "backend_unnamed"
     | "record_gone"
     | "open_elsewhere"
