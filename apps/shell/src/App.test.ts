@@ -138,7 +138,7 @@ const claude: BackendInfo = {
   tested: { min: "2.1.0", max: "2.1.400" },
   models: [{ id: "opus", label: "Opus", default: true }],
   efforts: [{ id: "high", label: "High", default: true }],
-  permission_modes: [{ id: "default", label: "Ask", default: true }],
+  permission_modes: [{ id: "default", label: "Manual", default: true }],
 };
 
 /** A Shell whose folder dialog answers each pick with the next of `picks`, then with a cancel. */

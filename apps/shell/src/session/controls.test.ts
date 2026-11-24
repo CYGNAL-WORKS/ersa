@@ -14,7 +14,7 @@ const backend = (name: string, status: BackendInfo["status"] = "available"): Bac
   tested: { min: "1.0.0", max: "2.0.0" },
   models: choices([`${name}-small`, `${name}-large`], `${name}-large`).map((m) => ({ ...m, efforts: ["low", "high"] })),
   efforts: choices(["low", "high"], "high"),
-  permission_modes: choices(["ask", "edits", "bypass"], "ask"),
+  permission_modes: choices(["manual", "edits", "bypass"], "manual"),
 });
 
 describe("the session controls' starting values", () => {
@@ -28,7 +28,7 @@ describe("the session controls' starting values", () => {
       backend: "claude-code",
       model: "claude-code-large",
       effort: "high",
-      permission_mode: "ask",
+      permission_mode: "manual",
     });
   });
 

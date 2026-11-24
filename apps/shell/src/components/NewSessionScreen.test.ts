@@ -31,7 +31,7 @@ const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
   ],
   // The CLI marks no effort as its default.
   efforts: choices([["medium", "Medium"], ["high", "High"]], "none"),
-  permission_modes: choices([["default", "Ask"], ["acceptEdits", "Accept edits"]], "default"),
+  permission_modes: choices([["default", "Manual"], ["acceptEdits", "Accept edits"]], "default"),
 });
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   ...claude(),
@@ -68,7 +68,7 @@ describe("the new-session screen", () => {
       "Project: ersa",
       "Model: Default (recommended)",
       "Effort: Default",
-      "Permission mode: Ask",
+      "Permission mode: Manual",
     ]);
     expect(html).toContain('aria-label="Context: none used yet"');
     // The Worktree checkbox, checked, in place of the workspace chip (issue 412).

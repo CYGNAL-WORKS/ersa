@@ -26,7 +26,7 @@ test("a running session's permission mode and effort change from its session con
 
   const controls = page.getByRole("group", { name: "Session controls" });
   const mode = controls.getByRole("button", { name: /^Permission mode:/ });
-  await expect(mode).toHaveAccessibleName("Permission mode: Ask");
+  await expect(mode).toHaveAccessibleName("Permission mode: Manual");
   await expect(mode).toBeEnabled();
   // The where chips stay read-only under the session.
   await expect(controls.getByRole("button", { name: /^Project:/ })).toBeDisabled();
