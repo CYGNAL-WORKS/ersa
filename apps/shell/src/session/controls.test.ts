@@ -59,7 +59,7 @@ describe("the session controls' starting values", () => {
     expect(valuesFor(project("git"), [plain])).toMatchObject({ model: "a", effort: undefined });
   });
 
-  /** Claude Code as `backend.list` lists it: the CLI's own `default` entry first, a model without efforts, and no effort marked. */
+  /** Claude Code as `backend.list` lists it: the CLI's own `default` entry first, a model without efforts, and no effort marked, as when the CLI does not say its default effort. */
   const claude: BackendInfo = {
     ...backend("claude-code"),
     models: [
