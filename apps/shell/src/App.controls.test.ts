@@ -433,4 +433,25 @@ describe("the session controls of a session at the backend's default model", () 
     await start(fakeCore(session()));
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
   });
+
+  // Before its host lists its backends, or when the listing failed, the chip is already in its place and reads the
+  // session's backend by its id, as a held model does, so nothing shifts when the label arrives (an open question in
+  // FLOW-NEW-SESSION).
+  it("holds the backend chip's place under the session's backend id until its host lists it", async () => {
+    let listing: (backends: BackendInfo[]) => void = () => {};
+    const core = fakeCore(session(), { "backend.list": () => new Promise<BackendInfo[]>((resolve) => (listing = resolve)) });
+    await start(core);
+    const names = () => within(controls()).getAllByRole("button").map((b) => b.getAttribute("aria-label")?.split(":")[0]);
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+    const before = names();
+    await act(async () => listing([claudeCode]));
+    await settle();
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+    expect(names()).toEqual(before);
+  });
+
+  it("reads the session's backend by its id when its host's listing failed", async () => {
+    await start(fakeCore(session(), { "backend.list": () => Promise.reject(refusal("backend.list: the host did not answer")) }));
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: claude-code");
+  });
 });
