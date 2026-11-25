@@ -15,7 +15,7 @@ describe("usage.updated windows", () => {
       rate_limit: {
         status: "allowed",
         windows: [
-          { id: "seven_day", label: "Weekly · all models", used: 0.04, resets_at: "2026-11-04T20:00:00Z" },
+          { id: "seven_day", label: "Weekly · all models", used: 0.3, resets_at: "2026-11-04T20:00:00Z" },
           { id: "five_hour", label: "5-hour limit", used: 1.2 },
         ],
       },

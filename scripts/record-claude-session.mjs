@@ -94,7 +94,7 @@ import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { redact } from "./redact.mjs";
+import { checkWritten, nextFixtureNumber, redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -267,10 +267,7 @@ if (!version) {
 
 const dir = join(ROOT, "docs", "briefs", "protocol", "fixtures", "claude-code", version);
 mkdirSync(join(dir, "record"), { recursive: true });
-// One past the highest number taken, not the count: a retired fixture leaves a
-// gap, and the count would hand its neighbor's number out again.
-const taken = readdirSync(dir).map((f) => /^(\d{2,})-.*\.jsonl$/.exec(f)).filter(Boolean).map((m) => Number(m[1]));
-const stem = `${String(Math.max(-1, ...taken) + 1).padStart(2, "0")}-${name}`;
+const stem = `${nextFixtureNumber(dir)}-${name}`;
 if (existsSync(join(dir, stem + ".jsonl"))) {
   console.error(`fixture ${stem} already exists`);
   process.exit(1);
@@ -585,6 +582,8 @@ for (const file of written.filter(existsSync)) {
     console.error(`WARNING: ${file} still contains the user name; redact it before committing`);
   }
 }
+// The redactor has run; an account detail it missed fails the recording here.
+checkWritten(written);
 // Leave nothing behind in the real ~/.claude or the temp directory, unless a
 // resume run follows. Only a scratch directory's sessions are deleted: their
 // project folder in ~/.claude holds the recorder's runs and nothing else.
