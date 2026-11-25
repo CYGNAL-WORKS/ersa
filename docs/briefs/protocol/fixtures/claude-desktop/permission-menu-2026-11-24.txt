@@ -17,6 +17,6 @@ The permission mode chip in the row beneath the composer opens a menu above it:
 
 The heading names the setting and, after a middle dot, that it is this session's. Each mode is two lines: its name, then a quieter sentence saying what it does. The chosen mode carries a check at the trailing edge, before its digit; Auto was chosen when observed. The digits 1 to 4 sit at the trailing edge of the four modes, in order. Bypass permissions sits apart at the foot, dimmed and unavailable, with no digit, and its second line says where to enable it.
 
-The row's own chips, beneath the menu, read "Fable 5.2", "High" and "Auto": the model, the effort and the permission mode, each as the value in use. Nothing in the row reads "Default".
+The row's own chips, beneath the menu, read "Fable 5.2", "High" and "Auto": the model, the effort and the permission mode, each as the value in use. Nothing in the row reads "Default". The menu's trailing edge is about level with the end of the "Auto" chip, the last chip before the ring, and the menu runs from there toward the leading edge, over the composer; the screenshot is cropped around the menu, so it does not show how much room the window had past the chip.
 
 Not observed: which mode a new session starts in, what the digits do, the menu for a session whose model does not take Auto, the menu once Bypass permissions is enabled, the model chip's and the effort chip's own lists, and Claude Desktop's version.
