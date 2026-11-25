@@ -863,7 +863,10 @@ async fn a_resume_that_puts_the_folder_back_says_so_before_it_answers() {
         assert_eq!(before, ["putting_back"], "refused: {refused}");
         assert!(after.is_empty(), "refused: {refused}; after: {after:?}");
         if refused {
-            assert_eq!(answer["error"]["data"]["reason"], "branch_gone", "{answer:#}");
+            assert_eq!(
+                answer["error"]["data"]["reason"], "branch_gone",
+                "{answer:#}"
+            );
         } else {
             assert!(answer["result"].is_object(), "{answer:#}");
             assert_back(&mut s, &workspace).await;
