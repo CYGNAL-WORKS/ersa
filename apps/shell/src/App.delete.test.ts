@@ -351,6 +351,7 @@ describe("the new-session screen behind the delete question", () => {
       hide: async () => {},
       quit: async () => {},
       openLink: () => {},
+    openDiagnosticLog: async () => {},
       pickFolder,
       pickFiles: async () => [],
       onDragDrop: () => () => {},

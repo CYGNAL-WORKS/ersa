@@ -4,7 +4,7 @@
 // held those are, and goes on following the end. jsdom does no layout, so the list's height is stubbed and the row
 // height is the design's token, set on the page as the stylesheet would.
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RawLogEntry } from "../protocol/core-api.gen";
@@ -175,5 +175,55 @@ describe("the filter", () => {
     update(viewOf(entries(0, 6), { session: "s2" }), "s2");
     expect((field() as HTMLInputElement).value).toBe("error");
     expect(texts()).toEqual(["Error 0", "Error 5"]);
+  });
+});
+
+describe("Open diagnostic log", () => {
+  const button = () => screen.getByRole("button", { name: "Open diagnostic log" });
+  const problem = () => document.querySelector(".raw-log-problem");
+  const opening = (open: () => Promise<void>, attachedTo?: string) =>
+    render(createElement(DeveloperPane, { session: "s1", view: viewOf(entries(0, 3)), backend: "Claude Code", onOpenDiagnosticLog: open, attachedTo }));
+  const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
+
+  // verifies: FLOW-READ-RAW-LOG-R13
+  it("asks the Shell to open the diagnostic log, and says nothing when it opened", async () => {
+    const open = vi.fn(() => Promise.resolve());
+    opening(open);
+    expect(button().getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(button());
+    await settle();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(problem()?.hasAttribute("data-shown")).toBe(false);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R13
+  it("says so with the reason when the diagnostic log couldn't be opened, until it opens", async () => {
+    const reason = "There's no diagnostic log at C:\Users\a\AppData\Local\Ersa\core.log yet.";
+    const open = vi.fn<() => Promise<void>>(() => Promise.reject(reason));
+    opening(open);
+    fireEvent.click(button());
+    await settle();
+    expect(problem()?.hasAttribute("data-shown")).toBe(true);
+    expect(problem()?.querySelector(".raw-log-problem-message")?.textContent).toBe("Ersa couldn't open the diagnostic log.");
+    expect(problem()?.querySelector(".raw-log-problem-reason")?.textContent).toBe(reason);
+    expect(problem()?.getAttribute("title")).toBe(`Ersa couldn't open the diagnostic log. ${reason}`);
+    expect(screen.getByRole("status").textContent).toBe(`Ersa couldn't open the diagnostic log. ${reason}`);
+    open.mockImplementation(() => Promise.resolve());
+    fireEvent.click(button());
+    await settle();
+    expect(problem()?.hasAttribute("data-shown")).toBe(false);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R13
+  it("is unavailable in a build attached to a labeled endpoint, and says why", async () => {
+    const open = vi.fn(() => Promise.resolve());
+    opening(open, "replay-7");
+    expect(button().getAttribute("aria-disabled")).toBe("true");
+    const why = "This build is attached to replay-7, so it has no diagnostic log to open.";
+    expect(button().getAttribute("title")).toBe(why);
+    expect(button().getAttribute("aria-description") ?? document.getElementById(button().getAttribute("aria-describedby") ?? "")?.textContent).toBe(why);
+    fireEvent.click(button());
+    await settle();
+    expect(open).not.toHaveBeenCalled();
   });
 });

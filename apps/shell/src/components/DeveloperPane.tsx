@@ -39,6 +39,8 @@ export function DeveloperPane({
   session,
   view,
   backend,
+  attachedTo,
+  onOpenDiagnosticLog,
   force,
 }: {
   /** The active session, or undefined while the new-session screen shows. */
@@ -46,10 +48,33 @@ export function DeveloperPane({
   /** What the reader holds of the active session's raw log. */
   view: RawLogView | undefined;
   backend: string;
+  /** The labeled endpoint a debug build is attached to, where Ersa has no diagnostic log of its own (FLOW-READ-RAW-LOG-R13). */
+  attachedTo?: string;
+  /** Asks the Shell to open the diagnostic log; rejects with the reason when it couldn't. */
+  onOpenDiagnosticLog?: () => Promise<void>;
   /** For the gallery: the filter's text, the field with keyboard focus, and the list's states. */
-  force?: { filter?: string; field?: "focus"; list?: Parameters<typeof RawLogList>[0]["force"] };
+  force?: {
+    filter?: string;
+    field?: "focus";
+    list?: Parameters<typeof RawLogList>[0]["force"];
+    /** Open diagnostic log under the pointer, pressed or with keyboard focus. */
+    openLog?: "hover" | "pressed" | "focus";
+    /** Why the diagnostic log couldn't be opened, as after a choice of Open diagnostic log that failed. */
+    unopened?: string;
+  };
 }) {
   const [filter, setFilter] = useState(force?.filter ?? "");
+  // Why the diagnostic log couldn't be opened, from the last choice of Open diagnostic log; gone once one opens it.
+  const [unopened, setUnopened] = useState(force?.unopened);
+  const unavailable = attachedTo !== undefined ? t("developer.openLogUnavailableReason", { label: attachedTo }) : undefined;
+  const why = useId();
+  const openLog = () => {
+    if (unavailable !== undefined || !onOpenDiagnosticLog) return;
+    onOpenDiagnosticLog().then(
+      () => setUnopened(undefined),
+      (reason: unknown) => setUnopened(String(reason)),
+    );
+  };
   const shown = useShownLines(view?.lines, filter);
   const count = useId();
   const filtering = filter !== "";
@@ -87,10 +112,27 @@ export function DeveloperPane({
         <span id={count} className="developer-count" data-shown={counted !== undefined || undefined} aria-hidden={counted === undefined || undefined}>
           {said}
         </span>
+        {/* Unavailable stays focusable (aria-disabled), so a keyboard user reaches the reason as well as the pointer. */}
+        <button
+          type="button"
+          className="developer-open-log"
+          data-force={force?.openLog}
+          aria-disabled={unavailable !== undefined || undefined}
+          aria-describedby={unavailable !== undefined ? why : undefined}
+          title={unavailable}
+          onClick={openLog}
+        >
+          {t("developer.openLogButton")}
+        </button>
+        {unavailable !== undefined && (
+          <span id={why} className="heard-only">
+            {unavailable}
+          </span>
+        )}
       </div>
       {/* Keyed by the active session, so a new one starts at its end, following, with no row selected; until the
           reader has the new session's lines it shows none of the one left (FLOW-READ-RAW-LOG-R04). */}
-      <RawLogList key={session ?? ""} view={view} lines={shown} filtering={filtering} active={session !== undefined} backend={backend} force={force?.list} />
+      <RawLogList key={session ?? ""} view={view} lines={shown} filtering={filtering} active={session !== undefined} backend={backend} unopened={unopened} force={force?.list} />
     </>
   );
 }

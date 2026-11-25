@@ -28,12 +28,16 @@
 //! - `shell_open_link { url }` opens a link from the agent's words in the
 //!   system's default handler, only when its scheme is `http`, `https` or
 //!   `mailto` (FLOW-READ-TRANSCRIPT-R03).
+//! - `shell_open_diagnostic_log` opens the diagnostic log's file in the
+//!   system's app for it, or answers why it could not ([`diagnostic_log`],
+//!   FLOW-READ-RAW-LOG-R13). It takes no path: only the Shell knows it.
 //!   - [`quit`]: shutting Core down, and ending it when it will not stop.
 //!   - [`startup`]: which Core a build reaches, and its window's claim.
 //!   - [`instance`]: one Shell per user; a second launch shows the first's
 //!     window.
 
 pub mod bridge;
+pub mod diagnostic_log;
 pub mod instance;
 pub mod launch;
 pub mod process;
@@ -215,6 +219,15 @@ fn openable_link(url: &str) -> Option<Url> {
     matches!(url.scheme(), "http" | "https" | "mailto").then_some(url)
 }
 
+/// Opens the diagnostic log in the system's app for it, or answers why it
+/// could not, in the user's terms (FLOW-READ-RAW-LOG-R13). The Interface
+/// names no file: the Shell opens only the one its Core writes to.
+#[tauri::command]
+fn shell_open_diagnostic_log(shell: State<'_, Shell>) -> Result<(), String> {
+    let log = diagnostic_log::log_file(&shell.location, shell.label.as_deref())?;
+    diagnostic_log::open_file(&log, diagnostic_log::system_open)
+}
+
 /// Quits: called by the Interface once the user has confirmed, or when
 /// there was nothing to confirm.
 #[tauri::command]
@@ -358,14 +371,7 @@ fn guard_navigation(url: &Url) -> bool {
 /// the program, never a shell command line, and is already parsed and its
 /// scheme checked.
 fn open_in_browser(url: &Url) {
-    let program = if cfg!(windows) {
-        "explorer.exe"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    let _ = std::process::Command::new(program)
+    let _ = std::process::Command::new(diagnostic_log::OPENER)
         .arg(url.as_str())
         .spawn();
 }
@@ -465,7 +471,8 @@ pub fn run() {
             shell_hide,
             shell_quit_heard,
             shell_quit,
-            shell_open_link
+            shell_open_link,
+            shell_open_diagnostic_log
         ])
         // The window is built here rather than in tauri.conf.json so it can
         // carry the navigation guard.
