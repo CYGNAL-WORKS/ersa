@@ -260,6 +260,7 @@ async fn read_for_fork(
     // counted out, and the message can't say which is which; a registry that
     // cannot say does not refuse (PROTO-CORE-API, `session.fork`).
     if let OpenElsewhere::Yes { pids } = ask_open_elsewhere(
+        &id,
         Arc::clone(&adapter),
         Arc::clone(&transport),
         &backend_id,

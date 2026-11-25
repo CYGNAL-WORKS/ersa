@@ -75,7 +75,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - Whether a turn too short for a tile to show as working should still leave its session unseen.
 - Whether the tree keeps its tiles, marked as out of date, while Ersa can't reach Core, so a short drop doesn't empty the rail.
 - Where the control that collapses the rail lives, and the one that shows it again.
-- How a list that could not be read is read again while Core stays reachable. Today the lists are read when Ersa connects and after the user changes one.
+- How a list that could not be read is read again while Core stays reachable. Today the projects, sessions and sections are read when Ersa connects and after the user changes one; a host's backends are also read again whenever the new-session screen is shown or the window comes back to it (FLOW-NEW-SESSION-R50).
 - Where keyboard focus lands after a Retry in the foot that succeeds. The foot goes away while Ersa connects, so today focus falls to the window.
 - How long assistive technology keeps the word that Ersa reconnected. Today it stays, unseen, until the next problem replaces it.
 - Whether the foot shows that Ersa is trying after Retry is pressed. Today it goes away while Ersa connects and comes back unchanged when the try fails, so nothing says a try was made.
@@ -92,6 +92,7 @@ Of the rail described above, what is built is the tree grouped by project, by se
 
 ## Changes
 
+- 2026-11-25: for #622: the open question on reading a list again no longer covers a host's backends, which the new-session screen reads again whenever it is shown or the window comes back to it (FLOW-NEW-SESSION-R50). No requirement IDs changed.
 - 2026-11-24: from #586 inbox: under a session the backend chip is in the row from the start and reads the backend's id until a listing names it (FLOW-NEW-SESSION-R49). No requirement IDs changed.
 - 2026-11-24: owner's finding of 2026-11-24 that the new-session screen has no button for the backend: the backend chip shows whenever the host's backends are listed, with one backend as with several, where it was hidden with one available backend (FLOW-NEW-SESSION-R48). No requirement IDs changed.
 - 2026-11-22: the workbench specified for its first pane, by the owner's decision of 2026-11-22 that the developer pane lives in the main window (The workbench): closed by default, at the right, one pane, its opener in the arrange menu until the title bar is built; how it opens, resizes and is remembered is FLOW-READ-RAW-LOG's. The open question on tabs or splits is now M2's. No requirement IDs changed.

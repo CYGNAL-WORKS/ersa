@@ -306,3 +306,52 @@ async fn the_adapter_answers_core_from_the_registry() {
     fs::write(unreadable.path().join("sessions/other.json"), "not json").unwrap();
     assert_eq!(ask(&unreadable).await, OpenElsewhere::Unknown);
 }
+
+/// A registry the adapter cannot read answers that it could not tell, and
+/// the log names the registry path that could not be read, never what the
+/// file holds: the trail a user told "could not tell" follows.
+#[tokio::test]
+async fn an_answer_the_registry_cannot_give_logs_the_paths_it_could_not_read() {
+    let home = registry_with(std::process::id(), "0989e382-5a8f-4fdf-9738-bf02b1f049e1");
+    let damaged = home.path().join("sessions/other.json");
+    fs::write(&damaged, "secret contents").unwrap();
+    let log = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let writer = {
+        let log = Arc::clone(&log);
+        move || Captured(Arc::clone(&log))
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(writer)
+        .with_ansi(false)
+        .finish();
+    // The test's runtime has one thread, and the adapter logs after the
+    // registry read comes back to it.
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let adapter = ClaudeAdapter::new().with_claude_home(home.path().to_path_buf());
+    let transport: Arc<dyn ersa_adapter::Transport> =
+        Arc::new(FakeTransport::new(Vec::<String>::new()));
+    let answer = adapter.open_elsewhere(transport, SESSION_ID).await;
+    assert_eq!(answer, OpenElsewhere::Unknown);
+
+    let log = String::from_utf8(log.lock().unwrap().clone()).unwrap();
+    let line = log
+        .lines()
+        .find(|line| line.contains("could not tell whether another process"))
+        .unwrap_or_else(|| panic!("no line says why: {log}"));
+    assert!(line.contains(" WARN "), "{line}");
+    assert!(line.contains("other.json"), "{line}");
+    assert!(!log.contains("secret contents"), "{log}");
+}
+
+/// Collects what the subscriber writes.
+struct Captured(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Captured {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
