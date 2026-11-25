@@ -83,6 +83,9 @@ use super::{TestCore, start_replay_of};
 
 pub const BACKEND: &str = "fake";
 
+/// The description the fake gives its `ask` permission mode.
+pub const FAKE_ASK_DESCRIPTION: &str = "Ask before every action";
+
 /// The largest image the fake takes.
 pub const IMAGE_MAX: u64 = 1024;
 
@@ -537,6 +540,8 @@ impl Adapter for FakeAdapter {
 
     /// Two of each. The permission modes mark a default, as Claude Code's
     /// do; the effort's default is the backend's report ([`Adapter::models`]).
+    /// `ask` carries a description and `auto` none, so a test sees Core
+    /// carry one and leave the other out (PROTO-CORE-API-R142).
     fn choices(&self) -> BackendChoices {
         let list = |ids: [&str; 2], default: &str| -> Vec<Choice> {
             ids.iter()
@@ -544,12 +549,15 @@ impl Adapter for FakeAdapter {
                     id: id.into(),
                     label: id.to_uppercase(),
                     default: id == default,
+                    description: None,
                 })
                 .collect()
         };
+        let mut permission_modes = list(["ask", "auto"], "ask");
+        permission_modes[0].description = Some(FAKE_ASK_DESCRIPTION.into());
         BackendChoices {
             efforts: list(["low", "high"], ""),
-            permission_modes: list(["ask", "auto"], "ask"),
+            permission_modes,
         }
     }
 

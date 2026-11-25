@@ -326,12 +326,24 @@ fn result_examples() -> Vec<(Method, Value)> {
                     id: "medium".into(),
                     label: "Medium".into(),
                     default: true,
+                    description: None,
                 }],
-                permission_modes: vec![Choice {
-                    id: "default".into(),
-                    label: "Manual".into(),
-                    default: true,
-                }],
+                // One mode with a description and one its adapter gives none
+                // (PROTO-CORE-API-R142).
+                permission_modes: vec![
+                    Choice {
+                        id: "default".into(),
+                        label: "Manual".into(),
+                        default: true,
+                        description: Some("Always ask before making changes".into()),
+                    },
+                    Choice {
+                        id: "plan".into(),
+                        label: "Plan".into(),
+                        default: false,
+                        description: None,
+                    },
+                ],
             }]),
         ),
         (
@@ -833,6 +845,57 @@ fn an_extra_field_on_a_closed_object_fails() {
     let mut value = to_value(&host());
     value["backends"][0]["vendor_field"] = json!(1);
     assert!(validate_core_api("host", &value).is_err());
+}
+
+/// A permission mode's `description` is optional: the schema takes a mode
+/// with one and a mode without, serialized from the Rust type, refuses one
+/// that is not text, and keeps an effort closed to it, since only a
+/// permission mode has one (PROTO-CORE-API-R142).
+// verifies: PROTO-CORE-API-R142
+#[test]
+fn a_permission_modes_description_is_optional_text() {
+    let mode = |description: Option<&str>| {
+        to_value(&Choice {
+            id: "default".into(),
+            label: "Manual".into(),
+            default: true,
+            description: description.map(Into::into),
+        })
+    };
+    let backend = |modes: Vec<Value>, efforts: Vec<Value>| {
+        let response = json!([{
+            "name": "claude-code",
+            "label": "Claude Code",
+            "status": "missing",
+            "tested": { "min": "2.1.302", "max": "2.1.316" },
+            "models": [],
+            "efforts": efforts,
+            "permission_modes": modes,
+        }]);
+        validate_response(
+            "backend.list",
+            &to_value(&Response::success(RequestId::Number(1), response)),
+        )
+    };
+
+    let with = mode(Some("Always ask before making changes"));
+    assert_eq!(
+        with["description"],
+        json!("Always ask before making changes")
+    );
+    let without = mode(None);
+    // The field is left out, never sent empty or null.
+    assert!(without.get("description").is_none(), "{without}");
+    backend(vec![with.clone(), without.clone()], vec![]).expect("both modes validate");
+
+    let mut not_text = with.clone();
+    not_text["description"] = json!(1);
+    assert!(backend(vec![not_text], vec![]).is_err());
+    assert!(
+        backend(vec![], vec![with]).is_err(),
+        "an effort takes no description"
+    );
+    backend(vec![], vec![without]).expect("an effort without one validates");
 }
 
 /// Every reason the brief names serializes to a value the schema takes, and

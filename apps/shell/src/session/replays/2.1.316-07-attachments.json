@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "9288453415e2a6bf64314703495981788ef49b53",
+  "ersa_commit": "2ba5645a6cd54c3cea14f8dbb698ab777116e277",
   "notifications": [
     {
       "kind": "notification",
@@ -72,7 +72,7 @@
                     "apiProvider": "firstParty",
                     "email": "user@example.com",
                     "organization": "Example Org",
-                    "subscriptionType": "Claude Ultra"
+                    "subscriptionType": "Example Plan"
                   },
                   "agents": [
                     {
@@ -2218,7 +2218,7 @@
                   "id": "seven_day",
                   "label": "Weekly · all models",
                   "resets_at": "2026-11-11T20:00:00Z",
-                  "used": 0.41
+                  "used": 0.5
                 }
               ]
             },
@@ -2466,7 +2466,7 @@
                 },
                 {
                   "name": "code-review",
-                  "path": "C:/Users/user\\.claude\\plugins\\synced\\4e34e985-8963-42c1-85cf-b03190dad646_d6a362ad-bf18-4fd3-a099-29ad0a36338c\\code-review",
+                  "path": "C:/Users/user\\.claude\\plugins\\synced\\00000000-0000-0000-0000-000000000000_00000000-0000-0000-0000-000000000000\\code-review",
                   "source": "code-review@synced",
                   "version": "2.4.0"
                 },
