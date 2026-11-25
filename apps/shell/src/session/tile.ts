@@ -62,12 +62,17 @@ export function tileOf(session: Session, backends: Readonly<Record<string, reado
   return { ...view, titleUnseen, titleMuted: view.titleMuted && !titleUnseen };
 }
 
+/** A session's backend by its own label on the session's host, or by its name when the host lists no such backend. */
+export function backendLabel(session: Session, backends: Readonly<Record<string, readonly BackendInfo[]>>): string {
+  return backends[session.host_id]?.find((b) => b.name === session.backend)?.label ?? session.backend;
+}
+
 function viewOf(session: Session, backends: Readonly<Record<string, readonly BackendInfo[]>>, forking: boolean): Omit<TileView, "titleUnseen"> {
   const { tile } = session;
   const cost = tile.cost_usd_total;
   const base = {
     title: titleOf(session),
-    backend: backends[session.host_id]?.find((b) => b.name === session.backend)?.label ?? session.backend,
+    backend: backendLabel(session, backends),
     cost: cost !== undefined && Number.isFinite(cost) ? dollars.format(cost) : undefined,
     ring: contextUsed(tile),
   };
