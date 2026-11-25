@@ -38,6 +38,17 @@ use crate::workspace;
 /// other failure leaves it `put_away` (R141), what is left of the folder
 /// going when it is put back (FLOW-CLEAN-UP-R03).
 pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
+    put_away(core, id, false).await
+}
+
+/// [`put_away_workspace`] for the sweep: refused also unless a session uses
+/// the workspace and every one there is archived, which admission decides
+/// as it admits the put-away (FLOW-CLEAN-UP-R22).
+pub(super) async fn put_away_for_sweep(core: &Core, id: &str) -> Result<(), ApiError> {
+    put_away(core, id, true).await
+}
+
+async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiError> {
     let workspace = core
         .store
         .workspace(id.to_string())
@@ -55,6 +66,7 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
         .admission
         .command(Command::PutAway {
             workspace: id.to_string(),
+            archived_only,
         })
         .await
         .map_err(|refusal| handlers::refused(refusal, id))?;

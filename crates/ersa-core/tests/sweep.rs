@@ -237,6 +237,60 @@ async fn a_folder_whose_session_another_process_has_open_stays() {
     put_away(&mut s, &workspace).await;
 }
 
+/// A session unarchived after the pass looked at its workspace, here while
+/// the pass asks whether another process has it open, keeps its folder:
+/// admission decides again as it admits the put-away.
+// verifies: FLOW-CLEAN-UP-R22
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_unarchived_while_the_pass_judges_its_folder_keeps_it() {
+    let fake = FakeAdapter::new(1);
+    let registry = Arc::clone(&fake.open_check_gate);
+    let (mut s, clock) = swept_with(fake, |_| {}).await;
+    let (workspace, session) = used(&mut s).await;
+    let before = clock.ended();
+    let asked_before = s.stats.at_gate.load(std::sync::atomic::Ordering::SeqCst);
+    let held = registry.lock().await;
+
+    let params = json!({ "id": session, "archived": true });
+    s.client.result("session.set_archived", params).await;
+    // Waiting at the registry, which the test holds: a record read, which
+    // counts there too, passes at once, so the count must hold.
+    let waiting = || s.stats.at_gate.load(std::sync::atomic::Ordering::SeqCst) > asked_before;
+    let deadline = tokio::time::Instant::now() + PASS;
+    loop {
+        if waiting() {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            if waiting() {
+                break;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the pass never asked"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let params = json!({ "id": session, "archived": false });
+    s.client.result("session.set_archived", params).await;
+    drop(held);
+    passes(&clock, before + 1).await;
+
+    left(&mut s, &workspace, "README.md").await;
+}
+
+/// A workspace no session uses is a leftover, for the Clean up list and the
+/// leftovers' own pass: this pass leaves it.
+// verifies: FLOW-CLEAN-UP-R22
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_no_session_uses_is_left() {
+    let (mut s, clock) = swept().await;
+    let workspace = s.workspace().await;
+
+    an_hour_passes(&clock).await;
+
+    left(&mut s, &workspace, "README.md").await;
+}
+
 /// The project's own folder is never put away.
 // verifies: FLOW-CLEAN-UP-R22
 #[tokio::test(flavor = "multi_thread")]

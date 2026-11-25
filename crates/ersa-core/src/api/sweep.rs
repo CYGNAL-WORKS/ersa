@@ -150,7 +150,9 @@ async fn judge(core: &Core, id: &str) {
         tracing::debug!(workspace = %id, %why, "the sweep left the workspace");
         return;
     }
-    match put_away::put_away_workspace(core, id).await {
+    // Admission decides again that every session there is archived, as it
+    // admits the put-away: one unarchived since the look above keeps it.
+    match put_away::put_away_for_sweep(core, id).await {
         // For whoever wonders later where a folder went (FLOW-CLEAN-UP-R08).
         Ok(()) => tracing::info!(
             workspace = %id,

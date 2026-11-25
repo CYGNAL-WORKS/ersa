@@ -231,6 +231,9 @@ pub(super) fn refused(refusal: Refusal, named: &str) -> ApiError {
         Refusal::SessionInUse => ApiError::invalid_state(format!(
             "a session in workspace {named} is running, starting or being changed"
         )),
+        Refusal::NotAllArchived => ApiError::invalid_state(format!(
+            "workspace {named} has no session, or one that is not archived"
+        )),
         // Answers to a session's admission, or an id used twice: Core's fault.
         Refusal::WorkspaceNotReady
         | Refusal::WorkspaceExists
