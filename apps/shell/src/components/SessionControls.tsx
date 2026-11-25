@@ -1,6 +1,6 @@
 import { Folder, Monitor, Plus, Square, SquareCheck } from "lucide-react";
 import { t } from "../catalog";
-import type { BackendInfo, Choice, CoreHelloResult, ModelChoice, Project } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, CoreHelloResult, ModelChoice, PermissionModeChoice, Project } from "../protocol/core-api.gen";
 import {
   type SessionValues,
   available,
@@ -91,6 +91,10 @@ const projectOption = (p: Project): ChipOption => ({
 });
 
 const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
+
+/** Each permission mode with the sentence its backend gives beneath it, and its label alone where there is none (FLOW-NEW-SESSION-R45). */
+const modeOptions = (modes: readonly PermissionModeChoice[]): ChipOption[] =>
+  modes.map(({ id, label, description }) => (description === undefined ? { id, label } : { id, label, description }));
 
 /**
  * The model chip's value and options (FLOW-NEW-SESSION-R46). Where a listed model not marked default resolves to the
@@ -259,7 +263,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
               <Chip
                 name="Permission mode"
                 value={values.permission_mode}
-                options={choiceOptions(backend.permission_modes)}
+                options={modeOptions(backend.permission_modes)}
                 {...chip("permission_mode")}
               />
             )}
