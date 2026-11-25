@@ -964,15 +964,18 @@ pub async fn git_holds_repository(
     let records = git_records(transport, repo, path, deadline).await?;
     let Some(record) = records.worktree else {
         return Err(VcsError::Failed {
-            message: "git has no record of the workspace's worktree, so what it holds can't be checked"
-                .into(),
+            message:
+                "git has no record of the workspace's worktree, so what it holds can't be checked"
+                    .into(),
             stderr: String::new(),
         });
     };
     let modules = std::path::Path::new(&record).join("modules");
-    let kept = blocking(deadline, "looking for a submodule's repository", move |_| {
-        Ok(modules.try_exists()?)
-    })
+    let kept = blocking(
+        deadline,
+        "looking for a submodule's repository",
+        move |_| Ok(modules.try_exists()?),
+    )
     .await?;
     if kept {
         return Ok(true);

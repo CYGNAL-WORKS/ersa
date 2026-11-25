@@ -188,7 +188,10 @@ async fn refused_and_whole(s: &mut Setup, workspace: &Value, inside: &str) {
         "{error:?}"
     );
     assert_eq!(error_kind(&error), "vcs_error", "{error:?}");
-    assert!(folder(workspace).join(inside).exists(), "the folder is whole");
+    assert!(
+        folder(workspace).join(inside).exists(),
+        "the folder is whole"
+    );
     assert!(listed_by_git(&s.repo, workspace));
     assert_eq!(s.listed(workspace).await["state"], "ready");
     admitted_ready(&s.core.core(), workspace);
@@ -211,7 +214,10 @@ async fn a_folder_with_a_submodule_is_not_put_away() {
 
     refused_and_whole(&mut s, &workspace, "sub/sub.txt").await;
 
-    git(&folder(&workspace), &["submodule", "deinit", "--quiet", "--all", "--force"]);
+    git(
+        &folder(&workspace),
+        &["submodule", "deinit", "--quiet", "--all", "--force"],
+    );
     assert!(!folder(&workspace).join("sub/sub.txt").exists());
     refused_and_whole(&mut s, &workspace, "sub").await;
 

@@ -186,7 +186,15 @@ impl Setup {
         let url = source.display().to_string();
         git(
             &self.repo,
-            &["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", &url, "sub"],
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "--quiet",
+                &url,
+                "sub",
+            ],
         );
         git(&self.repo, &["commit", "--quiet", "-m", "add a submodule"]);
         source
@@ -198,7 +206,14 @@ impl Setup {
 pub fn check_out_submodules(dir: &Path) {
     git(
         dir,
-        &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet"],
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "--quiet",
+        ],
     );
 }
 

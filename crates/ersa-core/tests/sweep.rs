@@ -342,7 +342,10 @@ async fn a_folder_that_holds_a_repository_of_its_own_stays() {
     let (deinitialized, session) = used(&mut s).await;
     let path = folder(&deinitialized);
     check_out_submodules(&path);
-    git(&path, &["submodule", "deinit", "--quiet", "--all", "--force"]);
+    git(
+        &path,
+        &["submodule", "deinit", "--quiet", "--all", "--force"],
+    );
     archive(&mut s, &clock, &session).await;
     left(&mut s, &deinitialized, "sub").await;
 
@@ -450,7 +453,10 @@ async fn a_put_away_that_failed_part_way_is_never_tried_again() {
 
     gate.go();
     passes(&clock, before + 1).await;
-    assert!(folder(&first).join("README.md").exists(), "the try deleted nothing");
+    assert!(
+        folder(&first).join("README.md").exists(),
+        "the try deleted nothing"
+    );
     left(&mut s, &second, "unsaved.txt").await;
 
     // Anything written at its path since stays: every try at a folder
