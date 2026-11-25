@@ -1619,7 +1619,7 @@ const entries: Entry[] = [
       ["No active session", rawLog({ view: undefined, active: false })],
       ["Reading", rawLog({ view: rawLogView({ lines: [], read: false }) })],
       ["No lines yet", rawLog({ view: rawLogView({ lines: [] }) })],
-      ["No lines yet, and a read failed", rawLog({ view: rawLogView({ lines: [], read: false, failure: "Core isn't running." }) })],
+      ["No lines yet, and a read failed", rawLog({ view: rawLogView({ lines: [], failure: "Core isn't running." }) })],
     ],
   },
   {

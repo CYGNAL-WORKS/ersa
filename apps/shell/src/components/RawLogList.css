@@ -220,9 +220,11 @@
   border-color: var(--color-ink-faint);
 }
 
+/* As a button's press: the fill sinks to canvas and the edge strengthens, so a press reads apart from rest. */
 .raw-log-jump:active,
 .raw-log-jump[data-force="pressed"] {
   background: var(--color-canvas);
+  border-color: var(--color-ink-muted);
 }
 
 .raw-log-jump:focus-visible,
