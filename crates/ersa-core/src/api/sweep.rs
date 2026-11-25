@@ -162,7 +162,9 @@ async fn judge(core: &Core, id: &str) {
         // A refusal left it `ready` for the next pass, a failure part way
         // left it `put_away`, which no pass looks at again (FLOW-CLEAN-UP-R24);
         // the put-away wrote either to the diagnostic log. No client is told.
-        Err(e) => tracing::debug!(workspace = %id, error = %e.0.message, "the sweep did not put the workspace away"),
+        Err(e) => {
+            tracing::debug!(workspace = %id, error = %e.0.message, "the sweep did not put the workspace away")
+        }
     }
 }
 
@@ -180,12 +182,20 @@ async fn sessions_keep(core: &Core, there: &[SessionRow]) -> Option<&'static str
         return Some("a session there is not archived");
     }
     // Admission never loads a session whose backend has no adapter here.
-    if there.iter().any(|row| core.sessions.adapter(&row.backend).is_none()) {
+    if there
+        .iter()
+        .any(|row| core.sessions.adapter(&row.backend).is_none())
+    {
         return Some("a session there is dormant");
     }
     for row in there {
         // An archive stops the session, and its run may still be ending.
-        if core.admission.run_settled(&row.id, RUN_SETTLING).await.is_err() {
+        if core
+            .admission
+            .run_settled(&row.id, RUN_SETTLING)
+            .await
+            .is_err()
+        {
             return Some("a session there is running");
         }
         let Some(transport) = core.session_transport_for(&row.host_id) else {
@@ -193,7 +203,9 @@ async fn sessions_keep(core: &Core, there: &[SessionRow]) -> Option<&'static str
         };
         match core.sessions.open_elsewhere(&row.id, transport).await {
             Ok(OpenElsewhere::No) => {}
-            Ok(OpenElsewhere::Yes { .. }) => return Some("another process has a session there open"),
+            Ok(OpenElsewhere::Yes { .. }) => {
+                return Some("another process has a session there open");
+            }
             Ok(OpenElsewhere::Unknown) | Err(_) => {
                 return Some("whether another process has a session there open can't be told");
             }
