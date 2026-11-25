@@ -518,7 +518,7 @@ export const enUS = {
     fromBackendLabel: "From {backend}",
     toBackendLabel: "To {backend}",
     // The list's first row when lines before the first listed are no longer held (R09).
-    earlierGoneStatus: "Earlier lines are no longer held.",
+    earlierGoneDetail: "Earlier lines are no longer held.",
     // Floats over the list's foot once the user scrolls away from the end (R07): its words, the count of lines that
     // arrived since in a quieter tone, and its accessible name, which starts with the words it shows.
     jumpButton: "Jump to latest",
