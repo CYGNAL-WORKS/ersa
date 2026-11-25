@@ -508,7 +508,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return true;
   };
 
-  // The backend keeps the title (PROTO-CORE-API-R12); the list is read again to show it, in the rail and here.
+  // The backend keeps the title (PROTO-CORE-API-R12); Core's answer shows it, in the rail and here, with no list read.
   const rename = async (id: string, title: string) => {
     setRenaming((r) => ({ ...r, [id]: { state: "sending" } }));
     try {

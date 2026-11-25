@@ -73,8 +73,7 @@ export interface Connection {
   reload(list: "projects" | "sessions"): void;
   /**
    * Shows session `id` with the fields Core answered a change to it with (a rename's title, an arrangement), at once,
-   * and reads the list again: a read already in flight may answer with the session from before, and is followed by
-   * another.
+   * with no list read; a read already in flight may answer with the session from before, so it is followed by another.
    */
   changed(id: string, fields: Partial<Session>): void;
   /** After this, neither `update` nor `onNotification` is called again. */
@@ -260,6 +259,10 @@ export function connect(
         listSessions();
         reload = (list) => (list === "projects" ? listProjects() : listSessions());
         changed = (id, fields) => {
+          // Core answered with the fields as it lists them, so the patch is the list as Core has it: no read is needed.
+          // A read already in flight may answer with the list from before the change; read once more after it, as a
+          // tile does, so the change is not lost.
+          if (sessionRead !== "idle") listSessions();
           patch((view) =>
             view.sessions.state === "ready"
               ? {
@@ -268,7 +271,6 @@ export function connect(
                 }
               : view,
           );
-          listSessions();
         };
       },
       (error) => {
