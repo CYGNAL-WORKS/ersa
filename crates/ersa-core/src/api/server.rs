@@ -511,7 +511,8 @@ async fn run_detached(
 /// lost that matters.
 ///
 /// A line is taken from the feed only with room on the connection already
-/// reserved, and queued in the same step: a line is never held here while
+/// reserved, and queued under the feed's lock in the same step, since
+/// queueing into reserved room never waits: a line is never held here while
 /// an answer queued meanwhile overtakes it. So a line that is withdrawn
 /// before an answer is queued never arrives after the answer
 /// (PROTO-CORE-API-R146), and one taken before is queued ahead of it.
@@ -523,9 +524,7 @@ async fn forward_tiles(mut tiles: crate::sessions::TileFeed, outbound: mpsc::Sen
         };
         // Withdrawn while waiting for room, there may be nothing now; the
         // room is let go and the feed waited on again.
-        if let Some(line) = tiles.take() {
-            room.send(line.as_ref().clone());
-        }
+        tiles.take(|line| room.send(line.as_ref().clone()));
     }
 }
 
