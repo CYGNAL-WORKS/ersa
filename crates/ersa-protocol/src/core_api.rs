@@ -195,6 +195,11 @@ pub enum ErrorReason {
     SendStopped,
     /// The session's folder no longer exists.
     FolderGone,
+    /// The branch or commit a put-away workspace had checked out no longer
+    /// exists, so its folder can't be put back.
+    BranchGone,
+    /// Another worktree has the branch a put-away workspace had checked out.
+    BranchInUse,
     /// The backend has not reported the session's id yet.
     BackendUnnamed,
     /// The backend has no record of the session.
@@ -644,6 +649,9 @@ pub enum Deleting {
 pub enum SendPhase {
     /// Checking the attachments.
     Checking,
+    /// Putting the session's workspace back, or waiting for its put-away to
+    /// end first (FLOW-CLEAN-UP-R05, PROTO-CORE-API-R134).
+    PuttingBack,
     /// Copying attachments from outside the workspace into its scratch folder.
     Copying,
     /// Waiting for a starting backend.
