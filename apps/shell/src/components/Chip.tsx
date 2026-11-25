@@ -18,6 +18,11 @@ export interface ChipOption {
   detail?: string;
   /** A warning before the status, behind a shield in the caution tone: "Not trusted". */
   caution?: string;
+  /**
+   * A sentence beneath the label saying what the option does, as a permission mode has (FLOW-NEW-SESSION-R45); cut
+   * at its end. Assistive technology hears it after the option's name, which stays the label.
+   */
+  description?: string;
 }
 
 /** The action that ends a chip's list, below a hairline: Add project…. */
@@ -235,7 +240,12 @@ export function Chip({ name, icon, value, marked, reads, placeholder, problem, p
       </button>
       {open && (
         <ul ref={list} id={listId} className="chip-list" data-side={side} data-wide={wide || undefined} style={{ positionAnchor: anchor } as CSSProperties} role="listbox" aria-label={name} onKeyDown={onListKey}>
-          {options.map((option) => (
+          {options.map((option, n) => {
+            // An option with a description is named by its label alone and described by the sentence beneath it.
+            const described = option.description !== undefined;
+            const labelId = `${listId}-label-${n}`;
+            const descriptionId = `${listId}-description-${n}`;
+            return (
             <li
               key={option.id}
               role="option"
@@ -243,6 +253,9 @@ export function Chip({ name, icon, value, marked, reads, placeholder, problem, p
               className="chip-option"
               data-id={option.id}
               data-two-line={option.detail !== undefined || undefined}
+              data-described={described || undefined}
+              aria-labelledby={described ? labelId : undefined}
+              aria-describedby={described ? descriptionId : undefined}
               data-force={forceOption?.id === option.id ? forceOption.state : undefined}
               aria-selected={option.id === inUse}
               aria-disabled={option.unavailable || undefined}
@@ -250,7 +263,20 @@ export function Chip({ name, icon, value, marked, reads, placeholder, problem, p
             >
               {/* The chosen option carries a mark in a slot every option keeps, so the labels align. */}
               <span className="chip-option-mark" aria-hidden="true" />
-              <span className="chip-option-label">{option.label}</span>
+              {described ? (
+                // The label and the sentence beneath it, in one column, so the description starts where the label
+                // starts and a list mixing options with and without one keeps its labels aligned.
+                <span className="chip-option-text">
+                  <span className="chip-option-label" id={labelId}>
+                    {option.label}
+                  </span>
+                  <span className="chip-option-description" id={descriptionId}>
+                    {option.description}
+                  </span>
+                </span>
+              ) : (
+                <span className="chip-option-label">{option.label}</span>
+              )}
               {option.caution && (
                 <span className="chip-option-caution">
                   <span className="chip-option-shield">
@@ -272,7 +298,8 @@ export function Chip({ name, icon, value, marked, reads, placeholder, problem, p
                 </span>
               )}
             </li>
-          ))}
+            );
+          })}
           {action && (
             <>
               {/* The hairline parts the action from options above it; alone in the list, it needs none. */}

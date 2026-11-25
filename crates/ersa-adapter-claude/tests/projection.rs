@@ -406,20 +406,22 @@ fn window(id: &str, label: &str, used: f64, resets_at: Option<&str>) -> UsageWin
 fn a_recorded_rate_limit_event_reports_both_its_windows_in_order() {
     let reported = windows_reported(&fixture("11-stream-permission-prompt-tool-stdio").raw_log());
     // The share is `utilization` as the line gives it, from 0 to 1, never a
-    // percent; Claude Desktop's names label the keys the adapter knows.
+    // percent; Claude Desktop's names label the keys the adapter knows. The
+    // recording carries the redactor's placeholder share, the same in every
+    // window, since the login's real figures are its owner's.
     assert_eq!(
         reported,
         [Some(vec![
             window(
                 "seven_day",
                 "Weekly · all models",
-                0.04,
+                0.5,
                 Some("2026-11-04T20:00:00Z")
             ),
             window(
                 "seven_day_overage_included",
                 "Weekly · overage",
-                0.06,
+                0.5,
                 Some("2026-11-04T20:00:00Z")
             ),
         ])]
