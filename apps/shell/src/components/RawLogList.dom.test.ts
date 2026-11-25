@@ -284,11 +284,11 @@ describe("a read that failed", () => {
     expect(problem.textContent).toBe("Ersa can't read the raw log. It's trying again.Core isn't running.");
     expect(problem.getAttribute("data-shown")).toBe("true");
     // Assistive technology hears it once, from a status region.
-    expect(screen.getByRole("status").textContent).toBe("Ersa can't read the raw log. It's trying again. Core isn't running.");
+    expect(screen.getAllByRole("status")[0]!.textContent).toBe("Ersa can't read the raw log. It's trying again. Core isn't running.");
     expect(rows()).toHaveLength(3);
     update(viewOf(entries(0, 3)));
     expect(problem.getAttribute("data-shown")).toBeNull();
-    expect(screen.getByRole("status").textContent).toBe("");
+    expect(screen.getAllByRole("status")[0]!.textContent).toBe("");
   });
 });
 

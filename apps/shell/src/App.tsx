@@ -1163,6 +1163,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         {/* Until the reader has the new session's lines the pane shows none of the one left (FLOW-READ-RAW-LOG-R04). */}
         <DeveloperPane session={shownId} view={rawLog?.session === shownId ? rawLog : undefined} backend={rawLogBackend}
           attachedTo={attachedTo}
+          open={workbench.open}
           onOpenDiagnosticLog={shell?.openDiagnosticLog}
         />
       </Workbench>

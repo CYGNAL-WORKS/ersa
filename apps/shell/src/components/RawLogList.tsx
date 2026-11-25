@@ -79,8 +79,7 @@ export function RawLogList({
   backend: string;
   /**
    * Why the diagnostic log couldn't be opened, after the user last chose Open diagnostic log and it failed
-   * (FLOW-READ-RAW-LOG-R13). Said over the list in place of a failed read while it stands, since it answers what the
-   * user just did.
+   * (FLOW-READ-RAW-LOG-R13), said on a line of its own (R25).
    */
   unopened?: string;
   /**
@@ -349,15 +348,10 @@ export function RawLogList({
             <p id={`${ids}-message`}>{message}</p>
           </div>
         )}
-        <Problem
-          problem={
-            unopened !== undefined
-              ? { message: t("developer.openLogError"), reason: unopened }
-              : view?.failure !== undefined
-                ? { message: t("developer.unreadableError"), reason: view.failure }
-                : undefined
-          }
-        />
+        {/* Two lines, each coming and going by itself: the read's at the top, and the open's beneath it while both
+            stand, so neither hides the other (R25). */}
+        <Problem problem={view?.failure !== undefined ? { message: t("developer.unreadableError"), reason: view.failure } : undefined} />
+        <Problem problem={unopened !== undefined ? { message: t("developer.openLogError"), reason: unopened } : undefined} below={view?.failure !== undefined} />
         {/* Always in the page, so it fades in and out; out of reach and unheard while hidden. */}
         <div className="raw-log-jump-place" data-shown={offering || undefined} inert={!offering} aria-hidden={!offering || undefined}>
           <button
@@ -380,16 +374,16 @@ export function RawLogList({
 
 /**
  * A problem, said over the top of the list so no row moves: a read that failed (R15), or the diagnostic log that
- * couldn't be opened (R13). The message, then the reason, cut with an ellipsis, and the line whole in its tooltip. It
+ * couldn't be opened (R13), beneath the first while both stand (R25). The message, then the reason, cut with an ellipsis, and the line whole in its tooltip. It
  * fades out with the words it had; assistive technology hears it once, from a status region that is always in the page.
  */
-function Problem({ problem }: { problem: { message: string; reason: string } | undefined }) {
+function Problem({ problem, below = false }: { problem: { message: string; reason: string } | undefined; below?: boolean }) {
   const [said, setSaid] = useState(problem);
   if (problem !== undefined && (problem.message !== said?.message || problem.reason !== said.reason)) setSaid(problem);
   const whole = (p: { message: string; reason: string }) => `${p.message} ${p.reason}`;
   return (
     <>
-      <div className="raw-log-problem" data-shown={problem !== undefined || undefined} aria-hidden="true" title={said && whole(said)}>
+      <div className="raw-log-problem" data-shown={problem !== undefined || undefined} data-below={below || undefined} aria-hidden="true" title={said && whole(said)}>
         <span className="raw-log-problem-message">{said?.message}</span>
         <span className="raw-log-problem-reason">{said?.reason}</span>
       </div>
