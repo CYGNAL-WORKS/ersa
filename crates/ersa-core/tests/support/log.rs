@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-/// What the test binary's subscriber wrote, every test's together: each
+/// What the test binary's subscriber wrote, at `info` and above as Core's
+/// own diagnostic log keeps it, every test's together: each
 /// test picks its own lines by session id.
 #[derive(Clone, Default)]
 pub struct Log(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -21,7 +22,7 @@ impl Log {
             let subscriber = tracing_subscriber::fmt()
                 .with_writer(log.clone())
                 .with_ansi(false)
-                .with_max_level(tracing::Level::WARN)
+                .with_max_level(tracing::Level::INFO)
                 .finish();
             tracing::subscriber::set_global_default(subscriber).unwrap();
             log
@@ -36,6 +37,15 @@ impl Log {
             .filter(|line| line.contains(" WARN "))
             .map(str::to_string)
             .collect()
+    }
+
+    /// Whether a line at `level` (`INFO`, `WARN`) holds `text` and the
+    /// field `field`, as `workspace=w-…`.
+    pub fn logged(&self, level: &str, text: &str, field: &str) -> bool {
+        let written = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+        written.lines().any(|line| {
+            line.contains(&format!(" {level} ")) && line.contains(text) && line.contains(field)
+        })
     }
 
     /// Whether a warning holds `text` and the field `field`, as

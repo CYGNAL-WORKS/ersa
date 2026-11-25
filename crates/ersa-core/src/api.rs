@@ -7,7 +7,8 @@
 //!   handshake and the reserved methods.
 //! - `handlers`: one function per implemented method.
 //! - [`put_away_workspace`]: putting a workspace away, which no method asks
-//!   for yet (FLOW-CLEAN-UP).
+//!   for yet: the sweep does (FLOW-CLEAN-UP-R22).
+//! - `sweep`: Core's own pass, which no method asks for either.
 
 mod delete;
 mod handlers;
@@ -16,6 +17,7 @@ mod put_away;
 mod sections;
 pub mod server;
 mod sessions;
+mod sweep;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
 use ersa_protocol::core_api::{ErrorKind, ErrorReason, Method};
@@ -103,7 +105,8 @@ impl From<VcsError> for ApiError {
             | VcsError::WorktreesBusy
             | VcsError::Locked { .. }
             | VcsError::Dirty
-            | VcsError::NotListed { .. } => ApiError::new(ErrorKind::VcsError, e.to_string()),
+            | VcsError::NotListed { .. }
+            | VcsError::HoldsRepository => ApiError::new(ErrorKind::VcsError, e.to_string()),
         }
     }
 }

@@ -98,6 +98,10 @@ pub enum VcsError {
     /// [`WORKTREE_TURN_WAIT`]; this one began no git work.
     #[error("another change to this project's workspaces did not finish in time; try again")]
     WorktreesBusy,
+    /// The folder holds a repository of its own (PROTO-CORE-API-R147), which
+    /// putting it away would lose; nothing was changed.
+    #[error("the workspace's folder holds a repository of its own, so it stays")]
+    HoldsRepository,
 }
 
 impl VcsError {
@@ -110,6 +114,7 @@ impl VcsError {
                 | VcsError::Dirty
                 | VcsError::NotListed { .. }
                 | VcsError::WorktreesBusy
+                | VcsError::HoldsRepository
         )
     }
 }
@@ -705,6 +710,25 @@ impl From<std::io::Error> for Halt {
 /// never all of Core's.
 static FILE_SYSTEM: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
 
+tokio::task_local! {
+    /// What each [`FILE_SYSTEM`] job started inside [`carrying`] keeps on
+    /// its thread until it has let its place go.
+    static CARRIED: Arc<dyn std::any::Any + Send + Sync>;
+}
+
+/// Runs `work` with `held` kept by every blocking file system job it
+/// starts, in this task, until that job's thread has let its place under
+/// [`FILE_SYSTEM`]'s cap go. A job answered at its deadline can keep its
+/// place long after; so whoever must hold at most one place at a time, the
+/// sweep (FLOW-CLEAN-UP-R06), learns from `held` going when its jobs have
+/// all let theirs go, rather than start another beside one still stuck.
+pub async fn carrying<F: std::future::Future>(
+    held: Arc<dyn std::any::Any + Send + Sync>,
+    work: F,
+) -> F::Output {
+    CARRIED.scope(held, work).await
+}
+
 /// Runs `work` on a blocking thread, answering by `deadline`; `what` names
 /// it in errors. `work` gets the deadline as a clock time, to stop itself
 /// between reads.
@@ -713,9 +737,13 @@ async fn blocking<T: Send + 'static>(
     what: &'static str,
     work: impl FnOnce(std::time::Instant) -> Result<T, Halt> + Send + 'static,
 ) -> Result<T, VcsError> {
+    let carried = CARRIED.try_with(Arc::clone).ok();
     let place = FILE_SYSTEM.try_acquire().map_err(|_| VcsError::Busy)?;
     let stop = deadline.at.into_std();
     let job = tokio::task::spawn_blocking(move || {
+        // Let go in the reverse order: the place first, then what is
+        // carried, so whoever waits on it finds the place free.
+        let _carried = carried;
         let _place = place;
         work(stop)
     });
@@ -909,6 +937,93 @@ async fn count_files(
     .await?;
     changes.evidence.extend(contents);
     Ok(())
+}
+
+/// Whether the git worktree at `path` of the repository at `repo` holds a
+/// repository of its own (PROTO-CORE-API-R147), which git removes only when
+/// forced and a put-back cannot bring back:
+///
+/// - a submodule's repository git keeps with its record of the worktree
+///   (`<record>/modules`), there once a submodule was checked out and still
+///   there after `git submodule deinit`. git refuses to remove the worktree
+///   while that folder exists, empty or not, so it counts either way;
+/// - a submodule checked out: an index entry of mode 160000 whose folder
+///   holds a `.git` of its own;
+/// - a nested repository the ignore rules do not ignore, which
+///   `git status --untracked-files=all` lists as a folder, never its files.
+///
+/// Without git's record of the worktree none of this can be read, which is
+/// an error, never "none": whoever asks keeps the folder. Its git calls and
+/// file reads share [`CHANGES_TIMEOUT`], as `workspace.changes`'s do.
+pub async fn git_holds_repository(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+) -> Result<bool, VcsError> {
+    let deadline = Deadline::after(CHANGES_TIMEOUT);
+    let records = git_records(transport, repo, path, deadline).await?;
+    let Some(record) = records.worktree else {
+        return Err(VcsError::Failed {
+            message: "git has no record of the workspace's worktree, so what it holds can't be checked"
+                .into(),
+            stderr: String::new(),
+        });
+    };
+    let modules = std::path::Path::new(&record).join("modules");
+    let kept = blocking(deadline, "looking for a submodule's repository", move |_| {
+        Ok(modules.try_exists()?)
+    })
+    .await?;
+    if kept {
+        return Ok(true);
+    }
+
+    // As `count_files` reads them: git's record and the folder named
+    // outright, so no other repository above the folder is found.
+    let git_dir = format!("--git-dir={record}");
+    let work_tree = format!("--work-tree={path}");
+    let args = [
+        git_dir.as_str(),
+        work_tree.as_str(),
+        "ls-files",
+        "--stage",
+        "-z",
+    ];
+    let output = query(transport, repo, &args, deadline).await?;
+    let submodules = submodule_paths(&checked(output, "git ls-files failed")?.stdout);
+    let markers: Vec<std::path::PathBuf> = submodules
+        .iter()
+        .map(|relative| std::path::Path::new(path).join(relative).join(".git"))
+        .collect();
+    let checked_out = blocking(deadline, "looking for checked-out submodules", move |_| {
+        for marker in markers {
+            if marker.try_exists()? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    })
+    .await?;
+    if checked_out {
+        return Ok(true);
+    }
+
+    // Without `--ignored`: an ignored nested repository goes with the
+    // folder as any ignored file does.
+    let args = [
+        "--no-optional-locks",
+        git_dir.as_str(),
+        work_tree.as_str(),
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=all",
+    ];
+    let output = query(transport, repo, &args, deadline).await?;
+    let entries = parse_status(&checked(output, "git status failed")?.stdout);
+    Ok(entries
+        .iter()
+        .any(|entry| entry.kind == '?' && entry.path.ends_with('/')))
 }
 
 /// The paths of the submodules in `git ls-files --stage -z` output: the

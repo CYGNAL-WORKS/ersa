@@ -103,7 +103,7 @@ export class Deletion {
   private marked = false;
   private phase: DeletePhase = { kind: "reading" };
   // The workspace as Core last listed it. The window reads its workspaces only now and then, and Core puts one away
-  // after its sessions are archived without telling it (FLOW-CLEAN-UP-R01), so the question reads it again.
+  // after its sessions are archived without telling it (FLOW-CLEAN-UP-R22), so the question reads it again.
   private workspace: Workspace;
 
   constructor(
