@@ -8,14 +8,15 @@ import { inTurn } from "../core/shell";
 import type { Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 
 /**
- * Why Delete can't be chosen now, or undefined when it can. A session starting, working or waiting on the user is
- * refused by Core, so the menu says to stop it first (FLOW-ARCHIVE-DELETE-SESSION-R05).
+ * Why Delete can't be chosen now, or undefined when it can. A session starting, working, waiting on the user or being
+ * sent a message is refused by Core (`session_busy`), so the menu says to stop it first (FLOW-ARCHIVE-DELETE-SESSION-R05).
  */
 export function deleteUnavailable(session: Session, offline: boolean): string | undefined {
   if (offline) return t("rail.tile.offlineReason");
   // Core holds a running deletion's workspace, and refuses another until it ends.
   if (session.deleting === "running") return t("rail.delete.deletingReason");
-  if (inTurn(session)) return t("rail.delete.busyReason");
+  // A send under way counts though the tile may still read idle: its turn has not begun.
+  if (inTurn(session) || session.sending !== undefined) return t("rail.delete.busyReason");
   return undefined;
 }
 
