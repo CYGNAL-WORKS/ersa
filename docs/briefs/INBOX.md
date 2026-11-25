@@ -9,3 +9,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
+- [ ] 2026-11-24 FLOW-READ-RAW-LOG: R07 says the list says how many lines arrived since the user scrolled away, and WORKBENCH.md shows only "3 new"; nothing says what Jump to latest shows before any line has arrived. The branch shows it with no count, named "Jump to latest", so "0 new" never shows.
+- [ ] 2026-11-24 FLOW-READ-RAW-LOG: WORKBENCH.md draws keyboard focus only on the selected row, but the list must take focus as one stop (R17) and Jump to latest sends focus to it when it goes, before any row can be selected. The branch draws the list's focus as a control without an edge does, an `ink` hairline inside the list's area; #570 may keep or replace it when selection comes.
+- [ ] 2026-11-24 FLOW-READ-RAW-LOG: WORKBENCH.md says a row draws at most the line's first 2,000 characters without saying what a character is. The branch counts UTF-16 code units, dropping a last unit that would split a character outside the Basic Multilingual Plane; a grapheme count would cost a segmenter on every row drawn.
