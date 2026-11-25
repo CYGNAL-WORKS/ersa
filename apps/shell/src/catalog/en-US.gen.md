@@ -518,6 +518,22 @@ The session's folder is deleted too, but its branch {branch} is kept.
 
 The branch holds commits that exist nowhere else.
 
+### `rail.delete.putAwayBranchDetail`
+
+The session's folder was already removed, and its branch {branch} is deleted too.
+
+### `rail.delete.putAwayBranchKeptDetail`
+
+The session's folder was already removed. Its branch {branch} is kept.
+
+### `rail.delete.putAwayDetail`
+
+The session's folder was already removed.
+
+### `rail.delete.putAwaySharedDetail`
+
+The session's folder was already removed. Another session uses its branch {branch}, so the branch stays.
+
 ### `rail.delete.filesStayDetail`
 
 Its files stay in {path}.
@@ -1006,6 +1022,10 @@ Copying attachments, {percent} percent done…
 
 Starting the backend…
 
+### `composer.puttingBackProgress`
+
+Putting the session's folder back…
+
 ### `composer.unknownNote`
 
 Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.
@@ -1379,3 +1399,11 @@ This session's backend can't fork sessions. Updating the backend may help.
 ### `errors.refusal.folderGoneError`
 
 This session's folder no longer exists. Put the folder back, then try again.
+
+### `errors.refusal.branchGoneError`
+
+The branch or commit this session's folder had checked out no longer exists, so the folder can't be put back. Start a new session to go on.
+
+### `errors.refusal.branchInUseError`
+
+This session's branch is checked out in another folder. Switch that folder to another branch, then try again.

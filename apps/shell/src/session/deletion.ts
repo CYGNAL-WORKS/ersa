@@ -21,8 +21,18 @@ export function deleteUnavailable(session: Session, offline: boolean): string | 
 
 /** What goes with the session's conversation, as the question says it (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
 export type WhatGoes =
-  /** The session's workspace is the project's own folder, or another session uses it: its files stay where they are. */
+  /**
+   * The session's workspace is the project's own folder, or a folder another session uses: its files stay where they
+   * are. Never a workspace that is put away, which has no folder for them to stay in.
+   */
   | { kind: "filesStay"; path: string }
+  /**
+   * The session's workspace is put away: no folder is left to delete (FLOW-ARCHIVE-DELETE-SESSION-R13), and Core counts
+   * nothing lost with it (PROTO-CORE-API-R123). Alone there, its branch goes unless `branchKept`: it holds commits
+   * that exist nowhere else. `shared`: another session uses the workspace, so the delete keeps it and its branch (R05),
+   * and `branchKept` is false, since the branch isn't kept for its commits.
+   */
+  | { kind: "putAway"; branch: string; branchKept: boolean; shared: boolean }
   /** The session is alone in an isolated workspace: its folder goes, and its branch unless the branch is kept. */
   | {
       kind: "folderGoes";
@@ -46,12 +56,17 @@ export function whatGoes(workspace: Workspace, changes: WorkspaceChanges | undef
   // `sessions` leaves out sessions marked deleting, so it counts this one only while it isn't. Any other session
   // using the folder keeps it.
   const others = changes ? changes.sessions - (marked ? 0 : 1) : 0;
-  if (workspace.kind === "root" || !changes || others > 0) return { kind: "filesStay", path: workspace.path };
+  if (workspace.kind === "root" || !changes) return { kind: "filesStay", path: workspace.path };
+  // Of the unshared commits, those the branch holds are the ones not stranded; any of them keeps the branch.
+  const branchKept = changes.unshared - changes.stranded > 0;
+  // A workspace that is put away has no folder, so the question never says its files stay there, even when another
+  // session uses it.
+  if (workspace.state === "put_away") return { kind: "putAway", branch: workspace.vcs_ref, branchKept: others === 0 && branchKept, shared: others > 0 };
+  if (others > 0) return { kind: "filesStay", path: workspace.path };
   return {
     kind: "folderGoes",
     branch: workspace.vcs_ref,
-    // Of the unshared commits, those the branch holds are the ones not stranded; any of them keeps the branch.
-    branchKept: changes.unshared - changes.stranded > 0,
+    branchKept,
     uncommitted: changes.uncommitted,
     ignored: changes.ignored,
     // With git's record gone, stranded commits can't be counted; the question says so instead of a count.
@@ -87,13 +102,18 @@ export class Deletion {
   // leaves it out of the sessions it counts.
   private marked = false;
   private phase: DeletePhase = { kind: "reading" };
+  // The workspace as Core last listed it. The window reads its workspaces only now and then, and Core puts one away
+  // after its sessions are archived without telling it (FLOW-CLEAN-UP-R01), so the question reads it again.
+  private workspace: Workspace;
 
   constructor(
     private readonly client: Pick<CoreClient, "call">,
     private readonly sessionId: string,
-    private readonly workspace: Workspace,
+    workspace: Workspace,
     private readonly onPhase: (phase: DeletePhase) => void,
-  ) {}
+  ) {
+    this.workspace = workspace;
+  }
 
   /** Reads what deleting would lose and asks. Try again after a failure is the same: it asks again with what is left. */
   async start(): Promise<void> {
@@ -105,11 +125,14 @@ export class Deletion {
       return;
     }
     try {
-      const [changes, listed] = await Promise.all([
+      const [changes, listed, workspaces] = await Promise.all([
         this.client.call("workspace.changes", { id: this.workspace.id }),
         // Unread, it is taken as unmarked, which can only overstate what goes, never hide it.
         this.client.call("session.list").catch(() => []),
+        // Unread, the workspace is taken as the window last read it.
+        this.client.call("workspace.list", { project_id: this.workspace.project_id }).catch(() => []),
       ]);
+      this.workspace = workspaces.find((w) => w.id === this.workspace.id) ?? this.workspace;
       this.marked = listed.some((s) => s.id === this.sessionId && s.deleting !== undefined);
       this.ask(changes, false);
     } catch (error) {
