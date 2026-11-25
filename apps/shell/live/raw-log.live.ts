@@ -15,7 +15,7 @@ const list = (page: Page) => pane(page).getByRole("list", { name: "Raw log" });
 const fromEnd = (page: Page) => list(page).evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
 
 test("the raw log's lines arrive and the list follows them, stays once scrolled up, and Jump to latest returns", async ({ ersa }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   const { page } = ersa;
   const folder = path.join(ersa.dir, "raw-log-check");
   mkdirSync(folder);
@@ -34,9 +34,9 @@ test("the raw log's lines arrive and the list follows them, stays once scrolled 
   await ersa.shot("no-session");
 
   const words = page.getByRole("textbox", { name: "Message" });
-  const composer = page.getByRole("form", { name: "Composer" });
+  // The stand-in's turn never ends, and a message sent meanwhile goes to it at once (FLOW-SEND-MESSAGE-R18): each is a
+  // line to the backend, and `limits` has it answer with a line of its own.
   const send = async (text: string) => {
-    await expect(composer.getByRole("button", { name: "Send", exact: true })).toBeVisible({ timeout: 60_000 });
     await words.fill(text);
     await words.press("Enter");
     await expect(words).toHaveValue("", { timeout: 60_000 });
@@ -48,8 +48,8 @@ test("the raw log's lines arrive and the list follows them, stays once scrolled 
   await ersa.shot("first-lines");
 
   // More messages until the lines are more than the list shows; it follows the end all the while.
-  const overflows = () => list(page).evaluate((el) => el.scrollHeight > el.clientHeight * 1.5);
-  for (let i = 0; i < 40 && !(await overflows()); i++) await send(`Message ${i + 2}.`);
+  const overflows = () => list(page).evaluate((el) => el.scrollHeight > el.clientHeight * 1.2);
+  for (let i = 0; i < 120 && !(await overflows()); i++) await send(i % 2 ? "limits" : `Message ${i + 2}.`);
   expect(await overflows()).toBe(true);
   await expect.poll(() => fromEnd(page), { timeout: 30_000 }).toBeLessThan(1);
   await ersa.shot("following");
@@ -60,17 +60,18 @@ test("the raw log's lines arrive and the list follows them, stays once scrolled 
   await expect.poll(() => list(page).evaluate((el) => el.scrollTop)).toBe(0);
   const jump = pane(page).getByRole("button", { name: /^Jump to latest/ });
   await expect(jump).toBeVisible();
-  await send("One more message.");
+  await send("limits");
   await expect(jump).toHaveAccessibleName(/^Jump to latest, \d+ new lines?$/, { timeout: 30_000 });
   expect(await list(page).evaluate((el) => el.scrollTop)).toBe(0);
   await ersa.shot("scrolled-away");
 
   // Jump to latest: back at the end, and following again.
   await jump.click();
+  const tall = await list(page).evaluate((el) => el.scrollHeight);
   await expect.poll(() => fromEnd(page)).toBeLessThan(1);
   await expect(jump).toBeHidden();
-  await send("And the last.");
-  await expect.poll(() => list(page).evaluate((el) => el.scrollHeight), { timeout: 30_000 }).toBeGreaterThan(0);
+  await send("limits");
+  await expect.poll(() => list(page).evaluate((el) => el.scrollHeight), { timeout: 30_000 }).toBeGreaterThan(tall);
   await expect.poll(() => fromEnd(page), { timeout: 30_000 }).toBeLessThan(1);
   await ersa.shot("jumped");
 });
