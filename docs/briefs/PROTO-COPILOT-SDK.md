@@ -21,9 +21,11 @@ How the Copilot adapter uses the official Copilot Rust SDK and maps its session,
 - Which SDK event field is the message id on which history and live events are merged.
 - How the adapter runs through the transport (ARCH-CORE-R04): the SDK speaks framed JSON-RPC and takes byte streams or starts the CLI itself, while the transport carries lines.
 - How the adapter detects the CLI on a host: the SDK resolves its own CLI, and its version flag is not documented.
+- How the adapter tells that Copilot is signed out and starts Copilot's own sign-in (FLOW-SIGN-IN, PROTO-CORE-API, Signing in), each from a recording: an earlier look found that a runtime with no sign-in starts and connects normally, and that a sign-in started through the SDK hands back an address to open (`docs/reference/lessons/copilot.md`).
 
 ## Changes
 
+- 2026-11-25: open question added on telling signed out and starting sign-in (ADR 0040, FLOW-SIGN-IN).
 - 2026-11-09: open questions added on running through the transport and on detecting the CLI.
 - 2026-11-01: history and listing through the SDK (`list_sessions`, `resume_session`, `Session::get_events`), Copilot CLI sessions only, per ADR 0017; the raw-log open question replaced.
 - 2026-10-31: replaces PROTO-COPILOT-RPC; wire protocol delegated to the official SDK per ADR 0009.

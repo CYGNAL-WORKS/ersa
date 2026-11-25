@@ -17,12 +17,13 @@ The user adds a host from their SSH configuration. Ersa connects, checks which b
 
 - Containers: a host that is a container exec, or a container reached over SSH.
 - How the remote Core is installed and updated, and what happens when its version differs from the local one.
-- How missing backend installation or authentication on the remote host is detected and explained.
+- How a backend that is missing or signed out on the remote host is detected and explained, and how a person signs in to one there (FLOW-SIGN-IN): the sign-in page must open in the person's own browser while the backend runs on the remote host.
 - Whether remote workspace roots are configurable per host.
 - What the rail shows for a remote host's sessions when the host can't be reached as Ersa starts (from FLOW-RESUME-SESSION).
 
 ## Changes
 
+- 2026-11-25: the open question on a backend missing or signed out on a remote host now asks how a person signs in there (ADR 0040, FLOW-SIGN-IN).
 - 2026-11-13: open question on unreachable hosts at start, moved from FLOW-RESUME-SESSION. No requirement IDs changed.
 - 2026-11-01: backfill after a disconnect comes from the backend's session record on the remote host (ADR 0017).
 - 2026-10-31: remote Core, reconnect defined as resume plus backfill, interrupted turns surfaced.
