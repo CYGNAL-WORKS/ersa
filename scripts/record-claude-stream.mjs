@@ -27,12 +27,12 @@
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { expandMcpConfig, redact } from "./redact.mjs";
+import { checkWritten, expandMcpConfig, nextFixtureNumber, redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -55,8 +55,7 @@ if (!version) {
 
 const dir = join(ROOT, "docs", "briefs", "protocol", "fixtures", "claude-code", version);
 mkdirSync(dir, { recursive: true });
-const existing = readdirSync(dir).filter((f) => /^\d{2}-.*\.jsonl$/.test(f)).length;
-const stem = `${String(existing).padStart(2, "0")}-${name}`;
+const stem = `${nextFixtureNumber(dir)}-${name}`;
 if (existsSync(join(dir, stem + ".jsonl"))) {
   console.error(`fixture ${stem} already exists`);
   process.exit(1);
@@ -195,6 +194,9 @@ writeFileSync(
     2
   ) + "\n")
 );
+
+// The redactor has run; an account detail it missed fails the recording here.
+checkWritten([join(dir, stem + ".jsonl"), join(dir, stem + ".meta.json")]);
 
 console.log(`recorded ${stem} (${version}): exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} lines in, ${elapsed_ms} ms`);
 for (const t of turns) console.log(`  turn ${t.turn}: ${t.got_result ? t.subtype : "NO RESULT"}${t.is_error ? " (error)" : ""}`);
