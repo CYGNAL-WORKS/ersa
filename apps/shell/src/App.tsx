@@ -18,13 +18,14 @@ import { RailTree } from "./components/RailTree";
 import { besideIn } from "./components/useFocusRestore";
 import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
+import { RawLogList } from "./components/RawLogList";
 import { Workbench } from "./components/Workbench";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
-import { contextUsed, tileOf } from "./session/tile";
+import { backendLabel, contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
@@ -37,6 +38,7 @@ import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangemen
 import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
+import { type RawLogReader, type RawLogView, readRawLog } from "./session/rawLog";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -272,6 +274,20 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+  // The active session's raw log for the developer pane (FLOW-READ-RAW-LOG), read while the workbench is open. One
+  // reader for each client, made in an effect so React's second run in development makes a fresh one; the next effect
+  // tells it what the window wants, after this one has made it.
+  const [rawLog, setRawLog] = useState<RawLogView>();
+  const rawLogReader = useRef<RawLogReader | undefined>(undefined);
+  useEffect(() => {
+    const reader = readRawLog(client, setRawLog);
+    rawLogReader.current = reader;
+    return () => {
+      reader.stop();
+      rawLogReader.current = undefined;
+    };
+  }, [client]);
+  useEffect(() => rawLogReader.current?.show({ open: workbench.open, session: shownId, link }), [client, workbench.open, shownId, link]);
   // An answer Core took whose decision never came may be lost with the old connection (FLOW-APPROVE-PERMISSION-R32).
   useEffect(() => {
     if (link !== undefined) sending.attached();
@@ -799,6 +815,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const titles = useRef<Record<string, string>>({});
   if (sessions.state === "ready") for (const s of sessions.sessions) if (s.title) titles.current[s.id] = s.title;
   const shown = !composing && session && session.id === activeId ? session : undefined;
+  // The active session's backend by its own label, as its tile names it, for the raw log's directions (FLOW-READ-RAW-LOG-R03).
+  const rawLogSession = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shownId) : undefined;
+  const rawLogBackend = rawLogSession ? backendLabel(rawLogSession, backends) : "";
   const firstSendHere = firstSend && firstSend.id === shown?.id ? firstSend : undefined;
 
   // A file dropped while the sessions page shows reaches no composer behind it.
@@ -1136,7 +1155,16 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         onResize={workbench.resize}
         onClose={() => workbench.setOpen(false)}
         focusAfterClose={() => document.querySelector<HTMLElement>(".rail-arrange")}
-      />
+      >
+        {/* Keyed by the active session, so a new one starts at its end, following; until the reader has the new
+            session's lines it shows none of the one left (FLOW-READ-RAW-LOG-R04). */}
+        <RawLogList
+          key={shownId ?? ""}
+          view={rawLog?.session === shownId ? rawLog : undefined}
+          active={shownId !== undefined}
+          backend={rawLogBackend}
+        />
+      </Workbench>
       </div>
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
         <DeleteQuestion
