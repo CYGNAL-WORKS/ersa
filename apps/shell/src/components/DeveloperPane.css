@@ -18,7 +18,10 @@
   align-items: center;
   gap: var(--space-xs);
   box-sizing: border-box;
-  min-width: var(--size-row-title-min);
+  /* It takes all the width the count and Open diagnostic log leave, which is at least size-row-title-min wherever the
+     pane is wide enough. At the workbench's least width a long count and the button leave less: then the field gives
+     way rather than the button or the count being cut (docs/briefs/INBOX.md). */
+  min-width: 0;
   height: var(--size-control);
   padding-inline: var(--space-sm);
   color: var(--color-ink-faint);
