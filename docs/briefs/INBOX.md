@@ -8,6 +8,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-24 PROTO-CLAUDE-CODE-STREAM: the opening paragraph calls each stream `.jsonl` "verbatim CLI output", but every recording passes through the redactor, which since #471 also replaces the plan's name (`subscriptionType`), each rate-limit window's `utilization` (now 0.5 in every window, so no recording shows two windows with different shares) and the ids in a synced plugin's path, besides the email, organization and paths it already replaced. Meanwhile the fixtures are redacted and the brief is unchanged; it could say "the CLI's output with the login's details replaced by placeholders".
-
 
