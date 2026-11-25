@@ -24,9 +24,10 @@ const checks = [
   // needs no build, so Tauri is not compiled.
   { name: "rustfmt", cmd: "cargo", args: ["fmt", "--all", "--check"] },
   // Clippy and tests build the default members, Core's crates, as CI's linux
-  // job does. CI's shell job builds the Shell (`-p ersa-shell`).
+  // job does. CI's shell job builds the Shell (`-p ersa-shell`). The tests
+  // run as CI's Test step runs them: the binaries side by side.
   { name: "clippy", cmd: "cargo", args: ["clippy", "--all-targets", "--locked", "--", "-D", "warnings"] },
-  ...(QUICK ? [] : [{ name: "tests", cmd: "cargo", args: ["test", "--locked"] }]),
+  ...(QUICK ? [] : [{ name: "tests", cmd: "node", args: ["scripts/test-rust.mjs", "--locked"] }]),
   ...(scriptTests.length ? [{ name: "script tests", cmd: "node", args: ["--test", ...scriptTests] }] : []),
   // The interface's TypeScript types, design tokens and catalog export are
   // generated from the protocol schemas, DESIGN.md and the string catalog; a
