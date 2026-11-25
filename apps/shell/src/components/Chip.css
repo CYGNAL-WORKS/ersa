@@ -102,12 +102,14 @@
 }
 
 /* The choices: a transient layer anchored to its chip, space-xs from it, beneath where the window has room, else
-   above, placed again as it grows. */
+   above, placed again as it grows. It starts where its chip starts and extends toward the trailing edge; where the
+   window has no room for that, as for a wide list from a chip at the row's trailing end, it ends where its chip ends
+   instead, so it never covers its chip or runs past the window. */
 .chip-list {
   position: fixed;
   inset: auto;
   position-area: block-end span-inline-end;
-  position-try-fallbacks: flip-block;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
   z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
