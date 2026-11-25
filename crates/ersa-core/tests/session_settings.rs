@@ -374,18 +374,6 @@ fn default_resolving_to_a_listed_model(fake: &FakeAdapter) {
     ]);
 }
 
-/// The model the fork's backend was started with: the second start's.
-async fn fork_started_with(fake: &FakeAdapter) -> Option<String> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
-            return config.model.clone();
-        }
-        assert!(tokio::time::Instant::now() < deadline, "never started");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
 /// A live session's turn reported `model` and `mode`; waits until it is idle.
 async fn reported(client: &mut Client, id: &str, model: &str, mode: &str) {
     client
@@ -418,7 +406,7 @@ async fn a_fork_of_a_default_session_leaves_the_model_to_its_backend() {
     let fork = client.result("session.fork", json!({ "id": id })).await;
 
     assert_eq!(fork["model_request"], Value::Null);
-    assert_eq!(fork_started_with(&fake).await, None);
+    assert_eq!(fake.stats.started(2).await[1].model, None);
 }
 
 // verifies: PROTO-CORE-API-R104
@@ -436,7 +424,10 @@ async fn a_fork_of_a_session_whose_model_changed_asks_for_the_model_reported() {
     let fork = client.result("session.fork", json!({ "id": id })).await;
 
     assert_eq!(fork["model_request"], json!("model-b-1"));
-    assert_eq!(fork_started_with(&fake).await.as_deref(), Some("model-b-1"));
+    assert_eq!(
+        fake.stats.started(2).await[1].model.as_deref(),
+        Some("model-b-1")
+    );
 }
 
 /// The effort is checked against the session's model choice, the one the
@@ -494,14 +485,7 @@ async fn a_fork_of_a_session_whose_alias_resolved_asks_for_the_alias() {
 
     // The original's choice, not the id it resolved to.
     assert_eq!(fork["model_request"], json!("model-b"));
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let config = loop {
-        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
-            break config.clone();
-        }
-        assert!(tokio::time::Instant::now() < deadline, "never started");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
+    let config = fake.stats.started(2).await.remove(1);
     assert_eq!(config.model.as_deref(), Some("model-b"));
 }
 
@@ -550,14 +534,7 @@ async fn a_fork_starts_with_the_values_its_original_lists() {
         ),
         three("model-a", "low", "ask")
     );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let config = loop {
-        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
-            break config.clone();
-        }
-        assert!(tokio::time::Instant::now() < deadline, "never started");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
+    let config = fake.stats.started(2).await.remove(1);
     assert_eq!(
         (
             config.model.as_deref(),
@@ -689,14 +666,7 @@ async fn relaunched(
     client.result("session.stop", json!({ "id": id })).await;
     let starts = fake.stats.configs.lock().unwrap().len();
     client.result("session.resume", json!({ "id": id })).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let config = loop {
-        if let Some(config) = fake.stats.configs.lock().unwrap().get(starts) {
-            break config.clone();
-        }
-        assert!(tokio::time::Instant::now() < deadline, "never resumed");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    };
+    let config = fake.stats.started(starts + 1).await.remove(starts);
     assert!(config.resume.is_some(), "{config:?}");
     (config.model, config.effort, config.permission_mode)
 }
