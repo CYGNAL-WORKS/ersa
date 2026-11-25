@@ -7,10 +7,10 @@ import { Icon } from "./Icon";
 import "./RawLogList.css";
 
 /** A row draws at most this many characters of its line (docs/design/WORKBENCH.md, The list). */
-export const ROW_CHARACTERS = 2_000;
+const ROW_CHARACTERS = 2_000;
 
 /** `ts` as 24-hour `HH:MM:SS.mmm` in the user's local time (FLOW-READ-RAW-LOG-R03); as sent when it isn't a time. */
-export function rawLogTime(ts: string): string {
+function rawLogTime(ts: string): string {
   const at = new Date(ts);
   if (Number.isNaN(at.getTime())) return ts;
   const two = (n: number) => String(n).padStart(2, "0");
@@ -18,7 +18,7 @@ export function rawLogTime(ts: string): string {
 }
 
 /** The start a row draws: the line, or the start Core sent of a cut one, to at most ROW_CHARACTERS characters. */
-export function rowText(entry: RawLogEntry): string {
+function rowText(entry: RawLogEntry): string {
   const text = "line" in entry ? entry.line : entry.head;
   if (text.length <= ROW_CHARACTERS) return text;
   const start = text.slice(0, ROW_CHARACTERS);
@@ -95,6 +95,18 @@ export function RawLogList({
   // The last index held when the user left the end; lines above it arrived since.
   const [seen, setSeen] = useState(() => (force?.away === undefined ? -1 : (lines.at(-1)?.index ?? 0) - force.away));
   const anchor = useRef<Anchor>({ index: -1, offset: 0 });
+  // The reader starting over (FLOW-READ-RAW-LOG-R18: Ersa connected to Core again, or the pane opened again while it
+  // ran back) reports a view with nothing held and nothing read yet. Where the user read and what they had seen no
+  // longer hold, since a Core that restarted numbers its lines from 0 again: the list follows the end again (R07).
+  const startOver = given !== undefined && !given.read && given.lines.length === 0;
+  const [wasStartOver, setWasStartOver] = useState(startOver);
+  if (startOver !== wasStartOver) {
+    setWasStartOver(startOver);
+    if (startOver) {
+      setFollowing(true);
+      setSeen(-1);
+    }
+  }
 
   /** The line at the top of a view starting at `scrollTop`, as an anchor. */
   const anchorAt = useCallback(

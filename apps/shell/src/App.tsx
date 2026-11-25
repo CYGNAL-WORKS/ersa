@@ -25,7 +25,7 @@ import { type Connection, type CoreView, type ProjectsView, type SessionsView, c
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
-import { contextUsed, tileOf } from "./session/tile";
+import { backendLabel, contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
@@ -817,7 +817,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const shown = !composing && session && session.id === activeId ? session : undefined;
   // The active session's backend by its own label, as its tile names it, for the raw log's directions (FLOW-READ-RAW-LOG-R03).
   const rawLogSession = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shownId) : undefined;
-  const rawLogBackend = rawLogSession ? (backends[rawLogSession.host_id]?.find((b) => b.name === rawLogSession.backend)?.label ?? rawLogSession.backend) : "";
+  const rawLogBackend = rawLogSession ? backendLabel(rawLogSession, backends) : "";
   const firstSendHere = firstSend && firstSend.id === shown?.id ? firstSend : undefined;
 
   // A file dropped while the sessions page shows reaches no composer behind it.
