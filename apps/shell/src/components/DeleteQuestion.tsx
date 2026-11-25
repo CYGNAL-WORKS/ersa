@@ -122,7 +122,7 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
           {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
         </div>
         {goes && <Loss goes={goes} />}
-        {goes?.kind === "folderGoes" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
+        {(goes?.kind === "folderGoes" || goes?.kind === "putAway") && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
         {failed && (
           <div className="delete-question-failed" role="alert">
             <p className="problem">{t("rail.delete.failedError")}</p>
@@ -159,6 +159,13 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
 /** What goes with the conversation: the folder and its branch by name, or where the files stay. */
 function Goes({ goes }: { goes: WhatGoes }) {
   if (goes.kind === "filesStay") return <p>{t("rail.delete.filesStayDetail", { path: <span className="delete-question-name">{goes.path}</span> })}</p>;
+  // A workspace that is put away has no folder left to delete: the question says so, and what happens to the branch
+  // (FLOW-ARCHIVE-DELETE-SESSION-R13).
+  if (goes.kind === "putAway") {
+    if (goes.branch === "") return <p>{t("rail.delete.putAwayDetail")}</p>;
+    const branch = <span className="delete-question-name">{goes.branch}</span>;
+    return <p>{goes.branchKept ? t("rail.delete.putAwayBranchKeptDetail", { branch }) : t("rail.delete.putAwayBranchDetail", { branch })}</p>;
+  }
   if (goes.branch === "") return <p>{t("rail.delete.folderDetail")}</p>;
   const branch = <span className="delete-question-name">{goes.branch}</span>;
   return <p>{goes.branchKept ? t("rail.delete.folderBranchKeptDetail", { branch }) : t("rail.delete.folderAndBranchDetail", { branch })}</p>;
