@@ -85,6 +85,10 @@ pub enum WorkspacePhase {
     /// up on and that has not ended: nothing else removes the folder or the
     /// workspace meanwhile (PROTO-CORE-API-R131), and nothing starts there.
     PuttingAway,
+    /// A put-back holds it (FLOW-CLEAN-UP-R03): its folder is being made
+    /// again. Nothing removes, deletes or forks there meanwhile, and another
+    /// session's put-back waits for this one.
+    PuttingBack,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -423,7 +427,9 @@ impl State {
             return true;
         };
         let removing = match entry.phase {
-            WorkspacePhase::Removing { .. } | WorkspacePhase::PuttingAway => true,
+            WorkspacePhase::Removing { .. }
+            | WorkspacePhase::PuttingAway
+            | WorkspacePhase::PuttingBack => true,
             WorkspacePhase::Creating
             | WorkspacePhase::Ready
             | WorkspacePhase::Error
@@ -511,6 +517,13 @@ pub enum Command {
     /// since nothing waits for it; refused while anything is under way on
     /// the workspace or a session there.
     PutAway {
+        workspace: Id,
+    },
+    /// Putting a put-away workspace back, for a resume or a send
+    /// (FLOW-CLEAN-UP-R03): admitted when it is put away; held while a
+    /// put-away of it, or another put-back, is under way
+    /// (PROTO-CORE-API-R132); done, beginning nothing, in any other state.
+    PutBack {
         workspace: Id,
     },
     /// A new session in `workspace`: one Ersa starts, or one `found` in the
@@ -625,6 +638,7 @@ pub enum Operation {
     CreateWorkspace(Id),
     RemoveWorkspace(Id),
     PutAway(Id),
+    PutBack(Id),
     CreateSession(Id),
     DeleteSession(Id),
     RemoveSession(Id),
@@ -689,6 +703,15 @@ pub enum Report {
     /// The put-away was refused before anything of the folder was removed;
     /// the workspace is `ready` again.
     PutAwayRefused {
+        workspace: Id,
+    },
+    /// The put-back made the folder again: the workspace is `ready`.
+    WorkspacePutBack {
+        workspace: Id,
+    },
+    /// The put-back did not make the folder; the workspace is still put
+    /// away (FLOW-CLEAN-UP-R04).
+    PutBackRefused {
         workspace: Id,
     },
     /// A `session.delete` that takes the workspace's files marked it `error`.
@@ -1092,7 +1115,8 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             let replaced = match entry.phase {
                 WorkspacePhase::Creating
                 | WorkspacePhase::Removing { .. }
-                | WorkspacePhase::PuttingAway => {
+                | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack => {
                     return Outcome::Refused(Refusal::WorkspaceBusy);
                 }
                 WorkspacePhase::Ready => Replaced::Ready,
@@ -1134,7 +1158,8 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 WorkspacePhase::Ready => {}
                 WorkspacePhase::Creating
                 | WorkspacePhase::Removing { .. }
-                | WorkspacePhase::PuttingAway => {
+                | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack => {
                     return Outcome::Refused(Refusal::WorkspaceBusy);
                 }
                 WorkspacePhase::Error | WorkspacePhase::PutAway => {
@@ -1152,6 +1177,34 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 entry.phase = WorkspacePhase::PuttingAway;
             }
             Outcome::Admitted(Operation::PutAway(workspace.clone()))
+        }
+        Command::PutBack { workspace } => {
+            let Some(entry) = state.workspaces.get_mut(workspace) else {
+                return Outcome::Refused(Refusal::NoWorkspace);
+            };
+            match entry.phase {
+                // A delete of a session there holds it: what the delete
+                // counted must not change under it.
+                WorkspacePhase::PutAway if entry.deleting.is_some() => {
+                    Outcome::Refused(Refusal::WorkspaceHeld)
+                }
+                WorkspacePhase::PutAway => {
+                    entry.phase = WorkspacePhase::PuttingBack;
+                    Outcome::Admitted(Operation::PutBack(workspace.clone()))
+                }
+                // A put-away under way, or a try at the folder it gave up on,
+                // ends first, so no folder is made that a try still running
+                // would delete (PROTO-CORE-API-R132). Another session's
+                // put-back ends first too; this one then finds it ready.
+                WorkspacePhase::PuttingAway | WorkspacePhase::PuttingBack => Outcome::Held,
+                // Nothing to put back: whether the folder is there is the
+                // resume's own look, and whether a backend may start there is
+                // its launch's.
+                WorkspacePhase::Ready
+                | WorkspacePhase::Creating
+                | WorkspacePhase::Error
+                | WorkspacePhase::Removing { .. } => Outcome::Done,
+            }
         }
         Command::CreateSession {
             workspace,
@@ -1171,7 +1224,8 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 WorkspacePhase::Creating
                 | WorkspacePhase::Error
                 | WorkspacePhase::Removing { .. }
-                | WorkspacePhase::PuttingAway => {
+                | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack => {
                     return Outcome::Refused(Refusal::WorkspaceNotReady);
                 }
                 // The sessions its folder held go on being listed
@@ -1544,7 +1598,8 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 | WorkspacePhase::Error
                 | WorkspacePhase::Removing { .. }
                 | WorkspacePhase::PutAway
-                | WorkspacePhase::PuttingAway => None,
+                | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack => None,
             })
         }
         Report::WorkspaceCreateFailed { workspace, kept } => {
@@ -1556,7 +1611,8 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     | WorkspacePhase::Error
                     | WorkspacePhase::Removing { .. }
                     | WorkspacePhase::PutAway
-                    | WorkspacePhase::PuttingAway,
+                    | WorkspacePhase::PuttingAway
+                    | WorkspacePhase::PuttingBack,
                 ) => return Outcome::Stale,
             }
             if kept {
@@ -1575,7 +1631,8 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     | WorkspacePhase::Ready
                     | WorkspacePhase::Error
                     | WorkspacePhase::PutAway
-                    | WorkspacePhase::PuttingAway,
+                    | WorkspacePhase::PuttingAway
+                    | WorkspacePhase::PuttingBack,
                 ) => {
                     return Outcome::Stale;
                 }
@@ -1598,11 +1655,24 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 | WorkspacePhase::Ready
                 | WorkspacePhase::Error
                 | WorkspacePhase::PutAway
-                | WorkspacePhase::PuttingAway => None,
+                | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack => None,
             })
         }
         Report::WorkspaceRemovalFailed { workspace } => fail_removal(state, &workspace),
         Report::WorkspacePutAway { workspace } => put_away_ended(state, &workspace),
+        Report::WorkspacePutBack { workspace } => {
+            set_workspace(state, &workspace, |phase| match phase {
+                WorkspacePhase::PuttingBack => Some(WorkspacePhase::Ready),
+                WorkspacePhase::Creating
+                | WorkspacePhase::Ready
+                | WorkspacePhase::Error
+                | WorkspacePhase::Removing { .. }
+                | WorkspacePhase::PutAway
+                | WorkspacePhase::PuttingAway => None,
+            })
+        }
+        Report::PutBackRefused { workspace } => put_back_ended(state, &workspace),
         Report::PutAwayRefused { workspace } => {
             set_workspace(state, &workspace, |phase| match phase {
                 WorkspacePhase::PuttingAway => Some(WorkspacePhase::Ready),
@@ -1610,7 +1680,8 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 | WorkspacePhase::Ready
                 | WorkspacePhase::Error
                 | WorkspacePhase::Removing { .. }
-                | WorkspacePhase::PutAway => None,
+                | WorkspacePhase::PutAway
+                | WorkspacePhase::PuttingBack => None,
             })
         }
         Report::WorkspaceErrored { workspace } => {
@@ -1628,6 +1699,7 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 // A delete is not admitted while a put-away holds it.
                 WorkspacePhase::Error
                 | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack
                 | WorkspacePhase::Removing {
                     replaced: Replaced::Error,
                 } => None,
@@ -1645,7 +1717,9 @@ fn note(state: &mut State, report: Report) -> Outcome {
             match entry.phase {
                 // A workspace still being made has had no session to delete,
                 // and a delete is not admitted while a put-away holds one.
-                WorkspacePhase::Creating | WorkspacePhase::PuttingAway => return Outcome::Stale,
+                WorkspacePhase::Creating
+                | WorkspacePhase::PuttingAway
+                | WorkspacePhase::PuttingBack => return Outcome::Stale,
                 WorkspacePhase::Ready
                 | WorkspacePhase::Error
                 | WorkspacePhase::Removing { .. }
@@ -1771,13 +1845,17 @@ fn note(state: &mut State, report: Report) -> Outcome {
                     | WorkspacePhase::Error
                     | WorkspacePhase::Removing { .. }
                     | WorkspacePhase::PutAway
-                    | WorkspacePhase::PuttingAway => None,
+                    | WorkspacePhase::PuttingAway
+                    | WorkspacePhase::PuttingBack => None,
                 })
             }
             Operation::RemoveWorkspace(workspace) => fail_removal(state, &workspace),
             // The store says `put_away` from before anything was removed, so
             // however the put-away ended, put away is what it is.
             Operation::PutAway(workspace) => put_away_ended(state, &workspace),
+            // The store says `put_away` until the folder is made and `ready`
+            // is stored, which the put-back then reports.
+            Operation::PutBack(workspace) => put_back_ended(state, &workspace),
             Operation::CreateSession(session) => {
                 match state.sessions.get(&session).map(SessionEntry::stored) {
                     Some(false) => {
@@ -1981,7 +2059,8 @@ fn fail_removal(state: &mut State, workspace: &str) -> Outcome {
         | WorkspacePhase::Ready
         | WorkspacePhase::Error
         | WorkspacePhase::PutAway
-        | WorkspacePhase::PuttingAway => None,
+        | WorkspacePhase::PuttingAway
+        | WorkspacePhase::PuttingBack => None,
     })
 }
 
@@ -1996,7 +2075,22 @@ fn put_away_ended(state: &mut State, workspace: &str) -> Outcome {
         | WorkspacePhase::Ready
         | WorkspacePhase::Error
         | WorkspacePhase::Removing { .. }
-        | WorkspacePhase::PutAway => None,
+        | WorkspacePhase::PutAway
+        | WorkspacePhase::PuttingBack => None,
+    })
+}
+
+/// A put-back that did not make the folder leaves its workspace put away,
+/// as the store still has it (FLOW-CLEAN-UP-R04).
+fn put_back_ended(state: &mut State, workspace: &str) -> Outcome {
+    set_workspace(state, workspace, |phase| match phase {
+        WorkspacePhase::PuttingBack => Some(WorkspacePhase::PutAway),
+        WorkspacePhase::Creating
+        | WorkspacePhase::Ready
+        | WorkspacePhase::Error
+        | WorkspacePhase::Removing { .. }
+        | WorkspacePhase::PutAway
+        | WorkspacePhase::PuttingAway => None,
     })
 }
 
@@ -2277,19 +2371,61 @@ impl Admission {
             project: project.to_string(),
         };
         let (outcome, waiter) = self.apply(Input::Command(command));
-        let outcome = match waiter {
-            None => outcome,
-            Some((number, mut waiter)) => match tokio::time::timeout(limit, &mut waiter).await {
-                Ok(answer) => answer.expect("a held command is always answered"),
-                Err(_) => {
-                    self.give_up(number);
-                    // Answered now: "gave up", or what a step just before
-                    // decided.
-                    waiter.await.expect("a held command is always answered")
-                }
-            },
-        };
+        let outcome = self.answer_within(limit, outcome, waiter).await;
         self.answered(outcome)
+    }
+
+    /// The answer to a command `apply` decided as `outcome`: that, or, when
+    /// it was held (`waiter`), the answer it gets within `limit`, else "gave
+    /// up" ([`Report::GaveUp`]).
+    async fn answer_within(
+        &self,
+        limit: Duration,
+        outcome: Outcome,
+        waiter: Option<(u64, oneshot::Receiver<Outcome>)>,
+    ) -> Outcome {
+        let Some((number, mut waiter)) = waiter else {
+            return outcome;
+        };
+        match tokio::time::timeout(limit, &mut waiter).await {
+            Ok(answer) => answer.expect("a held command is always answered"),
+            Err(_) => {
+                self.give_up(number);
+                // Answered now: "gave up", or what a step just before
+                // decided.
+                waiter.await.expect("a held command is always answered")
+            }
+        }
+    }
+
+    /// Asks to put `workspace` back ([`Command::PutBack`]), waiting at most
+    /// `limit` while a put-away of it, or another put-back, is under way:
+    /// then it gives up ([`Report::GaveUp`]) and is refused so
+    /// (PROTO-CORE-API-R132). `Ok(None)` when there is nothing to put back.
+    /// `there_is` runs once, at once, when there is: the workspace is put
+    /// away, or being put away or back, so a send can say so while it waits.
+    pub async fn put_back(
+        self: &Arc<Self>,
+        workspace: &str,
+        limit: Duration,
+        there_is: impl FnOnce(),
+    ) -> Result<Option<UnderWay>, Refusal> {
+        let command = Command::PutBack {
+            workspace: workspace.to_string(),
+        };
+        let (outcome, waiter) = self.apply(Input::Command(command));
+        if matches!(outcome, Outcome::Admitted(_) | Outcome::Held) {
+            there_is();
+        }
+        let outcome = self.answer_within(limit, outcome, waiter).await;
+        match outcome {
+            Outcome::Done => Ok(None),
+            outcome @ (Outcome::Admitted(_)
+            | Outcome::Refused(_)
+            | Outcome::Held
+            | Outcome::Noted
+            | Outcome::Stale) => self.answered(outcome).map(Some),
+        }
     }
 
     /// The waiter numbered `number` stops waiting: its held command is
@@ -2378,7 +2514,8 @@ impl Admission {
             | WorkspacePhase::Ready
             | WorkspacePhase::Error
             | WorkspacePhase::PutAway
-            | WorkspacePhase::PuttingAway => None,
+            | WorkspacePhase::PuttingAway
+            | WorkspacePhase::PuttingBack => None,
         }
     }
 
@@ -2580,6 +2717,18 @@ impl UnderWay {
             replaced = inner.sessions.insert(session, Arc::clone(&mine));
         });
         drop((replaced, mine));
+    }
+}
+
+/// Ends an operation whose tries at a folder shared it, with `report`. A
+/// try given up on whose thread has not returned still holds it: then the
+/// operation ends when that thread lets go, which admission takes as its
+/// [`Report::Ended`], what `report` then is too (a try that ran out fails
+/// it), so the workspace stays held until then (PROTO-CORE-API-R107, R131).
+pub fn end_held(under_way: Arc<UnderWay>, report: Report) {
+    match Arc::try_unwrap(under_way) {
+        Ok(under_way) => under_way.end(report),
+        Err(still_held) => drop(still_held),
     }
 }
 

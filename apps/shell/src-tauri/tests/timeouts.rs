@@ -19,3 +19,12 @@ fn a_delete_is_waited_on_for_10_minutes() {
 fn a_fork_is_waited_on_for_10_minutes() {
     assert_eq!(timeout_for("session.fork"), Duration::from_secs(10 * 60));
 }
+
+/// A resume may first put the session's folder back, which waits for a
+/// put-away under way and for a turn at the project's worktrees, so the
+/// Shell waits 10 minutes for its answer.
+// verifies: FLOW-CLEAN-UP-R05
+#[test]
+fn a_resume_is_waited_on_for_10_minutes() {
+    assert_eq!(timeout_for("session.resume"), Duration::from_secs(10 * 60));
+}

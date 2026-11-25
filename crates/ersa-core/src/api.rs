@@ -139,6 +139,7 @@ impl From<SessionError> for ApiError {
             SessionError::Busy(message) => ApiError::invalid_state(message).with_detail("busy"),
             // Said once, by `NoSection`'s own message.
             e @ SessionError::NoSection(_) => ApiError::not_found(e.to_string()),
+            SessionError::Vcs(e) => e.into(),
             SessionError::Refused {
                 reason,
                 message,
