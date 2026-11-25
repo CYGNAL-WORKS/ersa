@@ -102,13 +102,12 @@ pub trait Adapter: Send + Sync {
     /// (PROTO-CORE-API-R72), in the backend's order. Core asks only once
     /// the version check has found the backend. An `Io` error of kind
     /// `NotFound` means the backend is missing from the host; any other
-    /// error, that it is present but could not report them. None, the
-    /// default, for a backend that offers no choice of model.
-    async fn models(
-        &self,
-        _transport: Arc<dyn Transport>,
-    ) -> Result<Vec<ModelChoice>, AdapterError> {
-        Ok(Vec::new())
+    /// error, that it is present but could not report them. The report
+    /// also says which effort a session given none runs with, when the
+    /// backend says. Nothing, the default, for a backend that offers no
+    /// choice of model.
+    async fn models(&self, _transport: Arc<dyn Transport>) -> Result<ModelReport, AdapterError> {
+        Ok(ModelReport::default())
     }
 
     /// The images this backend takes inline with a message: Core refuses any
@@ -362,10 +361,21 @@ pub enum OpenElsewhere {
     Unknown,
 }
 
+/// What a backend reports of itself on a host ([`Adapter::models`]): its
+/// models, in its order, and the effort a session given none runs with,
+/// which Core marks as the default effort in `backend.list`
+/// (PROTO-CORE-API, `backend.list`). `None` when the backend did not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModelReport {
+    pub models: Vec<ModelChoice>,
+    pub default_effort: Option<String>,
+}
+
 /// The efforts and permission modes a session of a backend can start with.
 /// Each list marks the one a new session starts with when none is named, or
-/// none when the backend marks none (Claude Code marks no effort). The
-/// models are the backend's own report ([`Adapter::models`]).
+/// none when the backend marks none. An adapter's efforts carry no mark:
+/// the default effort is the backend's own report ([`ModelReport`]), as the
+/// models are.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BackendChoices {
     pub efforts: Vec<Choice>,

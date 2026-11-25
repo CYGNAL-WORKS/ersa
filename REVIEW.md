@@ -14,7 +14,7 @@ High and medium findings block the merge, whichever round found them. Low findin
 
 Tests:
 
-- A test that passes without the change is medium when it cites a requirement or covers the fix of a high or medium finding, and low otherwise.
+- A test that passes without the change is medium when it cites a requirement or covers the fix of a high or medium finding, and low otherwise. A citing test of code `main` already had is the exception: it pins a requirement, or a clause of one, written after its code, and is a finding only when it still passes with that code undone.
 - A test rewritten to expect whatever the code outputs is always medium.
 - A new test that waits a fixed pause for something it could wait on is medium: it fails by chance on a busy machine, and the review loop meets that as a clean head put out of the merge queue.
 - Mutation targets requirement values and fix hunks, not arbitrary lines.
