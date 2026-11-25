@@ -35,7 +35,10 @@ pub fn log_file(
 /// opener would answer it with a dialog of its own, or not at all.
 pub fn open_file(path: &Path, open: impl FnOnce(&Path) -> io::Result<()>) -> Result<(), String> {
     if !path.is_file() {
-        return Err(format!("There's no diagnostic log at {} yet.", path.display()));
+        return Err(format!(
+            "There's no diagnostic log at {} yet.",
+            path.display()
+        ));
     }
     open(path).map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -46,7 +49,10 @@ pub fn open_file(path: &Path, open: impl FnOnce(&Path) -> io::Result<()>) -> Res
 /// command line. Only starting the opener can fail here: none of them says
 /// whether the app it chose opened the file.
 pub fn system_open(path: &Path) -> io::Result<()> {
-    std::process::Command::new(OPENER).arg(path).spawn().map(drop)
+    std::process::Command::new(OPENER)
+        .arg(path)
+        .spawn()
+        .map(drop)
 }
 
 /// The operating system's opener: given a file or a link, it opens it in
@@ -79,7 +85,10 @@ mod tests {
         let attached = CoreLocation::attach_only("replay-1").expect("a location");
         assert_eq!(
             log_file(&Ok(attached), Some("replay-1")),
-            Err("This build is attached to replay-1, so it has no diagnostic log to open.".to_string())
+            Err(
+                "This build is attached to replay-1, so it has no diagnostic log to open."
+                    .to_string()
+            )
         );
     }
 
@@ -115,7 +124,13 @@ mod tests {
             asked = true;
             Ok(())
         });
-        assert_eq!(answer, Err(format!("There's no diagnostic log at {} yet.", log.display())));
+        assert_eq!(
+            answer,
+            Err(format!(
+                "There's no diagnostic log at {} yet.",
+                log.display()
+            ))
+        );
         assert!(!asked, "nothing is handed to the opener");
         // Nor a folder in its place.
         std::fs::create_dir(&log).expect("a folder named like the log");
@@ -128,7 +143,15 @@ mod tests {
         let dir = tempfile::tempdir().expect("a folder");
         let log = dir.path().join("core.log");
         std::fs::write(&log, "").expect("a log");
-        let answer = open_file(&log, |_| Err(io::Error::new(io::ErrorKind::NotFound, "explorer.exe is missing")));
-        assert_eq!(answer, Err(format!("{}: explorer.exe is missing", log.display())));
+        let answer = open_file(&log, |_| {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "explorer.exe is missing",
+            ))
+        });
+        assert_eq!(
+            answer,
+            Err(format!("{}: explorer.exe is missing", log.display()))
+        );
     }
 }
