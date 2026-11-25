@@ -95,3 +95,59 @@
     transition: none;
   }
 }
+
+/* Open diagnostic log (docs/design/WORKBENCH.md, The developer pane): a quiet button, its label in ui-small and
+   ink-muted, size-control high, radius-md, padded space-sm, with no edge (a transparent hairline, so keyboard focus can
+   draw one without moving anything). It sits space-sm after the field, or after the count while that shows. */
+.developer-open-log {
+  flex: none;
+  box-sizing: border-box;
+  height: var(--size-control);
+  margin-inline-start: var(--space-sm);
+  padding: 0 var(--space-sm);
+  color: var(--color-ink-muted);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: nowrap;
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Under the pointer it takes material-hover and reads ink; pressed, material-pressed. */
+.developer-open-log:hover:not([aria-disabled="true"]),
+.developer-open-log[data-force="hover"] {
+  color: var(--color-ink);
+  background: var(--material-hover);
+}
+
+.developer-open-log:active:not([aria-disabled="true"]),
+.developer-open-log[data-force="pressed"] {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+
+/* With keyboard focus its edge turns ink, available or not. */
+.developer-open-log:focus-visible,
+.developer-open-log[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+/* Unavailable it reads ink-faint and doesn't change under the pointer; its tooltip gives the reason. */
+.developer-open-log[aria-disabled="true"] {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .developer-open-log {
+    transition: none;
+  }
+}

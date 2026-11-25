@@ -11,6 +11,7 @@ fn main() {
         "shell_quit_heard",
         "shell_quit",
         "shell_open_link",
+        "shell_open_diagnostic_log",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("the Tauri build step failed");
