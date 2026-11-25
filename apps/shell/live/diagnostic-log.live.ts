@@ -26,7 +26,9 @@ test("Open diagnostic log is unavailable in a window attached to a label, and sa
   // Choosing it anyway does nothing: no problem line, and it keeps keyboard focus.
   // Playwright counts aria-disabled as disabled, so the click is forced, as a person's click reaches it regardless.
   await button.click({ force: true });
-  await button.focus();
+  // Reached from the keyboard, so it shows keyboard focus's ink edge: Tab from the filter field.
+  await pane.getByRole("searchbox", { name: "Filter lines" }).focus();
+  await page.keyboard.press("Tab");
   await expect(button).toBeFocused();
   await expect(pane.locator(".raw-log-problem[data-shown]")).toHaveCount(0);
   await ersa.shot("unavailable-focus");
