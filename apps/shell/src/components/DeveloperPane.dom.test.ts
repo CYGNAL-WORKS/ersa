@@ -110,6 +110,18 @@ describe("the filter", () => {
     expect(screen.queryByText("No lines contain that text.")).toBeNull();
   });
 
+  // verifies: FLOW-READ-RAW-LOG-R12
+  it("counts nothing of the session it left while it reads the next, or with no session", () => {
+    const { update } = show(viewOf(entries(0, 12)));
+    type("error");
+    expect(count()?.textContent).toBe("3 of 12");
+    update(undefined, "s2");
+    expect(count()?.hasAttribute("data-shown")).toBe(false);
+    update(viewOf(entries(0, 6), { session: "s2" }), "s2");
+    expect(count()?.hasAttribute("data-shown")).toBe(true);
+    expect(count()?.textContent).toBe("2 of 6");
+  });
+
   it("stays when the active session changes", () => {
     const { update } = show(viewOf(entries(0, 12)));
     type("error");
