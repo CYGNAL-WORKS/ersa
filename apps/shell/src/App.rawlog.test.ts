@@ -110,8 +110,8 @@ afterEach(() => {
 });
 
 const pane = () => screen.getByRole("complementary", { name: "Developer" });
-const list = () => within(pane()).getByRole("list", { name: "Raw log" });
-const rows = () => within(list()).queryAllByRole("listitem");
+const list = () => within(pane()).getByRole("listbox", { name: "Raw log" });
+const rows = () => within(list()).queryAllByRole("option");
 
 describe("the developer pane in the window", () => {
   // verifies: FLOW-READ-RAW-LOG-R03
@@ -145,6 +145,33 @@ describe("the developer pane in the window", () => {
     expect(within(pane()).getByText("Reading…")).toBeTruthy();
     core.let();
     await waitFor(() => expect(within(pane()).getByText("No lines yet. Lines appear here while the session runs.")).toBeTruthy());
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R12
+  it("filters the session's lines as they arrive, and counts them", async () => {
+    const core = fakeCore();
+    core.add(entry(0), entry(1), entry(10));
+    await start(core);
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    fireEvent.change(within(pane()).getByRole("searchbox", { name: "Filter lines" }), { target: { value: "LINE 1" } });
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("line 1"), expect.stringContaining("line 10")]);
+    core.add(entry(11), entry(12), entry(20));
+    // The reader asks again within its second; the new lines that contain the text join the list.
+    await waitFor(() => expect(rows()).toHaveLength(4), { timeout: 4_000 });
+    expect(within(pane()).getByText("4 of 6")).toBeTruthy();
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("shows the selected line in the detail beneath the list", async () => {
+    const core = fakeCore();
+    core.add(entry(0), entry(1));
+    await start(core);
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    fireEvent.click(rows()[1]!);
+    const detail = pane().querySelector(".raw-log-detail")!;
+    expect(detail.hasAttribute("data-shown")).toBe(true);
+    expect(detail.querySelector("pre")?.textContent).toBe("line 1");
+    expect(within(detail as HTMLElement).getByRole("button", { name: "Copy line" })).toBeTruthy();
   });
 
   // verifies: FLOW-READ-RAW-LOG-R14
