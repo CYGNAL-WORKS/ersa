@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 // The Worktree checkbox in the session controls, in place of the workspace chip (issue 412).
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Project } from "../protocol/core-api.gen";
+import type { BackendInfo, Project } from "../protocol/core-api.gen";
 import { SessionControls } from "./SessionControls";
 
 const project: Project = { id: "p1", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "git", trusted: true };
@@ -72,5 +72,65 @@ describe("the Worktree checkbox", () => {
   it("is unavailable while the first message is on its way", () => {
     // The browser sends a disabled box no click, so nothing can change it.
     expect(controls("isolated", { disabled: true }).box()?.disabled).toBe(true);
+  });
+});
+
+describe("the permission mode chip's list", () => {
+  const backend: BackendInfo = {
+    name: "claude-code",
+    label: "Claude Code",
+    status: "available",
+    tested: { min: "2.1.0", max: "2.1.400" },
+    models: [],
+    efforts: [],
+    permission_modes: [
+      { id: "default", label: "Manual", default: true, description: "Always ask before making changes" },
+      { id: "plan", label: "Plan", default: false, description: "Create a plan before making changes" },
+      // A mode its adapter says nothing more of.
+      { id: "custom", label: "Custom", default: false },
+    ],
+  };
+
+  function openModes() {
+    render(
+      createElement(SessionControls, {
+        hosts: [host],
+        localHostId: "local",
+        projects: [project],
+        backends: [backend],
+        values: { host_id: "local", project_id: "p1", workspace: "isolated", backend: "claude-code", permission_mode: "plan" },
+        onChoose: vi.fn(),
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Permission mode:/ }));
+    return screen.getByRole("listbox", { name: "Permission mode" });
+  }
+
+  // What assistive technology hears after the option's name: the text of what it is described by.
+  const described = (option: HTMLElement) =>
+    (option.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .filter(Boolean)
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+
+  // verifies: FLOW-NEW-SESSION-R45
+  it("shows each mode's description beneath its label, and the label alone for a mode with none", () => {
+    const list = openModes();
+    const manual = within(list).getByRole("option", { name: "Manual" });
+    const plan = within(list).getByRole("option", { name: "Plan" });
+    const custom = within(list).getByRole("option", { name: "Custom" });
+    // The option is still named by its label; the sentence is what it says next.
+    expect(described(manual)).toBe("Always ask before making changes");
+    expect(described(plan)).toBe("Create a plan before making changes");
+    // Beneath the label: the label first, then the description, each its own line of the option.
+    const lines = (option: HTMLElement) =>
+      [...option.querySelectorAll(".chip-option-label, .chip-option-description")].map((el) => el.textContent);
+    expect(lines(manual)).toEqual(["Manual", "Always ask before making changes"]);
+    expect(manual.dataset.described).toBeDefined();
+    // No empty second line for a mode with no description.
+    expect(lines(custom)).toEqual(["Custom"]);
+    expect(custom.dataset.described).toBeUndefined();
+    expect(custom.hasAttribute("aria-describedby")).toBe(false);
   });
 });
