@@ -5,9 +5,10 @@ export type OpenSide = "above" | "below";
 
 /**
  * The side a layer anchored to `anchor` opened on. A chip's list and the attach menu each have a usual side and flip
- * to the other where the window has no room (`position-try-fallbacks: flip-block`), and CSS cannot tell its entrance
- * which one the window chose; so it is measured once as the layer opens, after layout and before the first paint,
- * and the entrance slides away from what opened it on either side (docs/design/COMPOSER.md, A chip's list).
+ * to the other where the window has no room (`position-try-fallbacks: flip-block`; a sideways flip, `flip-inline`,
+ * moves it along its anchor and changes no side), and CSS cannot tell its entrance which one the window chose; so it
+ * is measured once as the layer opens, after layout and before the first paint, and the entrance slides away from
+ * what opened it on either side (docs/design/COMPOSER.md, A chip's list).
  *
  * Undefined until measured, and while closed.
  */

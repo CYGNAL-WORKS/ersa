@@ -219,6 +219,34 @@ fn the_choices_are_the_briefs_efforts_and_permission_modes() {
     );
 }
 
+/// Each permission mode carries the sentence Claude Desktop's permission
+/// menu shows beneath its name, on its own mode; no effort carries one
+/// (`claude-desktop/permission-menu-2026-11-24.txt`).
+// verifies: PROTO-CLAUDE-CODE-STREAM-R81
+#[test]
+fn each_permission_mode_says_what_it_does() {
+    let choices = adapter().choices();
+    let described: Vec<(&str, Option<&str>)> = choices
+        .permission_modes
+        .iter()
+        .map(|c| (c.id.as_str(), c.description.as_deref()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            ("auto", Some("Claude handles permission decisions")),
+            ("default", Some("Always ask before making changes")),
+            ("acceptEdits", Some("Automatically accept all file edits")),
+            ("plan", Some("Create a plan before making changes")),
+        ]
+    );
+    assert!(
+        choices.efforts.iter().all(|c| c.description.is_none()),
+        "{:?}",
+        choices.efforts
+    );
+}
+
 /// Choosing the CLI's own `default` entry passes no `--model`
 /// (PROTO-CLAUDE-CODE-STREAM, Invocation).
 #[test]

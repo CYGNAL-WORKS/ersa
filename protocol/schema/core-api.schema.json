@@ -1734,7 +1734,7 @@
         "permission_modes": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/choice"
+            "$ref": "#/$defs/permission_mode_choice"
           },
           "description": "The permission modes a session can start with."
         }
@@ -1761,6 +1761,34 @@
         "default": {
           "type": "boolean",
           "description": "Whether a new session starts with this one when none is named."
+        }
+      }
+    },
+    "permission_mode_choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "default"
+      ],
+      "description": "One permission mode a session can start with: a choice, with what the mode does.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "What session.create takes and session.list reports."
+        },
+        "label": {
+          "type": "string",
+          "description": "What the Interface shows."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Whether a new session starts with this one when none is named."
+        },
+        "description": {
+          "type": "string",
+          "description": "A sentence saying what the mode does, shown beneath its label; absent when the adapter gives none."
         }
       }
     },
