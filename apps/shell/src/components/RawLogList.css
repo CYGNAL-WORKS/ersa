@@ -1,10 +1,19 @@
 /* The developer pane's list of raw log lines (docs/design/WORKBENCH.md, The list): fixed rows edge to edge, the
-   problem line over its top, Jump to latest over its foot, and what it says when it has nothing to list. */
+   problem line over its top, Jump to latest over its foot, and what it says when it has nothing to list. The detail
+   (RawLogDetail.css) takes the lower half beneath it while a row is selected. */
 
 .raw-log {
-  position: relative;
   display: flex;
   flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The list's area: what lies over the list (a message, the problem line, Jump to latest) is placed in it. */
+.raw-log-area {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
 }
@@ -21,7 +30,8 @@
 }
 
 /* With keyboard focus the list shows it as a control without an edge does: an ink hairline, drawn inside it. */
-.raw-log-list:focus-visible {
+.raw-log-list:focus-visible,
+.raw-log-list[data-force="focus"] {
   box-shadow: inset 0 0 0 var(--line-hairline) var(--color-ink);
 }
 
@@ -50,9 +60,20 @@
   white-space: nowrap;
 }
 
-.raw-log-row:not(.raw-log-earlier):hover,
-.raw-log-row[data-force="hover"] {
+.raw-log-row:not(.raw-log-earlier) {
+  cursor: default;
+}
+
+/* Under the pointer a row takes material-hover; the selected row keeps its highlight, as the rail's open tile does. */
+.raw-log-row:not(.raw-log-earlier, [aria-selected="true"]):hover,
+.raw-log-row[data-force="hover"]:not([aria-selected="true"]) {
   background: var(--material-hover);
+}
+
+/* Selected, a row takes the rail's quiet highlight for the open session, the same with keyboard focus as without:
+   the list's own edge shows focus. */
+.raw-log-row[aria-selected="true"] {
+  background: var(--material-open-session);
 }
 
 /* The time as HH:MM:SS.mmm in ui-small, ink-faint and tabular figures. */
@@ -94,10 +115,20 @@
   line-height: var(--type-ui-small-leading);
 }
 
-/* Nothing to list: said in the middle of the list's area, in ui and ink-muted, centered, at most size-dialog wide. */
+/* Nothing to list: said in the middle of the list's area, in ui and ink-muted, centered, at most size-dialog wide. It
+   lies over the list, which stays in the page as the keyboard's stop. */
 .raw-log-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.raw-log-empty > p {
   max-width: var(--size-dialog);
-  margin: auto;
+  margin: 0;
   padding: 0 var(--space-md);
   color: var(--color-ink-muted);
   font-family: var(--type-ui-family);
@@ -186,11 +217,11 @@
   visibility: visible;
 }
 
-/* A pill size-control high on surface-raised with a line edge, padded space-md at the sides (with no shadow: DESIGN.md
-   keeps shadow-transient for layers with radius-lg corners; see the inbox), holding an
-   arrow, the words in ui-small and ink, the count after them in ink-muted and tabular figures. A control with an
-   edge: under the pointer its edge turns ink-faint and its fill steps up a surface, pressed it sinks to canvas, and
-   with keyboard focus its edge turns ink. */
+/* A pill size-control high on surface-raised with a line edge, padded space-md at the sides, with no shadow: it is a
+   control inside its pane, not a transient layer (WORKBENCH.md, The list). It holds an arrow, the words in ui-small
+   and ink, and the count after them in ink-muted and tabular figures. A control with an edge: under the pointer its
+   edge turns ink-faint and its fill steps up a surface, pressed it sinks to canvas, and with keyboard focus its edge
+   turns ink. */
 .raw-log-jump {
   display: inline-flex;
   align-items: center;
