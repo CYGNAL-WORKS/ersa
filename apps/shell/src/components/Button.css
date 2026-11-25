@@ -115,7 +115,12 @@
   }
 }
 
-/* With reduced motion on, the ring holds still at full tone. */
+/* A ring loops only while its work runs: in a label not shown, it holds still. With reduced motion on, it holds still
+   at full tone. */
+.button-label:not([data-shown]) .button-ring {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .button-ring {
     animation: none;
