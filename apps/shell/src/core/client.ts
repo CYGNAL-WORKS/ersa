@@ -73,6 +73,8 @@ const REFUSAL_WORDS: Partial<Record<Reason, () => string>> = {
   no_finished_reply: () => t("errors.refusal.noFinishedReplyError"),
   backend_cannot_fork: () => t("errors.refusal.backendCannotForkError"),
   folder_gone: () => t("errors.refusal.folderGoneError"),
+  branch_gone: () => t("errors.refusal.branchGoneError"),
+  branch_in_use: () => t("errors.refusal.branchInUseError"),
 };
 
 // Process ids as Core lists them for `open_elsewhere`: decimal numbers separated by a comma and a space (R87).

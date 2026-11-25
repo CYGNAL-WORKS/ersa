@@ -287,6 +287,46 @@ describe("Delete on a tile", () => {
   });
 });
 
+// A session whose workspace Core put away after the window read it (FLOW-ARCHIVE-DELETE-SESSION, step 4; FLOW-CLEAN-UP).
+describe("Delete on a tile whose workspace is put away", () => {
+  // The window reads the workspace while it is ready; Core puts it away when the session is archived, and lists it so
+  // from then on.
+  const putAwayLater = () => {
+    let reads = 0;
+    return () => (reads++ === 0 ? workspaces : workspaces.map((w) => (w.id === "w-fix" ? { ...w, state: "put_away" } : w)));
+  };
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R13
+  it("says the folder is already removed and the branch goes, and deletes with nothing lost", async () => {
+    const core = await open({
+      "workspace.list": putAwayLater(),
+      "workspace.changes": () => ({ ...changes, uncommitted: 0, token: "t-away" }),
+      "session.delete": (params: { id: string }) => ({ id: params.id, workspace_deleted: false, branch_kept: false }),
+    });
+    fireEvent.click(deleteItem("Fix the build"));
+    await settle();
+    const dialog = screen.getByRole("dialog", { name: "Delete Fix the build?" });
+    expect(dialog.textContent).toContain("The session's folder was already removed, and its branch ersa/fix is deleted too.");
+    expect(dialog.textContent).not.toContain("folder and branch");
+    expect(dialog.textContent).not.toContain("will be lost");
+    const confirm = within(dialog).getAllByRole("button").find((b) => b.classList.contains("delete-question-confirm"));
+    expect(confirm?.querySelector("[data-shown]")?.textContent).toBe("Delete");
+    fireEvent.click(confirm as HTMLElement);
+    await settle();
+    expect(core.calls.filter((c) => c.method === "session.delete").map((c) => c.params)).toEqual([{ id: "s1", token: "t-away" }]);
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R13
+  it("says the folder is already removed and the branch is kept when it holds commits that exist nowhere else", async () => {
+    await open({ "workspace.list": putAwayLater(), "workspace.changes": () => ({ ...changes, uncommitted: 0, unshared: 1 }) });
+    fireEvent.click(deleteItem("Fix the build"));
+    await settle();
+    const dialog = screen.getByRole("dialog", { name: "Delete Fix the build?" });
+    expect(dialog.textContent).toContain("The session's folder was already removed. Its branch ersa/fix is kept.");
+    expect(dialog.textContent).toContain("The branch holds commits that exist nowhere else.");
+  });
+});
+
 describe("the new-session screen behind the delete question", () => {
   // verifies: FLOW-NEW-SESSION-R27
   it("takes no Ctrl+O while the delete question stands over it", async () => {
