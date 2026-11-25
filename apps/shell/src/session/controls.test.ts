@@ -18,8 +18,10 @@ const backend = (name: string, status: BackendInfo["status"] = "available"): Bac
 });
 
 describe("the session controls' starting values", () => {
+  // The backend marks `high` as its default effort, which the effort chip reads (R47) and a start does not name.
   // verifies: FLOW-NEW-SESSION-R02
-  it("start a git project with nothing last used at a new workspace and the first available backend's defaults", () => {
+  // verifies: FLOW-NEW-SESSION-R47
+  it("start a git project with nothing last used at a new workspace and the first available backend's defaults, naming no effort", () => {
     const values = valuesFor(project("git"), [backend("copilot", "missing"), backend("claude-code"), backend("other")]);
     expect(values).toEqual({
       host_id: "local",
@@ -27,7 +29,7 @@ describe("the session controls' starting values", () => {
       workspace: "isolated",
       backend: "claude-code",
       model: "claude-code-large",
-      effort: "high",
+      effort: undefined,
       permission_mode: "manual",
     });
   });
@@ -48,7 +50,7 @@ describe("the session controls' starting values", () => {
     const last = { workspace: "isolated", backend: "copilot", model: "copilot-small", effort: "low" } as const;
     // The last backend has gone missing, so its model and effort mean nothing to the one that replaces it.
     const values = valuesFor(project("perforce"), [backend("copilot", "error"), backend("claude-code")], last);
-    expect(values).toMatchObject({ workspace: "root", backend: "claude-code", model: "claude-code-large", effort: "high" });
+    expect(values).toMatchObject({ workspace: "root", backend: "claude-code", model: "claude-code-large", effort: undefined });
   });
 
   // verifies: FLOW-NEW-SESSION-R02
@@ -57,7 +59,7 @@ describe("the session controls' starting values", () => {
     expect(valuesFor(project("git"), [plain])).toMatchObject({ model: "a", effort: undefined });
   });
 
-  /** Claude Code as `backend.list` lists it: the CLI's own `default` entry first, a model without efforts, and no effort marked. */
+  /** Claude Code as `backend.list` lists it: the CLI's own `default` entry first, a model without efforts, and no effort marked, as when the CLI does not say its default effort. */
   const claude: BackendInfo = {
     ...backend("claude-code"),
     models: [
@@ -122,6 +124,14 @@ describe("the session controls under a running session", () => {
       effort: "low",
       permission_mode: "edits",
     });
+  });
+
+  // The chip reads the backend's marked effort for such a session (SessionControls); the value stays the session's own.
+  // verifies: FLOW-NEW-SESSION-R47
+  it("leave a session's effort unchosen while it reports none, the marked default included", () => {
+    const shown = sessionShown({ ...running, effort: undefined }, branch, [backend("claude")]);
+    expect(shown.values.effort).toBeUndefined();
+    expect(shown.backend.efforts).toEqual(backend("claude").efforts);
   });
 
   // verifies: FLOW-NEW-SESSION-R12

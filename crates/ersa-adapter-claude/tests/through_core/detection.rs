@@ -10,7 +10,7 @@ use ersa_core::adapters::detect;
 use ersa_protocol::core_api::BackendState;
 use serde_json::Value;
 
-use crate::common::fixture;
+use crate::common::{fixture, settings_answer};
 
 /// The version line Claude Code 2.1.316 prints.
 fn version_check() -> FakeTransport {
@@ -18,7 +18,8 @@ fn version_check() -> FakeTransport {
 }
 
 /// A probe CLI that answers `initialize` with fixture 25's answer, which
-/// lists the models, and exits when its stdin closes.
+/// lists the models, then `get_settings` as recorded, and exits when its
+/// stdin closes.
 fn probe() -> FakeTransport {
     let answer = fixture("2.1.316/25-controls-between-turns")
         .stdout
@@ -31,6 +32,8 @@ fn probe() -> FakeTransport {
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(|_| Ok(()))
         .then_stdout([answer])
+        .wait_for_stdin(|_| Ok(()))
+        .then_stdout([settings_answer(|_| {})])
         .hold_open()
 }
 
@@ -81,6 +84,7 @@ async fn the_version_check_runs_with_the_adapters_environment() {
 // verifies: PROTO-CORE-API-R72
 // verifies: PROTO-CORE-API-R95
 // verifies: PROTO-CLAUDE-CODE-STREAM-R39
+// verifies: PROTO-CLAUDE-CODE-STREAM-R82
 #[tokio::test]
 async fn a_cli_found_lists_the_models_it_reports() {
     let probe = probe();
@@ -93,6 +97,14 @@ async fn a_cli_found_lists_the_models_it_reports() {
         ("default", true)
     );
     assert_eq!(info.models.iter().filter(|m| m.default).count(), 1);
+    // The effort `get_settings` applies is the one default effort.
+    let marked: Vec<&str> = info
+        .efforts
+        .iter()
+        .filter(|e| e.default)
+        .map(|e| e.id.as_str())
+        .collect();
+    assert_eq!(marked, ["medium"]);
     // The probe ran with the adapter's environment too.
     let mut session = ProcessSpec::default();
     claude().set_environment(&mut session);
@@ -103,5 +115,6 @@ async fn a_cli_found_lists_the_models_it_reports() {
     let info = found[0].info();
     assert_eq!(info.status, BackendState::Error);
     assert!(info.models.is_empty());
+    assert!(info.efforts.iter().all(|e| !e.default));
     assert_eq!(info.version.as_deref(), Some("2.1.316"));
 }

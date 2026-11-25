@@ -487,6 +487,12 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     },
                 )
             }
+            (Some("control_request"), Some(subtype)) if subtype == "get_settings" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::GetSettings,
+                )
+            }
             // No host message models `apply_flag_settings` yet: the ticket
             // that builds changing effort adds one. Until then the recorded
             // line must keep the shape the recordings settled.
