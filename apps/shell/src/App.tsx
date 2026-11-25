@@ -6,6 +6,7 @@ import type { AttachWhat } from "./components/AttachMenu";
 import { ArchivedNote } from "./components/ArchivedNote";
 import { Composer } from "./components/Composer";
 import { DeleteQuestion } from "./components/DeleteQuestion";
+import { DeveloperPane } from "./components/DeveloperPane";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
@@ -18,7 +19,6 @@ import { RailTree } from "./components/RailTree";
 import { besideIn } from "./components/useFocusRestore";
 import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
-import { RawLogList } from "./components/RawLogList";
 import { Workbench } from "./components/Workbench";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
@@ -1156,14 +1156,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         onClose={() => workbench.setOpen(false)}
         focusAfterClose={() => document.querySelector<HTMLElement>(".rail-arrange")}
       >
-        {/* Keyed by the active session, so a new one starts at its end, following; until the reader has the new
-            session's lines it shows none of the one left (FLOW-READ-RAW-LOG-R04). */}
-        <RawLogList
-          key={shownId ?? ""}
-          view={rawLog?.session === shownId ? rawLog : undefined}
-          active={shownId !== undefined}
-          backend={rawLogBackend}
-        />
+        {/* Until the reader has the new session's lines the pane shows none of the one left (FLOW-READ-RAW-LOG-R04). */}
+        <DeveloperPane session={shownId} view={rawLog?.session === shownId ? rawLog : undefined} backend={rawLogBackend} />
       </Workbench>
       </div>
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
