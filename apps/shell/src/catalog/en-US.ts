@@ -548,6 +548,12 @@ export const enUS = {
     closeLineButton: "Close line",
     // The detail of a line Core cut, above its start (R11).
     cutNote: "This line is {size}. Its first 256 KB are shown.",
+    // The toolbar's button that opens the diagnostic log's file in the system's app for it (R13); why it is
+    // unavailable in a debug build attached to a labeled endpoint, its tooltip; and the problem line when it couldn't
+    // open the file, followed by the reason.
+    openLogButton: "Open diagnostic log",
+    openLogUnavailableReason: "This build is attached to {label}, so it has no diagnostic log to open.",
+    openLogError: "Ersa couldn't open the diagnostic log.",
   },
   quit: {},
   trust: {

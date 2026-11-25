@@ -2,29 +2,25 @@ import { X } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import { type WidthLimits, clampWidth, limitsOf } from "../session/workbench";
+import { tokenLength } from "../theme/measure";
 import { milliseconds, reducedMotion } from "../theme/motion";
 import { IconButton } from "./Icon";
 import "./Workbench.css";
 
 /** A token's value on `el`, in pixels or, for a percentage, as a share of one; NaN when it can't be read. */
-function tokenOf(el: Element, name: string): number {
-  const value = getComputedStyle(el).getPropertyValue(name).trim();
-  return value.endsWith("%") ? parseFloat(value) / 100 : parseFloat(value);
-}
-
 /**
  * The workbench's limits where it is drawn (FLOW-READ-RAW-LOG-R16): the width it shares with the transcript area is
  * its parent's, the region beside the rail, and the least width and greatest share are the design's tokens.
  */
 function limitsHere(aside: HTMLElement): WidthLimits {
   const shared = aside.parentElement?.getBoundingClientRect().width ?? 0;
-  return limitsOf(shared, tokenOf(aside, "--size-workbench-min") || 0, tokenOf(aside, "--size-workbench-max") || 0);
+  return limitsOf(shared, tokenLength(aside, "--size-workbench-min") || 0, tokenLength(aside, "--size-workbench-max") || 0);
 }
 
 /** The width the workbench is drawn at: the one the user chose, or the design's, within its limits now. */
 function shownWidth(aside: HTMLElement, width: number | undefined): { width: number; limits: WidthLimits } {
   const limits = limitsHere(aside);
-  return { width: clampWidth(width ?? (tokenOf(aside, "--size-workbench") || 0), limits), limits };
+  return { width: clampWidth(width ?? (tokenLength(aside, "--size-workbench") || 0), limits), limits };
 }
 
 /**
@@ -159,7 +155,7 @@ export function Workbench({
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const el = aside.current;
     if (!el) return;
-    const step = tokenOf(el, "--space-lg") || 0;
+    const step = tokenLength(el, "--space-lg") || 0;
     const to: Record<string, (now: number, limits: WidthLimits) => number> = {
       ArrowLeft: (now) => now + step,
       ArrowRight: (now) => now - step,

@@ -4,6 +4,7 @@ import { t } from "../catalog";
 import type { RawLogEntry } from "../protocol/core-api.gen";
 import type { RawLogView } from "../session/rawLog";
 import { lineText, rawLogTime } from "../session/rawLogText";
+import { tokenLength } from "../theme/measure";
 import { Icon } from "./Icon";
 import { RawLogDetail } from "./RawLogDetail";
 import "./RawLogList.css";
@@ -64,6 +65,7 @@ export function RawLogList({
   filtering = false,
   active,
   backend,
+  unopened,
   force,
 }: {
   /** What the reader holds of the active session's raw log; undefined before it has read anything. */
@@ -76,6 +78,11 @@ export function RawLogList({
   active: boolean;
   /** The session's backend, by its own label, for the direction assistive technology hears. */
   backend: string;
+  /**
+   * Why the diagnostic log couldn't be opened, after the user last chose Open diagnostic log and it failed
+   * (FLOW-READ-RAW-LOG-R13), said on a line of its own (R25).
+   */
+  unopened?: string;
   /**
    * For the gallery: scrolled away with `away` new lines, Jump to latest in a pointer or keyboard state, a row under
    * the pointer, a line selected by its index, the list with keyboard focus, and the detail's buttons in a state.
@@ -149,7 +156,7 @@ export function RawLogList({
     const el = list.current;
     if (!el) return;
     const read = () => {
-      const row = parseFloat(getComputedStyle(el).getPropertyValue("--size-log-row"));
+      const row = tokenLength(el, "--size-log-row");
       setMeasure((was) => {
         if (was.row === row && was.height === el.clientHeight) return was;
         // The detail coming or going changes the list's height: the selected row stays in view (WORKBENCH.md, The detail).
@@ -342,7 +349,10 @@ export function RawLogList({
             <p id={`${ids}-message`}>{message}</p>
           </div>
         )}
-        <Problem failure={view?.failure} />
+        {/* Two lines, each coming and going by itself: the read's at the top, and the open's beneath it while both
+            stand, so neither hides the other (R25). */}
+        <Problem problem={view?.failure !== undefined ? { message: t("developer.unreadableError"), reason: view.failure } : undefined} />
+        <Problem problem={unopened !== undefined ? { message: t("developer.openLogError"), reason: unopened } : undefined} below={view?.failure !== undefined} />
         {/* Always in the page, so it fades in and out; out of reach and unheard while hidden. */}
         <div className="raw-log-jump-place" data-shown={offering || undefined} inert={!offering} aria-hidden={!offering || undefined}>
           <button
@@ -364,22 +374,22 @@ export function RawLogList({
 }
 
 /**
- * A read that failed, said over the top of the list so no row moves (R15): the message, then the reason, cut with an
- * ellipsis, and the line whole in its tooltip. It fades out with the words it had; assistive technology hears it once, from a
- * status region that is always in the page.
+ * A problem, said over the top of the list so no row moves: a read that failed (R15), or the diagnostic log that
+ * couldn't be opened (R13), beneath the first while both stand (R25). The message, then the reason, cut with an ellipsis, and the line whole in its tooltip. It
+ * fades out with the words it had; assistive technology hears it once, from a status region that is always in the page.
  */
-function Problem({ failure }: { failure: string | undefined }) {
-  const [said, setSaid] = useState(failure);
-  if (failure !== undefined && failure !== said) setSaid(failure);
-  const message = t("developer.unreadableError");
+function Problem({ problem, below = false }: { problem: { message: string; reason: string } | undefined; below?: boolean }) {
+  const [said, setSaid] = useState(problem);
+  if (problem !== undefined && (problem.message !== said?.message || problem.reason !== said.reason)) setSaid(problem);
+  const whole = (p: { message: string; reason: string }) => `${p.message} ${p.reason}`;
   return (
     <>
-      <div className="raw-log-problem" data-shown={failure !== undefined || undefined} aria-hidden="true" title={said && `${message} ${said}`}>
-        <span className="raw-log-problem-message">{message}</span>
-        <span className="raw-log-problem-reason">{said}</span>
+      <div className="raw-log-problem" data-shown={problem !== undefined || undefined} data-below={below || undefined} aria-hidden="true" title={said && whole(said)}>
+        <span className="raw-log-problem-message">{said?.message}</span>
+        <span className="raw-log-problem-reason">{said?.reason}</span>
       </div>
       <div className="heard-only" role="status">
-        {failure !== undefined && `${message} ${failure}`}
+        {problem !== undefined && whole(problem)}
       </div>
     </>
   );

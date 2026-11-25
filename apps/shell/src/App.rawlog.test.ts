@@ -8,6 +8,7 @@ import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, Method } from "./core/client";
+import type { ShellControl } from "./core/shell";
 import type { BackendInfo, CoreHelloResult, RawLogEntry, Session, SessionRawLogParams } from "./protocol/core-api.gen";
 
 const hello: CoreHelloResult = {
@@ -53,7 +54,7 @@ type Answers = Partial<Record<Method, (params: never) => unknown>>;
  * A Core with one session, the workbench kept open, and a raw log the test adds lines to. While `hold` is set, raw
  * log reads wait until it is cleared.
  */
-function fakeCore() {
+function fakeCore(label?: string) {
   const held: RawLogEntry[] = [];
   let release: (() => void) | undefined;
   let holding = false;
@@ -71,7 +72,7 @@ function fakeCore() {
     "session.raw_log": (params: SessionRawLogParams) => held.filter((e) => e.index >= (params.from ?? 0)),
   };
   const client: CoreClient = {
-    attach: () => Promise.resolve<Attachment>({ how: "attached", hello }),
+    attach: () => Promise.resolve<Attachment>({ how: "attached", hello, ...(label === undefined ? {} : { label }) }),
     call: (method, params) => {
       const answer = answers[method];
       if (!answer) return Promise.reject({ kind: "unavailable", message: `no answer for ${method}` }) as never;
@@ -91,8 +92,8 @@ function fakeCore() {
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
-async function start(core: ReturnType<typeof fakeCore>) {
-  render(createElement(App, { client: core.client }));
+async function start(core: ReturnType<typeof fakeCore>, shell?: ShellControl) {
+  render(createElement(App, { client: core.client, shell }));
   for (let i = 0; i < 4; i++) await settle();
 }
 
@@ -181,5 +182,44 @@ describe("the developer pane in the window", () => {
     fireEvent.click(within(screen.getByRole("navigation", { name: "Rail" })).getByRole("button", { name: "New session" }));
     await settle();
     expect(within(pane()).getByText("No session is open. Choose a session to see its raw log.")).toBeTruthy();
+  });
+});
+
+describe("Open diagnostic log in the window", () => {
+  const shellWith = (openDiagnosticLog: () => Promise<void>) =>
+    ({
+      onQuitRequested: () => () => {},
+      quitHeard: async () => {},
+      show: async () => false,
+      hide: async () => {},
+      quit: async () => {},
+      pickFolder: async () => null,
+      pickFiles: async () => [],
+      onDragDrop: () => () => {},
+      openLink: () => {},
+      openDiagnosticLog,
+    }) satisfies ShellControl;
+  const button = () => within(pane()).getByRole("button", { name: "Open diagnostic log" });
+
+  // verifies: FLOW-READ-RAW-LOG-R13
+  it("reaches the Shell's command, and says why when the Shell couldn't open the file", async () => {
+    const open = vi.fn<() => Promise<void>>(() => Promise.reject("There's no diagnostic log at D:\\data\\core.log yet."));
+    await start(fakeCore(), shellWith(open));
+    expect(button().getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(button());
+    await settle();
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(within(pane()).getAllByRole("status").map((s) => s.textContent)).toContain("Ersa couldn't open the diagnostic log. There's no diagnostic log at D:\\data\\core.log yet.");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R13
+  it("is unavailable in a debug build attached to a labeled endpoint, naming it", async () => {
+    const open = vi.fn(async () => {});
+    await start(fakeCore("replay-3"), shellWith(open));
+    expect(button().getAttribute("aria-disabled")).toBe("true");
+    expect(button().getAttribute("title")).toBe("This build is attached to replay-3, so it has no diagnostic log to open.");
+    fireEvent.click(button());
+    await settle();
+    expect(open).not.toHaveBeenCalled();
   });
 });

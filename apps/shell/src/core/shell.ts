@@ -40,6 +40,11 @@ export interface ShellControl {
    * address in the mail app. The Shell opens only `http`, `https` and `mailto` addresses (FLOW-READ-TRANSCRIPT-R03).
    */
   openLink(url: string): void;
+  /**
+   * Opens the diagnostic log's file in the system's app for it; rejects with the reason, in the user's terms, when it
+   * couldn't. The Shell alone knows the file, so nothing here names it (FLOW-READ-RAW-LOG-R13).
+   */
+  openDiagnosticLog(): Promise<void>;
 }
 
 const BUSY = new Set<string>(["starting", "running", "waiting_user"]);
