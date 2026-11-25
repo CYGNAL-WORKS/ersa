@@ -325,6 +325,18 @@ describe("Delete on a tile whose workspace is put away", () => {
     expect(dialog.textContent).toContain("The session's folder was already removed. Its branch ersa/fix is kept.");
     expect(dialog.textContent).toContain("The branch holds commits that exist nowhere else.");
   });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R13
+  it("says the folder is already removed and the branch stays when another session uses the workspace", async () => {
+    // The branch holds a commit of its own too, but it stays for the other session, which is what the question says.
+    await open({ "workspace.list": putAwayLater(), "workspace.changes": () => ({ ...changes, uncommitted: 0, unshared: 1, sessions: 2 }) });
+    fireEvent.click(deleteItem("Fix the build"));
+    await settle();
+    const dialog = screen.getByRole("dialog", { name: "Delete Fix the build?" });
+    expect(dialog.textContent).toContain("The session's folder was already removed. Another session uses its branch ersa/fix, so the branch stays.");
+    expect(dialog.textContent).not.toContain("Its files stay in");
+    expect(dialog.textContent).not.toContain("exist nowhere else");
+  });
 });
 
 describe("the new-session screen behind the delete question", () => {
