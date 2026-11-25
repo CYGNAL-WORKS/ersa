@@ -122,7 +122,7 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
           {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
         </div>
         {goes && <Loss goes={goes} />}
-        {goes?.kind === "folderGoes" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
+        {goes && goes.kind !== "filesStay" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
         {failed && (
           <div className="delete-question-failed" role="alert">
             <p className="problem">{t("rail.delete.failedError")}</p>
@@ -159,9 +159,21 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
 /** What goes with the conversation: the folder and its branch by name, or where the files stay. */
 function Goes({ goes }: { goes: WhatGoes }) {
   if (goes.kind === "filesStay") return <p>{t("rail.delete.filesStayDetail", { path: <span className="delete-question-name">{goes.path}</span> })}</p>;
-  if (goes.branch === "") return <p>{t("rail.delete.folderDetail")}</p>;
+  // A workspace that is put away has no folder left to delete: the question says so, and what happens to the branch
+  // (FLOW-ARCHIVE-DELETE-SESSION-R13). One choice for both kinds, only the words differ.
+  const away = goes.kind === "putAway";
+  if (goes.branch === "") return <p>{away ? t("rail.delete.putAwayDetail") : t("rail.delete.folderDetail")}</p>;
   const branch = <span className="delete-question-name">{goes.branch}</span>;
-  return <p>{goes.branchKept ? t("rail.delete.folderBranchKeptDetail", { branch }) : t("rail.delete.folderAndBranchDetail", { branch })}</p>;
+  const said = away
+    ? goes.shared
+      ? t("rail.delete.putAwaySharedDetail", { branch })
+      : goes.branchKept
+        ? t("rail.delete.putAwayBranchKeptDetail", { branch })
+        : t("rail.delete.putAwayBranchDetail", { branch })
+    : goes.branchKept
+      ? t("rail.delete.folderBranchKeptDetail", { branch })
+      : t("rail.delete.folderAndBranchDetail", { branch });
+  return <p>{said}</p>;
 }
 
 // The counts read as one list: "3 uncommitted or untracked files and 12 ignored files".

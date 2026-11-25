@@ -1453,6 +1453,25 @@ describe("archiving a session from its tile, and an archived session read-only",
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
   });
 
+  // verifies: PROTO-CORE-API-R80
+  it.each([
+    ["branch_gone", "The branch or commit this session's folder had checked out no longer exists, so the folder can't be put back. Start a new session to go on."],
+    ["branch_in_use", "This session's branch is checked out in another folder. Switch that folder to another branch, then try again."],
+  ])("says above the note why a put-away folder can't come back when Core refuses the resume for %s", async (reason, said) => {
+    await archivedWhileOpen({
+      "session.resume": () => {
+        throw { kind: "rpc", error: { code: -32000, message: "session.resume: core's own words", data: { kind: "invalid_state", reason } } };
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await settle();
+    const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
+    expect(alert?.textContent).toBe(`Ersa can't resume this session. ${said}`);
+    expect(alert?.textContent).not.toContain("core's own words");
+    expect(composerBox()).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
   it("brings the composer back once Core accepts the resume and lists the session unarchived, sending nothing else", async () => {
     const holder: { list?: { current: Session[] } } = {};
@@ -2031,7 +2050,7 @@ describe("the attachments App gives the composer", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R16
-  it("shows where a session's message is, and where a new session's first message is", async () => {
+  it("shows where a session's message is", async () => {
     const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": () => new Promise(() => {}) });
     render(createElement(App, { client: core.client }));
     await settle();
@@ -2042,6 +2061,28 @@ describe("the attachments App gives the composer", () => {
     core.emit({ kind: "notification", method: "session.send_progress", params: { session_id: "s2", phase: "copying", copied_bytes: 1, total_bytes: 2 } });
     expect(document.querySelector(".composer-status-line")?.textContent).toBe("Copying attachments, 50 percent done…");
     cleanup();
+  });
+
+  // verifies: FLOW-CLEAN-UP-R05
+  it("says the session's folder is being put back while the message waits for it, then that the backend is starting", async () => {
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": () => new Promise(() => {}) });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.change(words(), { target: { value: "Go on" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    core.emit({ kind: "notification", method: "session.send_progress", params: { session_id: "s2", phase: "putting_back" } });
+    const line = () => document.querySelector(".composer-status-line");
+    expect(line()?.textContent).toBe("Putting the session's folder back…");
+    // No share to show, so the ring turns, as it does while the backend starts.
+    expect(line()?.querySelector(".context-ring[data-turning]")).toBeTruthy();
+    core.emit({ kind: "notification", method: "session.send_progress", params: { session_id: "s2", phase: "starting" } });
+    expect(line()?.textContent).toBe("Starting the backend…");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R16
+  it("shows where a new session's first message is", async () => {
 
     const started = await screenWith([project("alpha")], undefined, {
       "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
@@ -2213,6 +2254,17 @@ describe("a refused send App's composer says", () => {
     expect(line).toBe("This session's folder no longer exists. Put the folder back, then try again.");
     expect(words().value).toBe("Fix the build");
     expect(screen.getByRole("navigation", { name: "Rail" }).querySelectorAll(".session").length).toBe(sessions.length);
+  });
+
+  // verifies: PROTO-CORE-API-R80
+  it("says why a put-away folder can't come back in the catalog's words, and keeps the message", async () => {
+    const gone = await sendRefused(refuseWith("session.send: the branch ersa/fix no longer exists", "branch_gone"));
+    expect(gone).toBe("The branch or commit this session's folder had checked out no longer exists, so the folder can't be put back. Start a new session to go on.");
+    expect(words().value).toBe("Fix the build");
+    cleanup();
+    const inUse = await sendRefused(refuseWith("session.send: the branch ersa/fix is checked out in another worktree", "branch_in_use"));
+    expect(inUse).toBe("This session's branch is checked out in another folder. Switch that folder to another branch, then try again.");
+    expect(words().value).toBe("Fix the build");
   });
 
   // Core's side of a failed start carrying no reason is PROTO-CORE-API-R88, verified in Core's tests.
