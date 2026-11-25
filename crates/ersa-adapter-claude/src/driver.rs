@@ -739,12 +739,27 @@ impl Adapter for ClaudeAdapter {
         _transport: Arc<dyn Transport>,
         backend_session_id: &str,
     ) -> OpenElsewhere {
-        let Ok(home) = self.claude_home() else {
-            return OpenElsewhere::Unknown;
+        let home = match self.claude_home() {
+            Ok(home) => home,
+            Err(e) => {
+                tracing::warn!(
+                    "could not tell whether another process has a session open: no Claude home \
+                     to find its registry in: {e}"
+                );
+                return OpenElsewhere::Unknown;
+            }
         };
         let id = backend_session_id.to_string();
-        let check = tokio::task::spawn_blocking(move || record::live_session(&home, &id)).await;
-        check.map_or(OpenElsewhere::Unknown, open_elsewhere)
+        match tokio::task::spawn_blocking(move || record::live_session(&home, &id)).await {
+            Ok(check) => open_elsewhere(check),
+            Err(e) => {
+                tracing::warn!(
+                    "could not tell whether another process has a session open: the registry \
+                     read failed: {e}"
+                );
+                OpenElsewhere::Unknown
+            }
+        }
     }
 
     /// Deletes the session's record file and the folder of the same name
@@ -791,14 +806,23 @@ impl Adapter for ClaudeAdapter {
 
 /// What the live-session registry's answer says about whether another
 /// process has the session open; an answer it cannot give is unknown,
-/// never "not open".
+/// never "not open". An unknown answer is logged with the registry paths
+/// that could not be read, so a user told so has a trail to follow; only
+/// the paths, never what the files hold.
 fn open_elsewhere(check: LiveCheck) -> OpenElsewhere {
     match check {
         LiveCheck::NotOpen => OpenElsewhere::No,
         LiveCheck::Open(open) => OpenElsewhere::Yes {
             pids: open.iter().map(|live| live.pid).collect(),
         },
-        LiveCheck::Unknown { .. } => OpenElsewhere::Unknown,
+        LiveCheck::Unknown { unreadable } => {
+            tracing::warn!(
+                unreadable = ?unreadable,
+                "could not tell whether another process has a session open: registry paths \
+                 could not be read"
+            );
+            OpenElsewhere::Unknown
+        }
     }
 }
 

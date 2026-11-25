@@ -1424,7 +1424,7 @@ async fn the_tile_sent_when_a_stopped_session_opens_carries_its_title() {
 /// A stopped session, renamed while the fake's registry answers `answer`:
 /// the events that reached a client reading the session as it was renamed,
 /// after the session's end.
-async fn rename_while_open_elsewhere(answer: OpenElsewhere) -> (Vec<Value>, Arc<Stats>) {
+async fn rename_while_open_elsewhere(answer: OpenElsewhere) -> (Vec<Value>, Arc<Stats>, String) {
     let adapter = FakeAdapter::new(1);
     *adapter.open_elsewhere.lock().unwrap() = answer;
     let (core, stats) = start_fake(adapter).await;
@@ -1459,14 +1459,14 @@ async fn rename_while_open_elsewhere(answer: OpenElsewhere) -> (Vec<Value>, Arc<
             after.push(n["params"]["event"].clone());
         }
     }
-    (after, stats)
+    (after, stats, id)
 }
 
 // verifies: PROTO-AGENT-EVENTS-R15
 // verifies: PROTO-AGENT-EVENTS-R16
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_another_process_has_open_says_so_and_renames_it() {
-    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Yes { pids: vec![4242] }).await;
+    let (after, _, _) = rename_while_open_elsewhere(OpenElsewhere::Yes { pids: vec![4242] }).await;
     assert_eq!(types(&after), ["session.notice"], "{after:#?}");
     let notice = &after[0];
     assert_eq!(notice["event"]["code"], "session_open_elsewhere");
@@ -1486,18 +1486,22 @@ async fn renaming_a_session_another_process_has_open_says_so_and_renames_it() {
 // verifies: PROTO-AGENT-EVENTS-R16
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_when_the_check_cannot_tell_says_so_and_renames_it() {
-    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Unknown).await;
+    let log = support::log::Log::installed();
+    let (after, _, id) = rename_while_open_elsewhere(OpenElsewhere::Unknown).await;
     assert_eq!(types(&after), ["session.notice"], "{after:#?}");
     let notice = &after[0]["event"];
     assert_eq!(notice["code"], "session_open_check_failed");
     assert_eq!(notice["level"], "info");
     assert!(notice.get("pid").is_none(), "{notice:#}");
+    // The diagnostic log says why it could not tell, for this session.
+    let why = log.warning("could not tell whether another process", &id);
+    assert!(why.contains("the adapter could not tell"), "{why}");
 }
 
 // verifies: PROTO-AGENT-EVENTS-R15
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_no_other_process_has_open_gives_no_notice() {
-    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::No).await;
+    let (after, _, _) = rename_while_open_elsewhere(OpenElsewhere::No).await;
     assert!(after.is_empty(), "{after:#?}");
 }
 

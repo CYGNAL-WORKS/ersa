@@ -397,6 +397,10 @@ struct Handle {
     /// The same for looking at the session's folder before a resume: on a
     /// network drive that stops answering, one stuck look per session.
     folder_check: ReadSlot<resume::FolderLook>,
+    /// The same for asking the backend's registry, before a rename writes
+    /// the record, whether another process has the session open: on a disk
+    /// that hangs, one stuck scan per session, not one per rename.
+    open_elsewhere_check: ReadSlot<OpenElsewhere>,
     /// What the send under way reports its progress from, while it
     /// reports. Its lock is the one progress lines are published under, so
     /// none follows a send's answer. Which send has the session's slot,
@@ -820,6 +824,7 @@ impl Handle {
             summary_read: tokio::sync::Mutex::new(None),
             own_record_look: tokio::sync::Mutex::new(None),
             folder_check: tokio::sync::Mutex::new(None),
+            open_elsewhere_check: tokio::sync::Mutex::new(None),
             reporting: Mutex::default(),
             scratch: Arc::default(),
         }
@@ -1969,7 +1974,7 @@ impl SessionManager {
             return Ok(OpenElsewhere::No);
         };
         let adapter = self.adapter_of(&row.backend)?;
-        Ok(ask_open_elsewhere(adapter, transport, &backend_id, ()).await)
+        Ok(ask_open_elsewhere(id, adapter, transport, &backend_id, ()).await)
     }
 
     /// Marks the session deleting, `running`, and records whether its
@@ -2622,8 +2627,10 @@ fn pid_list(pids: &[u32]) -> String {
 /// Asks `adapter` whether another process has session `backend_id` open,
 /// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
 /// not tell, so its answer is unknown. `held` is kept until the check itself
-/// ends, however long that is after the answer.
+/// ends, however long that is after the answer. `session` is Core's id for
+/// it, which the diagnostic log names when the answer is unknown.
 async fn ask_open_elsewhere(
+    session: &str,
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
     backend_id: &str,
@@ -2635,9 +2642,64 @@ async fn ask_open_elsewhere(
         adapter.open_elsewhere(transport, &id).await
     });
     match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
-        Ok(Ok(answer)) => answer,
-        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
+        Ok(Ok(answer)) => answered(session, answer),
+        Ok(Err(e)) => could_not_tell(session, &format!("the check failed: {e}")),
+        Err(_) => could_not_tell(session, &timed_out()),
     }
+}
+
+/// Asks `adapter` whether another process has the session `handle` holds
+/// open, as [`ask_open_elsewhere`] does, through the session's one
+/// open-elsewhere check: a check still running from an earlier caller that
+/// gave up on it is joined, never started beside, so on a disk that hangs
+/// the checks hold one blocking thread per session, not one per rename.
+///
+/// A caller that joins takes the joined check's answer as it is: the
+/// registry is read as the check ends, which is during this call, and the
+/// answer only decides a notice. One that ended after its caller gave up is
+/// never handed on.
+async fn ask_open_elsewhere_once(
+    handle: &Handle,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    backend_id: &str,
+) -> OpenElsewhere {
+    let id = backend_id.to_string();
+    let start = move || tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
+    let slot = &handle.open_elsewhere_check;
+    match read_once(slot, OPEN_ELSEWHERE_CHECK, start, async |_| true).await {
+        Some(answer) => answered(&handle.id, answer),
+        // Still running, kept for the next caller to join; or it failed,
+        // and `wait` logged how beside this.
+        None if slot.lock().await.is_some() => could_not_tell(&handle.id, &timed_out()),
+        None => could_not_tell(&handle.id, "the check failed"),
+    }
+}
+
+/// The open-elsewhere `answer` for `session`, logged when the adapter could
+/// not tell: it logs why itself (for Claude Code, the registry files it
+/// could not read, or that it found no Claude home).
+fn answered(session: &str, answer: OpenElsewhere) -> OpenElsewhere {
+    if answer == OpenElsewhere::Unknown {
+        return could_not_tell(session, "the adapter could not tell, and logs why");
+    }
+    answer
+}
+
+/// Why an open-elsewhere check left running gave no answer.
+fn timed_out() -> String {
+    format!("the check did not answer within {OPEN_ELSEWHERE_CHECK:?}")
+}
+
+/// Writes to the diagnostic log why Core could not tell whether another
+/// process has `session` open, so a user told so on every rename has a
+/// trail to follow, and answers that it is unknown.
+fn could_not_tell(session: &str, cause: &str) -> OpenElsewhere {
+    tracing::warn!(
+        session = %session,
+        "could not tell whether another process has the session open: {cause}"
+    );
+    OpenElsewhere::Unknown
 }
 
 /// Asks the adapter whether a process other than this Core's has the
@@ -2655,7 +2717,7 @@ async fn notice_if_open_elsewhere(
     backend_id: &str,
     consequence: &str,
 ) {
-    let notice = match ask_open_elsewhere(adapter, transport, backend_id, ()).await {
+    let notice = match ask_open_elsewhere_once(handle, adapter, transport, backend_id).await {
         OpenElsewhere::No => return,
         OpenElsewhere::Yes { pids } => SessionNotice {
             level: NoticeLevel::Warning,
@@ -3889,6 +3951,12 @@ mod tests {
         forgets: std::sync::atomic::AtomicUsize,
         stats_hang: AtomicBool,
         hung_stats: std::sync::atomic::AtomicUsize,
+        /// While set, asking the registry whether another process has the
+        /// session open never returns, as a scan on a wedged disk does;
+        /// `hung_open_checks` counts those calls, each a blocking thread
+        /// held for ever.
+        open_checks_hang: AtomicBool,
+        hung_open_checks: std::sync::atomic::AtomicUsize,
     }
 
     #[ersa_adapter::async_trait]
@@ -3953,6 +4021,17 @@ mod tests {
             self.renames.fetch_add(1, Ordering::SeqCst);
             self.rename.notified().await;
             Ok(())
+        }
+        async fn open_elsewhere(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _backend_session_id: &str,
+        ) -> OpenElsewhere {
+            if self.open_checks_hang.load(Ordering::SeqCst) {
+                self.hung_open_checks.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+            }
+            OpenElsewhere::No
         }
 
         fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {
@@ -4065,6 +4144,78 @@ mod tests {
         }
         // Every later open joined the check still running.
         assert_eq!(adapter.hung_stats.load(Ordering::SeqCst), 1);
+    }
+
+    /// What `run` logs at warning level and above. A paused-time test's
+    /// runtime has one thread, so every task it spawns logs through this
+    /// subscriber.
+    async fn logged(run: impl Future<Output = ()>) -> String {
+        #[derive(Clone, Default)]
+        struct Captured(Arc<Mutex<Vec<u8>>>);
+        impl io::Write for Captured {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                lock(&self.0).extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let captured = Captured::default();
+        let writer = {
+            let captured = captured.clone();
+            move || captured.clone()
+        };
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer)
+            .with_ansi(false)
+            .with_max_level(tracing::Level::WARN)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        run.await;
+        String::from_utf8(lock(&captured.0).clone()).unwrap()
+    }
+
+    /// Renames `s-gated`, which is not running, through its record; the
+    /// record's rewrite is not held up.
+    async fn rename_gated(manager: &SessionManager, adapter: &GatedReads, title: &str) {
+        adapter.rename.notify_one();
+        let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+        let renamed = manager
+            .set_title("s-gated", title, |_| Some(transport))
+            .await;
+        assert!(renamed.is_ok(), "{renamed:?}");
+    }
+
+    // verifies: PROTO-AGENT-EVENTS-R15
+    // Paused time: each rename's wait for the check runs out at once.
+    #[tokio::test(start_paused = true)]
+    async fn renames_while_the_registry_hangs_leave_one_open_elsewhere_check_not_one_each() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = gated_manager(dir.path(), &adapter);
+        adapter.open_checks_hang.store(true, Ordering::SeqCst);
+        let log = logged(async {
+            for title in ["One", "Two", "Three"] {
+                rename_gated(&manager, &adapter, title).await;
+            }
+        })
+        .await;
+        // Every rename went on, and every later one joined the check the
+        // first left running.
+        assert_eq!(adapter.renames.load(Ordering::SeqCst), 3);
+        assert_eq!(adapter.hung_open_checks.load(Ordering::SeqCst), 1);
+        // Each could-not-tell answer says why, for the session it was.
+        let causes: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains("could not tell whether another process"))
+            .collect();
+        assert_eq!(causes.len(), 3, "{log}");
+        for line in causes {
+            assert!(line.contains(" WARN "), "{line}");
+            assert!(line.contains("session=s-gated"), "{line}");
+            assert!(line.contains("did not answer within 5s"), "{line}");
+        }
     }
 
     // Paused time: the reads' timeouts run out as soon as nothing else can.
