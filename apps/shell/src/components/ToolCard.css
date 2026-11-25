@@ -314,8 +314,11 @@
 }
 
 /* Each stretch of the file the call changes after the first sits under a line hairline, so two changes far apart in
-   the file never read as one. The hairline runs the whole scrolled width, as the tints do. */
+   the file never read as one. The hairline runs the whole scrolled width, as the tints do, with space-xs of untinted
+   surface on either side, so it shows between two tinted lines too. */
 .diff-hunk + .diff-hunk {
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
   border-top: var(--line-hairline) solid var(--color-line);
 }
 
