@@ -191,9 +191,30 @@ fn choices() -> BackendChoices {
                 id: id.into(),
                 label: label.into(),
                 default: Some(id) == default,
+                description: None,
             })
             .collect()
     };
+    // Each mode's sentence is the one Claude Desktop's permission menu shows
+    // beneath its name (R81), the adapter's words as the labels are.
+    let mut permission_modes = list(
+        &[
+            ("auto", "Auto"),
+            ("default", "Manual"),
+            ("acceptEdits", "Accept edits"),
+            ("plan", "Plan"),
+        ],
+        Some("default"),
+    );
+    let descriptions = [
+        "Claude handles permission decisions",
+        "Always ask before making changes",
+        "Automatically accept all file edits",
+        "Create a plan before making changes",
+    ];
+    for (mode, description) in permission_modes.iter_mut().zip(descriptions) {
+        mode.description = Some(description.into());
+    }
     BackendChoices {
         efforts: list(
             &[
@@ -205,15 +226,7 @@ fn choices() -> BackendChoices {
             ],
             None,
         ),
-        permission_modes: list(
-            &[
-                ("auto", "Auto"),
-                ("default", "Manual"),
-                ("acceptEdits", "Accept edits"),
-                ("plan", "Plan"),
-            ],
-            Some("default"),
-        ),
+        permission_modes,
     }
 }
 

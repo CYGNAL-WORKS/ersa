@@ -32,6 +32,19 @@ test("a running session's permission mode and effort change from its session con
   await expect(controls.getByRole("button", { name: /^Project:/ })).toBeDisabled();
 
   await mode.click();
+  // Each mode says what it does beneath its name, in the adapter's words (FLOW-NEW-SESSION-R45, PROTO-CLAUDE-CODE-STREAM-R81).
+  const modes = page.getByRole("listbox", { name: "Permission mode" });
+  const described = [
+    ["Auto", "Claude handles permission decisions"],
+    ["Manual", "Always ask before making changes"],
+    ["Accept edits", "Automatically accept all file edits"],
+    ["Plan", "Create a plan before making changes"],
+  ];
+  for (const [label, description] of described) {
+    const option = modes.getByRole("option", { name: label, exact: true });
+    await expect(option).toHaveAccessibleDescription(description!);
+    await expect(option).toContainText(description!);
+  }
   await ersa.shot("permission-mode-open");
   await page.getByRole("option", { name: "Plan", exact: true }).click();
   await expect(mode).toHaveAccessibleName("Permission mode: Plan", { timeout: 30_000 });
