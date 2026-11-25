@@ -509,12 +509,22 @@ async fn run_detached(
 /// busy reading a long replay is slow, not stuck. Meanwhile its feed keeps
 /// only the newest tile per session, so nothing piles up and nothing is
 /// lost that matters.
+///
+/// A line is taken from the feed only with room on the connection already
+/// reserved, and queued in the same step: a line is never held here while
+/// an answer queued meanwhile overtakes it. So a line that is withdrawn
+/// before an answer is queued never arrives after the answer
+/// (PROTO-CORE-API-R146), and one taken before is queued ahead of it.
 async fn forward_tiles(mut tiles: crate::sessions::TileFeed, outbound: mpsc::Sender<String>) {
     loop {
-        for line in tiles.next().await {
-            if outbound.send(line.as_ref().clone()).await.is_err() {
-                return;
-            }
+        tiles.ready().await;
+        let Ok(room) = outbound.reserve().await else {
+            return;
+        };
+        // Withdrawn while waiting for room, there may be nothing now; the
+        // room is let go and the feed waited on again.
+        if let Some(line) = tiles.take() {
+            room.send(line.as_ref().clone());
         }
     }
 }
