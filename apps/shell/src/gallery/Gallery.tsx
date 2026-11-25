@@ -702,7 +702,7 @@ const severalCall: Event = {
   ],
 };
 
-// Two stretches of one file, far apart: two hunks, divided (issue #483).
+// Two stretches of one file, far apart: two hunks, divided (issue 483).
 const twoChangesCall: Event = {
   type: "tool.requested",
   tool_use_id: "e1",
@@ -1493,6 +1493,9 @@ const entries: Entry[] = [
         "Asking, from the keyboard",
         <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" forceCancelFocus />,
       ],
+      // FLOW-NEW-SESSION-R42: while a picked folder is checked, then added after Trust, the screen says so and sends nothing.
+      ["Checking a folder", <NewSessionScreen {...newSession} backends={oneBackend} initialText="Fix the build" adding={{ state: "finding" }} />],
+      ["Adding a project", <NewSessionScreen {...newSession} backends={oneBackend} initialText="Fix the build" adding={{ state: "adding" }} />],
       [
         "Adding a folder refused",
         <NewSessionScreen {...newSession} backends={oneBackend} adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }} />,

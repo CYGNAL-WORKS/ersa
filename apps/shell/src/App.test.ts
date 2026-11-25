@@ -358,6 +358,8 @@ describe("adding a project from the new-session screen", () => {
     await addFromChip();
     expect(trustQuestion()).toBeNull();
     expect(sendButton().getAttribute("aria-disabled")).toBe("true");
+    // The screen says what it is doing meanwhile (issue #483).
+    expect(document.querySelector(".new-session-above .composer-status-line")?.textContent).toBe("Checking the folder…");
     await pressEnter();
     expect(methods(core)).not.toContain("workspace.create");
     find.resolve(null);
@@ -375,6 +377,8 @@ describe("adding a project from the new-session screen", () => {
     await settle();
     expect(trustQuestion()).toBeNull();
     expect(sendButton().getAttribute("aria-disabled")).toBe("true");
+    // The screen says what it is doing meanwhile (issue #483).
+    expect(document.querySelector(".new-session-above .composer-status-line")?.textContent).toBe("Adding the project…");
     await pressEnter();
     expect(methods(core)).not.toContain("workspace.create");
     add.reject({ kind: "invalid_params", message: "Ersa couldn't add the folder." });
