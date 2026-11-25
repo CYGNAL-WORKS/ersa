@@ -520,6 +520,15 @@ describe("the keyboard", () => {
     expect(selectedText()).toBe("line 10");
   });
 
+  // verifies: FLOW-READ-RAW-LOG-R23
+  it("takes the first row wholly in view with Down, not the one in part at the top, when scrolled away from the end", () => {
+    show(viewOf(entries(0, 30)));
+    // Row 1 shows only in part, so line 2 is the first wholly in view.
+    scrollTo(ROW + 4);
+    press("ArrowDown");
+    expect(selectedText()).toBe("line 2");
+  });
+
   // verifies: FLOW-READ-RAW-LOG-R17
   it("clears the selection and closes the detail with Escape, leaving focus in the list", () => {
     show(viewOf(entries(0, 3)));
