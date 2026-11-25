@@ -1,7 +1,7 @@
 import { Archive } from "lucide-react";
 import { t } from "../catalog";
 import type { Sending } from "../session/follow";
-import { Button } from "./Button";
+import { Button, ButtonLabels } from "./Button";
 import { Icon } from "./Icon";
 import "./ArchivedNote.css";
 
@@ -51,7 +51,13 @@ export function ArchivedNote({
         </span>
         {/* Unavailable while Core answers, yet still focusable, so keyboard focus stays on it through a refusal. */}
         <Button variant="primary" aria-disabled={busy || undefined} onClick={() => !busy && onResume()} force={force}>
-          {busy ? t("composer.archived.resumingProgress") : t("composer.archived.resumeButton")}
+          {/* One appearance for the whole wait, the folder being put back included: the ring leads "Resuming…", and both
+              labels hold one cell, so Resume keeps its width (docs/design/DESIGN.md, Motion). */}
+          <ButtonLabels
+            labels={{ resume: t("composer.archived.resumeButton"), resuming: t("composer.archived.resumingProgress") }}
+            shown={busy ? "resuming" : "resume"}
+            busy="resuming"
+          />
         </Button>
       </div>
     </div>

@@ -1,10 +1,8 @@
-import { LoaderCircle } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { t } from "../catalog";
 import { type DeletePhase, type WhatGoes, losesWork } from "../session/deletion";
 import { HeightEase } from "../theme/motion";
-import { Button } from "./Button";
-import { Icon } from "./Icon";
+import { Button, ButtonLabels } from "./Button";
 import "./DeleteQuestion.css";
 
 interface DeleteQuestionProps {
@@ -140,16 +138,7 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
           onClick={failed ? onTryAgain : onConfirm}
           disabled={deleting || phase.kind === "reading"}
         >
-          {Object.entries(labels).map(([key, label]) => (
-            <span key={key} className="delete-question-label" data-shown={key === shown || undefined} aria-hidden={key !== shown || undefined}>
-              {key === "deleting" && (
-                <span className="delete-question-ring" aria-hidden="true">
-                  <Icon icon={LoaderCircle} size="icon-xs" />
-                </span>
-              )}
-              {label}
-            </span>
-          ))}
+          <ButtonLabels labels={labels} shown={shown} busy="deleting" />
         </Button>
       </div>
     </div>
