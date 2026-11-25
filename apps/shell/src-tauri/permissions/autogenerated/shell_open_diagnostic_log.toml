@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shell-open-diagnostic-log"
+description = "Enables the shell_open_diagnostic_log command without any pre-configured scope."
+commands.allow = ["shell_open_diagnostic_log"]
+
+[[permission]]
+identifier = "deny-shell-open-diagnostic-log"
+description = "Denies the shell_open_diagnostic_log command without any pre-configured scope."
+commands.deny = ["shell_open_diagnostic_log"]

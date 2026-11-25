@@ -63,6 +63,8 @@ export const tauriShell: ShellControl = {
   openLink: (url) => {
     invoke("shell_open_link", { url }).catch((error) => console.error(error));
   },
+  // The Shell answers why it couldn't open the file as the rejection's reason (FLOW-READ-RAW-LOG-R13).
+  openDiagnosticLog: () => invoke("shell_open_diagnostic_log"),
   // One folder, or null when the user cancels (FLOW-NEW-SESSION-R27, R17).
   pickFolder: async () => {
     const picked = await open({ directory: true, multiple: false });

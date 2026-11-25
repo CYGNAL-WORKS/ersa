@@ -159,8 +159,16 @@
   opacity: 0;
   visibility: hidden;
   transition:
+    top var(--motion-quick) var(--motion-ease-out),
     opacity var(--motion-quick) var(--motion-ease-out),
     visibility var(--motion-quick) var(--motion-ease-out);
+}
+
+/* That the diagnostic log couldn't be opened lies beneath the read's line while both stand (FLOW-READ-RAW-LOG-R25),
+   one line's height down: its padding, its ui-small line and its hairline. The first never moves; this one slides to
+   its place over motion-quick when the first comes or goes. */
+.raw-log-problem[data-below] {
+  top: calc(var(--space-xs) + var(--space-xs) + var(--type-ui-small-leading) * var(--type-ui-small-size) + var(--line-hairline));
 }
 
 .raw-log-problem[data-shown] {

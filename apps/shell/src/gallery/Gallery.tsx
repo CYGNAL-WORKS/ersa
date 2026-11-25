@@ -812,6 +812,15 @@ const rawLogLines = (from: number, count: number): RawLogEntry[] =>
     return { index, ts, dir: "backend", line: `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Running pnpm test ${index}"}}}` };
   });
 const rawLogView = (more: Partial<RawLogView> = {}): RawLogView => ({ session: "s1", lines: rawLogLines(0, 60), read: true, earlier: false, ...more });
+/**
+ * The developer pane alone at the workbench's first width, size-workbench, wider than the gallery's half-column
+ * workbench allows: there its toolbar is one row (docs/design/WORKBENCH.md, The toolbar).
+ */
+const rawLogWide = (props: Partial<Parameters<typeof DeveloperPane>[0]> = {}) => (
+  <div className="gallery-pane-alone">
+    <DeveloperPane session="s1" view={rawLogView()} backend="Claude Code" {...props} />
+  </div>
+);
 /** The developer pane in the workbench. */
 const rawLog = (props: Partial<Parameters<typeof DeveloperPane>[0]> = {}) =>
   workbench(undefined, <DeveloperPane session="s1" view={rawLogView()} backend="Claude Code" {...props} />, true);
@@ -1659,6 +1668,17 @@ const entries: Entry[] = [
       ["Close line under the pointer", rawLog({ force: { list: { selected: 57, detail: { close: "hover" } } } })],
       ["Close line, keyboard focus", rawLog({ force: { list: { selected: 57, detail: { close: "focus" } } } })],
       ["The filter field, keyboard focus", rawLog({ force: { field: "focus" } })],
+      ["Open diagnostic log under the pointer", rawLog({ force: { openLog: "hover" } })],
+      ["Open diagnostic log pressed", rawLog({ force: { openLog: "pressed" } })],
+      ["Open diagnostic log, keyboard focus", rawLog({ force: { openLog: "focus" } })],
+      ["Open diagnostic log, unavailable in a build attached to a label", rawLog({ attachedTo: "replay-3" })],
+      ["Open diagnostic log, unavailable, keyboard focus", rawLog({ attachedTo: "replay-3", force: { openLog: "focus" } })],
+      ["The diagnostic log couldn't be opened", rawLog({ force: { unopened: "There's no diagnostic log at C:\\Users\\you\\AppData\\Local\\Ersa\\core.log yet." } })],
+      ["Both problems: the raw log can't be read, and the diagnostic log couldn't be opened", rawLog({ view: rawLogView({ failure: "Core isn't running." }), force: { unopened: "There's no diagnostic log at C:\\Users\\you\\AppData\\Local\\Ersa\\core.log yet." } })],
+      ["The toolbar in two rows at a narrow width, with a filter and its count", rawLog({ force: { filter: "stream" } })],
+      ["The toolbar in one row at the workbench's first width", rawLogWide()],
+      ["The toolbar in one row, with a filter and its count", rawLogWide({ force: { filter: "stream" } })],
+      ["The toolbar in one row, Open diagnostic log with keyboard focus", rawLogWide({ force: { openLog: "focus" } })],
       ["A filter, with its count", rawLog({ force: { filter: "user" } })],
       ["A filter no line contains", rawLog({ force: { filter: "permission_denied" } })],
       ["Earlier lines are no longer held", rawLog({ view: rawLogView({ lines: rawLogLines(1_200, 6), earlier: true }) })],

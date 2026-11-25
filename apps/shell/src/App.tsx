@@ -86,6 +86,10 @@ function useVersion(value: unknown): string {
 
 export function App({ client, shell }: { client: CoreClient; shell?: ShellControl }) {
   const [view, setView] = useState<CoreView>({ phase: "connecting" });
+  // The labeled endpoint a debug build is attached to, kept once Core has named it: the Shell fixes it at start, so it
+  // holds while the connection is lost too, and Open diagnostic log stays unavailable (FLOW-READ-RAW-LOG-R13).
+  const [attachedTo, setAttachedTo] = useState<string>();
+  if (view.phase === "connected" && view.label !== undefined && view.label !== attachedTo) setAttachedTo(view.label);
   // Bumped to attach again; the effect below reconnects on each change.
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
@@ -1164,7 +1168,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         focusAfterClose={() => document.querySelector<HTMLElement>(".rail-arrange")}
       >
         {/* Until the reader has the new session's lines the pane shows none of the one left (FLOW-READ-RAW-LOG-R04). */}
-        <DeveloperPane session={shownId} view={rawLog?.session === shownId ? rawLog : undefined} backend={rawLogBackend} />
+        <DeveloperPane session={shownId} view={rawLog?.session === shownId ? rawLog : undefined} backend={rawLogBackend}
+          attachedTo={attachedTo}
+          open={workbench.open}
+          onOpenDiagnosticLog={shell?.openDiagnosticLog}
+        />
       </Workbench>
       </div>
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
