@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RawLogEntry } from "../protocol/core-api.gen";
 import type { RawLogView } from "../session/rawLog";
+import { rawLogTime as rawLogTimeOf } from "../session/rawLogText";
 import { RawLogList } from "./RawLogList";
 
 /** The row token's value, and the list's height: ten rows in view. */
@@ -40,8 +41,8 @@ function show(view: RawLogView | undefined, more: Partial<Props> = {}) {
   return { ...shown, update: (next: RawLogView | undefined) => shown.rerender(createElement(RawLogList, props(next, more))) };
 }
 
-const list = () => screen.getByRole("list", { name: "Raw log" });
-const rows = () => within(list()).queryAllByRole("listitem");
+const list = () => screen.getByRole("listbox", { name: "Raw log" });
+const rows = () => within(list()).queryAllByRole("option");
 const rowOf = (text: string) => rows().find((row) => row.textContent?.includes(text));
 /** A row's place in the list, from the variable its position is drawn by. */
 const placeOf = (row: HTMLElement | undefined) => Number(row?.style.getPropertyValue("--row"));
@@ -248,7 +249,7 @@ describe("nothing to list", () => {
   it("says to choose a session when there is no active session", () => {
     show(undefined, { active: false });
     expect(screen.getByText("No session is open. Choose a session to see its raw log.")).toBeTruthy();
-    expect(screen.queryByRole("list")).toBeNull();
+    expect(rows()).toHaveLength(0);
   });
 
   // verifies: FLOW-READ-RAW-LOG-R14
@@ -286,5 +287,189 @@ describe("a read that failed", () => {
     update(viewOf(entries(0, 3)));
     expect(problem.getAttribute("data-shown")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("");
+  });
+});
+
+describe("a selected line in the detail", () => {
+  let written: string[];
+  let take: (text: string) => Promise<void>;
+  beforeEach(() => {
+    written = [];
+    take = (text) => (written.push(text), Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (text: string) => take(text) } });
+  });
+
+  const detail = () => document.querySelector<HTMLElement>(".raw-log-detail")!;
+  const detailOpen = () => detail().hasAttribute("data-shown") && !detail().inert;
+  const shownText = () => detail().querySelector("pre")?.textContent;
+  const copyButton = () => within(detail()).getByRole("button", { name: /^Copy line$|^Copied$/ });
+  const clickCopy = () =>
+    act(async () => {
+      fireEvent.click(copyButton());
+    });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("shows the selected line beneath the list, indented as JSON, with its direction, time and size", () => {
+    const json = '{"type":"user","message":{"content":"hi"},"n":1.0}';
+    show(viewOf([entry(0), entry(1, { dir: "host", line: json, ts: "2026-11-22T10:00:01.250Z" })]));
+    expect(detailOpen()).toBe(false);
+    fireEvent.click(rowOf('"type"')!);
+    expect(detailOpen()).toBe(true);
+    expect(rowOf('"type"')?.getAttribute("aria-selected")).toBe("true");
+    expect(rowOf("line 0")?.getAttribute("aria-selected")).toBe("false");
+    expect(shownText()).toBe(["{", '  "type": "user",', '  "message": {', '    "content": "hi"', "  },", '  "n": 1.0', "}"].join("\n"));
+    const head = detail().querySelector(".raw-log-detail-head")!.textContent;
+    expect(head).toContain("To Claude Code");
+    expect(head).toContain(rawLogTimeOf("2026-11-22T10:00:01.250Z"));
+    expect(head).toContain(`${json.length} bytes`);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("shows a line that is not valid JSON exactly as it crossed", () => {
+    const line = '  Claude Code started {"half":';
+    show(viewOf([entry(0, { line })]));
+    fireEvent.click(rowOf("Claude Code started")!);
+    expect(shownText()).toBe(line);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("copies the line as it crossed, not as it is laid out, and says so only once the clipboard has it", async () => {
+    const json = '{"type":"user","n":1e3}';
+    show(viewOf([entry(0, { line: json })]));
+    fireEvent.click(rowOf('"type"')!);
+    let release!: () => void;
+    take = (text) => (written.push(text), new Promise<void>((resolve) => (release = resolve)));
+    await clickCopy();
+    expect(written).toEqual([json]);
+    // The write is not done yet: Copy says nothing of it.
+    expect(copyButton().getAttribute("aria-label")).toBe("Copy line");
+    await act(async () => release());
+    expect(copyButton().getAttribute("aria-label")).toBe("Copied");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("doesn't say it copied when the clipboard refuses the line", async () => {
+    take = () => Promise.reject(new DOMException("Write permission denied.", "NotAllowedError"));
+    show(viewOf([entry(0)]));
+    fireEvent.click(rowOf("line 0")!);
+    await clickCopy();
+    expect(copyButton().getAttribute("aria-label")).toBe("Copy line");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R11
+  it("for a line Core cut, says how large the whole line is, shows its start unchanged and copies only that", async () => {
+    // The start happens to be JSON on its own; a cut line is still shown as it came.
+    const head = '{"type":"assistant"}';
+    show(viewOf([{ index: 0, ts: "2026-11-22T10:00:00.000Z", dir: "backend", head, size: 1_843_200 }]));
+    fireEvent.click(rowOf('"assistant"')!);
+    expect(detail().querySelector(".raw-log-detail-note")?.textContent).toBe("This line is 1.8 MB. Its first 256 KB are shown.");
+    expect(detail().querySelector(".raw-log-detail-head")?.textContent).toContain("1.8 MB");
+    expect(shownText()).toBe(head);
+    await clickCopy();
+    expect(written).toEqual([head]);
+  });
+
+  it("says nothing of a cut for a whole line", () => {
+    show(viewOf([entry(0)]));
+    fireEvent.click(rowOf("line 0")!);
+    expect(detail().querySelector(".raw-log-detail-note")).toBeNull();
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("closes with Close line, and keyboard focus inside it goes to the list", () => {
+    show(viewOf(entries(0, 3)));
+    fireEvent.click(rowOf("line 1")!);
+    const close = within(detail()).getByRole("button", { name: "Close line" });
+    close.focus();
+    fireEvent.click(close);
+    expect(detailOpen()).toBe(false);
+    expect(rowOf("line 1")?.getAttribute("aria-selected")).toBe("false");
+    expect(document.activeElement).toBe(list());
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("closes with Escape from inside it, and keyboard focus goes to the list", () => {
+    show(viewOf(entries(0, 3)));
+    fireEvent.click(rowOf("line 1")!);
+    copyButton().focus();
+    fireEvent.keyDown(copyButton(), { key: "Escape" });
+    expect(detailOpen()).toBe(false);
+    expect(document.activeElement).toBe(list());
+  });
+
+  it("clears the selection when the reader starts over", () => {
+    const { update } = show(viewOf(entries(0, 3)));
+    fireEvent.click(rowOf("line 1")!);
+    update(viewOf([], { read: false }));
+    update(viewOf(entries(0, 3)));
+    expect(detailOpen()).toBe(false);
+    expect(rows().every((row) => row.getAttribute("aria-selected") !== "true")).toBe(true);
+  });
+});
+
+describe("the keyboard", () => {
+  const selectedText = () => rows().find((row) => row.getAttribute("aria-selected") === "true")?.querySelector(".raw-log-text")?.textContent;
+  const press = (key: string) => fireEvent.keyDown(list(), { key });
+  const detailShown = () => document.querySelector(".raw-log-detail")?.hasAttribute("data-shown");
+
+  // verifies: FLOW-READ-RAW-LOG-R17
+  it("takes keyboard focus as one stop: the list, never a row", () => {
+    show(viewOf(entries(0, 3)));
+    expect(list().tabIndex).toBe(0);
+    expect(rows().every((row) => row.tabIndex < 0)).toBe(true);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R17
+  it("moves the selection a row with Up and Down, and to the first and last row with Home and End", () => {
+    show(viewOf(entries(0, 30)));
+    // Following the end: rows 20 to 29 are in view, so Down with nothing selected takes the first of them.
+    press("ArrowDown");
+    expect(selectedText()).toBe("line 20");
+    press("ArrowDown");
+    expect(selectedText()).toBe("line 21");
+    press("ArrowUp");
+    expect(selectedText()).toBe("line 20");
+    press("Home");
+    expect(selectedText()).toBe("line 0");
+    // Home brought the first row into view, away from the end.
+    expect(list().scrollTop).toBe(0);
+    expect(offered()).toBe(true);
+    press("ArrowUp");
+    expect(selectedText()).toBe("line 0");
+    press("End");
+    expect(selectedText()).toBe("line 29");
+    // End returns to the end and to following.
+    expect(list().scrollTop).toBe(30 * ROW - HEIGHT);
+    expect(offered()).toBe(false);
+    press("ArrowDown");
+    expect(selectedText()).toBe("line 29");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R17
+  it("takes the last row in view with Up when nothing is selected, and names the selected row to assistive technology", () => {
+    show(viewOf(entries(0, 30)));
+    press("ArrowUp");
+    expect(selectedText()).toBe("line 29");
+    expect(list().getAttribute("aria-activedescendant")).toBe(rowOf("line 29")?.id);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R17
+  it("clears the selection and closes the detail with Escape, leaving focus in the list", () => {
+    show(viewOf(entries(0, 3)));
+    list().focus();
+    press("ArrowDown");
+    expect(detailShown()).toBe(true);
+    press("Escape");
+    expect(selectedText()).toBeUndefined();
+    expect(detailShown()).toBe(false);
+    expect(document.activeElement).toBe(list());
+  });
+
+  it("keeps keyboard focus on the list when the reader starts over and a message takes the rows' place", () => {
+    const { update } = show(viewOf(entries(0, 3)));
+    list().focus();
+    update(viewOf([], { read: false }));
+    expect(screen.getByText("Reading…")).toBeTruthy();
+    expect(document.activeElement).toBe(list());
   });
 });

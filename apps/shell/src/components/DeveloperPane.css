@@ -1,0 +1,97 @@
+/* The developer pane's toolbar (docs/design/WORKBENCH.md, The developer pane): a row padded space-sm by space-md, its
+   parts space-sm apart. The filter field takes the width left over and keeps at least size-row-title-min; the count
+   follows it while it holds text, its space-sm before it growing and running back with it. */
+.developer-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: var(--space-sm) var(--space-md);
+  /* Lets the count's width move between nothing and its words. */
+  interpolate-size: allow-keywords;
+}
+
+/* The filter field is the sessions page's search field (RAIL.md): ui on surface with a line edge that turns accent
+   while focused, radius-md, size-control high; a filter icon at size-icon-sm in ink-faint before the words. */
+.developer-filter {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  min-width: var(--size-row-title-min);
+  height: var(--size-control);
+  padding-inline: var(--space-sm);
+  color: var(--color-ink-faint);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  cursor: text;
+  transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.developer-filter:focus-within,
+.developer-filter[data-force="focus"] {
+  border-color: var(--color-accent);
+}
+
+.developer-filter-field {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  padding: 0;
+  color: var(--color-ink);
+  font: inherit;
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+/* The placeholder in ink-faint, which DESIGN.md keeps safe for placeholders. */
+.developer-filter-field::placeholder {
+  color: var(--color-ink-faint);
+  opacity: 1;
+}
+
+/* Escape empties it; the browser's own clear button is outside the tokens and the icon set. */
+.developer-filter-field::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* The count: "{shown} of {total}" in ui-small, ink-muted and tabular figures. It grows in from nothing as it fades in
+   over motion-quick, the field giving up the room, and leaves the same way. */
+.developer-count {
+  flex: none;
+  box-sizing: border-box;
+  width: 0;
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    width var(--motion-quick) var(--motion-ease-out),
+    padding var(--motion-quick) var(--motion-ease-out),
+    opacity var(--motion-quick) var(--motion-ease-out),
+    visibility var(--motion-quick) var(--motion-ease-out);
+}
+
+.developer-count[data-shown] {
+  width: auto;
+  padding-inline-start: var(--space-sm);
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .developer-filter,
+  .developer-count {
+    transition: none;
+  }
+}

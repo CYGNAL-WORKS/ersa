@@ -1,0 +1,90 @@
+/* The detail beneath the developer pane's list (docs/design/WORKBENCH.md, The detail): the lower half of the pane
+   beneath the toolbar, divided from the list by a line hairline. Shown, it grows as the list's area does from no
+   height, so each takes half; it grows in from the foot over motion-settle with motion-ease-out, and runs back the
+   same way. With reduced motion it comes and goes at once. */
+.raw-log-detail {
+  display: flex;
+  flex: 0 0 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-top: var(--line-hairline) solid var(--color-line);
+  visibility: hidden;
+  transition:
+    flex-grow var(--motion-settle) var(--motion-ease-out),
+    visibility var(--motion-settle) var(--motion-ease-out);
+}
+
+.raw-log-detail[data-shown] {
+  flex-grow: 1;
+  visibility: visible;
+}
+
+/* Its head: size-control high, padded space-xs by space-md; the direction, the time and the size in ui-small and
+   ink-muted, space-sm apart, and Copy and Close line at the trailing edge. */
+.raw-log-detail-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: content-box;
+  height: var(--size-control);
+  padding: var(--space-xs) var(--space-md);
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: nowrap;
+}
+
+.raw-log-detail-figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.raw-log-detail-actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* The line: mono in ink, padded space-md, its lines kept and wrapping wherever they must, so the detail scrolls down
+   and never sideways. */
+.raw-log-detail-body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-md);
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+}
+
+/* With keyboard focus, the scrolling text shows it as the list does: an ink hairline drawn inside it. */
+.raw-log-detail-body:focus-visible {
+  box-shadow: inset 0 0 0 var(--line-hairline) var(--color-ink);
+}
+
+/* A cut line says so above its text, in ui-small and ink-muted. */
+.raw-log-detail-note {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-ink-muted);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.raw-log-detail-text {
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  line-height: var(--type-mono-leading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raw-log-detail {
+    transition: none;
+  }
+}
