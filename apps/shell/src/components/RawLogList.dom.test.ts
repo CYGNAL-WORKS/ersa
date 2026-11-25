@@ -212,6 +212,7 @@ describe("following the end", () => {
     expect(jump()?.getAttribute("aria-label")).toBe("Jump to latest, 2 new lines");
   });
 
+  // verifies: FLOW-READ-RAW-LOG-R20
   it("sends keyboard focus that was on Jump to latest to the list as it goes", () => {
     show(viewOf(entries(0, 30)));
     scrollTo(0);
