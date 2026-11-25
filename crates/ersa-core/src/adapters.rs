@@ -11,7 +11,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Adapter, AdapterError, BackendChoices, Transport};
+use ersa_adapter::{Adapter, AdapterError, BackendChoices, ModelReport, Transport};
 use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus, ModelChoice, TestedRange};
 
 use crate::transport::{self, RunError};
@@ -31,7 +31,7 @@ pub struct Detected {
     /// when the adapter does not say.
     pub tested: (String, String),
     /// The efforts and permission modes a session of it can start with,
-    /// from its adapter.
+    /// from its adapter, the effort it reported as its default marked.
     pub choices: BackendChoices,
     /// Its models, as the backend reported them on the host; none unless
     /// it is available (PROTO-CORE-API-R72).
@@ -111,30 +111,37 @@ pub async fn detect(
                 (None, BackendState::Error)
             }
         };
-        let (state, models) = if state == BackendState::Available {
+        let (state, report) = if state == BackendState::Available {
             match adapter.models(Arc::clone(&probe)).await {
-                Ok(models) => (state, models),
+                Ok(report) => (state, report),
                 Err(AdapterError::Io(e)) if e.kind() == io::ErrorKind::NotFound => {
-                    (BackendState::Missing, Vec::new())
+                    (BackendState::Missing, ModelReport::default())
                 }
                 Err(e) => {
                     tracing::warn!(backend = adapter.backend(), error = %e, "backend could not list its models");
-                    (BackendState::Error, Vec::new())
+                    (BackendState::Error, ModelReport::default())
                 }
             }
         } else {
-            (state, Vec::new())
+            (state, ModelReport::default())
         };
+        // The default effort is the backend's own report of the effort a
+        // session given none runs with; none is marked while it gives none
+        // (PROTO-CORE-API, `backend.list`).
+        let mut choices = adapter.choices();
+        for effort in &mut choices.efforts {
+            effort.default = report.default_effort.as_deref() == Some(effort.id.as_str());
+        }
         found.push(Detected {
             name: adapter.backend().to_string(),
             version,
             state,
-            models,
+            models: report.models,
             tested: adapter
                 .tested_versions()
                 .map(|(min, max)| (min.to_string(), max.to_string()))
                 .unwrap_or_default(),
-            choices: adapter.choices(),
+            choices,
             label: adapter.label().to_string(),
         });
     }

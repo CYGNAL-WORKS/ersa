@@ -736,7 +736,8 @@ function Titled(props: Omit<Parameters<typeof SessionTitle>[0], "title" | "onRen
 const draft = "Fix the flaky reconnect test on Windows";
 
 // What `backend.list` lists for Claude Code (PROTO-CLAUDE-CODE-STREAM): the models the CLI reports, its own `default`
-// entry first and one model that takes no effort, no effort marked, and the permission modes with the CLI's default.
+// entry first and one model that takes no effort, Medium marked as the effort a session given none runs with, as the
+// CLI's `get_settings` says (PROTO-CLAUDE-CODE-STREAM-R82), and the permission modes with the CLI's default.
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
 const allEfforts = ["low", "medium", "high", "xhigh", "max"];
@@ -754,7 +755,7 @@ const claudeCode: BackendInfo = {
     { id: "haiku", label: "Haiku 5.5", default: false, resolved: "claude-haiku-5-5", efforts: allEfforts },
     { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", default: false, resolved: "claude-haiku-4-5-20251001" },
   ],
-  efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], ""),
+  efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], "medium"),
   permission_modes: choices(
     [["auto", "Auto"], ["default", "Manual"], ["acceptEdits", "Accept edits"], ["plan", "Plan"]],
     "default",
@@ -1456,8 +1457,14 @@ const entries: Entry[] = [
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
       // FLOW-NEW-SESSION-R46: the default reads as the listed model it stands for, marked, with no Default row.
       ["The model chip open, at the default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="model" />)],
-      // docs/design/COMPOSER.md: with no level chosen the effort reads Default, the first row of its list.
-      ["The effort chip open, at Default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="effort" />)],
+      // FLOW-NEW-SESSION-R47: with no level chosen the effort reads the level the backend marks, marked, in a list of the
+      // levels alone.
+      ["The effort chip open, at the backend's default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="effort" />)],
+      // A backend that marks no default effort: the chip reads Default, the first row of its list.
+      [
+        "The effort chip open, at Default",
+        room(<NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, efforts: claudeCode.efforts.map((e) => ({ ...e, default: false })) }] }} open="effort" />),
+      ],
       // A model that takes no effort leaves the effort chip in its place, unavailable, reading None.
       [
         "A model that takes no effort",

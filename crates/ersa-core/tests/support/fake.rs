@@ -62,9 +62,10 @@ use std::sync::{Arc, Mutex};
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, ConversationEnd,
-    Direction, ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit,
-    ProcessSpec, Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary,
-    RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules, Transport, async_trait,
+    Direction, ImageLimits, ModelReport, OpenElsewhere, OutgoingMessage, PermissionDecision,
+    ProcessExit, ProcessSpec, Projected, Projector, RawLine, RecordDeletion, RecordEvent,
+    RecordSummary, RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules,
+    Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -497,13 +498,14 @@ impl Adapter for FakeAdapter {
         }
     }
 
-    async fn models(
-        &self,
-        _transport: Arc<dyn Transport>,
-    ) -> Result<Vec<ModelChoice>, AdapterError> {
+    /// The listed models, with `high` reported as the default effort.
+    async fn models(&self, _transport: Arc<dyn Transport>) -> Result<ModelReport, AdapterError> {
         self.stats.model_probes.fetch_add(1, Ordering::SeqCst);
         match &*self.models.lock().unwrap() {
-            ModelsAnswer::Listed(models) => Ok(models.clone()),
+            ModelsAnswer::Listed(models) => Ok(ModelReport {
+                models: models.clone(),
+                default_effort: Some("high".into()),
+            }),
             ModelsAnswer::Missing => Err(AdapterError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "the fake backend is gone",
@@ -512,7 +514,8 @@ impl Adapter for FakeAdapter {
         }
     }
 
-    /// Two of each, with a default marked in each list as Claude Code's are.
+    /// Two of each. The permission modes mark a default, as Claude Code's
+    /// do; the effort's default is the backend's report ([`Adapter::models`]).
     fn choices(&self) -> BackendChoices {
         let list = |ids: [&str; 2], default: &str| -> Vec<Choice> {
             ids.iter()
@@ -524,7 +527,7 @@ impl Adapter for FakeAdapter {
                 .collect()
         };
         BackendChoices {
-            efforts: list(["low", "high"], "high"),
+            efforts: list(["low", "high"], ""),
             permission_modes: list(["ask", "auto"], "ask"),
         }
     }

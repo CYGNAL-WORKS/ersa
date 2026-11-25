@@ -106,7 +106,10 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
 
             // The first message: a new workspace, the session with the
             // chips' values, and the message as its first turn.
-            // The CLI marks no default effort, so none is named.
+            // The stand-in says it runs at `low` given no effort, which
+            // detection marks as the default effort; a session started
+            // with none chosen still names none (FLOW-NEW-SESSION-R47).
+            assert_eq!(default_of(&claude["efforts"]), "low");
             let (model, mode) = (
                 default_of(&claude["models"]),
                 default_of(&claude["permission_modes"]),
