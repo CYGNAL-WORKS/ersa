@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use ersa_adapter::Adapter;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::support::{start_with_adapters, tempdir};
 
@@ -60,4 +60,49 @@ async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
         .map(|c| c["label"].as_str().unwrap())
         .collect();
     assert_eq!(labels, ["Auto", "Manual", "Accept edits", "Plan"]);
+}
+
+/// Each permission mode's sentence reaches the Interface through Core's
+/// `backend.list` on its own mode, and no effort carries one.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R81
+// verifies: PROTO-CORE-API-R142
+#[tokio::test(flavor = "multi_thread")]
+async fn backend_list_says_what_each_of_claude_codes_permission_modes_does() {
+    let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
+    let core = start_with_adapters(tempdir(), |_| {}, vec![claude]).await;
+    let mut client = core.client().await;
+    let infos = client
+        .result("backend.list", json!({ "host_id": "local" }))
+        .await;
+    let described: Vec<(String, Value)> = infos[0]["permission_modes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["id"].as_str().unwrap().to_string(),
+                c["description"].clone(),
+            )
+        })
+        .collect();
+    let expected = |pairs: &[(&str, &str)]| -> Vec<(String, Value)> {
+        pairs
+            .iter()
+            .map(|&(id, d)| (id.to_string(), json!(d)))
+            .collect()
+    };
+    assert_eq!(
+        described,
+        expected(&[
+            ("auto", "Claude handles permission decisions"),
+            ("default", "Always ask before making changes"),
+            ("acceptEdits", "Automatically accept all file edits"),
+            ("plan", "Create a plan before making changes"),
+        ])
+    );
+    let efforts = infos[0]["efforts"].as_array().unwrap();
+    assert!(
+        efforts.iter().all(|e| e.get("description").is_none()),
+        "{efforts:?}"
+    );
 }
