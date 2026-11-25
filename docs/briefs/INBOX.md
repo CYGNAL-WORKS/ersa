@@ -9,4 +9,3 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
-- [ ] 2026-11-24 none (docs/design/COMPOSER.md, A chip's list): the page says a list floats beneath its chip, or above it where the window has no room, but not where it goes sideways. With each mode's description, the permission mode chip's list is wider than the room from that chip, the row's last, to the window's edge, and with only an up-or-down flip it covered its own chip. #588 lets every chip's list, the attach menu included, end where its chip ends when it can't start where its chip starts, as Claude Desktop's permission menu sits above its chip at the row's end; a list that fits is placed as before.
