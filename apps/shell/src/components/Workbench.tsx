@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import { type WidthLimits, clampWidth, limitsOf } from "../session/workbench";
 import { milliseconds, reducedMotion } from "../theme/motion";
@@ -42,6 +42,7 @@ export function Workbench({
   onClose,
   focusAfterClose,
   force,
+  children,
 }: {
   open: boolean;
   /** The width the user chose, in CSS pixels; undefined is the design's. The drawn width keeps within its limits. */
@@ -58,6 +59,8 @@ export function Workbench({
   focusAfterClose: () => HTMLElement | null | undefined;
   /** For the gallery: the resize edge under the pointer, being dragged, or with keyboard focus. */
   force?: "hover" | "pressed" | "focus";
+  /** The pane's body, beneath its head. */
+  children?: ReactNode;
 }) {
   const aside = useRef<HTMLElement>(null);
   const pane = useRef<HTMLDivElement>(null);
@@ -206,6 +209,7 @@ export function Workbench({
           </h2>
           <IconButton icon={X} size="icon-sm" label={t("workbench.closeButton")} className="workbench-close" onClick={onClose} />
         </div>
+        {children}
       </div>
     </aside>
   );
