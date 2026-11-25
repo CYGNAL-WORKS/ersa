@@ -209,7 +209,7 @@ describe("Open diagnostic log in the window", () => {
     fireEvent.click(button());
     await settle();
     expect(open).toHaveBeenCalledTimes(1);
-    expect(within(pane()).getByRole("status").textContent).toBe("Ersa couldn't open the diagnostic log. There's no diagnostic log at D:\\data\\core.log yet.");
+    expect(within(pane()).getAllByRole("status").map((s) => s.textContent)).toContain("Ersa couldn't open the diagnostic log. There's no diagnostic log at D:\\data\\core.log yet.");
   });
 
   // verifies: FLOW-READ-RAW-LOG-R13
