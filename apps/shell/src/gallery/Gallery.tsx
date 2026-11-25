@@ -702,6 +702,21 @@ const severalCall: Event = {
   ],
 };
 
+// Two stretches of one file, far apart: two hunks, divided (issue #483).
+const twoChangesCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "MultiEdit",
+  input: {},
+  target_kind: "path",
+  target: appFile,
+  edits: [
+    { path: appFile, old_text: "working?: boolean;", new_text: "working?: boolean;
+  since?: string;" },
+    { path: appFile, old_text: "      return { ...next, working: false };", new_text: "      return { ...next, working: false, since: undefined };" },
+  ],
+};
+
 /** One call's card as the transcript shows it, with its subagent's calls, against the gallery's clock and workspace. */
 function Card({
   steps,
@@ -1423,6 +1438,7 @@ const entries: Entry[] = [
       ["Made at every occurrence", <Card steps={[[0, renameCall], [1, editDone]]} id="e1" />],
       ["A line wider than the column", <Card steps={[[0, wideCall], [1, editDone]]} id="e1" />],
       ["Several files", <Card steps={[[0, severalCall], [1, editDone]]} id="e1" />],
+      ["Two changes in one file", <Card steps={[[0, twoChangesCall], [1, editDone]]} id="e1" />],
     ],
   },
   {
