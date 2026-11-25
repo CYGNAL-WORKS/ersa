@@ -215,6 +215,12 @@ export const enUS = {
       // A branch that holds commits no other branch or remote holds is kept; the next line says why.
       folderBranchKeptDetail: "The session's folder is deleted too, but its branch {branch} is kept.",
       branchKeptDetail: "The branch holds commits that exist nowhere else.",
+      // A session whose workspace is put away: Ersa removed its folder already, so only the branch is left to say.
+      putAwayBranchDetail: "The session's folder was already removed, and its branch {branch} is deleted too.",
+      putAwayBranchKeptDetail: "The session's folder was already removed. Its branch {branch} is kept.",
+      putAwayDetail: "The session's folder was already removed.",
+      // The same, when another session uses the workspace, so the delete keeps its branch.
+      putAwaySharedDetail: "The session's folder was already removed. Another session uses its branch {branch}, so the branch stays.",
       // The project's own folder, or a folder another session also uses.
       filesStayDetail: "Its files stay in {path}.",
       // What goes with the folder and exists nowhere else, joined into one list: "3 uncommitted or untracked files and
@@ -408,6 +414,8 @@ export const enUS = {
     // reached the agent (R15), which never says it failed.
     copyingProgress: "Copying attachments, {percent} percent done…",
     startingProgress: "Starting the backend…",
+    // The session's workspace was put away, and Ersa puts its folder back before the message goes (FLOW-CLEAN-UP-R05).
+    puttingBackProgress: "Putting the session's folder back…",
     unknownNote: "Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.",
     // The attach menu (docs/design/COMPOSER.md, The attach menu; FLOW-SEND-MESSAGE-R07).
     attach: {
@@ -573,6 +581,10 @@ export const enUS = {
       // A session whose folder was deleted or moved, or whose workspace was removed. It keeps its history and its place,
       // and Core checks the folder again on each try (FLOW-RESUME-SESSION-R23).
       folderGoneError: "This session's folder no longer exists. Put the folder back, then try again.",
+      // A put-away workspace whose folder can't come back (FLOW-CLEAN-UP-R04): the branch, or the commit when it was on
+      // none, that it had checked out is gone, so nothing can bring it back; or another folder has the branch checked out, which the user can change.
+      branchGoneError: "The branch or commit this session's folder had checked out no longer exists, so the folder can't be put back. Start a new session to go on.",
+      branchInUseError: "This session's branch is checked out in another folder. Switch that folder to another branch, then try again.",
     },
   },
 } as const satisfies Section;
