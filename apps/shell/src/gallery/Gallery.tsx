@@ -739,6 +739,12 @@ const draft = "Fix the flaky reconnect test on Windows";
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
 const allEfforts = ["low", "medium", "high", "xhigh", "max"];
+const modeDescriptions: Record<string, string> = {
+  auto: "Claude handles permission decisions",
+  default: "Always ask before making changes",
+  acceptEdits: "Automatically accept all file edits",
+  plan: "Create a plan before making changes",
+};
 const claudeCode: BackendInfo = {
   name: "claude-code",
   label: "Claude Code",
@@ -754,10 +760,11 @@ const claudeCode: BackendInfo = {
     { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", default: false, resolved: "claude-haiku-4-5-20251001" },
   ],
   efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], "medium"),
+  // Each with the sentence the adapter gives beneath it (PROTO-CLAUDE-CODE-STREAM-R81).
   permission_modes: choices(
     [["auto", "Auto"], ["default", "Manual"], ["acceptEdits", "Accept edits"], ["plan", "Plan"]],
     "default",
-  ),
+  ).map((mode) => ({ ...mode, description: modeDescriptions[mode.id] })),
 };
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   name: "copilot",
@@ -825,6 +832,21 @@ const chipOptions = [
   { id: "acceptEdits", label: "Accept edits" },
 ];
 const chip = { name: "Permission mode", value: "default", options: chipOptions, onChoose: () => {} };
+/** The permission mode chip's list: each option with its description, one unavailable, one with none, and one whose
+    description is wider than the list, cut at size-menu (FLOW-NEW-SESSION-R45). */
+const describedChip = {
+  name: "Permission mode",
+  value: "default",
+  options: [
+    { id: "auto", label: "Auto", description: modeDescriptions.auto },
+    { id: "default", label: "Manual", description: modeDescriptions.default },
+    { id: "acceptEdits", label: "Accept edits", description: modeDescriptions.acceptEdits },
+    { id: "plan", label: "Plan", description: "Create a plan before making changes, then wait for an answer before carrying any of it out", unavailable: true },
+    { id: "held", label: "held" },
+  ],
+  onChoose: () => {},
+  initialOpen: true,
+};
 const projectChip = {
   name: "Project",
   value: "p1",
@@ -1517,6 +1539,10 @@ const entries: Entry[] = [
       ["Open", room(<Chip {...chip} initialOpen />)],
       ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "acceptEdits", state: "hover" }} />)],
       ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "acceptEdits", state: "pressed" }} />)],
+      ["Open, options with descriptions", room(<Chip {...describedChip} />)],
+      ["Open, a described option hovered", room(<Chip {...describedChip} forceOption={{ id: "acceptEdits", state: "hover" }} />)],
+      ["Open, a described option with keyboard focus", room(<Chip {...describedChip} forceOption={{ id: "acceptEdits", state: "focus" }} />)],
+      ["Open, a described option pressed", room(<Chip {...describedChip} forceOption={{ id: "acceptEdits", state: "pressed" }} />)],
       ["Open, two lines and an action", room(<Chip {...projectChip} forceOption={{ id: "p2", state: "hover" }} />)],
       // The action as it will be once it can be taken, with its shortcut.
       ["Open, the action available", room(<Chip {...projectChip} action={{ ...projectChip.action, onChoose: () => {} }} />)],

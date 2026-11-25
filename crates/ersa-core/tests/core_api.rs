@@ -153,6 +153,33 @@ async fn host_and_backend_lists_hold_each_registered_adapter_in_order() {
     assert_eq!(kind(&error), "not_found");
 }
 
+/// A permission mode's description reaches `backend.list` as its adapter
+/// gives it, and a mode it gives none has no `description` at all, not an
+/// empty or null one.
+// verifies: PROTO-CORE-API-R142
+#[tokio::test(flavor = "multi_thread")]
+async fn backend_list_carries_a_permission_modes_description_as_its_adapter_gives_it() {
+    let core = start_with_adapters(tempdir(), |_| {}, vec![Arc::new(FakeAdapter::new(1))]).await;
+    let mut client = core.client().await;
+    let infos = client
+        .result("backend.list", json!({ "host_id": "local" }))
+        .await;
+    let modes = infos[0]["permission_modes"].as_array().unwrap();
+    assert_eq!(modes[0]["id"], json!("ask"));
+    assert_eq!(
+        modes[0]["description"],
+        json!(support::fake::FAKE_ASK_DESCRIPTION)
+    );
+    assert_eq!(modes[1]["id"], json!("auto"));
+    assert!(modes[1].get("description").is_none(), "{:?}", modes[1]);
+    // An effort carries none.
+    let efforts = infos[0]["efforts"].as_array().unwrap();
+    assert!(
+        efforts.iter().all(|e| e.get("description").is_none()),
+        "{efforts:?}"
+    );
+}
+
 /// `backend.list` on a Core that detects the fake backend for real, with
 /// the fake answering `models` as given.
 async fn listed(answer: ModelsAnswer) -> serde_json::Value {

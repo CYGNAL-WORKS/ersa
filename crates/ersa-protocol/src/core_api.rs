@@ -362,9 +362,12 @@ pub struct TestedRange {
     pub max: String,
 }
 
-/// One value a session can start with: a model, an effort or a permission
-/// mode. The choices are the adapter's knowledge of its tested versions, not
-/// detected on the host.
+/// One value a session can start with: an effort or a permission mode (a
+/// model is a [`ModelChoice`]). The choices are the adapter's knowledge of
+/// its tested versions, not detected on the host. One struct serves both
+/// lists, though only a permission mode takes a `description`: Core checks
+/// no response against the schema at run time, so the conformance tests and
+/// each adapter's tests keep an effort without one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Choice {
@@ -376,6 +379,12 @@ pub struct Choice {
     /// Whether a new session starts with this one when none is named. One
     /// per list.
     pub default: bool,
+    /// A sentence saying what the choice does, which the Interface shows
+    /// beneath its label. Only a permission mode has one, and only when its
+    /// adapter gives one; left out otherwise, never sent empty
+    /// (PROTO-CORE-API-R142). The schema refuses it on an effort.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// One model a session can start with, as the backend reports it on the host
