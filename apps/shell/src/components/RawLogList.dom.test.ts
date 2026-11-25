@@ -4,6 +4,8 @@
 // the rows near view in the page, and what it says with nothing to list. jsdom does no layout, so the list's height is
 // stubbed and the row height is the design's token, set on the page as the stylesheet would.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -404,6 +406,46 @@ describe("a selected line in the detail", () => {
     update(viewOf(entries(0, 3)));
     expect(detailOpen()).toBe(false);
     expect(rows().every((row) => row.getAttribute("aria-selected") !== "true")).toBe(true);
+  });
+});
+
+describe("the selected row's highlight", () => {
+  /**
+   * The rules of the list's stylesheet that set a row's background with the pointer over it, as selectors with the
+   * `:hover` taken out. jsdom draws no hover, so the test asks which of those selectors a row then matches.
+   */
+  const hoverBackgrounds = () => {
+    const css = readFileSync(join(import.meta.dirname, "RawLogList.css"), "utf8");
+    const found: string[] = [];
+    for (const [, selectors, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/\bbackground:/.test(body!)) continue;
+      // A selector list splits at its own commas, never at those inside :not(…).
+      const list = selectors!.replace(/\/\*[\s\S]*?\*\//g, "");
+      let depth = 0;
+      let start = 0;
+      const each: string[] = [];
+      for (let i = 0; i <= list.length; i++) {
+        const ch = list[i];
+        if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        else if ((ch === "," && depth === 0) || ch === undefined) {
+          each.push(list.slice(start, i));
+          start = i + 1;
+        }
+      }
+      for (const selector of each) if (selector.includes(":hover")) found.push(selector.replace(":hover", "").trim());
+    }
+    return found;
+  };
+
+  // verifies: FLOW-READ-RAW-LOG-R10
+  it("keeps the selected row's highlight under the pointer, where any other row takes the pointer's", () => {
+    show(viewOf(entries(0, 3)));
+    fireEvent.click(rowOf("line 1")!);
+    const rules = hoverBackgrounds();
+    expect(rules.length).toBeGreaterThan(0);
+    expect(rules.some((selector) => rowOf("line 0")!.matches(selector))).toBe(true);
+    expect(rules.some((selector) => rowOf("line 1")!.matches(selector))).toBe(false);
   });
 });
 
