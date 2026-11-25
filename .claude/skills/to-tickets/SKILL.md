@@ -103,7 +103,7 @@ The public interfaces the tests sit at, one line each: what each catches and wha
 
 ## Done when
 
-- [ ] Every listed requirement has a test citing `verifies: <ID>` that fails without the change
+- [ ] Every listed requirement has a test citing `verifies: <ID>`
 - [ ] Any further criteria in terms of the brief
 
 ## Blocked by
