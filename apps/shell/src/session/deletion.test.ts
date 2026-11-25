@@ -69,6 +69,7 @@ describe("what the delete question says goes", () => {
   });
 
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R13
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R14
   it("says a put-away workspace another session uses has no folder left, never that its files stay there", () => {
     const away: Workspace = { ...isolated, state: "put_away" };
     // Another session uses the workspace, so the delete keeps it and its branch (R05).
