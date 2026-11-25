@@ -1,0 +1,246 @@
+/* The developer pane's list of raw log lines (docs/design/WORKBENCH.md, The list): fixed rows edge to edge, the
+   problem line over its top, Jump to latest over its foot, and what it says when it has nothing to list. */
+
+.raw-log {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The scrolling list: one stop for the keyboard. Only the rows near view are in the page; the block they sit in is
+   as tall as every row, so the list scrolls as far as the lines go (FLOW-READ-RAW-LOG-R08). */
+.raw-log-list {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  outline: none;
+}
+
+/* With keyboard focus the list shows it as a control without an edge does: an ink hairline, drawn inside it. */
+.raw-log-list:focus-visible {
+  box-shadow: inset 0 0 0 var(--line-hairline) var(--color-ink);
+}
+
+.raw-log-rows {
+  position: relative;
+  /* How many rows the list holds, set on the element; none until it is. */
+  --rows: 0;
+  height: calc(var(--rows) * var(--size-log-row));
+}
+
+/* A row: size-log-row high, padded space-md at the sides, its parts space-sm apart, edge to edge with no radius and
+   no rule between rows. Placed by its number, so rows out of view take no element. */
+.raw-log-row {
+  position: absolute;
+  /* The row's number in the list, set on the element. */
+  --row: 0;
+  top: calc(var(--row) * var(--size-log-row));
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: var(--size-log-row);
+  padding: 0 var(--space-md);
+  white-space: nowrap;
+}
+
+.raw-log-row:not(.raw-log-earlier):hover,
+.raw-log-row[data-force="hover"] {
+  background: var(--material-hover);
+}
+
+/* The time as HH:MM:SS.mmm in ui-small, ink-faint and tabular figures. */
+.raw-log-time {
+  flex: none;
+  color: var(--color-ink-faint);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The direction mark: an arrow at size-icon-xs in ink-muted. Shape carries the meaning, not color. */
+.raw-log-dir {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-ink-muted);
+}
+
+/* The line's start in mono and ink, on one line, cut with an ellipsis at its end. */
+.raw-log-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink);
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  line-height: var(--type-mono-leading);
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+
+/* The first row when earlier lines are gone: ui-small, ink-faint, centered, not a line. */
+.raw-log-earlier {
+  justify-content: center;
+  color: var(--color-ink-faint);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* Nothing to list: said in the middle of the list's area, in ui and ink-muted, centered, at most size-dialog wide. */
+.raw-log-empty {
+  max-width: var(--size-dialog);
+  margin: auto;
+  padding: 0 var(--space-md);
+  color: var(--color-ink-muted);
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  text-align: center;
+}
+
+/* A problem: one line over the top of the list, on surface-raised with a line hairline beneath, so no row moves when
+   it comes or goes. Padded space-xs by space-md: the danger dot, the message in ui-small and ink, then the reason in
+   ink-faint, cut with an ellipsis. It fades in and out over motion-quick. */
+.raw-log-problem {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  overflow: hidden;
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: nowrap;
+  background: var(--color-surface-raised);
+  border-bottom: var(--line-hairline) solid var(--color-line);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-quick) var(--motion-ease-out),
+    visibility var(--motion-quick) var(--motion-ease-out);
+}
+
+.raw-log-problem[data-shown] {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* The danger dot at size-glyph, centred on the line. */
+.raw-log-problem::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: var(--size-glyph);
+  height: var(--size-glyph);
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+}
+
+/* The message keeps its words while it can, then is cut like the reason, which takes only the room left after it. */
+.raw-log-problem-message {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+}
+
+.raw-log-problem-reason {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink-faint);
+  text-overflow: ellipsis;
+}
+
+/* Jump to latest floats over the list's foot, centered, space-md above it, and fades in and out over motion-quick. */
+.raw-log-jump-place {
+  position: absolute;
+  right: 0;
+  bottom: var(--space-md);
+  left: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-quick) var(--motion-ease-out),
+    visibility var(--motion-quick) var(--motion-ease-out);
+}
+
+.raw-log-jump-place[data-shown] {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* A pill size-control high on surface-raised with a line edge, padded space-md at the sides (with no shadow: DESIGN.md
+   keeps shadow-transient for layers with radius-lg corners; see the inbox), holding an
+   arrow, the words in ui-small and ink, the count after them in ink-muted and tabular figures. A control with an
+   edge: under the pointer its edge turns ink-faint and its fill steps up a surface, pressed it sinks to canvas, and
+   with keyboard focus its edge turns ink. */
+.raw-log-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  height: var(--size-control);
+  padding: 0 var(--space-md);
+  color: var(--color-ink);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: nowrap;
+  background: var(--color-surface-raised);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-pill);
+  outline: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.raw-log-jump:hover,
+.raw-log-jump[data-force="hover"] {
+  background: var(--material-tile);
+  border-color: var(--color-ink-faint);
+}
+
+/* As a button's press: the fill sinks to canvas and the edge strengthens, so a press reads apart from rest. */
+.raw-log-jump:active,
+.raw-log-jump[data-force="pressed"] {
+  background: var(--color-canvas);
+  border-color: var(--color-ink-muted);
+}
+
+.raw-log-jump:focus-visible,
+.raw-log-jump[data-force="focus"] {
+  border-color: var(--color-ink);
+}
+
+.raw-log-jump-count {
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .raw-log-problem,
+  .raw-log-jump-place,
+  .raw-log-jump {
+    transition: none;
+  }
+}

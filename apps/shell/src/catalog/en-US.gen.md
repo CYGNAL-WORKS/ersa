@@ -1238,6 +1238,56 @@ Developer
 
 Ersa got a raw log it can't read.
 
+### `developer.listLabel`
+
+Raw log
+
+### `developer.fromBackendLabel`
+
+From {backend}
+
+### `developer.toBackendLabel`
+
+To {backend}
+
+### `developer.earlierGoneDetail`
+
+Earlier lines are no longer held.
+
+### `developer.jumpButton`
+
+Jump to latest
+
+### `developer.newLinesStatus`
+
+{count} new
+
+### `developer.jumpLabel`
+
+#### `one`
+
+Jump to latest, {count} new line
+
+#### `other`
+
+Jump to latest, {count} new lines
+
+### `developer.noSessionEmpty`
+
+No session is open. Choose a session to see its raw log.
+
+### `developer.noLinesEmpty`
+
+No lines yet. Lines appear here while the session runs.
+
+### `developer.readingProgress`
+
+Reading…
+
+### `developer.unreadableError`
+
+Ersa can't read the raw log. It's trying again.
+
 ## `quit`
 
 ## `trust`

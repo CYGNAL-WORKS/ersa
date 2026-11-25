@@ -10,6 +10,7 @@ import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
 import { ArchivedNote } from "../components/ArchivedNote";
+import { RawLogList } from "../components/RawLogList";
 import { Workbench } from "../components/Workbench";
 import { AgentLink, AgentText, CodeBlock } from "../components/AgentText";
 import { AttachmentChip } from "../components/AttachmentChip";
@@ -33,7 +34,8 @@ import { ThinkingRow, ToolCard, type ToolContext } from "../components/ToolCard"
 import { Transcript } from "../components/Transcript";
 import type { CoreView, SessionsView } from "../core/connection";
 import type { Envelope, Event, QuestionAsked } from "../protocol/agent-events.gen";
-import type { BackendInfo, Choice, CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, CoreHelloResult, Project, RawLogEntry, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
+import type { RawLogView } from "../session/rawLog";
 import type { Answer } from "../session/answers";
 import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
@@ -792,12 +794,27 @@ const oneBackend = { local: [claudeCode] };
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
 /** The workbench open at the right of a region standing in for the window beside the rail, in a resize edge's state. */
-const workbench = (force?: "hover" | "pressed" | "focus") => (
+const workbench = (force?: "hover" | "pressed" | "focus", body?: ReactNode) => (
   <div className="gallery-workbench">
     <div className="gallery-workbench-stage" />
-    <Workbench open width={undefined} eases={false} onResize={() => {}} onClose={() => {}} focusAfterClose={() => null} force={force} />
+    <Workbench open width={undefined} eases={false} onResize={() => {}} onClose={() => {}} focusAfterClose={() => null} force={force}>
+      {body}
+    </Workbench>
   </div>
 );
+/** A session's raw log as the developer pane holds it: requests to the backend and its streaming answers, a long one among them. */
+const rawLogLines = (from: number, count: number): RawLogEntry[] =>
+  Array.from({ length: count }, (_, i) => {
+    const index = from + i;
+    const ts = new Date(Date.UTC(2026, 10, 22, 10, 4, 5, 7) + index * 137).toISOString();
+    if (index % 9 === 0) return { index, ts, dir: "host", line: `{"type":"user","message":{"role":"user","content":"Run the tests and fix what fails."}}` };
+    if (index % 9 === 4) return { index, ts, dir: "backend", head: `{"type":"assistant","message":{"content":[{"type":"image","source":{"data":"${"iVBORw0KGgo".repeat(40)}`, size: 1_843_200 };
+    return { index, ts, dir: "backend", line: `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Running pnpm test ${index}"}}}` };
+  });
+const rawLogView = (more: Partial<RawLogView> = {}): RawLogView => ({ session: "s1", lines: rawLogLines(0, 60), read: true, earlier: false, ...more });
+/** The developer pane's list in the workbench. */
+const rawLog = (props: Partial<Parameters<typeof RawLogList>[0]> = {}) =>
+  workbench(undefined, <RawLogList view={rawLogView()} active backend="Claude Code" {...props} />);
 /** Room above a composer for its status line, which grows upward over what is above it. */
 const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
 /** Room above a composer for its attach menu, which opens upward from attach. */
@@ -1616,6 +1633,26 @@ const entries: Entry[] = [
       ["Resize edge under the pointer", workbench("hover")],
       ["Resize edge dragged", workbench("pressed")],
       ["Resize edge, keyboard focus", workbench("focus")],
+    ],
+  },
+  {
+    // The developer pane's list of raw log lines (docs/design/WORKBENCH.md, The list; FLOW-READ-RAW-LOG).
+    name: "RawLogList",
+    wide: true,
+    states: [
+      ["Following the end", rawLog()],
+      ["A row under the pointer", rawLog({ force: { hover: 57 } })],
+      ["Earlier lines are no longer held", rawLog({ view: rawLogView({ lines: rawLogLines(1_200, 6), earlier: true }) })],
+      ["Scrolled away, Jump to latest", rawLog({ force: { away: 3 } })],
+      ["Jump to latest under the pointer", rawLog({ force: { away: 3, jump: "hover" } })],
+      ["Jump to latest pressed", rawLog({ force: { away: 3, jump: "pressed" } })],
+      ["Jump to latest, keyboard focus", rawLog({ force: { away: 3, jump: "focus" } })],
+      ["Scrolled away, nothing new yet", rawLog({ force: { away: 0 } })],
+      ["The raw log can't be read", rawLog({ view: rawLogView({ failure: "Core isn't running. Start Ersa again, or check the app log for why it stopped." }) })],
+      ["No active session", rawLog({ view: undefined, active: false })],
+      ["Reading", rawLog({ view: rawLogView({ lines: [], read: false }) })],
+      ["No lines yet", rawLog({ view: rawLogView({ lines: [] }) })],
+      ["No lines yet, and a read failed", rawLog({ view: rawLogView({ lines: [], failure: "Core isn't running." }) })],
     ],
   },
   {
