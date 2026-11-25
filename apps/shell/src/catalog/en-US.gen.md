@@ -1332,6 +1332,18 @@ Close line
 
 This line is {size}. Its first 256 KB are shown.
 
+### `developer.openLogButton`
+
+Open diagnostic log
+
+### `developer.openLogUnavailableReason`
+
+This build is attached to {label}, so it has no diagnostic log to open.
+
+### `developer.openLogError`
+
+Ersa couldn't open the diagnostic log.
+
 ## `quit`
 
 ## `trust`

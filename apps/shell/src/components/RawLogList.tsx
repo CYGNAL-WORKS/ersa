@@ -64,6 +64,7 @@ export function RawLogList({
   filtering = false,
   active,
   backend,
+  unopened,
   force,
 }: {
   /** What the reader holds of the active session's raw log; undefined before it has read anything. */
@@ -76,6 +77,12 @@ export function RawLogList({
   active: boolean;
   /** The session's backend, by its own label, for the direction assistive technology hears. */
   backend: string;
+  /**
+   * Why the diagnostic log couldn't be opened, after the user last chose Open diagnostic log and it failed
+   * (FLOW-READ-RAW-LOG-R13). Said over the list in place of a failed read while it stands, since it answers what the
+   * user just did.
+   */
+  unopened?: string;
   /**
    * For the gallery: scrolled away with `away` new lines, Jump to latest in a pointer or keyboard state, a row under
    * the pointer, a line selected by its index, the list with keyboard focus, and the detail's buttons in a state.
@@ -342,7 +349,15 @@ export function RawLogList({
             <p id={`${ids}-message`}>{message}</p>
           </div>
         )}
-        <Problem failure={view?.failure} />
+        <Problem
+          problem={
+            unopened !== undefined
+              ? { message: t("developer.openLogError"), reason: unopened }
+              : view?.failure !== undefined
+                ? { message: t("developer.unreadableError"), reason: view.failure }
+                : undefined
+          }
+        />
         {/* Always in the page, so it fades in and out; out of reach and unheard while hidden. */}
         <div className="raw-log-jump-place" data-shown={offering || undefined} inert={!offering} aria-hidden={!offering || undefined}>
           <button
@@ -364,22 +379,22 @@ export function RawLogList({
 }
 
 /**
- * A read that failed, said over the top of the list so no row moves (R15): the message, then the reason, cut with an
- * ellipsis, and the line whole in its tooltip. It fades out with the words it had; assistive technology hears it once, from a
- * status region that is always in the page.
+ * A problem, said over the top of the list so no row moves: a read that failed (R15), or the diagnostic log that
+ * couldn't be opened (R13). The message, then the reason, cut with an ellipsis, and the line whole in its tooltip. It
+ * fades out with the words it had; assistive technology hears it once, from a status region that is always in the page.
  */
-function Problem({ failure }: { failure: string | undefined }) {
-  const [said, setSaid] = useState(failure);
-  if (failure !== undefined && failure !== said) setSaid(failure);
-  const message = t("developer.unreadableError");
+function Problem({ problem }: { problem: { message: string; reason: string } | undefined }) {
+  const [said, setSaid] = useState(problem);
+  if (problem !== undefined && (problem.message !== said?.message || problem.reason !== said.reason)) setSaid(problem);
+  const whole = (p: { message: string; reason: string }) => `${p.message} ${p.reason}`;
   return (
     <>
-      <div className="raw-log-problem" data-shown={failure !== undefined || undefined} aria-hidden="true" title={said && `${message} ${said}`}>
-        <span className="raw-log-problem-message">{message}</span>
-        <span className="raw-log-problem-reason">{said}</span>
+      <div className="raw-log-problem" data-shown={problem !== undefined || undefined} aria-hidden="true" title={said && whole(said)}>
+        <span className="raw-log-problem-message">{said?.message}</span>
+        <span className="raw-log-problem-reason">{said?.reason}</span>
       </div>
       <div className="heard-only" role="status">
-        {failure !== undefined && `${message} ${failure}`}
+        {problem !== undefined && whole(problem)}
       </div>
     </>
   );

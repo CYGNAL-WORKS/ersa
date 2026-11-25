@@ -89,6 +89,7 @@ function fakeShell() {
     pickFiles: async () => [] as string[],
     onDragDrop: () => () => {},
     openLink: vi.fn((_url: string) => {}),
+    openDiagnosticLog: async () => {},
   } satisfies ShellControl;
 }
 
