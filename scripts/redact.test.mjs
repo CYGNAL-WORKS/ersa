@@ -123,7 +123,7 @@ test("redacts the plan's name", () => {
 });
 
 test("redacts every rate-limit window's utilization, to a share of the same type", () => {
-  const line = '{"unifiedWindows":{"seven_day":{"utilization":0.04,"resetsAt":1},"five_hour":{"utilization": 1.2e-1},"opus_week":{"utilization":1}}}';
+  const line = '{"unifiedWindows":{"seven_day":{"utilization":0.37,"resetsAt":1},"five_hour":{"utilization": 1.2e-1},"opus_week":{"utilization":1}}}';
   const out = redact(line);
   assert.equal(out, `{"unifiedWindows":{"seven_day":{"utilization":${PLACEHOLDER_USAGE},"resetsAt":1},"five_hour":{"utilization": ${PLACEHOLDER_USAGE}},"opus_week":{"utilization":${PLACEHOLDER_USAGE}}}}`);
   assert.equal(typeof JSON.parse(out).unifiedWindows.seven_day.utilization, "number");
@@ -143,7 +143,7 @@ test("redacts the pair of ids in a synced plugin's path, in every spelling of it
 
 test("names the line and field of each account detail left as recorded, never its value", () => {
   const text = [
-    '{"subscriptionType":"Claude Mega","utilization":0.04}',
+    '{"subscriptionType":"Claude Mega","utilization":0.37}',
     `{"subscriptionType":"${PLACEHOLDER_PLAN}","utilization":${PLACEHOLDER_USAGE}}`,
     'plugins\\synced\\4c1d2e3f-0000-4000-8000-0123456789ab_9a8b7c6d-1111-4111-9111-ba9876543210',
   ].join("\n");
@@ -153,7 +153,7 @@ test("names the line and field of each account detail left as recorded, never it
     { line: 1, field: "utilization" },
     { line: 3, field: "synced plugin ids" },
   ]);
-  assert.ok(!JSON.stringify(found).includes("Mega") && !JSON.stringify(found).includes("0.04"));
+  assert.ok(!JSON.stringify(found).includes("Mega") && !JSON.stringify(found).includes("0.37"));
   assert.deepEqual(accountDetails(redact(text)), []);
 });
 
