@@ -422,3 +422,37 @@ impl Drop for ResumeReport {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::tests::taken;
+    use super::*;
+
+    /// A resume's report goes out as `putting_back` for its session; as the
+    /// resume answers, the report is withdrawn where no connection took it,
+    /// and a put-back that only begins to wait after the answer says
+    /// nothing.
+    // verifies: PROTO-CORE-API-R146
+    #[test]
+    fn a_resume_withdraws_its_report_as_it_answers() {
+        let tiles = Arc::new(TileHub::default());
+        let (mut quick, mut slow) = (tiles.feed(), tiles.feed());
+        let report = ResumeReport::new(&tiles, "s1");
+        (report.putting_back())();
+        let line = taken(&mut quick).expect("reported");
+        let sent: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(sent["method"], "session.send_progress");
+        assert_eq!(sent["params"]["session_id"], "s1");
+        assert_eq!(sent["params"]["phase"], "putting_back");
+
+        // The resume answers: the connection that has not taken the report
+        // never gets it.
+        let late = report.putting_back();
+        drop(report);
+        assert_eq!(taken(&mut slow), None);
+        // Nor does anyone, from a put-back that begins to wait only now.
+        late();
+        assert_eq!(taken(&mut quick), None);
+        assert_eq!(taken(&mut slow), None);
+    }
+}

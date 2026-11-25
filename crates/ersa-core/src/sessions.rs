@@ -3515,14 +3515,20 @@ impl TileFeed {
         }
     }
 
-    /// Takes one waiting line, if there is one, without waiting. The caller
-    /// takes it only once it has room to queue it at once, so a line is
-    /// either still here, where [`TileHub::withdraw`] reaches it, or
-    /// already queued on the connection ahead of whatever is queued after.
-    pub fn take(&mut self) -> Option<Arc<String>> {
+    /// Takes one waiting line, if there is one, and hands it to `queue`,
+    /// which must queue it on the connection without waiting. `queue` runs
+    /// under the lock [`TileHub::withdraw`] takes, so a line is either still
+    /// here, where a withdrawal reaches it, or already queued on the
+    /// connection ahead of anything queued after the withdrawal. Says
+    /// whether there was a line.
+    pub fn take(&mut self, queue: impl FnOnce(Arc<String>)) -> bool {
         let mut latest = lock(&self.inbox.latest);
-        let key = latest.keys().next()?.clone();
-        latest.remove(&key)
+        let Some(key) = latest.keys().next().cloned() else {
+            return false;
+        };
+        let line = latest.remove(&key).expect("the key was just found");
+        queue(line);
+        true
     }
 }
 
@@ -3644,17 +3650,23 @@ mod tests {
         let (mut first, mut second) = (hub.feed(), hub.feed());
         let report = hub.publish("s1", Latest::SendProgress, "report".into());
         hub.withdraw("s1", Latest::SendProgress, &report);
-        assert_eq!(first.take(), None);
-        assert_eq!(second.take(), None);
+        assert_eq!(taken(&mut first), None);
+        assert_eq!(taken(&mut second), None);
 
         let report = hub.publish("s1", Latest::SendProgress, "report".into());
-        let taken = first.take();
-        let newer = hub.publish("s1", Latest::SendProgress, "newer".into());
+        let before = taken(&mut first);
+        hub.publish("s1", Latest::SendProgress, "newer".into());
         hub.withdraw("s1", Latest::SendProgress, &report);
-        assert_eq!(taken.as_deref().map(String::as_str), Some("report"));
-        assert_eq!(first.take().as_deref().map(String::as_str), Some("newer"));
-        assert_eq!(second.take().as_deref().map(String::as_str), Some("newer"));
-        drop(newer);
+        assert_eq!(before.as_deref(), Some("report"));
+        assert_eq!(taken(&mut first).as_deref(), Some("newer"));
+        assert_eq!(taken(&mut second).as_deref(), Some("newer"));
+    }
+
+    /// The line `feed` hands over next, if one waits.
+    pub(super) fn taken(feed: &mut TileFeed) -> Option<String> {
+        let mut line = None;
+        feed.take(|l| line = Some(l.as_ref().clone()));
+        line
     }
 
     /// A record read that corrects the date created asks for a tile; the
