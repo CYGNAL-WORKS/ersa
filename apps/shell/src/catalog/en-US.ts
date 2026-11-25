@@ -414,6 +414,9 @@ export const enUS = {
     // reached the agent (R15), which never says it failed.
     copyingProgress: "Copying attachments, {percent} percent done…",
     startingProgress: "Starting the backend…",
+    // On the new-session screen, while Ersa finds whether a picked folder is already a project, then adds it after Trust.
+    findingFolderProgress: "Checking the folder…",
+    addingProjectProgress: "Adding the project…",
     // The session's workspace was put away, and Ersa puts its folder back before the message goes (FLOW-CLEAN-UP-R05).
     puttingBackProgress: "Putting the session's folder back…",
     unknownNote: "Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.",

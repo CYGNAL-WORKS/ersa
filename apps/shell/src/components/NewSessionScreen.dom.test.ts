@@ -89,6 +89,29 @@ describe("adding a project from the project chip", () => {
     });
   };
 
+  // verifies: FLOW-NEW-SESSION-R42
+  it("says it is checking a picked folder, then adding it, with the ring, in the status line's place, sending nothing", () => {
+    const { rerender } = render(createElement(NewSessionScreen, props([alpha], { adding: { state: "finding" }, initialText: "Fix the build" })));
+    const line = () => document.querySelector(".new-session-above .composer-status-line");
+    expect(line()?.textContent).toBe("Checking the folder…");
+    expect(line()?.getAttribute("role")).toBe("status");
+    expect(line()?.querySelector('.context-ring[data-turning=""]')).not.toBeNull();
+    // The composer's own status line gives way: one line at a time.
+    expect(document.querySelectorAll(".composer-status-line")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBe("true");
+    rerender(createElement(NewSessionScreen, props([alpha], { adding: { state: "adding" }, initialText: "Fix the build" })));
+    expect(line()?.textContent).toBe("Adding the project…");
+    expect(line()?.querySelector('.context-ring[data-turning=""]')).not.toBeNull();
+    rerender(createElement(NewSessionScreen, props([alpha], { initialText: "Fix the build" })));
+    expect(line()).toBeNull();
+  });
+
+  it("says Ersa can't reach the sessions in place of the folder's wait, which that line comes before", () => {
+    render(createElement(NewSessionScreen, props([alpha], { adding: { state: "adding" }, away: "reconnecting" })));
+    const lines = [...document.querySelectorAll(".composer-status-line")].map((l) => l.textContent);
+    expect(lines).toEqual(["Ersa can't reach your sessions. It's trying again."]);
+  });
+
   // verifies: FLOW-NEW-SESSION-R27
   it("offers the folder dialog only on the local host: a remote host's folders are not this computer's", async () => {
     const remote = { id: "far", name: "buildbox", platform: "linux" as const };
