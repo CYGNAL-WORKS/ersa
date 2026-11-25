@@ -157,6 +157,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       if (notification.method === "session.send_progress") {
         follower.current?.progress(notification.params);
         if (notification.params.session_id === startStop.current?.session) setStartProgress(progressOf(notification.params));
+        // A Resume from the archived note, still unanswered, waits for the session's folder to be put back: its note
+        // says so until the resume is answered (FLOW-CLEAN-UP-R21). A report with no Resume under way here is not its.
+        const { session_id: id, phase } = notification.params;
+        if (phase === "putting_back") {
+          setResuming((r) => (r[id]?.state === "sending" ? { ...r, [id]: { state: "sending", progress: { phase: "puttingBack" } } } : r));
+        }
         return;
       }
       if (notification.method !== "session.event") return;
