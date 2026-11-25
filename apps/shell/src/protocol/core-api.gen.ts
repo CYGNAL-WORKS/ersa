@@ -943,7 +943,7 @@ export interface BackendInfo {
   /**
    * The permission modes a session can start with.
    */
-  permission_modes: Choice[];
+  permission_modes: PermissionModeChoice[];
 }
 /**
  * One model a session can start with, as the backend reports it on the host.
@@ -986,6 +986,27 @@ export interface Choice {
    * Whether a new session starts with this one when none is named.
    */
   default: boolean;
+}
+/**
+ * One permission mode a session can start with: a choice, with what the mode does.
+ */
+export interface PermissionModeChoice {
+  /**
+   * What session.create takes and session.list reports.
+   */
+  id: string;
+  /**
+   * What the Interface shows.
+   */
+  label: string;
+  /**
+   * Whether a new session starts with this one when none is named.
+   */
+  default: boolean;
+  /**
+   * A sentence saying what the mode does, shown beneath its label; absent when the adapter gives none.
+   */
+  description?: string;
 }
 export interface Project {
   id: Id;
