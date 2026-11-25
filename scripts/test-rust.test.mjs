@@ -132,7 +132,9 @@ test("a job's stdout and stderr keep the order they were written in", async () =
 });
 
 // A job that prints `line`, then keeps running until the test opens its gate
-// (creates the gate file), so it runs exactly as long as the test needs.
+// (creates the gate file), so it runs exactly as long as the test needs. A
+// test opens the gate in `finally`, so a failing test still lets the child
+// end, the run finish and the test process exit.
 function gated(line) {
   const dir = mkdtempSync(join(tmpdir(), "test-rust-gate-"));
   const gate = join(dir, "open");
@@ -164,10 +166,13 @@ test("a binary still running is named, with libtest's slow-test lines, while it 
     const at = reports().findIndex((s) => s.includes(slow));
     return at >= 0 && reports().length - at >= 2;
   };
-  await until(reportedAgain, "reported again after the slow line");
-  hung.open();
-  await finished;
-  hung.remove();
+  try {
+    await until(reportedAgain, "reported again after the slow line");
+  } finally {
+    hung.open();
+    await finished;
+    hung.remove();
+  }
   assert.match(reports()[0], /still running after \d+s: Running tests\/hangs\.rs\n/);
   assert.equal(written.join("").split(slow).length - 1, 2, "once in a report, once in the job's block");
   // Before the job's own block, so a log cut off there still has it.
@@ -179,11 +184,14 @@ test("a run that is stopped can report everything each running binary has writte
   const hung = gated("partial line");
   const finished = runJobs([hung.job], { size: 1, write: () => {}, running });
   let report = "";
-  await until(() => (report = stillRunning(running, true)).includes("partial line"), "reported the partial line");
+  try {
+    await until(() => (report = stillRunning(running, true)).includes("partial line"), "reported the partial line");
+  } finally {
+    hung.open();
+    await finished;
+    hung.remove();
+  }
   assert.match(report, /still running after \d+s: Running tests\/hangs\.rs\npartial line/);
-  hung.open();
-  await finished;
-  hung.remove();
   assert.equal(stillRunning(running, true), "");
 });
 
