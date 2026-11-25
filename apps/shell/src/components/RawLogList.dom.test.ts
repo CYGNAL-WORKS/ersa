@@ -399,6 +399,20 @@ describe("a selected line in the detail", () => {
     expect(document.activeElement).toBe(list());
   });
 
+  // verifies: FLOW-READ-RAW-LOG-R21
+  it("keeps a line selected, its detail open, as lines arrive and after the pane lets go of it", () => {
+    const { update } = show(viewOf(entries(0, 30)));
+    fireEvent.click(rowOf("line 25")!);
+    update(viewOf(entries(0, 35)));
+    expect(rowOf("line 25")?.getAttribute("aria-selected")).toBe("true");
+    // The pane lets go of lines 0 to 26, the selected one among them: its detail stays.
+    update(viewOf(entries(27, 40), { earlier: true }));
+    expect(detailOpen()).toBe(true);
+    expect(shownText()).toBe("line 25");
+    expect(rows().some((row) => row.getAttribute("aria-selected") === "true")).toBe(false);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R22
   it("clears the selection when the reader starts over", () => {
     const { update } = show(viewOf(entries(0, 3)));
     fireEvent.click(rowOf("line 1")!);
@@ -462,6 +476,7 @@ describe("the keyboard", () => {
   });
 
   // verifies: FLOW-READ-RAW-LOG-R17
+  // verifies: FLOW-READ-RAW-LOG-R23
   it("moves the selection a row with Up and Down, and to the first and last row with Home and End", () => {
     show(viewOf(entries(0, 30)));
     // Following the end: rows 20 to 29 are in view, so Down with nothing selected takes the first of them.
@@ -488,11 +503,21 @@ describe("the keyboard", () => {
   });
 
   // verifies: FLOW-READ-RAW-LOG-R17
+  // verifies: FLOW-READ-RAW-LOG-R23
   it("takes the last row in view with Up when nothing is selected, and names the selected row to assistive technology", () => {
     show(viewOf(entries(0, 30)));
     press("ArrowUp");
     expect(selectedText()).toBe("line 29");
     expect(list().getAttribute("aria-activedescendant")).toBe(rowOf("line 29")?.id);
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R23
+  it("takes the last row wholly in view with Up, not the last line, when scrolled away from the end", () => {
+    show(viewOf(entries(0, 30)));
+    // Rows 1 to 11 show, the first and last of them in part, so lines 2 to 10 are wholly in view.
+    scrollTo(ROW + 4);
+    press("ArrowUp");
+    expect(selectedText()).toBe("line 10");
   });
 
   // verifies: FLOW-READ-RAW-LOG-R17

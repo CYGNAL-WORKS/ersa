@@ -43,6 +43,15 @@ const type = (text: string) => fireEvent.change(field(), { target: { value: text
 const list = () => screen.getByRole("listbox", { name: "Raw log" });
 const texts = () => within(list()).queryAllByRole("option").map((row) => row.querySelector(".raw-log-text")?.textContent);
 const count = () => document.querySelector(".developer-count");
+const selectedText = () =>
+  within(list())
+    .queryAllByRole("option")
+    .find((row) => row.getAttribute("aria-selected") === "true")
+    ?.querySelector(".raw-log-text")?.textContent;
+const detailOpen = () => {
+  const detail = document.querySelector<HTMLElement>(".raw-log-detail");
+  return !!detail?.hasAttribute("data-shown") && !detail.inert;
+};
 
 describe("the filter", () => {
   // verifies: FLOW-READ-RAW-LOG-R12
@@ -120,6 +129,44 @@ describe("the filter", () => {
     update(viewOf(entries(0, 6), { session: "s2" }), "s2");
     expect(count()?.hasAttribute("data-shown")).toBe(true);
     expect(count()?.textContent).toBe("2 of 6");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R21
+  it("keeps a selected line selected, its detail open, while the filter leaves it out", () => {
+    show(viewOf(entries(0, 12)));
+    fireEvent.click(within(list()).getByText("ok 3"));
+    type("error");
+    expect(detailOpen()).toBe(true);
+    expect(document.querySelector(".raw-log-detail pre")?.textContent).toBe("ok 3");
+    type("");
+    expect(selectedText()).toBe("ok 3");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R24
+  it("moves from a selected line the list doesn't show to the nearest listed line, the way the key points", () => {
+    show(viewOf(entries(0, 12)));
+    const press = (key: string) => fireEvent.keyDown(list(), { key });
+    const from = (text: string, filter: string) => {
+      type("");
+      fireEvent.click(within(list()).getByText(text));
+      type(filter);
+    };
+    // Lines 0, 5 and 10 hold "Error"; line 3 is selected and left out.
+    from("ok 3", "error");
+    press("ArrowDown");
+    expect(selectedText()).toBe("Error 5");
+    from("ok 3", "error");
+    press("ArrowUp");
+    expect(selectedText()).toBe("Error 0");
+    // With no listed line on the key's side, the nearest listed line.
+    from("ok 11", "error");
+    press("ArrowDown");
+    expect(selectedText()).toBe("Error 10");
+    type("");
+    fireEvent.click(within(list()).getByText("Error 0"));
+    type("ok");
+    press("ArrowUp");
+    expect(selectedText()).toBe("ok 1");
   });
 
   it("stays when the active session changes", () => {
