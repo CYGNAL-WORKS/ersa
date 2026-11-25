@@ -112,7 +112,7 @@ function RetryingFoot({ view }: { view: CoreView }) {
     const timer = setTimeout(() => setShown(tries === 1 ? view : connected), 500);
     return () => clearTimeout(timer);
   }, [tries, view]);
-  return <RailFoot view={shown} onRetry={() => setTries((n) => n + 1)} />;
+  return <RailFoot view={shown} retried={tries > 0} onRetry={() => setTries((n) => n + 1)} />;
 }
 
 const session = (id: string, title: string, created_at: string, tile: Session["tile"]): Session => ({
@@ -1111,10 +1111,14 @@ const entries: Entry[] = [
   },
   {
     name: "RailFoot",
-    states: coreViews.map(([label, view]) => [
-      label,
-      view.phase === "failed" ? <RetryingFoot view={view} /> : <RailFoot view={view} onRetry={() => {}} />,
-    ]),
+    states: [
+      ...coreViews.map(([label, view]): [string, ReactNode] => [
+        label,
+        view.phase === "failed" ? <RetryingFoot view={view} /> : <RailFoot view={view} onRetry={() => {}} />,
+      ]),
+      // Retry pressed, and the try under way (issue 483).
+      ["Trying again after Retry", <RailFoot view={{ phase: "connecting" }} retried onRetry={() => {}} />],
+    ],
   },
   {
     name: "QuitQuestion",

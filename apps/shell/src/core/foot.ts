@@ -6,9 +6,9 @@
 import type { CoreView } from "./connection";
 
 export type Foot =
-  /** Connecting, or connected to the user's own Core: the foot says nothing. */
+  /** First connecting, or connected to the user's own Core: the foot says nothing. */
   | { kind: "silent" }
-  /** The connection dropped and Ersa is attaching again. */
+  /** The connection dropped and Ersa is attaching again, or Retry was pressed and the try is under way. */
   | { kind: "reconnecting"; reason?: string }
   /** Ersa has stopped trying; Retry attaches again. */
   | { kind: "unreachable"; reason?: string }
@@ -18,10 +18,13 @@ export type Foot =
 /** An empty reason is no reason: the foot shows a line beneath only when there is text to put there. */
 const reasonOf = (text: string): { reason?: string } => (text.trim() === "" ? {} : { reason: text });
 
-export function footOf(view: CoreView): Foot {
+/** `retried`: Retry has been pressed since the window opened, so a connect under way is a try the user asked for. */
+export function footOf(view: CoreView, retried = false): Foot {
   switch (view.phase) {
     case "connecting":
-      return { kind: "silent" };
+      // The first connect is quiet: the tree says it is loading. A Retry's try says so, as a reattach does; its
+      // reason is not known yet.
+      return retried ? { kind: "reconnecting" } : { kind: "silent" };
     case "connected":
       return view.label === undefined ? { kind: "silent" } : { kind: "attached", label: view.label };
     case "lost":

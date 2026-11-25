@@ -568,6 +568,28 @@ describe("adding a project from the new-session screen", () => {
 
 // The rail's wiring (LAY-SHELL, The rail; FLOW-NEW-SESSION-R13): App hands the tree the sessions and the workspaces it
 // read, so each session sits under its own project. session/tree.test.ts covers the grouping itself.
+// LAY-SHELL, The foot; issue #483: a Retry that is under way says so, rather than leaving the foot empty.
+describe("the rail's foot after Retry", () => {
+  it("shows Ersa trying again while the retry attaches, where it showed nothing", async () => {
+    let attaches = 0;
+    const client: CoreClient = {
+      // The first attach fails; the retry never answers.
+      attach: () => (attaches++ === 0 ? Promise.reject({ kind: "unavailable", message: "Core did not start." }) : new Promise(() => {})),
+      call: () => new Promise(() => {}) as never,
+    };
+    render(createElement(App, { client }));
+    await settle();
+    const rail = screen.getByRole("navigation", { name: "Rail" });
+    fireEvent.click(within(rail).getByRole("button", { name: "Retry" }));
+    await settle();
+    expect(attaches).toBe(2);
+    expect(within(rail).queryByRole("button", { name: "Retry" })).toBeNull();
+    const trying = rail.querySelector(".rail-foot .problem.rail-foot-trying");
+    expect(trying?.textContent).toBe("Ersa can't reach your sessions. It's trying again.");
+    expect(trying?.closest("[role=status]")).not.toBeNull();
+  });
+});
+
 describe("the tree App draws in the rail", () => {
   /** Each project heading's name with how many tiles sit beneath it, in the rail's order. */
   function headings(): [string, number][] {

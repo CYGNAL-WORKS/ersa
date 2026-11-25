@@ -20,6 +20,12 @@ describe("what the rail's foot shows", () => {
     expect(footOf({ phase: "connecting" })).toEqual({ kind: "silent" });
   });
 
+  // Issue #483: the try a Retry starts is under way, so the foot says Ersa is trying again, with no reason yet.
+  it("says Ersa is trying again while connecting after a Retry", () => {
+    expect(footOf({ phase: "connecting" }, true)).toEqual({ kind: "reconnecting" });
+    expect(footOf({ phase: "failed", message: "gone" }, true)).toEqual({ kind: "unreachable", reason: "gone" });
+  });
+
   it("says nothing while connected to the user's own Core, whatever Core reports", () => {
     expect(footOf(connected())).toEqual({ kind: "silent" });
   });
