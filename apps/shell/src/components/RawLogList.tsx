@@ -177,7 +177,7 @@ export function RawLogList({
     if (row < lead) {
       rows.push(
         <div key="earlier" role="listitem" className="raw-log-row raw-log-earlier" style={place} aria-posinset={row + 1} aria-setsize={total}>
-          {t("developer.earlierGoneStatus")}
+          {t("developer.earlierGoneDetail")}
         </div>,
       );
       continue;

@@ -27,6 +27,8 @@
 
 .raw-log-rows {
   position: relative;
+  /* How many rows the list holds, set on the element; none until it is. */
+  --rows: 0;
   height: calc(var(--rows) * var(--size-log-row));
 }
 
@@ -34,6 +36,8 @@
    no rule between rows. Placed by its number, so rows out of view take no element. */
 .raw-log-row {
   position: absolute;
+  /* The row's number in the list, set on the element. */
+  --row: 0;
   top: calc(var(--row) * var(--size-log-row));
   right: 0;
   left: 0;
@@ -182,7 +186,8 @@
   visibility: visible;
 }
 
-/* A pill size-control high on surface-raised with a line edge and shadow-transient, padded space-md at the sides: an
+/* A pill size-control high on surface-raised with a line edge, padded space-md at the sides (with no shadow: DESIGN.md
+   keeps shadow-transient for layers with radius-lg corners; see the inbox), holding an
    arrow, the words in ui-small and ink, the count after them in ink-muted and tabular figures. A control with an
    edge: under the pointer its edge turns ink-faint and its fill steps up a surface, pressed it sinks to canvas, and
    with keyboard focus its edge turns ink. */
@@ -201,7 +206,6 @@
   background: var(--color-surface-raised);
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-pill);
-  box-shadow: var(--shadow-transient);
   outline: none;
   cursor: pointer;
   pointer-events: auto;
