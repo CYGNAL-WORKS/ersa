@@ -1,0 +1,84 @@
+{
+  "recorded_at": "2026-11-25T00:13:21.083Z",
+  "claude_code_version": "2.1.316",
+  "executable": "C:/Users/user/AppData/Local/Temp/claude/b8309f9360047cf5/62316a9a-2260-4eb2-b77b-252f3d031c9e/scratchpad/claude-2.1.316/package/claude.exe",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "ecc3fe4d-8615-41e3-9b75-1f51efef3b17"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": null,
+  "session_record": null,
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "attachment/queued_command",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 776,
+  "stderr": "",
+  "stdout_lines": 2,
+  "stdout_timing_ms": [
+    397,
+    408
+  ],
+  "sent": [
+    {
+      "t": 6,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 397,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_settings-1\",\"request\":{\"subtype\":\"get_settings\"}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "control": "get_settings",
+      "got_response": true,
+      "subtype": "success"
+    }
+  ]
+}
