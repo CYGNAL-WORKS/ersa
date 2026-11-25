@@ -62,10 +62,17 @@ describe("what the delete question says goes", () => {
   it("says a put-away workspace has no folder left, and whether its branch goes, losing nothing", () => {
     const away: Workspace = { ...isolated, state: "put_away" };
     const goes = whatGoes(away, clean);
-    expect(goes).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: false });
+    expect(goes).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: false, shared: false });
     expect(losesWork(goes)).toBe(false);
     // Commits only the branch holds keep it, as for any delete (R05).
-    expect(whatGoes(away, { ...clean, unshared: 2 })).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: true });
+    expect(whatGoes(away, { ...clean, unshared: 2 })).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: true, shared: false });
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R13
+  it("says a put-away workspace another session uses has no folder left, never that its files stay there", () => {
+    const away: Workspace = { ...isolated, state: "put_away" };
+    // Another session uses the workspace, so the delete keeps it and its branch (R05).
+    expect(whatGoes(away, { ...clean, sessions: 2 })).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: false, shared: true });
   });
 
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R04
