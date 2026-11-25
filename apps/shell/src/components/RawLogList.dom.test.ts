@@ -74,7 +74,11 @@ describe("a row for each line", () => {
     // The direction is heard in words, with the backend's own label: to it, and from it.
     expect(within(first!).getByRole("img").getAttribute("aria-label")).toBe("To Claude Code");
     expect(within(second!).getByRole("img").getAttribute("aria-label")).toBe("From Claude Code");
-    // Each row is one of how many, so assistive technology hears where it is though most rows aren't in the page.
+  });
+
+  it("tells assistive technology where each row is, though most rows aren't in the page", () => {
+    show(viewOf(entries(0, 2)));
+    const [first, second] = rows();
     expect(first?.getAttribute("aria-posinset")).toBe("1");
     expect(second?.getAttribute("aria-setsize")).toBe("2");
   });
@@ -186,6 +190,26 @@ describe("following the end", () => {
     expect(list().scrollTop).toBe(36 * ROW - HEIGHT);
     scrollTo(0);
     expect(jump()?.getAttribute("aria-label")).toBe("Jump to latest");
+  });
+
+  // verifies: FLOW-READ-RAW-LOG-R07
+  it("follows the end again when the reader starts over, as after connecting to Core again", () => {
+    const { update } = show(viewOf(entries(0, 30)));
+    scrollTo(0);
+    update(viewOf(entries(0, 33)));
+    expect(offered()).toBe(true);
+    // The reader lets go of what it held and reads from Core's first line again: a Core that restarted numbers its
+    // lines from 0 again, so nothing of where the user was reading still holds.
+    update(viewOf([], { read: false }));
+    update(viewOf(entries(0, 40)));
+    expect(list().scrollTop).toBe(40 * ROW - HEIGHT);
+    expect(offered()).toBe(false);
+    update(viewOf(entries(0, 45)));
+    expect(list().scrollTop).toBe(45 * ROW - HEIGHT);
+    // Scrolled away again, the count starts from the lines held now.
+    scrollTo(0);
+    update(viewOf(entries(0, 47)));
+    expect(jump()?.getAttribute("aria-label")).toBe("Jump to latest, 2 new lines");
   });
 
   it("sends keyboard focus that was on Jump to latest to the list as it goes", () => {
