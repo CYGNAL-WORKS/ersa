@@ -512,6 +512,24 @@ export const enUS = {
     nameHeading: "Developer",
     // Why a read of the raw log failed when Core's answer can't be read (FLOW-READ-RAW-LOG-R15).
     unreadableReason: "Ersa got a raw log it can't read.",
+    // The list of raw log lines, for assistive technology (FLOW-READ-RAW-LOG-R03).
+    listLabel: "Raw log",
+    // A row's direction, heard in place of its arrow, with the backend's own label (R03).
+    fromBackendLabel: "From {backend}",
+    toBackendLabel: "To {backend}",
+    // The list's first row when lines before the first listed are no longer held (R09).
+    earlierGoneStatus: "Earlier lines are no longer held.",
+    // Floats over the list's foot once the user scrolls away from the end (R07): its words, the count of lines that
+    // arrived since in a quieter tone, and its accessible name, which starts with the words it shows.
+    jumpButton: "Jump to latest",
+    newLinesStatus: "{count} new",
+    jumpLabel: { one: "Jump to latest, {count} new line", other: "Jump to latest, {count} new lines" },
+    // What the list says when it has nothing to list (R14).
+    noSessionEmpty: "No session is open. Choose a session to see its raw log.",
+    noLinesEmpty: "No lines yet. Lines appear here while the session runs.",
+    readingProgress: "Reading…",
+    // The problem line over the list when a read fails, followed by the reason (R15).
+    unreadableError: "Ersa can't read the raw log. It's trying again.",
   },
   quit: {},
   trust: {
