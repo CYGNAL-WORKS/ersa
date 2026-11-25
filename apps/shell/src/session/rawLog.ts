@@ -90,7 +90,8 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
         if (stopped || mine !== generation || view === undefined) return;
         const entries = rawLogEntries(answer, from);
         if (entries === undefined) {
-          report({ ...view, read: true, failure: t("developer.unreadableReason") });
+          // An answer it can't read is no answer: the pane goes on saying it is reading until one comes (R14).
+          report({ ...view, failure: t("developer.unreadableReason") });
           next(false);
           return;
         }
@@ -107,8 +108,8 @@ export function readRawLog(client: CoreClient, update: (view: RawLogView | undef
       },
       (error: unknown) => {
         if (stopped || mine !== generation || view === undefined) return;
-        // Keep the lines held and go on asking (R15).
-        report({ ...view, read: true, failure: describeError(error) });
+        // Keep the lines held and go on asking (R15). A failed read is no answer, so `read` stays as it was (R14).
+        report({ ...view, failure: describeError(error) });
         next(false);
       },
     );
