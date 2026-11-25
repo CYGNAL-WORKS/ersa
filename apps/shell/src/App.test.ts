@@ -1078,6 +1078,22 @@ describe("a tile's menu, and renaming on the tile", () => {
     expect(field()).toBeNull();
   });
 
+  // Issue #483: Core answers with the title as the backend lists it, and its tile carries it from then on
+  // (PROTO-CORE-API-R84), so the rail shows it from the answer with no list read.
+  it("shows the title Core answers with, and reads the session list no more for a rename", async () => {
+    const core = await open({ "session.set_title": () => ({ title: "Fix the flaky build (listed)" }) });
+    const lists = () => core.calls.filter((c) => c.method === "session.list").length;
+    const listed = lists();
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Rename/ }));
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix the flaky build" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    await settle();
+    expect(tile("Fix the flaky build (listed)")).toBeTruthy();
+    expect(lists()).toBe(listed);
+  });
+
   it("turns the title into a field with F2, and Escape restores it, sending nothing", async () => {
     const core = await open();
     fireEvent.keyDown(tile("Write the notes"), { key: "F2" });
