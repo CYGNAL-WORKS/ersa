@@ -43,7 +43,7 @@ The line for a refused message, a refused change or a dialog that failed to open
 
 ## The archived note
 
-An archived session shows a note where the composer sits, at its measure: one row on `canvas` with a `line` edge at `hairline`, `radius-md`, padded `space-sm`. From the leading edge: an archive icon at `size-icon-sm` in `ink-muted`, the words in `ui` and `ink-muted`, then Resume, the primary button, at the trailing edge. While Core answers, Resume reads "Resuming…" and is unavailable. A refused Resume says why above the note, where the status line sits, as a refused message does.
+An archived session shows a note where the composer sits, at its measure: one row on `canvas` with a `line` edge at `hairline`, `radius-md`, padded `space-sm`. From the leading edge: an archive icon at `size-icon-sm` in `ink-muted`, the words in `ui` and `ink-muted`, then Resume, the primary button, at the trailing edge. While Core answers, Resume reads "Resuming…" and is unavailable. When Core says the session's folder is being put back meanwhile (FLOW-CLEAN-UP-R21), the note's words say so in place of the archived line, in the same style and as a status that assistive technology announces, as the status line says it of a message. The icon, the row and Resume keep their size and place, and the words crossfade over `motion-quick`, as send and stop do. The words stay with the resume when the user leaves the session and returns to it. A refused Resume says why above the note, where the status line sits, as a refused message does.
 
 ## Attachments
 
