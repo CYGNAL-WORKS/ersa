@@ -7,13 +7,15 @@ import "./RailFoot.css";
 
 interface RailFootProps {
   view: CoreView;
+  /** Whether Retry has been pressed since the window opened: then a connect under way shows Ersa trying again. */
+  retried?: boolean;
   /** Attach again, after Ersa has stopped trying. A lost connection reattaches by itself. */
   onRetry: () => void;
 }
 
 /** The rail's foot: nothing while all is well, else what is wrong in the user's terms (LAY-SHELL, The foot). */
-export function RailFoot({ view, onRetry }: RailFootProps) {
-  const foot = footOf(view);
+export function RailFoot({ view, retried = false, onRetry }: RailFootProps) {
+  const foot = footOf(view, retried);
   const problem = foot.kind === "reconnecting" || foot.kind === "unreachable";
 
   // Whether the foot has shown a problem since Ersa last reached the sessions, and whether it has just reached

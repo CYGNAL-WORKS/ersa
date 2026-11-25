@@ -995,7 +995,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} failed={quitAsk.failed} onQuit={quit} onCancel={cancel} />
           )}
           <ErrorBoundary what={t("rail.foot.boundaryName")} resetKey={coreVersion} action={<Button onClick={retry}>{t("rail.foot.retryButton")}</Button>}>
-            <RailFoot view={view} onRetry={retry} />
+            <RailFoot view={view} retried={attempt > 0} onRetry={retry} />
           </ErrorBoundary>
         </div>
       </nav>
