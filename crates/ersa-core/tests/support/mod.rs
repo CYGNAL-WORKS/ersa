@@ -441,6 +441,12 @@ impl Client {
         self.notifications.clear();
     }
 
+    /// Takes the notifications kept so far, which arrived on the socket
+    /// before the last response read, reading nothing more.
+    pub fn take_notifications(&mut self) -> Vec<Value> {
+        self.notifications.drain(..).collect()
+    }
+
     /// The next notification, kept from earlier or read now; `None` once Core
     /// has closed the connection. Checked against the schema.
     pub async fn notification(&mut self) -> Option<Value> {

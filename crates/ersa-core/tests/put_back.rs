@@ -387,6 +387,7 @@ async fn assert_held(s: &mut Setup, session: &str, workspace: &Value) {
 /// workspace `invalid_state`; the other session's resume waits for the
 /// put-back and then puts nothing back.
 // verifies: PROTO-CORE-API-R143
+// verifies: PROTO-CORE-API-R146
 #[tokio::test(flavor = "multi_thread")]
 async fn a_put_back_under_way_holds_its_workspace() {
     let gate = Arc::new(Gate::default());
@@ -405,10 +406,19 @@ async fn a_put_back_under_way_holds_its_workspace() {
 
     assert_held(&mut s, &second, &workspace).await;
     assert_eq!(s.listed(&workspace).await["state"], "put_away");
+    s.client.clear_notifications();
     let waiting = s
         .client
         .request("session.resume", json!({ "id": second }))
         .await;
+    // Held behind the first one's put-back, it says it is putting back.
+    let report = s
+        .client
+        .notification_where(|n| {
+            n["method"] == "session.send_progress" && n["params"]["session_id"] == second
+        })
+        .await;
+    assert_eq!(report["params"]["phase"], "putting_back", "{report:#}");
     let core = s.core.core();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     while !core
@@ -551,10 +561,12 @@ async fn put_away_under_way(s: &Setup, gate: &Gate, workspace: &Value) {
 }
 
 /// A resume and a send that find their workspace being put away wait for
-/// that to end and then put it back, rather than being refused; the send
-/// says meanwhile that it is putting the folder back.
+/// that to end and then put it back, rather than being refused; each says
+/// meanwhile that it is putting the folder back, while the put-away is
+/// still under way.
 // verifies: PROTO-CORE-API-R132
 // verifies: PROTO-CORE-API-R134
+// verifies: PROTO-CORE-API-R146
 // verifies: FLOW-CLEAN-UP-R05
 #[tokio::test(flavor = "multi_thread")]
 async fn a_resume_or_send_during_a_put_away_waits_for_it() {
@@ -573,14 +585,20 @@ async fn a_resume_or_send_during_a_put_away_waits_for_it() {
             _ => json!({ "id": session }),
         };
         let asked = s.client.request(method, params).await;
+        // The put-away is still stopped at the gate: this comes while it is
+        // under way, not once it has ended.
+        let report = s
+            .client
+            .notification_where(|n| {
+                n["method"] == "session.send_progress" && n["params"]["phase"] == "putting_back"
+            })
+            .await;
+        assert_eq!(report["params"]["session_id"], session.as_str(), "{method}");
+        let state = s.core.core().admission.snapshot();
+        let phase = state.workspace(id(&workspace)).map(|w| w.phase);
+        let under_way = Some(ersa_core::admission::WorkspacePhase::PuttingAway);
+        assert_eq!(phase, under_way, "{method}: the put-away is under way");
         if method == "session.send" {
-            let report = s
-                .client
-                .notification_where(|n| {
-                    n["method"] == "session.send_progress" && n["params"]["phase"] == "putting_back"
-                })
-                .await;
-            assert_eq!(report["params"]["session_id"], session.as_str());
             // `session.list` says so too.
             let row = session_row(&mut s, &session).await;
             assert_eq!(row["sending"], "putting_back", "{row:#}");
@@ -792,4 +810,85 @@ async fn stopping_a_send_while_its_folder_is_put_back_answers_at_once() {
     assert_back(&mut s, &workspace).await;
     assert_eq!(starts(&s), 1, "the backend was not started");
     assert_eq!(session_row(&mut s, &session).await["state"], "ended");
+}
+
+// -- What a resume reports (PROTO-CORE-API-R146) ----------------------------
+
+/// The phases of the `session.send_progress` reports for `session` among
+/// `notifications`, in the order they came.
+fn reported(notifications: &[Value], session: &str) -> Vec<String> {
+    notifications
+        .iter()
+        .filter(|n| n["method"] == "session.send_progress")
+        .filter(|n| n["params"]["session_id"] == session)
+        .map(|n| n["params"]["phase"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// Resumes `session` and returns its answer, with the phases Core reported
+/// for the session on the socket before the answer and after it. "After"
+/// is up to the answer of a `session.list` asked once the resume answered:
+/// a report left undelivered at the answer goes out ahead of that answer,
+/// so it is among them.
+async fn resume_reporting(s: &mut Setup, session: &str) -> (Value, Vec<String>, Vec<String>) {
+    // Whatever came before this resume is not its own.
+    s.client.result("session.list", json!({})).await;
+    s.client.clear_notifications();
+    let answer = s
+        .client
+        .call("session.resume", json!({ "id": session }))
+        .await;
+    let before = reported(&s.client.take_notifications(), session);
+    s.client.result("session.list", json!({})).await;
+    let after = reported(&s.client.take_notifications(), session);
+    (answer, before, after)
+}
+
+/// A resume that puts its session's workspace back says so once, before
+/// its answer, with phase `putting_back` and nothing else; nothing of it
+/// comes after the answer. The same holds when the put-back is refused.
+// verifies: PROTO-CORE-API-R146
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resume_that_puts_the_folder_back_says_so_before_it_answers() {
+    for refused in [false, true] {
+        let mut s = setup().await;
+        let (workspace, session) = put_away_session(&mut s).await;
+        archive(&mut s, &session).await;
+        if refused {
+            git(&s.repo, &["branch", "-D", branch(&workspace)]);
+        }
+
+        let (answer, before, after) = resume_reporting(&mut s, &session).await;
+
+        assert_eq!(before, ["putting_back"], "refused: {refused}");
+        assert!(after.is_empty(), "refused: {refused}; after: {after:?}");
+        if refused {
+            assert_eq!(
+                answer["error"]["data"]["reason"], "branch_gone",
+                "{answer:#}"
+            );
+        } else {
+            assert!(answer["result"].is_object(), "{answer:#}");
+            assert_back(&mut s, &workspace).await;
+            assert_eq!(s.stats.started(2).await.len(), 2);
+        }
+    }
+}
+
+/// A resume whose workspace has its folder has nothing to put back or wait
+/// for, and reports nothing.
+// verifies: PROTO-CORE-API-R146
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resume_with_its_folder_in_place_reports_nothing() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let session = s.stopped_session(&workspace).await;
+    archive(&mut s, &session).await;
+
+    let (answer, before, after) = resume_reporting(&mut s, &session).await;
+
+    assert!(answer["result"].is_object(), "{answer:#}");
+    assert!(before.is_empty(), "before: {before:?}");
+    assert!(after.is_empty(), "after: {after:?}");
+    assert_eq!(s.stats.started(2).await.len(), 2);
 }

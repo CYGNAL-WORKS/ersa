@@ -1685,6 +1685,12 @@ const entries: Entry[] = [
       ["Resume, keyboard focus", <ArchivedNote onResume={() => {}} force="focus" />],
       ["Resuming", <ArchivedNote onResume={() => {}} resuming={{ state: "sending" }} />],
       ["Resuming, keyboard focus", <ArchivedNote onResume={() => {}} resuming={{ state: "sending" }} force="focus" />],
+      // FLOW-CLEAN-UP-R21: the session's folder being put back while its Resume is unanswered.
+      ["Putting the folder back", <ArchivedNote onResume={() => {}} resuming={{ state: "sending", progress: { phase: "puttingBack" } }} />],
+      [
+        "Putting the folder back, keyboard focus",
+        <ArchivedNote onResume={() => {}} resuming={{ state: "sending", progress: { phase: "puttingBack" } }} force="focus" />,
+      ],
       [
         "Resume refused",
         <ArchivedNote onResume={() => {}} resuming={{ state: "failed", message: "session.resume: resuming a stopped session arrives with milestone M1" }} />,
