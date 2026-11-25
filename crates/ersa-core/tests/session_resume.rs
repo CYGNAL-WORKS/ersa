@@ -53,24 +53,6 @@ async fn session_row(client: &mut Client, id: &str) -> Value {
         .unwrap_or_else(|| panic!("session {id} listed"))
 }
 
-/// The configurations of the backend's first `n` starts, once there are as
-/// many: Core starts a backend after it answers.
-async fn started(stats: &Stats, n: usize) -> Vec<ersa_adapter::SessionConfig> {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    loop {
-        let configs = stats.configs.lock().unwrap().clone();
-        if configs.len() >= n {
-            return configs;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "{} starts",
-            configs.len()
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-}
-
 /// The one record the fake backend keeps: its id for the session.
 fn only_record(records: &Records) -> String {
     let records = records.lock().unwrap();
@@ -115,7 +97,7 @@ async fn a_resumed_session_continues_its_record_in_its_own_folder() {
     let resumed = client.result("session.resume", json!({ "id": id })).await;
     assert_eq!(resumed["id"], id.as_str());
     assert_eq!(resumed["state"], "starting");
-    let configs = started(&stats, 2).await;
+    let configs = stats.started(2).await;
     // Its backend id, in its folder: the backend continues that record.
     assert_eq!(configs[1].resume.as_deref(), Some(backend_id.as_str()));
     assert_eq!(configs[1].backend_session_id, None);
@@ -169,7 +151,7 @@ async fn a_session_with_no_record_yet_starts_again_as_new_under_its_id() {
     records.lock().unwrap().clear();
 
     client.result("session.resume", json!({ "id": id })).await;
-    let configs = started(&stats, 2).await;
+    let configs = stats.started(2).await;
     assert_eq!(configs[1].resume, None);
     assert_eq!(
         configs[1].backend_session_id.as_deref(),
@@ -286,7 +268,7 @@ async fn resuming_an_archived_session_unarchives_it() {
     let resumed = client.result("session.resume", json!({ "id": id })).await;
     assert_eq!(resumed["archived"], false);
     assert_eq!(resumed["state"], "starting");
-    started(&stats, 2).await;
+    stats.started(2).await;
 }
 
 // verifies: FLOW-RESUME-SESSION-R08
@@ -331,7 +313,7 @@ async fn a_session_live_when_core_died_ends_its_transcript_and_resumes() {
     client
         .result("session.send", json!({ "id": id, "text": "again" }))
         .await;
-    let configs = started(&stats, 1).await;
+    let configs = stats.started(1).await;
     assert_eq!(configs[0].resume.as_deref(), Some(backend_id.as_str()));
     let after = client.events_until("assistant.text").await;
     assert_eq!(
@@ -362,7 +344,7 @@ async fn recordless_fork(
         .unwrap()
         .to_string();
     let starts = stats.starts.load(Ordering::SeqCst);
-    started(stats, starts).await;
+    stats.started(starts).await;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while records.lock().unwrap().len() < 2 {
         assert!(
@@ -395,7 +377,7 @@ async fn a_fork_with_no_record_yet_is_forked_from_its_original_again() {
         recordless_fork(&mut client, &core, &records, &stats).await;
 
     client.result("session.resume", json!({ "id": fork })).await;
-    let configs = started(&stats, 3).await;
+    let configs = stats.started(3).await;
     let again = &configs[2];
     assert_eq!(
         again.fork_of.as_ref().map(|f| f.original.as_str()),
@@ -502,7 +484,7 @@ async fn a_recordless_fork_whose_original_is_gone_is_forked_without_its_conditio
     client
         .result("session.send", json!({ "id": fork, "text": "go on" }))
         .await;
-    let configs = started(&stats, 3).await;
+    let configs = stats.started(3).await;
     assert_eq!(
         configs[2].fork_of.as_ref().map(|f| f.original.as_str()),
         Some(original_backend_id.as_str())
@@ -535,7 +517,7 @@ async fn a_recordless_fork_whose_original_was_deleted_fails_as_a_start_does() {
     let error = client
         .error("session.send", json!({ "id": fork, "text": "go on" }))
         .await;
-    let configs = started(&stats, 3).await;
+    let configs = stats.started(3).await;
     assert_eq!(
         configs[2].fork_of.as_ref().map(|f| f.original.as_str()),
         Some(original_backend_id.as_str())
@@ -572,7 +554,7 @@ async fn sends_to_the_original_wait_until_a_resumed_recordless_fork_is_ready() {
 
     let held = start_gate.lock().await;
     client.result("session.resume", json!({ "id": fork })).await;
-    let configs = started(&stats, 4).await;
+    let configs = stats.started(4).await;
     assert!(configs[3].fork_of.is_some(), "forked again");
     let error = client
         .error(
@@ -712,7 +694,7 @@ async fn a_resumed_session_goes_from_starting_to_idle_once_its_backend_answers()
     let starting = client.events_until("session.state").await;
     assert_eq!(starting.last().unwrap()["event"]["state"], "starting");
     // The backend has been asked to start, and has not answered.
-    started(&stats, 2).await;
+    stats.started(2).await;
     assert_eq!(session_row(&mut client, &id).await["state"], "starting");
 
     drop(held);
@@ -835,7 +817,7 @@ async fn a_send_just_after_the_backend_exited_resumes_the_session() {
     client
         .result("session.send", json!({ "id": id, "text": "again" }))
         .await;
-    let configs = started(&stats, 2).await;
+    let configs = stats.started(2).await;
     assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
 }
 
@@ -874,7 +856,7 @@ async fn a_resume_just_after_the_backend_exited_starts_the_session_again() {
     client.events_until("session.ended").await;
 
     client.result("session.resume", json!({ "id": id })).await;
-    let configs = started(&stats, 2).await;
+    let configs = stats.started(2).await;
     assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
 }
 
@@ -902,7 +884,7 @@ async fn the_list_carries_a_self_named_session_id_from_when_the_backend_names_it
         )
         .await;
     let id = session["id"].as_str().unwrap().to_string();
-    started(&stats, 1).await;
+    stats.started(1).await;
     let before = session_row(&mut client, &id).await;
     assert!(before.get("backend_session_id").is_none(), "{before:#}");
 
