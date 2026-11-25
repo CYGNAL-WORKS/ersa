@@ -2,7 +2,7 @@
 // file. Run: node --test scripts/redact.test.mjs
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -17,11 +17,15 @@ import {
   PLACEHOLDER_HOME,
   PLACEHOLDER_MUNGED_REPO,
   PLACEHOLDER_ORG,
+  PLACEHOLDER_PLAN,
   PLACEHOLDER_REPO,
+  PLACEHOLDER_USAGE,
   PLACEHOLDER_UUID,
   REPO,
+  accountDetails,
   expandMcpConfig,
   expandRepo,
+  nextFixtureNumber,
   redact,
   repoRules,
 } from "./redact.mjs";
@@ -110,13 +114,72 @@ test("leaves other paths and placeholders alone", () => {
   assert.equal(redact(text), text);
 });
 
+test("redacts the plan's name", () => {
+  const line = '{"account":{"organization":"Example Org","subscriptionType":"Claude Mega" }}';
+  const out = redact(line);
+  assert.equal(out, `{"account":{"organization":"Example Org","subscriptionType":"${PLACEHOLDER_PLAN}" }}`);
+  assert.equal(redact(out), out);
+  assert.equal(redact('{"subscriptionType": null}'), '{"subscriptionType": null}');
+});
+
+test("redacts every rate-limit window's utilization, to a share of the same type", () => {
+  const line = '{"unifiedWindows":{"seven_day":{"utilization":0.37,"resetsAt":1},"five_hour":{"utilization": 1.2e-1},"opus_week":{"utilization":1}}}';
+  const out = redact(line);
+  assert.equal(out, `{"unifiedWindows":{"seven_day":{"utilization":${PLACEHOLDER_USAGE},"resetsAt":1},"five_hour":{"utilization": ${PLACEHOLDER_USAGE}},"opus_week":{"utilization":${PLACEHOLDER_USAGE}}}}`);
+  assert.equal(typeof JSON.parse(out).unifiedWindows.seven_day.utilization, "number");
+  assert.equal(redact('{"utilization":null}'), '{"utilization":null}');
+});
+
+test("redacts the pair of ids in a synced plugin's path, in every spelling of its separators", () => {
+  const a = "4c1d2e3f-0000-4000-8000-0123456789ab";
+  const b = "9a8b7c6d-1111-4111-9111-ba9876543210";
+  for (const sep of ["\\", "\\\\", "/"]) {
+    const line = `plugins${sep}synced${sep}${a}_${b}${sep}code-review`;
+    const out = redact(line);
+    assert.equal(out, `plugins${sep}synced${sep}${PLACEHOLDER_UUID}_${PLACEHOLDER_UUID}${sep}code-review`, line);
+    assert.equal(redact(out), out);
+  }
+});
+
+test("names the line and field of each account detail left as recorded, never its value", () => {
+  const text = [
+    '{"subscriptionType":"Claude Mega","utilization":0.37}',
+    `{"subscriptionType":"${PLACEHOLDER_PLAN}","utilization":${PLACEHOLDER_USAGE}}`,
+    'plugins\\synced\\4c1d2e3f-0000-4000-8000-0123456789ab_9a8b7c6d-1111-4111-9111-ba9876543210',
+  ].join("\n");
+  const found = accountDetails(text);
+  assert.deepEqual(found, [
+    { line: 1, field: "subscriptionType" },
+    { line: 1, field: "utilization" },
+    { line: 3, field: "synced plugin ids" },
+  ]);
+  assert.ok(!JSON.stringify(found).includes("Mega") && !JSON.stringify(found).includes("0.37"));
+  assert.deepEqual(accountDetails(redact(text)), []);
+});
+
+test("a new fixture takes one past the highest number in its folder, whatever the gaps", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ersa-number-"));
+  try {
+    assert.equal(nextFixtureNumber(dir), "00");
+    for (const f of ["00-a.jsonl", "00-a.meta.json", "01-b.jsonl", "05-c.jsonl", "notes.txt"]) writeFileSync(join(dir, f), "");
+    mkdirSync(join(dir, "record"));
+    writeFileSync(join(dir, "record", "40-d.jsonl"), "");
+    assert.equal(nextFixtureNumber(dir), "06");
+    writeFileSync(join(dir, "99-e.jsonl"), "");
+    assert.equal(nextFixtureNumber(dir), "100");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function* recordings() {
-  // The protocol fixtures, and every adapter's tests, where its goldens live.
+  // The protocol fixtures, every adapter's tests, where its goldens live, and
+  // the Shell's replays, which Core builds from the fixtures.
   const adapters = readdirSync(join(ROOT, "crates"))
     .filter((name) => name.startsWith("ersa-adapter-"))
     .map((name) => join(ROOT, "crates", name, "tests"))
     .filter((dir) => existsSync(dir));
-  const dirs = [join(ROOT, "docs", "briefs", "protocol", "fixtures"), ...adapters];
+  const dirs = [join(ROOT, "docs", "briefs", "protocol", "fixtures"), ...adapters, join(ROOT, "apps", "shell", "src", "session", "replays")];
   for (const dir of dirs) {
     for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
       if (entry.isFile()) yield join(entry.parentPath, entry.name);
@@ -132,18 +195,28 @@ const DRIVE_RE = /\b[A-Za-z]:(?:(?:\\\\|\/)[^\\/"'`\s]+)+/g;
 const MUNGED_RE = /\b[A-Za-z]--[A-Za-z0-9][A-Za-z0-9-]*/g;
 const allowed = (m) => /^C:(?:\\\\|\/)(?:Users(?:\\\\|\/)user|Windows)\b/i.test(m) || /^C--Users-user\b/.test(m);
 
-test("guard: no recording or golden carries a real email, home path or path on the owner's disk", () => {
+// A finding names the file, the line and the kind of detail, never the value:
+// the guard's output reaches CI's public log.
+const lineOf = (text, index) => text.slice(0, index).split("\n").length;
+const USED_RE = /"used"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+
+test("guard: no recording or golden carries a real email, home path, path on the owner's disk or account detail", () => {
   const found = [];
   for (const file of recordings()) {
     const text = readFileSync(file, "utf8");
-    for (const [m] of text.matchAll(EMAIL_RE)) if (m !== PLACEHOLDER_EMAIL) found.push(`${file}: ${m}`);
+    const at = (m, kind) => found.push(`${file}:${lineOf(text, m.index)}: ${kind}`);
+    for (const m of text.matchAll(EMAIL_RE)) if (m[0] !== PLACEHOLDER_EMAIL) at(m, "an email address");
     for (const re of [HOME_RE, MUNGED_HOME_RE]) {
-      for (const m of text.matchAll(re)) if (m.at(-1) !== "user") found.push(`${file}: ${m[0]}`);
+      for (const m of text.matchAll(re)) if (m.at(-1) !== "user") at(m, "a home folder's user name");
     }
+    // Test sources build their own lines, with invented values.
     if (file.endsWith(".rs")) continue;
     for (const re of [DRIVE_RE, MUNGED_RE]) {
-      for (const [m] of text.matchAll(re)) if (!allowed(m)) found.push(`${file}: ${m}`);
+      for (const m of text.matchAll(re)) if (!allowed(m[0])) at(m, "a path on the recording machine");
     }
+    for (const { line, field } of accountDetails(text)) found.push(`${file}:${line}: ${field} as recorded`);
+    // Goldens and replays carry a window's share as Ersa projects it, `used`.
+    for (const m of text.matchAll(USED_RE)) if (Number(m[1]) !== PLACEHOLDER_USAGE) at(m, "a usage window's share (used) as recorded");
   }
   assert.deepEqual(found, []);
 });

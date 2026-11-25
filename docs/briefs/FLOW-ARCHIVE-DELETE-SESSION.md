@@ -44,7 +44,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Requirements
 
-- ~~**FLOW-ARCHIVE-DELETE-SESSION-R01**~~: retired 2026-11-21 (an archived session's workspace is put away, FLOW-CLEAN-UP-R01), replaced by R12.
+- ~~**FLOW-ARCHIVE-DELETE-SESSION-R01**~~: retired 2026-11-21 (an archived session's workspace is put away, FLOW-CLEAN-UP-R22), replaced by R12.
 - **FLOW-ARCHIVE-DELETE-SESSION-R02**: An archived session shall open read-only: Ersa shall show its transcript and offer Resume in place of the composer, and Core shall refuse to send it a message.
 - **FLOW-ARCHIVE-DELETE-SESSION-R03**: When the user unarchives a session, or resumes an archived one and Core accepts the resume, Ersa shall clear its archived mark and keep its pin and section.
 - **FLOW-ARCHIVE-DELETE-SESSION-R04**: Before deleting a session, Ersa shall ask the user, saying whether its workspace and its branch will be deleted; how many uncommitted and untracked files, ignored files, and commits no branch holds will be lost with the folder; and, when the branch is kept, that it holds commits that exist nowhere else.
@@ -67,6 +67,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-25: FLOW-CLEAN-UP-R01 is retired for FLOW-CLEAN-UP-R22, which keeps a folder that holds a repository of its own, so the line of the retired R01 names R22. Such a folder counts as holding unsaved work (GLOSSARY), so the Outcome and step 1 stand as worded. No requirement IDs changed.
 - 2026-11-25: from #538 inbox: step 4's put-away bullet and its shared-workspace bullet both fit a session whose put-away workspace another session also uses, and saying the files stay would name a folder that is gone. The put-away bullet now covers it: the question says the folder is already removed and that the branch stays because another session uses it (R14), which is what #538 ships. That reason stands in place of R04's, a branch kept for commits that exist nowhere else: the branch stays whatever it holds. The shared-workspace bullet is now about a workspace whose folder exists. That a delete leaves the branch of a workspace another session uses, put away or not, was only in PROTO-CORE-API's prose; it is R15, which Core already meets and #539 pins with a test. R14 and R15 added; R04, R05 and R13 unchanged.
 - 2026-11-21: owner's direction of 2026-11-21, to do what Claude Desktop does (`claude-desktop/cleanup-2026-11-20.txt`): an archived session's workspace is put away once it holds no unsaved work, which replaces his decision of 2026-11-05 that it stays (ADR 0038, FLOW-CLEAN-UP). R01 retired for R12, which keeps the record, the pin and the section and leaves the workspace to FLOW-CLEAN-UP; R13 added for deleting a session whose workspace is put away. Reclaiming workspaces leaves Out of scope, since FLOW-CLEAN-UP does it; acting on several sessions at once joins it, until its own planning pass. The refused Resume cites FLOW-RESUME-SESSION-R23, which replaced R03.
 - 2026-11-20: from #521 inbox: a folder in use fails the delete only after Core has tried it for 30 seconds (PROTO-CORE-API-R113). No requirement IDs changed.
