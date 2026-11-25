@@ -177,35 +177,8 @@
   font: inherit;
 }
 
-/* Copy: the quiet icon button (Icon.css) at size-control-sm, its icon in ink-faint; once copied, a check in
-   ink-muted. The two icons sit one over the other and crossfade. */
-.code-block-copy {
-  box-sizing: border-box;
-  width: var(--size-control-sm);
-  height: var(--size-control-sm);
-  color: var(--color-ink-faint);
-}
-.code-block-copy[data-copied] {
-  color: var(--color-ink-muted);
-}
-.code-block-copy-icons {
-  display: grid;
-}
-.code-block-copy-icons > .icon {
-  grid-area: 1 / 1;
-  transition: opacity var(--motion-quick) var(--motion-ease-out);
-}
-.code-block-copy-icons > .icon:last-child,
-.code-block-copy[data-copied] .code-block-copy-icons > .icon:first-child {
-  opacity: 0;
-}
-.code-block-copy[data-copied] .code-block-copy-icons > .icon:last-child {
-  opacity: 1;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .agent-link,
-  .code-block-copy-icons > .icon {
+  .agent-link {
     transition: none;
   }
 }

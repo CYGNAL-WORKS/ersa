@@ -60,6 +60,7 @@ afterEach(() => {
 });
 
 describe("reading a session's raw log", () => {
+  // verifies: FLOW-READ-RAW-LOG-R11
   it("asks from the line after the last it holds, with the clip", async () => {
     const { reader, reads, indices } = setUp();
     reader.show({ open: true, session: "s1", link: 1 });
