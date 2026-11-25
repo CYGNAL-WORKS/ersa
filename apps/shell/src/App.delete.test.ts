@@ -107,6 +107,18 @@ describe("Delete on a tile", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R05
+  it("is unavailable while a message is being sent to an idle session, which Core refuses as busy", async () => {
+    // Idle in the tile, yet a message is on its way: Core refuses `session.delete` with `session_busy` (PROTO-CORE-API, Errors).
+    const sending = listed.map((s) => (s.id === "s1" ? { ...s, sending: "copying" as const } : s));
+    await open({ "session.list": () => sending });
+    const item = deleteItem("Fix the build");
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Stop the session to delete it");
+    fireEvent.click(item);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R04
   it("asks with what would be lost, focus on Cancel, and Cancel deletes nothing and gives focus back to the tile", async () => {
     const core = await open();
