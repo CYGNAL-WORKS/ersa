@@ -14,8 +14,11 @@ import { type Transcript, apply, emptyTranscript } from "./transcript";
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
 export const EARLIER = "earlier:";
 
-/** How far a message on its way has got (FLOW-SEND-MESSAGE-R16): its attachments' copy, as a share, or the backend starting. */
-export type SendProgress = { phase: "copying"; share: number } | { phase: "starting" };
+/**
+ * How far a message on its way has got (FLOW-SEND-MESSAGE-R16): its session's folder being put back (FLOW-CLEAN-UP-R05),
+ * its attachments' copy, as a share, or the backend starting.
+ */
+export type SendProgress = { phase: "puttingBack" } | { phase: "copying"; share: number } | { phase: "starting" };
 
 /**
  * The state of something the user sent: on its way, refused with a reason, or a message Ersa can't tell reached the
@@ -28,6 +31,7 @@ export type Sending =
 
 /** What `session.send_progress` says to show; nothing for checking or handing over, which are quick. */
 export function progressOf(notification: SessionSendProgressNotification): SendProgress | undefined {
+  if (notification.phase === "putting_back") return { phase: "puttingBack" };
   if (notification.phase === "starting") return { phase: "starting" };
   if (notification.phase !== "copying") return undefined;
   const { copied_bytes: copied = 0, total_bytes: total = 0 } = notification;

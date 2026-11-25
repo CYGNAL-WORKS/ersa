@@ -58,6 +58,16 @@ describe("what the delete question says goes", () => {
     expect(losesWork(goes)).toBe(false);
   });
 
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R13
+  it("says a put-away workspace has no folder left, and whether its branch goes, losing nothing", () => {
+    const away: Workspace = { ...isolated, state: "put_away" };
+    const goes = whatGoes(away, clean);
+    expect(goes).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: false });
+    expect(losesWork(goes)).toBe(false);
+    // Commits only the branch holds keep it, as for any delete (R05).
+    expect(whatGoes(away, { ...clean, unshared: 2 })).toEqual({ kind: "putAway", branch: "ersa/fix-build", branchKept: true });
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R04
   it("says the files stay, and where, for the root workspace and for one another session uses", () => {
     expect(whatGoes(root, undefined)).toEqual({ kind: "filesStay", path: "D:\\Projects\\ersa" });
@@ -112,7 +122,7 @@ describe("the delete question against Core", () => {
     expect(phases[0]).toEqual({ kind: "reading" });
     expect(last()).toMatchObject({ kind: "asking", changed: false, goes: { uncommitted: 2 } });
     await deletion.confirm();
-    expect(calls.filter((c) => c.method !== "session.list").map((c) => [c.method, c.params])).toEqual([
+    expect(calls.filter((c) => c.method !== "session.list" && c.method !== "workspace.list").map((c) => [c.method, c.params])).toEqual([
       ["workspace.changes", { id: "w1" }],
       ["session.delete", { id: "s1", token: "shown" }],
     ]);
@@ -146,7 +156,7 @@ describe("the delete question against Core", () => {
     // Asked again, not deleted: the question now counts the three files, and says it changed.
     expect(last()).toMatchObject({ kind: "asking", changed: true, goes: { uncommitted: 3 } });
     await deletion.confirm();
-    expect(calls.filter((c) => c.method !== "session.list").map((c) => c.params)).toEqual([{ id: "w1" }, { id: "s1", token: "t1" }, { id: "s1", token: "now" }]);
+    expect(calls.filter((c) => c.method !== "session.list" && c.method !== "workspace.list").map((c) => c.params)).toEqual([{ id: "w1" }, { id: "s1", token: "t1" }, { id: "s1", token: "now" }]);
     expect(last()).toEqual({ kind: "deleted" });
   });
 
