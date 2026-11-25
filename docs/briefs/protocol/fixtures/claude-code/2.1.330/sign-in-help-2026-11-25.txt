@@ -1,0 +1,62 @@
+Claude Code 2.1.330 (Windows, winget install), read 2026-11-25 on a machine where the CLI was installed and not signed in. This is the CLI's own help text for its sign-in commands, and nothing else: no command here was run except with `--help`, no sign-in was started, and no account was involved, so the file holds no account details. It shows which commands exist and what the CLI says each is for. It shows nothing of what any of them does when run: what `auth login` prints, opens or waits for, how it ends, what `auth status` reports, and whether any of them works without a terminal are all unrecorded.
+
+What it shows:
+- `claude auth` has three commands: `login` ("Sign in to your Anthropic account"), `logout` and `status`.
+- `auth login` takes `--claudeai` (a Claude subscription, the default), `--console` (Anthropic Console, API usage billing), `--sso`, and `--email <email>` to fill in the address on the login page.
+- `auth status` prints the authentication status, as JSON by default or as text.
+- `setup-token` sets up a long-lived authentication token and requires a Claude subscription.
+
+The help text, verbatim:
+
+$ claude auth --help
+Usage: claude auth [options] [command]
+
+Manage authentication
+
+Options:
+  -h, --help        Display help for command
+
+Commands:
+  help [command]    display help for command
+  login [options]   Sign in to your Anthropic account
+  logout            Log out from your Anthropic account
+  status [options]  Show authentication status
+
+$ claude auth login --help
+Usage: claude auth login [options]
+
+Sign in to your Anthropic account
+
+Options:
+  --claudeai       Use Claude subscription (default)
+  --console        Use Anthropic Console (API usage billing) instead of Claude
+                   subscription
+  --email <email>  Fill in the email address on the login page
+  -h, --help       Display help for command
+  --sso            Log in with SSO
+
+$ claude auth status --help
+Usage: claude auth status [options]
+
+Show authentication status
+
+Options:
+  -h, --help  Display help for command
+  --json      Output as JSON (default)
+  --text      Output as plain text
+
+$ claude auth logout --help
+Usage: claude auth logout [options]
+
+Log out from your Anthropic account
+
+Options:
+  -h, --help  Display help for command
+
+$ claude setup-token --help
+Usage: claude setup-token [options]
+
+Set up a long-lived authentication token (requires Claude subscription)
+
+Options:
+  -h, --help  Display help for command
