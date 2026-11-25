@@ -44,10 +44,10 @@ pub mod fake;
 // rather than reaching into private module paths.
 pub use adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, CallOffOnDrop,
-    ConversationEnd, ForkOf, ImageLimits, ListedRecord, OpenElsewhere, OutgoingAttachment,
-    OutgoingMessage, PermissionDecision, Projected, Projector, QuestionReply, RecordDeletion,
-    RecordEvent, RecordSummary, Recorded, RecordedSettings, RelaunchSettings, Requested,
-    SessionConfig, SessionControl, TitleRules,
+    ConversationEnd, ForkOf, ImageLimits, ListedRecord, ModelReport, OpenElsewhere,
+    OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected, Projector, QuestionReply,
+    RecordDeletion, RecordEvent, RecordSummary, Recorded, RecordedSettings, RelaunchSettings,
+    Requested, SessionConfig, SessionControl, TitleRules,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};
