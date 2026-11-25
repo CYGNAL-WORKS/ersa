@@ -64,8 +64,9 @@
   cursor: default;
 }
 
-.raw-log-row:not(.raw-log-earlier):hover,
-.raw-log-row[data-force="hover"] {
+/* Under the pointer a row takes material-hover; the selected row keeps its highlight, as the rail's open tile does. */
+.raw-log-row:not(.raw-log-earlier, [aria-selected="true"]):hover,
+.raw-log-row[data-force="hover"]:not([aria-selected="true"]) {
   background: var(--material-hover);
 }
 

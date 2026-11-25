@@ -71,7 +71,7 @@ export function DeveloperPane({
             className="developer-filter-field"
             placeholder={t("developer.filterLabel")}
             aria-label={t("developer.filterLabel")}
-            aria-describedby={filtering ? count : undefined}
+            aria-describedby={counted !== undefined ? count : undefined}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
             onKeyDown={(event) => {
@@ -82,8 +82,9 @@ export function DeveloperPane({
             }}
           />
         </label>
-        {/* Always in the page, so it fades in and out with the filter's text. */}
-        <span id={count} className="developer-count" data-shown={filtering || undefined} aria-hidden={!filtering || undefined}>
+        {/* Always in the page, so it fades in and out. Shown only while there is a count of this session's lines: none
+            while the next session is read, or with no session, so it never counts the session left (R04, R12). */}
+        <span id={count} className="developer-count" data-shown={counted !== undefined || undefined} aria-hidden={counted === undefined || undefined}>
           {said}
         </span>
       </div>
