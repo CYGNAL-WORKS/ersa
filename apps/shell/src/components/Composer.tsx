@@ -460,11 +460,12 @@ function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked,
       </p>
     );
   }
-  if (progress?.phase === "starting") {
+  // Neither putting the folder back nor starting the backend has a share to show, so the ring turns.
+  if (progress?.phase === "puttingBack" || progress?.phase === "starting") {
     return (
       <p className="composer-status-line">
         <ContextRing turning />
-        {t("composer.startingProgress")}
+        {progress.phase === "puttingBack" ? t("composer.puttingBackProgress") : t("composer.startingProgress")}
       </p>
     );
   }
