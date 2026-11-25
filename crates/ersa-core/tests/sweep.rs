@@ -248,22 +248,20 @@ async fn a_session_unarchived_while_the_pass_judges_its_folder_keeps_it() {
     let (mut s, clock) = swept_with(fake, |_| {}).await;
     let (workspace, session) = used(&mut s).await;
     let before = clock.ended();
-    let asked_before = s.stats.at_gate.load(std::sync::atomic::Ordering::SeqCst);
+    let stats = Arc::clone(&s.stats);
+    let asked = move || {
+        let arrived = &stats.open_checks_arrived;
+        arrived.load(std::sync::atomic::Ordering::SeqCst)
+    };
+    let asked_before = asked();
     let held = registry.lock().await;
 
     let params = json!({ "id": session, "archived": true });
     s.client.result("session.set_archived", params).await;
-    // Waiting at the registry, which the test holds: a record read, which
-    // counts there too, passes at once, so the count must hold.
-    let waiting = || s.stats.at_gate.load(std::sync::atomic::Ordering::SeqCst) > asked_before;
+    // At the registry, which the test holds: the pass has read the
+    // sessions and found every one archived.
     let deadline = tokio::time::Instant::now() + PASS;
-    loop {
-        if waiting() {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            if waiting() {
-                break;
-            }
-        }
+    while asked() == asked_before {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the pass never asked"

@@ -7,7 +7,9 @@
 //!   handshake and the reserved methods.
 //! - `handlers`: one function per implemented method.
 //! - [`put_away_workspace`]: putting a workspace away, which no method asks
-//!   for yet: the sweep does (FLOW-CLEAN-UP-R22).
+//!   for yet. The sweep puts one away through `put_away::put_away_for_sweep`,
+//!   which has admission refuse it unless every session there is archived
+//!   (FLOW-CLEAN-UP-R22).
 //! - `sweep`: Core's own pass, which no method asks for either.
 
 mod delete;

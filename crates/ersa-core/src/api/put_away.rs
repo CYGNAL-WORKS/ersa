@@ -37,6 +37,11 @@ use crate::workspace;
 /// away, its whole folder would go unchecked when it is put back. Any
 /// other failure leaves it `put_away` (R141), what is left of the folder
 /// going when it is put back (FLOW-CLEAN-UP-R03).
+///
+/// It does not ask whether the workspace's sessions are archived: the Clean
+/// up list also puts away the folders of sessions that are only inactive
+/// (FLOW-CLEAN-UP-R11, R13), so whoever calls it decides which sessions may
+/// be there. The sweep calls [`put_away_for_sweep`], never this.
 pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
     put_away(core, id, false).await
 }
