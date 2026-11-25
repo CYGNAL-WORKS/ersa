@@ -711,8 +711,7 @@ const twoChangesCall: Event = {
   target_kind: "path",
   target: appFile,
   edits: [
-    { path: appFile, old_text: "working?: boolean;", new_text: "working?: boolean;
-  since?: string;" },
+    { path: appFile, old_text: "working?: boolean;", new_text: "working?: boolean;\n  since?: string;" },
     { path: appFile, old_text: "      return { ...next, working: false };", new_text: "      return { ...next, working: false, since: undefined };" },
   ],
 };
