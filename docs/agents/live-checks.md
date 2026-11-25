@@ -35,6 +35,15 @@ Everything from the Interface inward is real: the Interface, the Shell's bridge,
 - A system dialog: the Interface's call to the Tauri dialog plugin's `open` or `save` command is answered from the test. The Shell and the system's dialog never see it.
 - A file drop: the window receives Tauri's drag-and-drop events with the test's paths, exactly as the Shell delivers them. Unlike a real drop, Tauri doesn't add the dropped paths to its asset scope, so a preview that loads a dropped file through `convertFileSrc` won't load.
 
+## What a live check can't reach
+
+Every window the harness starts is attached to a labeled endpoint, and a live check starts no other app. So what Ersa does only in a window that is not attached can't be driven: today that is Open diagnostic log opening the file, which is unavailable in an attached build (FLOW-READ-RAW-LOG-R13). Write the live check for what the attached window does show, and check the rest by hand, once per head:
+
+- Check first that nothing serves the default endpoint: with the owner's own Ersa running, a build that is not attached would join its Core and its sessions. When something does, don't run the check; say so in the pull request and leave it to the owner.
+- Run the live-check build's `ersa` with no `ERSA_ATTACH` and with `LOCALAPPDATA` set to a new temporary folder, so it starts a Core and a data folder of its own.
+- Do the step, then end both processes and remove the folder.
+- In the pull request's **Evidence**, say what you did, what the window and the system showed, and that it was by hand. A ticket whose **Done when** asks for a live check of such a step is met this way.
+
 ## Put the screenshots in the pull request
 
 The repository is public, and so is every screenshot you publish, for good. The harness records which backend each test ran in `backend.txt` beside its screenshots, and the script publishes screenshots only from checks that ran the stand-in backend. A check that ran the real Claude Code can show the owner's account, folders or conversation, so when any screenshot came from such a check, or from one whose backend isn't recorded, the script publishes nothing and lists them. Delete the folders it names from `apps/shell/live-results`, run it again, and describe what those checks showed in words in the pull request's **Evidence**: what you did, what the window showed, and that it passed. Open each stand-in screenshot first too, since a path in it can show the Windows user name.
