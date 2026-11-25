@@ -1472,6 +1472,67 @@ describe("archiving a session from its tile, and an archived session read-only",
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
   });
 
+  // FLOW-CLEAN-UP-R21: the note's words while its own Resume waits for the session's folder to be put back.
+  const archivedLine = "This session is archived. Resume it to send a message.";
+  const puttingBack = "Putting the session's folder back…";
+  // The note's words as shown: the line not shown is faded out and hidden from assistive technology.
+  const noteWords = () => document.querySelector(".archived-words [data-shown]")?.textContent;
+  const heard = () => document.querySelector(".archived [role='status']")?.textContent;
+  const reportPuttingBack = (core: ReturnType<typeof fakeCore>, session = "s2") =>
+    act(() => core.emit({ kind: "notification", method: "session.send_progress", params: { session_id: session, phase: "putting_back" } }));
+
+  // verifies: FLOW-CLEAN-UP-R21
+  it("says the folder is being put back while its Resume is unanswered, and archived again after a refusal", async () => {
+    let refuse: (error: unknown) => void = () => {};
+    const { core } = await archivedWhileOpen({
+      "session.resume": () =>
+        new Promise((_, reject) => {
+          refuse = reject;
+        }),
+    });
+    expect(noteWords()).toBe(archivedLine);
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await settle();
+    // Resuming, with nothing reported yet: the archived line stays.
+    expect(noteWords()).toBe(archivedLine);
+    expect(heard()).toBe("");
+    // Another session's report changes nothing here.
+    await reportPuttingBack(core, "s1");
+    expect(noteWords()).toBe(archivedLine);
+    await reportPuttingBack(core);
+    expect(noteWords()).toBe(puttingBack);
+    expect(heard()).toBe(puttingBack);
+    // The row keeps Resume where it was, still unavailable.
+    expect(screen.getByRole("button", { name: "Resuming…" }).getAttribute("aria-disabled")).toBe("true");
+
+    await act(async () => refuse({ kind: "rpc", error: { code: -32000, message: "session.resume: no", data: { kind: "invalid_state", reason: "branch_gone" } } }));
+    await settle();
+    expect(noteWords()).toBe(archivedLine);
+    expect(heard()).toBe("");
+    // A report with no Resume under way here leaves the archived line.
+    await reportPuttingBack(core);
+    expect(noteWords()).toBe(archivedLine);
+  });
+
+  // verifies: FLOW-CLEAN-UP-R21
+  it("keeps saying the folder is being put back when the user leaves the session and returns to it", async () => {
+    const { core } = await archivedWhileOpen({ "session.resume": () => new Promise(() => {}) });
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await settle();
+    await reportPuttingBack(core);
+    expect(noteWords()).toBe(puttingBack);
+
+    fireEvent.click(tileNamed("Fix the build") as HTMLElement);
+    await settle();
+    expect(document.querySelector(".archived")).toBeNull();
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Show/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "All" }));
+    fireEvent.click(tileNamed("Write the notes") as HTMLElement);
+    await settle();
+    expect(noteWords()).toBe(puttingBack);
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
   it("brings the composer back once Core accepts the resume and lists the session unarchived, sending nothing else", async () => {
     const holder: { list?: { current: Session[] } } = {};

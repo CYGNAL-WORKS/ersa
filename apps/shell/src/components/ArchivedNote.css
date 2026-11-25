@@ -44,3 +44,25 @@
   line-height: var(--type-ui-leading);
   color: var(--color-ink-muted);
 }
+
+/* The archived line and the folder being put back share one cell, so the note is as tall as the longer of them and
+   keeps its size as they crossfade (docs/design/COMPOSER.md, The archived note). */
+.archived-words {
+  display: grid;
+}
+
+.archived-line {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+
+.archived-line[data-shown] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archived-line {
+    transition: none;
+  }
+}
