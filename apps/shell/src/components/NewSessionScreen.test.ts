@@ -29,7 +29,7 @@ const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
     { id: "sonnet", label: "Sonnet", default: false, resolved: "claude-sonnet-5-5", efforts: ["medium", "high"] },
     { id: "haiku-4-5", label: "Haiku 4.5", default: false, resolved: "claude-haiku-4-5" },
   ],
-  // The CLI marks no effort as its default.
+  // No effort marked, as for a CLI that does not say which effort a session given none runs with.
   efforts: choices([["medium", "Medium"], ["high", "High"]], "none"),
   permission_modes: choices([["default", "Manual"], ["acceptEdits", "Accept edits"]], "default"),
 });
