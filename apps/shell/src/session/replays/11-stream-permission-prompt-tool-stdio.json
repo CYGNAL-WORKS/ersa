@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "83a8092b95077d011d0c2c130545d39f4de478f8",
+  "ersa_commit": "2ba5645a6cd54c3cea14f8dbb698ab777116e277",
   "notifications": [
     {
       "kind": "notification",
@@ -72,7 +72,7 @@
                     "apiProvider": "firstParty",
                     "email": "user@example.com",
                     "organization": "Example Org",
-                    "subscriptionType": "Claude Ultra"
+                    "subscriptionType": "Example Plan"
                   },
                   "agents": [
                     {
@@ -1107,13 +1107,13 @@
                   "id": "seven_day",
                   "label": "Weekly · all models",
                   "resets_at": "2026-11-04T20:00:00Z",
-                  "used": 0.04
+                  "used": 0.5
                 },
                 {
                   "id": "seven_day_overage_included",
                   "label": "Weekly · overage",
                   "resets_at": "2026-11-04T20:00:00Z",
-                  "used": 0.06
+                  "used": 0.5
                 }
               ]
             },
