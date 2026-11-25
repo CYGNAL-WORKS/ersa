@@ -79,9 +79,10 @@ test("no doctests when targets are named or nothing selected is a library", () =
 });
 
 // A job that prints `lines` with a pause between them, then exits with `status`.
+// The script is fixed; what it prints and how reach it as arguments, never as code.
 function node(label, lines, status = 0, pauseMs = 30) {
-  const script = `const l=${JSON.stringify(lines)};let i=0;const t=setInterval(()=>{if(i<l.length){process.stdout.write(l[i++]+"\\n")}else{clearInterval(t);process.exit(${status})}},${pauseMs});`;
-  return { label, cmd: process.execPath, args: ["-e", script] };
+  const script = `const [l, status, pause] = [JSON.parse(process.argv[1]), Number(process.argv[2]), Number(process.argv[3])];let i=0;const t=setInterval(()=>{if(i<l.length){process.stdout.write(l[i++]+"\\n")}else{clearInterval(t);process.exit(status)}},pause);`;
+  return { label, cmd: process.execPath, args: ["-e", script, JSON.stringify(lines), String(status), String(pauseMs)] };
 }
 
 test("a failing binary fails the run, and every other binary still runs", async () => {
@@ -138,9 +139,11 @@ test("a job's stdout and stderr keep the order they were written in", async () =
 function gated(line) {
   const dir = mkdtempSync(join(tmpdir(), "test-rust-gate-"));
   const gate = join(dir, "open");
-  const script = `console.log(${JSON.stringify(line)}); const fs = require("fs"); const t = setInterval(() => { if (fs.existsSync(${JSON.stringify(gate)})) clearInterval(t); }, 20);`;
+  // A fixed script; the line and the gate's path reach it as arguments
+  // (`process.argv[1]` and `[2]` under `node -e`), never as code.
+  const script = `const [line, gate] = process.argv.slice(1); console.log(line); const fs = require("fs"); const t = setInterval(() => { if (fs.existsSync(gate)) clearInterval(t); }, 20);`;
   return {
-    job: { label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", script] },
+    job: { label: "Running tests/hangs.rs", cmd: process.execPath, args: ["-e", script, line, gate] },
     open: () => writeFileSync(gate, ""),
     remove: () => rmSync(dir, { recursive: true, force: true }),
   };
@@ -213,14 +216,15 @@ function fakeCargo({ build = 0, binaries }) {
   const ran = [];
   const run = (cmd, args, opts) => {
     ran.push([cmd, ...args].join(" "));
-    let script;
     if (cmd === "cargo" && args.includes("--no-run")) {
-      script = `${JSON.stringify(messages)}.forEach((m) => console.log(JSON.stringify(m))); process.exit(${build});`;
-    } else if (cmd === "cargo") {
-      script = `console.log("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s")`;
-    } else {
-      script = binaries[cmd];
+      // The messages and the exit code reach the fixed script as arguments.
+      const script = `JSON.parse(process.argv[1]).forEach((m) => console.log(JSON.stringify(m))); process.exit(Number(process.argv[2]));`;
+      return spawn(process.execPath, ["-e", script, JSON.stringify(messages), String(build)], opts);
     }
+    const script =
+      cmd === "cargo"
+        ? `console.log("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s")`
+        : binaries[cmd];
     return spawn(process.execPath, ["-e", script], opts);
   };
   return { run, ran };
