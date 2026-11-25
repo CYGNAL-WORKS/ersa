@@ -183,3 +183,15 @@
   flex: 1;
   min-width: 0;
 }
+
+/* The developer pane alone at the workbench's first width, as the workbench's pane lays it out: a column on surface,
+   with the workbench's leading hairline. */
+.gallery-pane-alone {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--size-workbench);
+  height: var(--size-card-max);
+  background: var(--color-surface);
+  border-left: var(--line-hairline) solid var(--color-line);
+}

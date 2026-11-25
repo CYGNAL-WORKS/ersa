@@ -4,6 +4,7 @@ import { t } from "../catalog";
 import type { RawLogEntry } from "../protocol/core-api.gen";
 import type { RawLogView } from "../session/rawLog";
 import { lineMatcher, lineText } from "../session/rawLogText";
+import { tokenLength } from "../theme/measure";
 import { Icon } from "./Icon";
 import { RawLogList } from "./RawLogList";
 import "./DeveloperPane.css";
@@ -64,8 +65,6 @@ export function DeveloperPane({
     openLog?: "hover" | "pressed" | "focus";
     /** Why the diagnostic log couldn't be opened, as after a choice of Open diagnostic log that failed. */
     unopened?: string;
-    /** The toolbar in two rows, or one, whatever its width. */
-    narrow?: boolean;
   };
 }) {
   const [filter, setFilter] = useState(force?.filter ?? "");
@@ -93,7 +92,7 @@ export function DeveloperPane({
   };
   const toolbar = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
-  const narrow = useNarrowToolbar(toolbar, button, force?.narrow);
+  const narrow = useNarrowToolbar(toolbar, button);
   const shown = useShownLines(view?.lines, filter);
   const count = useId();
   const filtering = filter !== "";
@@ -161,25 +160,20 @@ export function DeveloperPane({
   );
 }
 
-/** A length token in pixels, as the page resolves it; 0 when it is unset, as where no stylesheet is loaded. */
-function pixels(el: Element, token: string): number {
-  return Number.parseFloat(getComputedStyle(el).getPropertyValue(token)) || 0;
-}
-
 /**
  * Whether the toolbar is too narrow for one row (docs/design/WORKBENCH.md, The toolbar): one row while it can give the
  * field and the count twice `size-row-title-min` beside Open diagnostic log, else the button goes to a second row. It
  * follows the toolbar's width alone, never what is typed, so the list doesn't move while the user types.
  */
-function useNarrowToolbar(toolbar: RefObject<HTMLDivElement | null>, button: RefObject<HTMLButtonElement | null>, forced?: boolean): boolean {
-  const [narrow, setNarrow] = useState(forced ?? false);
+function useNarrowToolbar(toolbar: RefObject<HTMLDivElement | null>, button: RefObject<HTMLButtonElement | null>): boolean {
+  const [narrow, setNarrow] = useState(false);
   useLayoutEffect(() => {
     const el = toolbar.current;
-    if (!el || forced !== undefined) return;
+    if (!el) return;
     const measure = () => {
       const style = getComputedStyle(el);
       const room = el.clientWidth - (Number.parseFloat(style.paddingLeft) || 0) - (Number.parseFloat(style.paddingRight) || 0);
-      const needed = 2 * pixels(el, "--size-row-title-min") + pixels(el, "--space-sm") + (button.current?.offsetWidth ?? 0);
+      const needed = 2 * (tokenLength(el, "--size-row-title-min") || 0) + (tokenLength(el, "--space-sm") || 0) + (button.current?.offsetWidth ?? 0);
       setNarrow(room < needed);
     };
     measure();
@@ -187,6 +181,6 @@ function useNarrowToolbar(toolbar: RefObject<HTMLDivElement | null>, button: Ref
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [toolbar, button, forced]);
+  }, [toolbar, button]);
   return narrow;
 }

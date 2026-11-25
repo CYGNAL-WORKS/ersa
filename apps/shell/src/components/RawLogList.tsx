@@ -4,6 +4,7 @@ import { t } from "../catalog";
 import type { RawLogEntry } from "../protocol/core-api.gen";
 import type { RawLogView } from "../session/rawLog";
 import { lineText, rawLogTime } from "../session/rawLogText";
+import { tokenLength } from "../theme/measure";
 import { Icon } from "./Icon";
 import { RawLogDetail } from "./RawLogDetail";
 import "./RawLogList.css";
@@ -155,7 +156,7 @@ export function RawLogList({
     const el = list.current;
     if (!el) return;
     const read = () => {
-      const row = parseFloat(getComputedStyle(el).getPropertyValue("--size-log-row"));
+      const row = tokenLength(el, "--size-log-row");
       setMeasure((was) => {
         if (was.row === row && was.height === el.clientHeight) return was;
         // The detail coming or going changes the list's height: the selected row stays in view (WORKBENCH.md, The detail).
