@@ -130,6 +130,27 @@ pub struct Stats {
     pub refuse_changes: AtomicBool,
 }
 
+impl Stats {
+    /// The configurations of the backend's first `n` starts, once there are
+    /// as many. Core answers a resume before it starts the backend, so a
+    /// start is counted some time after the answer.
+    pub async fn started(&self, n: usize) -> Vec<SessionConfig> {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let configs = self.configs.lock().unwrap().clone();
+            if configs.len() >= n {
+                return configs;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{} starts",
+                configs.len()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+}
+
 /// The kind of the record entry a rename adds.
 const CUSTOM_TITLE: &str = "custom-title";
 
