@@ -538,6 +538,16 @@ export const enUS = {
     readingProgress: "Reading…",
     // The problem line over the list when a read fails, followed by the reason (R15).
     unreadableError: "Ersa can't read the raw log. It's trying again.",
+    // The toolbar's filter field: its placeholder and accessible name (R12), and the count beside it while it holds text.
+    filterLabel: "Filter lines",
+    filterCountDetail: "{shown} of {total}",
+    // What the list says when the filter's text is in no line (R14).
+    noMatchEmpty: "No lines contain that text.",
+    // The detail beneath the list (R10): Copy's accessible name and tooltip, then the icon button that closes it.
+    copyLineButton: "Copy line",
+    closeLineButton: "Close line",
+    // The detail of a line Core cut, above its start (R11).
+    cutNote: "This line is {size}. Its first 256 KB are shown.",
   },
   quit: {},
   trust: {
