@@ -1013,6 +1013,10 @@ const deleteStates: [string, Exclude<DeletePhase, { kind: "deleted" }>][] = [
   ["Folder and branch go, with work lost", { kind: "asking", changed: false, goes: counted({ uncommitted: 3, ignored: 12, unshared: 1, stranded: 1 }) }],
   ["Branch kept, nothing lost", { kind: "asking", changed: false, goes: counted({ unshared: 4 }) }],
   ["Files stay", { kind: "asking", changed: false, goes: whatGoes(deleteRoot, undefined) }],
+  // FLOW-ARCHIVE-DELETE-SESSION-R13: a session whose workspace is put away has no folder left to delete.
+  ["Folder put away, branch goes", { kind: "asking", changed: false, goes: counted({}, { ...deleteWorkspace, state: "put_away" }) }],
+  ["Folder put away, branch kept", { kind: "asking", changed: false, goes: counted({ unshared: 2 }, { ...deleteWorkspace, state: "put_away" }) }],
+  ["Folder put away, another session there", { kind: "asking", changed: false, goes: counted({ unshared: 2, sessions: 2 }, { ...deleteWorkspace, state: "put_away" }) }],
   ["Git lost the workspace's record", { kind: "asking", changed: false, goes: counted({ uncommitted: 2, unshared: 1, unrecorded: true }) }],
   ["Asked again", { kind: "asking", changed: true, goes: counted({ uncommitted: 4 }) }],
   ["Reading what would be lost", { kind: "reading" }],
@@ -1644,6 +1648,8 @@ const entries: Entry[] = [
         "Resume refused",
         <ArchivedNote onResume={() => {}} resuming={{ state: "failed", message: "session.resume: resuming a stopped session arrives with milestone M1" }} />,
       ],
+      // PROTO-CORE-API-R80: the catalog's words for a put-away folder whose branch is gone.
+      ["Resume refused, branch gone", <ArchivedNote onResume={() => {}} resuming={{ state: "failed", message: t("errors.refusal.branchGoneError") }} />],
     ],
   },
   {
@@ -1734,6 +1740,8 @@ const entries: Entry[] = [
         "Copying attachments",
         statusRoom(<Composer {...attachProps} initialAttachments={galleryAttachments} sending={{ state: "sending", progress: { phase: "copying", share: 0.4 } }} onStop={() => {}} />),
       ],
+      // FLOW-CLEAN-UP-R05: the session's folder is put back before the message goes.
+      ["Putting the folder back", statusRoom(<Composer {...attachProps} initialText="Match the mockup." sending={{ state: "sending", progress: { phase: "puttingBack" } }} onStop={() => {}} />)],
       ["Starting the backend", statusRoom(<Composer {...attachProps} initialText="Match the mockup." sending={{ state: "sending", progress: { phase: "starting" } }} onStop={() => {}} />)],
       ["Can't tell whether it was sent", statusRoom(<Composer {...attachProps} initialText="Match the mockup." initialAttachments={galleryAttachments} sending={{ state: "unknown" }} />)],
       // FLOW-SEND-MESSAGE-R08: files dragged over the box, and an image pasted into the words.

@@ -44,6 +44,8 @@ describe("describeError over a refusal with a reason", () => {
     ["no_finished_reply", "errors.refusal.noFinishedReplyError"],
     ["backend_cannot_fork", "errors.refusal.backendCannotForkError"],
     ["folder_gone", "errors.refusal.folderGoneError"],
+    ["branch_gone", "errors.refusal.branchGoneError"],
+    ["branch_in_use", "errors.refusal.branchInUseError"],
   ] as const;
 
   // verifies: PROTO-CORE-API-R80
