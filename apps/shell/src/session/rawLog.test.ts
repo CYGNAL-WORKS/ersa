@@ -118,6 +118,20 @@ describe("reading a session's raw log", () => {
     expect(last()).toEqual({ session: "s1", lines: [], read: true, earlier: false });
   });
 
+  it("is still reading after a read that failed, until an answer comes", async () => {
+    // verifies: FLOW-READ-RAW-LOG-R14
+    const { reader, reads, last } = setUp();
+    reader.show({ open: true, session: "s1", link: 1 });
+    await reads[0]?.fail(unreachable);
+    expect(last()).toMatchObject({ read: false, failure: "Core isn't running." });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await reads[1]?.answer("not a list");
+    expect(last()).toMatchObject({ read: false, failure: "Ersa got a raw log it can't read." });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await reads[2]?.answer([]);
+    expect(last()).toEqual({ session: "s1", lines: [], read: true, earlier: false });
+  });
+
   it("asks for nothing while the workbench is closed", async () => {
     // verifies: FLOW-READ-RAW-LOG-R06
     const { reader, reads, last } = setUp();
