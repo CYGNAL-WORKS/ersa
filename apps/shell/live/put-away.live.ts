@@ -48,7 +48,8 @@ test("archiving a session puts its folder away, and resuming it puts the folder 
   const tile = rail.locator(".session").first();
   await expect(tile).toBeVisible({ timeout: 60_000 });
   await tile.hover();
-  await rail.getByRole("button", { name: /^More for / }).first().click();
+  // The stand-in backend gives the session no title. More sits beside the tile's button, not in it.
+  await rail.getByRole("button", { name: "More for Untitled session" }).click();
   await page.getByRole("menuitem", { name: "Archive" }).click();
 
   // The sweep the archive asked for removes the folder and git's record, and keeps the branch.
