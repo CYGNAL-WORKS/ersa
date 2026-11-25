@@ -219,6 +219,8 @@ export const enUS = {
       putAwayBranchDetail: "The session's folder was already removed, and its branch {branch} is deleted too.",
       putAwayBranchKeptDetail: "The session's folder was already removed. Its branch {branch} is kept.",
       putAwayDetail: "The session's folder was already removed.",
+      // The same, when another session uses the workspace, so the delete keeps its branch.
+      putAwaySharedDetail: "The session's folder was already removed. Another session uses its branch {branch}, so the branch stays.",
       // The project's own folder, or a folder another session also uses.
       filesStayDetail: "Its files stay in {path}.",
       // What goes with the folder and exists nowhere else, joined into one list: "3 uncommitted or untracked files and

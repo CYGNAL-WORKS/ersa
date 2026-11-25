@@ -530,6 +530,10 @@ The session's folder was already removed. Its branch {branch} is kept.
 
 The session's folder was already removed.
 
+### `rail.delete.putAwaySharedDetail`
+
+The session's folder was already removed. Another session uses its branch {branch}, so the branch stays.
+
 ### `rail.delete.filesStayDetail`
 
 Its files stay in {path}.

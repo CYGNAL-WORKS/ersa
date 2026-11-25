@@ -26,8 +26,9 @@ export type WhatGoes =
   /**
    * The session is alone in a workspace that is put away: no folder is left to delete, and its branch goes unless it
    * is kept (FLOW-ARCHIVE-DELETE-SESSION-R13). Core counts nothing lost with the folder (PROTO-CORE-API-R123).
+   * `shared`: another session uses the workspace, so the delete keeps it and its branch (R05).
    */
-  | { kind: "putAway"; branch: string; branchKept: boolean }
+  | { kind: "putAway"; branch: string; branchKept: boolean; shared: boolean }
   /** The session is alone in an isolated workspace: its folder goes, and its branch unless the branch is kept. */
   | {
       kind: "folderGoes";
@@ -51,10 +52,13 @@ export function whatGoes(workspace: Workspace, changes: WorkspaceChanges | undef
   // `sessions` leaves out sessions marked deleting, so it counts this one only while it isn't. Any other session
   // using the folder keeps it.
   const others = changes ? changes.sessions - (marked ? 0 : 1) : 0;
-  if (workspace.kind === "root" || !changes || others > 0) return { kind: "filesStay", path: workspace.path };
+  if (workspace.kind === "root" || !changes) return { kind: "filesStay", path: workspace.path };
   // Of the unshared commits, those the branch holds are the ones not stranded; any of them keeps the branch.
   const branchKept = changes.unshared - changes.stranded > 0;
-  if (workspace.state === "put_away") return { kind: "putAway", branch: workspace.vcs_ref, branchKept };
+  // A workspace that is put away has no folder, so the question never says its files stay there, even when another
+  // session uses it.
+  if (workspace.state === "put_away") return { kind: "putAway", branch: workspace.vcs_ref, branchKept, shared: others > 0 };
+  if (others > 0) return { kind: "filesStay", path: workspace.path };
   return {
     kind: "folderGoes",
     branch: workspace.vcs_ref,
