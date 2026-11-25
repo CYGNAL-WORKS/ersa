@@ -102,12 +102,14 @@
 }
 
 /* The choices: a transient layer anchored to its chip, space-xs from it, beneath where the window has room, else
-   above, placed again as it grows. */
+   above, placed again as it grows. It starts where its chip starts and extends toward the trailing edge; where the
+   window has no room for that, as for a wide list from a chip at the row's trailing end, it ends where its chip ends
+   instead, so it never covers its chip or runs past the window. */
 .chip-list {
   position: fixed;
   inset: auto;
   position-area: block-end span-inline-end;
-  position-try-fallbacks: flip-block;
+  position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
   z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
@@ -220,6 +222,29 @@
 
 /* Unavailable: ink-faint, keeping its status, unchanged under the pointer. */
 .chip-option[aria-disabled="true"] .chip-option-label {
+  color: var(--color-ink-faint);
+}
+
+/* An option with a description (docs/design/COMPOSER.md, A chip's list), as a permission mode has: two lines tall,
+   padded space-xs top and bottom, the sentence under the label in ui-small and ink-faint. The mark stays where a
+   one-line option's is, so a list mixing the two keeps its labels aligned. */
+.chip-option[data-described] {
+  padding-block: var(--space-xs);
+}
+
+/* The label and its description, one column, so the description starts where the label starts. */
+.chip-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Left to right, so a description longer than size-menu allows is cut at its end. */
+.chip-option-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   color: var(--color-ink-faint);
 }
 
