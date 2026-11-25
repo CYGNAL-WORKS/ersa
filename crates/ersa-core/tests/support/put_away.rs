@@ -40,6 +40,15 @@ pub async fn setup_with(configure: impl FnOnce(&mut CoreConfig)) -> Setup {
 /// `gate` and give up after 200 ms; with `wait` for each wait at the
 /// project's worktrees.
 pub async fn stuck_folder_setup(gate: &Arc<Gate>, wait: Duration) -> Setup {
+    stuck_folder_setup_with(gate, wait, |_| {}).await
+}
+
+/// [`stuck_folder_setup`], with `more` applied to the configuration too.
+pub async fn stuck_folder_setup_with(
+    gate: &Arc<Gate>,
+    wait: Duration,
+    more: impl FnOnce(&mut CoreConfig),
+) -> Setup {
     let git_drops = Arc::new(FailingGit::new(Removal::DropsRecordThenFails, None));
     let fake = FakeAdapter::new(1);
     let stats = Arc::clone(&fake.stats);
@@ -51,6 +60,7 @@ pub async fn stuck_folder_setup(gate: &Arc<Gate>, wait: Duration) -> Setup {
             config.folder_gate = Some(gate);
             config.folder_removal_limit = Duration::from_millis(200);
             config.worktree_turn_wait = wait;
+            more(config);
         }
     };
     let core = start_with_adapters(tempdir(), configure, adapters).await;
@@ -162,6 +172,42 @@ impl Setup {
             .await;
         session
     }
+}
+
+impl Setup {
+    /// Adds a submodule at `sub` to the project's repository, committed on
+    /// its branch, so each workspace made from now on has it, not checked
+    /// out. Its repository is beside the project's, with one file.
+    pub fn add_submodule(&self) -> PathBuf {
+        let source = self.core.dir.path().join("sub-source");
+        std::fs::create_dir_all(&source).unwrap();
+        git(&source, &["init", "--quiet", "--initial-branch=main"]);
+        commit(&source, "sub.txt");
+        let url = source.display().to_string();
+        git(
+            &self.repo,
+            &["-c", "protocol.file.allow=always", "submodule", "add", "--quiet", &url, "sub"],
+        );
+        git(&self.repo, &["commit", "--quiet", "-m", "add a submodule"]);
+        source
+    }
+}
+
+/// Checks out every submodule in the worktree at `dir`, as a person or an
+/// agent would there.
+pub fn check_out_submodules(dir: &Path) {
+    git(
+        dir,
+        &["-c", "protocol.file.allow=always", "submodule", "update", "--init", "--quiet"],
+    );
+}
+
+/// A repository of its own at `dir`, with one commit and nothing
+/// uncommitted.
+pub fn nested_repository(dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    git(dir, &["init", "--quiet", "--initial-branch=main"]);
+    commit(dir, "nested.txt");
 }
 
 pub fn id(workspace: &Value) -> &str {

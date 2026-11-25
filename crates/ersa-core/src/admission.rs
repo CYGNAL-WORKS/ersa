@@ -1150,7 +1150,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             let Some(entry) = state.workspaces.get(workspace) else {
                 return Outcome::Refused(Refusal::NoWorkspace);
             };
-            // The user's own folder is never put away (FLOW-CLEAN-UP-R01).
+            // The user's own folder is never put away (FLOW-CLEAN-UP-R22).
             if entry.root {
                 return Outcome::Refused(Refusal::RootWorkspace);
             }
