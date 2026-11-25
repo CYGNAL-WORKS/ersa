@@ -1665,6 +1665,8 @@ const entries: Entry[] = [
       ["Open diagnostic log, unavailable in a build attached to a label", rawLog({ attachedTo: "replay-3" })],
       ["Open diagnostic log, unavailable, keyboard focus", rawLog({ attachedTo: "replay-3", force: { openLog: "focus" } })],
       ["The diagnostic log couldn't be opened", rawLog({ force: { unopened: "There's no diagnostic log at C:\\Users\\you\\AppData\\Local\\Ersa\\core.log yet." } })],
+      ["Both problems: the raw log can't be read, and the diagnostic log couldn't be opened", rawLog({ view: rawLogView({ failure: "Core isn't running." }), force: { unopened: "There's no diagnostic log at C:\\Users\\you\\AppData\\Local\\Ersa\\core.log yet." } })],
+      ["The toolbar in two rows at a narrow width, with a filter and its count", rawLog({ force: { filter: "stream", narrow: true } })],
       ["A filter, with its count", rawLog({ force: { filter: "user" } })],
       ["A filter no line contains", rawLog({ force: { filter: "permission_denied" } })],
       ["Earlier lines are no longer held", rawLog({ view: rawLogView({ lines: rawLogLines(1_200, 6), earlier: true }) })],

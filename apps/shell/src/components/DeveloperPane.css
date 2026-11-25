@@ -1,13 +1,41 @@
-/* The developer pane's toolbar (docs/design/WORKBENCH.md, The developer pane): a row padded space-sm by space-md, its
-   parts space-sm apart. The filter field takes the width left over and keeps at least size-row-title-min; the count
-   follows it while it holds text, its space-sm before it growing and running back with it. */
+/* The pane's body: laid out as if it weren't there, so the toolbar and the list stay the pane's own rows. It is in the
+   page only to hear the presses and keys that end what the pane says about the diagnostic log (FLOW-READ-RAW-LOG-R26). */
+.developer-pane {
+  display: contents;
+}
+
+/* The developer pane's toolbar (docs/design/WORKBENCH.md, The toolbar): padded space-sm by space-md, its parts space-sm
+   apart. The field and the count share the width Open diagnostic log leaves at the trailing edge. Too narrow to give
+   them twice size-row-title-min beside the button, the toolbar puts the button on a second row space-sm beneath, at its
+   trailing edge; which it is follows the toolbar's width alone (data-narrow, measured by the pane). */
 .developer-toolbar {
   display: flex;
   flex: none;
   align-items: center;
+  gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
+}
+
+/* The field and the count keep together. The count follows the field while it holds text, its space-sm before it
+   growing and running back with it, so it grows in out of the field. */
+.developer-filter-group {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  min-width: 0;
   /* Lets the count's width move between nothing and its words. */
   interpolate-size: allow-keywords;
+}
+
+/* Narrow, the field and the count have the first row to themselves, and the button its own beneath, at the trailing
+   edge. */
+.developer-toolbar[data-narrow] {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.developer-toolbar[data-narrow] .developer-open-log {
+  align-self: flex-end;
 }
 
 /* The filter field is the sessions page's search field (RAIL.md): ui on surface with a line edge that turns accent
@@ -18,10 +46,9 @@
   align-items: center;
   gap: var(--space-xs);
   box-sizing: border-box;
-  /* It takes all the width the count and Open diagnostic log leave, which is at least size-row-title-min wherever the
-     pane is wide enough. At the workbench's least width a long count and the button leave less: then the field gives
-     way rather than the button or the count being cut (docs/briefs/INBOX.md). */
-  min-width: 0;
+  /* It takes what the count leaves. Neither the count nor the button is ever cut: the field is the part that gives way,
+     down to its icon, and what is typed scrolls inside it. */
+  min-width: calc(var(--size-icon-sm) + var(--space-sm) + var(--space-sm) + var(--line-hairline) + var(--line-hairline));
   height: var(--size-control);
   padding-inline: var(--space-sm);
   color: var(--color-ink-faint);
@@ -101,12 +128,13 @@
 
 /* Open diagnostic log (docs/design/WORKBENCH.md, The developer pane): a quiet button, its label in ui-small and
    ink-muted, size-control high, radius-md, padded space-sm, with no edge (a transparent hairline, so keyboard focus can
-   draw one without moving anything). It sits space-sm after the field, or after the count while that shows. */
+   draw one without moving anything). */
 .developer-open-log {
   flex: none;
   box-sizing: border-box;
   height: var(--size-control);
-  margin-inline-start: var(--space-sm);
+  /* At the trailing edge, on the first row or the second. */
+  margin-inline-start: auto;
   padding: 0 var(--space-sm);
   color: var(--color-ink-muted);
   font-family: var(--type-ui-small-family);
