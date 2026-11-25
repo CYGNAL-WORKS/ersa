@@ -1308,6 +1308,30 @@ Reading…
 
 Ersa can't read the raw log. It's trying again.
 
+### `developer.filterLabel`
+
+Filter lines
+
+### `developer.filterCountDetail`
+
+{shown} of {total}
+
+### `developer.noMatchEmpty`
+
+No lines contain that text.
+
+### `developer.copyLineButton`
+
+Copy line
+
+### `developer.closeLineButton`
+
+Close line
+
+### `developer.cutNote`
+
+This line is {size}. Its first 256 KB are shown.
+
 ## `quit`
 
 ## `trust`

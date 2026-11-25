@@ -1,8 +1,9 @@
-import { Check, Copy, Square, SquareCheck } from "lucide-react";
-import { type ReactNode, memo, useMemo, useState } from "react";
+import { Square, SquareCheck } from "lucide-react";
+import { type ReactNode, memo, useMemo } from "react";
 import Markdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { t } from "../catalog";
+import { CopyButton } from "./CopyButton";
 import { Icon } from "./Icon";
 import "./AgentText.css";
 
@@ -147,7 +148,7 @@ export function CodeBlock({
   language,
   text,
   force,
-  copied: forceCopied,
+  copied,
 }: {
   language?: string;
   text: string;
@@ -156,38 +157,11 @@ export function CodeBlock({
   /** For the gallery: show Copy as it is just after copying. */
   copied?: boolean;
 }) {
-  const [copiedNow, setCopied] = useState(false);
-  const copied = copiedNow || forceCopied === true;
-  const label = copied ? t("transcript.markdown.copiedLabel") : t("transcript.markdown.copyCodeButton");
-  const copy = () => {
-    // A refused write leaves Copy as it was: it says "Copied" only once the code is on the clipboard.
-    navigator.clipboard.writeText(text).then(
-      () => setCopied(true),
-      () => {},
-    );
-  };
-  const reset = () => setCopied(false);
   return (
     <div className="code-block">
       <div className="code-block-head">
         <span className="code-block-language">{language}</span>
-        <button
-          type="button"
-          className="icon-button code-block-copy"
-          aria-label={label}
-          title={label}
-          data-force={force}
-          data-copied={copied || undefined}
-          onClick={copy}
-          onPointerLeave={reset}
-          onBlur={reset}
-        >
-          {/* Both icons are drawn, one over the other, so the change between them can crossfade. */}
-          <span className="code-block-copy-icons">
-            <Icon icon={Copy} size="icon-sm" />
-            <Icon icon={Check} size="icon-sm" />
-          </span>
-        </button>
+        <CopyButton text={text} label={t("transcript.markdown.copyCodeButton")} force={force} copied={copied} />
       </div>
       <pre className="code-block-code">
         <code>{text}</code>
