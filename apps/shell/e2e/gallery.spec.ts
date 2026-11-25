@@ -24,7 +24,7 @@ const components = [
   "Chip",
   "ContextRing",
   "Workbench",
-  "RawLogList",
+  "DeveloperPane",
   "ArchivedNote",
   "Composer",
   "Icon",
