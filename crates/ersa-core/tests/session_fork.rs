@@ -7,7 +7,7 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{ConversationEnd, OpenElsewhere, SessionConfig};
+use ersa_adapter::{ConversationEnd, OpenElsewhere};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter};
@@ -71,21 +71,6 @@ async fn settle(client: &mut Client, id: &str) {
 async fn without_a_record_of_its_own(fake: &FakeAdapter, original_backend_id: &str) {
     fork_started(fake).await;
     without_a_record_of_its_own_now(fake, original_backend_id);
-}
-
-/// How the backend of the fork of a session was started, once it has been.
-async fn fork_config(fake: &FakeAdapter) -> SessionConfig {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
-            return config.clone();
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork never started"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 /// The fake's id for the fork of the session whose id is `original`.
@@ -730,7 +715,7 @@ async fn a_forks_link_to_its_original_goes_once_it_has_a_record() {
         .as_str()
         .unwrap()
         .to_string();
-    let started = fork_config(&fake).await;
+    let started = fake.stats.started(2).await.remove(1);
     assert!(started.fork_of.is_some());
     fork_started(&fake).await;
 
@@ -952,9 +937,8 @@ async fn a_fork_of_an_isolated_session_gets_its_own_workspace_and_branch_at_its_
     assert!(made_folder.join("committed.txt").exists());
     assert!(!made_folder.join("uncommitted.txt").exists());
     assert!(folder.join("uncommitted.txt").exists());
-    fork_config(&fake).await;
     assert_eq!(
-        fake.stats.configs.lock().unwrap()[1].cwd,
+        fake.stats.started(2).await[1].cwd,
         made["path"].as_str().unwrap()
     );
 }
@@ -1014,7 +998,15 @@ async fn a_long_title_is_shortened_to_fit_with_its_mark() {
 
     // Core holds none of its own: the name goes to the backend.
     assert_eq!(fork["title"], Value::Null);
-    let name = fork_config(&fake).await.fork_of.unwrap().name.unwrap();
+    let name = fake
+        .stats
+        .started(2)
+        .await
+        .remove(1)
+        .fork_of
+        .unwrap()
+        .name
+        .unwrap();
     assert_eq!(name.chars().count(), 200);
     assert_eq!(name, format!("{} (fork)", "t".repeat(193)));
 }
