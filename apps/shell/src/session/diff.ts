@@ -9,10 +9,13 @@ export interface DiffLine {
   text: string;
 }
 
-/** One file's diff, and whether an edit to it is made at every occurrence of its text (R13). */
+/**
+ * One file's diff, and whether an edit to it is made at every occurrence of its text (R13). Its lines come in hunks,
+ * one per stretch of the file the call changes, in the order the call makes them, so the card can divide them.
+ */
 export interface FileDiff {
   path: string;
-  lines: DiffLine[];
+  hunks: DiffLine[][];
   everyOccurrence: boolean;
 }
 
@@ -53,7 +56,7 @@ export function fileDiffs(edits: readonly FileEdit[]): FileDiff[] {
   }
   return [...files].map(([path, file]) => ({
     path,
-    lines: file.changes.flatMap((c) => lineDiff(lines(c.old), lines(c.new))),
+    hunks: file.changes.map((c) => lineDiff(lines(c.old), lines(c.new))),
     everyOccurrence: file.everyOccurrence,
   }));
 }
@@ -63,7 +66,7 @@ export function diffCounts(diffs: readonly FileDiff[]): { added: number; removed
   let added = 0;
   let removed = 0;
   for (const diff of diffs) {
-    for (const line of diff.lines) {
+    for (const line of diff.hunks.flat()) {
       if (line.sign === "+") added++;
       else if (line.sign === "-") removed++;
     }

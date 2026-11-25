@@ -5,8 +5,10 @@ import { describe, expect, it } from "vitest";
 import type { FileEdit } from "../protocol/agent-events.gen";
 import { diffCounts, fileDiffs } from "./diff";
 
-/** A diff's lines as "+text", "-text" or " text", to read at a glance. */
-const shown = (edits: FileEdit[]) => fileDiffs(edits).map((d) => ({ path: d.path, lines: d.lines.map((l) => `${l.sign}${l.text}`) }));
+/** A diff's lines as "+text", "-text" or " text", to read at a glance, its hunks run together. */
+const shown = (edits: FileEdit[]) => fileDiffs(edits).map((d) => ({ path: d.path, lines: d.hunks.flat().map((l) => `${l.sign}${l.text}`) }));
+/** Each hunk of each file's diff, its lines read as `shown` reads them. */
+const hunks = (edits: FileEdit[]) => fileDiffs(edits).map((d) => d.hunks.map((h) => h.map((l) => `${l.sign}${l.text}`)));
 
 describe("a file's diff", () => {
   // verifies: FLOW-READ-TRANSCRIPT-R09
@@ -37,6 +39,26 @@ describe("a file's diff", () => {
       { path: "a.ts", old_text: "second", new_text: "Second" },
     ];
     expect(shown(edits)).toEqual([{ path: "a.ts", lines: ["-first", "+First", "-second", "+Second"] }]);
+  });
+
+  // Issue #483: each stretch of the file a call changes is a hunk of its own, so the card can divide them.
+  it("keeps each stretch of a file the call changes as a hunk of its own, and edits that change one stretch as one", () => {
+    expect(
+      hunks([
+        { path: "a.ts", old_text: "first", new_text: "First" },
+        { path: "b.ts", old_text: "x", new_text: "y" },
+        { path: "a.ts", old_text: "second", new_text: "Second" },
+        { path: "a.ts", old_text: "First", new_text: "FIRST" },
+      ]),
+    ).toEqual([
+      [
+        ["-first", "+FIRST"],
+        ["-second", "+Second"],
+      ],
+      [["-x", "+y"]],
+    ]);
+    // A file written whole is one hunk, whatever was changed before it.
+    expect(hunks([{ path: "a.ts", old_text: "a", new_text: "b" }, { path: "a.ts", new_text: "c\nd" }])).toEqual([[["+c", "+d"]]]);
   });
 
   // verifies: FLOW-READ-TRANSCRIPT-R09

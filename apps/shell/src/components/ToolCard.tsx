@@ -279,15 +279,20 @@ function DiffChange({ diffs, item, workspace }: { diffs: readonly FileDiff[]; it
             {file.everyOccurrence && <p className="diff-note">{t("transcript.diff.everyOccurrenceLabel")}</p>}
             <div className="diff-scroll">
               <div className="diff-lines mono">
-                {file.lines.map((line, index) => (
-                  // A line's place is what tells it apart (the same text can be removed and added), and lines never
-                  // reorder.
+                {/* A place is what tells a hunk or a line apart (the same text can be removed and added), and neither
+                    ever reorders. Each hunk after the first is divided from the one before it. */}
+                {file.hunks.map((hunk, at) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: see above
-                  <div key={index} className="diff-line" data-sign={signName[line.sign]}>
-                    <span className="diff-sign">{signShown[line.sign]}</span>
-                    <span className="diff-text">
-                      <Revealed text={line.text} />
-                    </span>
+                  <div key={at} className="diff-hunk">
+                    {hunk.map((line, index) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: see above
+                      <div key={index} className="diff-line" data-sign={signName[line.sign]}>
+                        <span className="diff-sign">{signShown[line.sign]}</span>
+                        <span className="diff-text">
+                          <Revealed text={line.text} />
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
