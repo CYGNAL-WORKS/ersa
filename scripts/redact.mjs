@@ -3,13 +3,15 @@
 //   node scripts/redact.mjs <file>...   rewrite files in place (used to scrub old fixtures)
 //
 // Recordings are captured under a real login: the `initialize` response's
-// `account` object carries an email and organization, paths carry the Windows
-// user name, and the working directory, the scratchpad and the command line
+// `account` object carries an email, organization and the plan's name, every
+// `rate_limit_event` carries how much of each usage window the login has
+// used, a synced plugin's path carries a pair of account ids, paths carry the
+// Windows user name, and the working directory, the scratchpad and the command line
 // carry the repository's own location on the owner's disk. Every recorder
 // passes all text through `redact` first.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +20,9 @@ export const PLACEHOLDER_EMAIL = "user@example.com";
 export const PLACEHOLDER_ORG = "Example Org";
 export const PLACEHOLDER_HOME = "C:/Users/user";
 export const PLACEHOLDER_UUID = "00000000-0000-0000-0000-000000000000";
+export const PLACEHOLDER_PLAN = "Example Plan";
+// A usage window's share, from 0 to 1: a number, as the recorded one is.
+export const PLACEHOLDER_USAGE = 0.5;
 // The repository, as a path and as Claude Code munges one (every character
 // other than an ASCII letter or digit becomes `-`).
 export const PLACEHOLDER_REPO = "C:/Users/user/repo";
@@ -33,6 +38,59 @@ export const HOME_RE = /(?:[A-Za-z]:)?(?:\\+|\/)(Users|home)(?:\\+|\/)(?!Public\
 // Claude Code also names project directories after the path with every
 // separator turned into a dash: `C--Users-<name>-AppData-...`.
 export const MUNGED_HOME_RE = /\b([A-Za-z])--(Users|home)-(?!Public-)([^-\\/"'`\s]+)/gi;
+
+// The account details a recording carries as values, each as a JSON field or
+// a path segment. A JSON-escaped spelling (`\"key\":`) is matched too. The
+// first group is what stays; the second, where there is one, is the value.
+const PLAN_RE = /(\\?"subscriptionType\\?"\s*:\s*\\?")([^"\\]*)(?=\\?")/g;
+const USAGE_RE = /(\\?"utilization\\?"\s*:\s*)(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+// `plugins/synced/<id>_<id>/<plugin>`: the ids name the account the plugin
+// was synced from.
+const SYNCED_RE = /(synced(?:\\+|\/))([A-Za-z0-9-]+_[A-Za-z0-9-]+)/g;
+const PLACEHOLDER_SYNCED = `${PLACEHOLDER_UUID}_${PLACEHOLDER_UUID}`;
+const ACCOUNT_RULES = [
+  { field: "subscriptionType", re: PLAN_RE, placeholder: PLACEHOLDER_PLAN },
+  { field: "utilization", re: USAGE_RE, placeholder: String(PLACEHOLDER_USAGE) },
+  { field: "synced plugin ids", re: SYNCED_RE, placeholder: PLACEHOLDER_SYNCED },
+];
+
+// Each account detail `text` still carries as recorded: its 1-based line and
+// the field's name. Never the value, so a report of it leaks nothing.
+export function accountDetails(text) {
+  const found = [];
+  text.split("\n").forEach((line, i) => {
+    for (const { field, re, placeholder } of ACCOUNT_RULES) {
+      for (const m of line.matchAll(re)) if (m[2] !== placeholder) found.push({ line: i + 1, field });
+    }
+  });
+  return found;
+}
+
+// For a recorder, after it writes: names each file, line and field that still
+// carries an account detail, and fails the run, so nothing reaches a commit
+// unnoticed. The value itself is never printed.
+export function checkWritten(files) {
+  for (const file of files) {
+    let text;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue; // a file this run did not write
+    }
+    for (const { line, field } of accountDetails(text)) {
+      console.error(`${file}:${line}: ${field} still carries the recorded value; redact it before committing`);
+      process.exitCode = 1;
+    }
+  }
+}
+
+// The number a new recording takes in its version folder: one past the
+// highest there, two digits at least. Counting the files instead would give a
+// number already taken once a fixture is removed or the numbers have a gap.
+export function nextFixtureNumber(dir) {
+  const taken = readdirSync(dir).map((f) => /^(\d{2,})-.*\.jsonl$/.exec(f)).filter(Boolean).map((m) => Number(m[1]));
+  return String(Math.max(-1, ...taken) + 1).padStart(2, "0");
+}
 
 // This checkout, and the repository on this machine: the main checkout, which
 // a worktree of it sits under, both with forward slashes. Recordings are made
@@ -67,6 +125,11 @@ export function redact(text) {
     .replace(/("organization(?:Name)?"\s*:\s*)"(?:[^"\\]|\\.)*"/g, `$1"${PLACEHOLDER_ORG}"`)
     // The account's organization id, which session records carry.
     .replace(/("organizationUuid"\s*:\s*)"[^"]*"/g, `$1"${PLACEHOLDER_UUID}"`)
+    // The plan's name, the usage figures and a synced plugin's ids, each to a
+    // fixed placeholder of the same type.
+    .replace(PLAN_RE, `$1${PLACEHOLDER_PLAN}`)
+    .replace(USAGE_RE, `$1${PLACEHOLDER_USAGE}`)
+    .replace(SYNCED_RE, `$1${PLACEHOLDER_SYNCED}`)
     .replace(EMAIL_RE, PLACEHOLDER_EMAIL)
     // Windows homes become the placeholder; Unix ones keep their shape.
     .replace(HOME_RE, (_m, dir) => (dir === "home" ? "/home/user" : PLACEHOLDER_HOME))
