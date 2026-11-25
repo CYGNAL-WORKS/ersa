@@ -122,8 +122,7 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
           {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
         </div>
         {goes && <Loss goes={goes} />}
-        {/* Why the branch is kept, unless it stays because another session uses it. */}
-        {goes && goes.kind !== "filesStay" && goes.branchKept && !(goes.kind === "putAway" && goes.shared) && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
+        {goes && goes.kind !== "filesStay" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
         {failed && (
           <div className="delete-question-failed" role="alert">
             <p className="problem">{t("rail.delete.failedError")}</p>

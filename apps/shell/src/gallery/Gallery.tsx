@@ -998,6 +998,7 @@ const deleteStates: [string, Exclude<DeletePhase, { kind: "deleted" }>][] = [
   // FLOW-ARCHIVE-DELETE-SESSION-R13: a session whose workspace is put away has no folder left to delete.
   ["Folder put away, branch goes", { kind: "asking", changed: false, goes: counted({}, { ...deleteWorkspace, state: "put_away" }) }],
   ["Folder put away, branch kept", { kind: "asking", changed: false, goes: counted({ unshared: 2 }, { ...deleteWorkspace, state: "put_away" }) }],
+  ["Folder put away, another session there", { kind: "asking", changed: false, goes: counted({ unshared: 2, sessions: 2 }, { ...deleteWorkspace, state: "put_away" }) }],
   ["Git lost the workspace's record", { kind: "asking", changed: false, goes: counted({ uncommitted: 2, unshared: 1, unrecorded: true }) }],
   ["Asked again", { kind: "asking", changed: true, goes: counted({ uncommitted: 4 }) }],
   ["Reading what would be lost", { kind: "reading" }],

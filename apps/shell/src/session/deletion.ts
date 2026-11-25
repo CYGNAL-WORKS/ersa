@@ -21,12 +21,16 @@ export function deleteUnavailable(session: Session, offline: boolean): string | 
 
 /** What goes with the session's conversation, as the question says it (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
 export type WhatGoes =
-  /** The session's workspace is the project's own folder, or another session uses it: its files stay where they are. */
+  /**
+   * The session's workspace is the project's own folder, or a folder another session uses: its files stay where they
+   * are. Never a workspace that is put away, which has no folder for them to stay in.
+   */
   | { kind: "filesStay"; path: string }
   /**
-   * The session is alone in a workspace that is put away: no folder is left to delete, and its branch goes unless it
-   * is kept (FLOW-ARCHIVE-DELETE-SESSION-R13). Core counts nothing lost with the folder (PROTO-CORE-API-R123).
-   * `shared`: another session uses the workspace, so the delete keeps it and its branch (R05).
+   * The session's workspace is put away: no folder is left to delete (FLOW-ARCHIVE-DELETE-SESSION-R13), and Core counts
+   * nothing lost with it (PROTO-CORE-API-R123). Alone there, its branch goes unless `branchKept`: it holds commits
+   * that exist nowhere else. `shared`: another session uses the workspace, so the delete keeps it and its branch (R05),
+   * and `branchKept` is false, since the branch isn't kept for its commits.
    */
   | { kind: "putAway"; branch: string; branchKept: boolean; shared: boolean }
   /** The session is alone in an isolated workspace: its folder goes, and its branch unless the branch is kept. */
@@ -57,7 +61,7 @@ export function whatGoes(workspace: Workspace, changes: WorkspaceChanges | undef
   const branchKept = changes.unshared - changes.stranded > 0;
   // A workspace that is put away has no folder, so the question never says its files stay there, even when another
   // session uses it.
-  if (workspace.state === "put_away") return { kind: "putAway", branch: workspace.vcs_ref, branchKept, shared: others > 0 };
+  if (workspace.state === "put_away") return { kind: "putAway", branch: workspace.vcs_ref, branchKept: others === 0 && branchKept, shared: others > 0 };
   if (others > 0) return { kind: "filesStay", path: workspace.path };
   return {
     kind: "folderGoes",
