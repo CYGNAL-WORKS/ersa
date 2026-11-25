@@ -99,7 +99,7 @@ async fn resuming_puts_the_workspace_back_on_its_branch_at_its_tip() {
     let path = folder(&workspace);
     assert_eq!(current_branch(&path), branch(&workspace));
     assert_eq!(head(&path), moved, "at the branch's tip");
-    assert_eq!(starts(&s), 2);
+    assert_eq!(s.stats.started(2).await.len(), 2);
     assert_eq!(last_started_in(&s), workspace["path"].as_str().unwrap());
     assert_eq!(session_row(&mut s, &session).await["archived"], false);
     // Nothing of a put-away is stored once it is back.
@@ -125,7 +125,7 @@ async fn a_workspace_on_no_branch_comes_back_on_its_commit() {
     assert_back(&mut s, &workspace).await;
     assert_eq!(current_branch(&path), "", "on no branch");
     assert_eq!(head(&path), detached);
-    assert_eq!(starts(&s), 2);
+    assert_eq!(s.stats.started(2).await.len(), 2);
 }
 
 /// What a put-away left at the path goes before the folder is made again:
@@ -163,7 +163,7 @@ async fn what_a_put_away_left_at_the_path_is_removed_first() {
     assert_back(&mut s, &workspace).await;
     assert!(!path.join("left.txt").exists(), "what was left is gone");
     assert_eq!(current_branch(&path), branch(&workspace));
-    assert_eq!(starts(&s), 4);
+    assert_eq!(s.stats.started(4).await.len(), 4);
 }
 
 /// A message with an attachment to a session whose workspace is put away
@@ -431,7 +431,7 @@ async fn a_put_back_under_way_holds_its_workspace() {
     assert_back(&mut s, &workspace).await;
     let adds = git.changes().iter().filter(|c| *c == "add").count();
     assert_eq!(adds, 2, "made once, put back once");
-    assert_eq!(starts(&s), 4);
+    assert_eq!(s.stats.started(4).await.len(), 4);
 }
 
 /// A try at the folder that a put-back gave up on holds the workspace too,
@@ -591,7 +591,7 @@ async fn a_resume_or_send_during_a_put_away_waits_for_it() {
         let answer = s.client.response(asked).await;
         assert!(answer["result"].is_object(), "{method}: {answer:#}");
         assert_back(&mut s, &workspace).await;
-        assert_eq!(starts(&s), 2, "{method}");
+        assert_eq!(s.stats.started(2).await.len(), 2, "{method}");
     }
 }
 

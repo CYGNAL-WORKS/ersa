@@ -15,7 +15,7 @@ No board on the design canvas draws these, and Claude Desktop has no developer p
 
 ## The developer pane
 
-The pane's name is "Developer". Beneath the head, from top to bottom: the toolbar, the list, and the detail when a row is selected.
+The pane's name is "Developer". Beneath the head, from top to bottom: the toolbar, the list, and the detail while a line is selected.
 
 - **The toolbar** is a row padded `space-sm` by `space-md`, its parts `space-sm` apart: the filter field, which takes the width left over and keeps at least `size-row-title-min`; the count, while the field holds text; then Open diagnostic log.
 - **The filter field** is the sessions page's search field (`RAIL.md`), with a filter icon at `size-icon-sm` in `ink-faint` before the words. Its placeholder and accessible name are "Filter lines". Escape empties it.
@@ -27,7 +27,7 @@ The pane's name is "Developer". Beneath the head, from top to bottom: the toolba
 
 - **A row** is `size-log-row` high, padded `space-md` at the sides, its parts `space-sm` apart, edge to edge with no radius and no rule between rows. From the leading edge: the time as 24-hour `HH:MM:SS.mmm` in `ui-small`, `ink-faint` and tabular figures; the direction mark; the line's start in `mono` and `ink`, on one line, cut with an ellipsis at its end. A row draws at most the line's first 2,000 characters, counted as the platform counts a string's length, in UTF-16 code units. A character that takes two units is never cut in half; one the reader sees as a single character but that is made of several, such as an emoji joined from others or a letter with a combining mark, may be.
 - **The direction mark** is an arrow at `size-icon-xs` in `ink-muted`: pointing down and left for a line from the backend, up and right for a line to it. Shape carries the meaning, not color. Assistive technology hears "From {backend}" or "To {backend}", with the backend's own label.
-- **Under the pointer** a row takes `material-hover`. **Selected**, it takes `material-open-session`, the rail's quiet highlight for the open session, the same with keyboard focus as without.
+- **Under the pointer** a row takes `material-hover`. **Selected**, it takes `material-open-session`, the rail's quiet highlight for the open session, the same with keyboard focus as without. A selected line the list doesn't show, left out by the filter or no longer held, has no row to highlight, and its detail stays (FLOW-READ-RAW-LOG-R21).
 - **With keyboard focus** the list has an `ink` hairline edge, drawn inside its area, as a control without an edge does (`DESIGN.md`, Pointer and press), whether or not a row is selected. The mark is the list's and never a row's: the selected row can be out of view, scrolled away from or left out by the filter, and the list's edge can't.
 - **Earlier lines are gone**: the first row reads "Earlier lines are no longer held." in `ui-small` and `ink-faint`, centered, and can't be selected.
 - **Jump to latest** floats over the list's foot, centered, `space-md` above it: a pill `size-control` high on `surface-raised` with a `line` edge and `radius-pill`, padded `space-md` at the sides, holding an arrow-down icon at `size-icon-sm`, "Jump to latest" in `ui-small` and `ink`, and, once a line has arrived since the user scrolled away, the count of new lines after it in `ink-muted` and tabular figures ("3 new"). It never reads "0 new". Its accessible name starts with the words it shows: "Jump to latest", then "Jump to latest, 3 new lines". It casts no shadow: it is a control inside its pane, not a transient layer that opens over the page, so it takes no `stack` token either (`DESIGN.md`, Elevation & Depth). It is a control with an edge: under the pointer its edge turns `ink-faint` and it takes `material-tile`, pressed it sinks to `canvas` and its edge turns `ink-muted`, and with keyboard focus its edge turns `ink`. It fades in and out over `motion-quick` with `motion-ease-out`.
@@ -36,9 +36,9 @@ The pane's name is "Developer". Beneath the head, from top to bottom: the toolba
 
 ### The detail
 
-- **The detail** takes the lower half of the pane beneath the toolbar, divided from the list by a `line` hairline, and grows in over `motion-settle` with `motion-ease-out`; the list keeps the selected row in view.
+- **The detail** takes the lower half of the pane beneath the toolbar, divided from the list by a `line` hairline, and grows in over `motion-settle` with `motion-ease-out`; as it grows in, the list brings the selected row into view. It stays while its line is selected, whether or not the list shows that line, and says nothing more then: its head still gives the line's direction, time and size.
 - **Its head** is a row `size-control` high, padded `space-xs` by `space-md`: "From {backend}" or "To {backend}", the time, and the line's size as `CONTENT.md` writes a number with its unit (1.2 KB, 12 MB), in `ui-small` and `ink-muted`, `space-sm` apart. At the trailing edge are Copy, the transcript's Copy (`TRANSCRIPT.md`) with the tooltip and accessible name "Copy line", then an icon button with an x icon named "Close line", which clears the selection.
-- **The line** is `mono` in `ink`, padded `space-md`, its lines kept and wrapping wherever they must, so the detail scrolls down and never sideways.
+- **The line** is `mono` in `ink`, padded `space-md`, its lines kept and wrapping wherever they must, so the detail scrolls down and never sideways. The scrolling text takes keyboard focus, so it scrolls from the keyboard, and then has an `ink` hairline edge drawn inside it, as the list does.
 - **A cut line** says above its text, in `ui-small` and `ink-muted`: "This line is {size}. Its first 256 KB are shown."
 
 ## Copy
