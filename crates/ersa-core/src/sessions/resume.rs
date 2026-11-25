@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use ersa_adapter::ForkOf;
+use ersa_protocol::core_api::{SendPhase, SendProgressParams};
 use serde_json::Value;
 
 use super::*;
@@ -113,9 +114,15 @@ impl SessionManager {
         let row = handle.row()?;
         // A put-away workspace is put back first: one being put away, or
         // back for another session, is waited for, not refused as busy
-        // (PROTO-CORE-API-R132). A send has put it back already.
+        // (PROTO-CORE-API-R132). A send has put it back already, and said
+        // so itself. A resume says so once, as it begins to put back or to
+        // wait (PROTO-CORE-API-R146); `report` withdraws that line, if no
+        // connection has taken it yet, however this returns, so it never
+        // arrives after the resume's answer.
+        let report = ResumeReport::new(&self.tiles, &handle.id);
         if folder == FolderChecked::No {
-            self.put_back(handle, &how, || {}, None).await?;
+            let there_is = report.putting_back();
+            self.put_back(handle, &how, there_is, None).await?;
         }
         self.refuse_if_claimed(&row.workspace_id)?;
         if folder == FolderChecked::No {
@@ -348,5 +355,70 @@ pub(super) async fn check_folder(handle: &Handle) -> Result<(), SessionError> {
         None => Err(SessionError::InvalidState(format!(
             "the session's folder {cwd} did not answer within {FOLDER_CHECK:?}"
         ))),
+    }
+}
+
+/// The one `session.send_progress` a `session.resume` sends, with phase
+/// `putting_back`, as it begins to put its session's workspace back or to
+/// wait for a put-away or another put-back of it (PROTO-CORE-API-R146).
+/// Dropped as the resume answers, it withdraws the line from every
+/// connection that has not taken it, so none arrives after the answer.
+struct ResumeReport {
+    tiles: Arc<TileHub>,
+    session: String,
+    sent: Arc<Mutex<Reported>>,
+}
+
+/// Where the resume's report is: shared with the put-back's own task,
+/// which sends it.
+enum Reported {
+    NotYet,
+    Sent(Arc<String>),
+    /// The resume has answered, or its request went away: a put-back that
+    /// begins to wait only now says nothing.
+    Over,
+}
+
+impl ResumeReport {
+    fn new(tiles: &Arc<TileHub>, session: &str) -> ResumeReport {
+        ResumeReport {
+            tiles: Arc::clone(tiles),
+            session: session.to_string(),
+            sent: Arc::new(Mutex::new(Reported::NotYet)),
+        }
+    }
+
+    /// What the put-back calls once there is something to put back or to
+    /// wait for: sends the report, once.
+    fn putting_back(&self) -> impl FnOnce() + Send + 'static {
+        let tiles = Arc::clone(&self.tiles);
+        let session = self.session.clone();
+        let sent = Arc::clone(&self.sent);
+        move || {
+            // Under the lock the withdrawal takes, so the two never cross.
+            let mut sent = lock(&sent);
+            if !matches!(*sent, Reported::NotYet) {
+                return;
+            }
+            let progress = SendProgressParams {
+                session_id: session.clone(),
+                phase: SendPhase::PuttingBack,
+                copied_bytes: None,
+                total_bytes: None,
+            };
+            let method = ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS;
+            let line = notification_line(method, &progress);
+            *sent = Reported::Sent(tiles.publish(&session, Latest::SendProgress, line));
+        }
+    }
+}
+
+impl Drop for ResumeReport {
+    fn drop(&mut self) {
+        let mut sent = lock(&self.sent);
+        if let Reported::Sent(line) = std::mem::replace(&mut *sent, Reported::Over) {
+            self.tiles
+                .withdraw(&self.session, Latest::SendProgress, &line);
+        }
     }
 }

@@ -3458,7 +3458,22 @@ impl TileHub {
         }
     }
 
-    fn publish(&self, session_id: &str, kind: Latest, line: String) {
+    /// Drops `line`, which [`TileHub::publish`] returned, from every
+    /// connection that has not taken it yet; a newer line of the session
+    /// that took its place stays.
+    fn withdraw(&self, session_id: &str, kind: Latest, line: &Arc<String>) {
+        let key = (session_id.to_string(), kind);
+        for inbox in lock(&self.inboxes).iter().filter_map(Weak::upgrade) {
+            let mut latest = lock(&inbox.latest);
+            if latest.get(&key).is_some_and(|kept| Arc::ptr_eq(kept, line)) {
+                latest.remove(&key);
+            }
+        }
+    }
+
+    /// Hands `line` to every connection, in place of any line of the same
+    /// session and kind not yet taken; returns it, for [`TileHub::withdraw`].
+    fn publish(&self, session_id: &str, kind: Latest, line: String) -> Arc<String> {
         let line = Arc::new(line);
         let mut inboxes = lock(&self.inboxes);
         // A connection that has gone dropped its feed; forget its inbox.
@@ -3471,6 +3486,7 @@ impl TileHub {
             inbox.ready.notify_one();
             true
         });
+        line
     }
 }
 
@@ -3487,18 +3503,26 @@ pub struct TileFeed {
 }
 
 impl TileFeed {
-    /// The tile lines that changed since the last call, one per session;
-    /// waits until there is at least one.
-    pub async fn next(&mut self) -> Vec<Arc<String>> {
+    /// Waits until at least one line is waiting to be taken.
+    pub async fn ready(&self) {
         loop {
-            {
-                let mut latest = lock(&self.inbox.latest);
-                if !latest.is_empty() {
-                    return latest.drain().map(|(_, line)| line).collect();
-                }
+            if !lock(&self.inbox.latest).is_empty() {
+                return;
             }
+            // A publish stores a permit when nobody waits, so a line put in
+            // between the look and this wait still wakes it.
             self.inbox.ready.notified().await;
         }
+    }
+
+    /// Takes one waiting line, if there is one, without waiting. The caller
+    /// takes it only once it has room to queue it at once, so a line is
+    /// either still here, where [`TileHub::withdraw`] reaches it, or
+    /// already queued on the connection ahead of whatever is queued after.
+    pub fn take(&mut self) -> Option<Arc<String>> {
+        let mut latest = lock(&self.inbox.latest);
+        let key = latest.keys().next()?.clone();
+        latest.remove(&key)
     }
 }
 
@@ -3609,6 +3633,29 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A withdrawn line that no connection has taken is gone from every
+    /// connection; a newer line of the session that took its place stays,
+    /// and a line already taken is not withdrawn from the taker.
+    // verifies: PROTO-CORE-API-R146
+    #[test]
+    fn a_withdrawn_line_goes_only_where_it_was_not_taken_or_replaced() {
+        let hub = TileHub::default();
+        let (mut first, mut second) = (hub.feed(), hub.feed());
+        let report = hub.publish("s1", Latest::SendProgress, "report".into());
+        hub.withdraw("s1", Latest::SendProgress, &report);
+        assert_eq!(first.take(), None);
+        assert_eq!(second.take(), None);
+
+        let report = hub.publish("s1", Latest::SendProgress, "report".into());
+        let taken = first.take();
+        let newer = hub.publish("s1", Latest::SendProgress, "newer".into());
+        hub.withdraw("s1", Latest::SendProgress, &report);
+        assert_eq!(taken.as_deref().map(String::as_str), Some("report"));
+        assert_eq!(first.take().as_deref().map(String::as_str), Some("newer"));
+        assert_eq!(second.take().as_deref().map(String::as_str), Some("newer"));
+        drop(newer);
+    }
 
     /// A record read that corrects the date created asks for a tile; the
     /// same read again, with nothing changed, asks for none.
