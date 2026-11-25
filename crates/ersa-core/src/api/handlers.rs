@@ -15,7 +15,7 @@ use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
 
 use super::{After, Answer, ApiError, ConnectionState, lock};
-use crate::admission::{self, Command, Refusal, Replaced, Report};
+use crate::admission::{self, Command, Refusal, Replaced, Report, end_held};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::platform;
 use crate::settings;
@@ -788,16 +788,7 @@ pub(super) struct RepositoryTurns<'a> {
 impl workspace::Worktrees for RepositoryTurns<'_> {
     async fn turn(&self) -> Result<Box<dyn Send>, VcsError> {
         let wait = self.core.config.worktree_turn_wait;
-        match self.core.admission.worktrees(self.project, wait).await {
-            Ok(under_way) => Ok(Box::new(under_way)),
-            Err(Refusal::GaveUp) => Err(VcsError::WorktreesBusy),
-            // Only a project that is gone; nothing that changes worktrees
-            // runs then, since a project with workspaces is not removed.
-            Err(refusal) => Err(VcsError::Failed {
-                message: format!("the project's worktrees cannot be changed: {refusal:?}"),
-                stderr: String::new(),
-            }),
-        }
+        workspace::project_turn(&self.core.admission, self.project, wait).await
     }
 }
 
@@ -957,18 +948,6 @@ pub(super) async fn workspace_remove(
     core.sessions.forget_found(quiet).await;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
-}
-
-/// Ends a removal whose tries at the folder shared it, with `report`. A try
-/// given up on whose thread has not returned still holds it: then the
-/// removal ends when that thread lets go, which admission takes as a failed
-/// removal, as `report` then is (a try that ran out fails the removal), so
-/// the workspace stays held until then (PROTO-CORE-API-R107).
-pub(super) fn end_held(removing: Arc<admission::UnderWay>, report: Report) {
-    match Arc::try_unwrap(removing) {
-        Ok(removing) => removing.end(report),
-        Err(still_held) => drop(still_held),
-    }
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by
