@@ -800,9 +800,49 @@ const signedOut = (waiting = false): Record<string, BackendInfo[]> => ({
 });
 /** What this window knows of Claude Code's sign-in on the local host. */
 const signInSaid = (local: SignInLocal): SignIns => ({ [signInKey("local", "claude-code")]: local });
-const signInNote = (state: NoteState, more: { focal?: boolean; force?: "hover" | "focus" | "pressed" } = {}) => (
+const signInNote = (state: NoteState, more: { focal?: boolean; force?: "hover" | "focus" | "pressed"; place?: "session" } = {}) => (
   <SignInNote label="Claude Code" state={state} onSignIn={() => {}} onCancel={() => {}} {...more} />
 );
+
+// FLOW-SIGN-IN-R16, R17: a session whose latest message failed as not signed in.
+const notSignedIn: Event[] = [
+  ...twoTurns,
+  { type: "user.message", origin: "human", text: "Run the tests again." },
+  { type: "error", code: "authentication_failed", message: "Not logged in · Please run /login", recoverable: true, action: "log_in" },
+  { type: "session.state", state: "idle" },
+];
+
+/**
+ * A session's stage, its transcript above its composer, at a stage's height (docs/design/COMPOSER.md, The sign-in
+ * note, under a session). The note comes and goes on a `gallery-note` event dispatched on the stage, so the gallery's
+ * checks can watch the box keep its place and the transcript keep its end in view as the note arrives.
+ */
+function SessionStage({ noted: initial }: { noted: boolean }) {
+  const [noted, setNoted] = useState(initial);
+  const [stage, setStage] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!stage) return;
+    const toggle = () => setNoted((was) => !was);
+    stage.addEventListener("gallery-note", toggle);
+    return () => stage.removeEventListener("gallery-note", toggle);
+  }, [stage]);
+  // Drawn once, so the note coming and going leaves the transcript as it is, as when a sign-in ends: only its area
+  // changes, and it keeps its end in view by itself.
+  const [transcript] = useState(() => (
+    <Transcript title="Fix the flaky reconnect test" view={sessionView(notSignedIn)} onDecide={() => {}} onAnswer={() => {}} onRetry={() => {}} now={transcriptNow} backend="Claude Code" />
+  ));
+  return (
+    <div ref={setStage} className="stage gallery-stage">
+      {transcript}
+      <Composer
+        autoFocus={false}
+        onSend={async () => false}
+        note={noted ? signInNote({ kind: "signedOut" }, { place: "session" }) : undefined}
+        controls={sessionControls({ changeable: true })}
+      />
+    </div>
+  );
+}
 
 const newSession = {
   hosts: [hello.host],
@@ -1755,6 +1795,8 @@ const entries: Entry[] = [
     states: [
       ["Signed out", signInNote({ kind: "signedOut" })],
       ["Signed out, holding the focal glow", signInNote({ kind: "signedOut" }, { focal: true })],
+      // Under a session whose message failed as not signed in (FLOW-SIGN-IN-R17): its own words.
+      ["Signed out, under a session", signInNote({ kind: "signedOut" }, { place: "session" })],
       ["Sign in under the pointer", signInNote({ kind: "signedOut" }, { force: "hover" })],
       ["Sign in pressed", signInNote({ kind: "signedOut" }, { force: "pressed" })],
       ["Sign in, keyboard focus", signInNote({ kind: "signedOut" }, { force: "focus" })],
@@ -1827,6 +1869,23 @@ const entries: Entry[] = [
           />,
         ),
       ],
+      // FLOW-SIGN-IN-R17, R18: the sign-in note at the top of the column, the status line saying what it says beneath it.
+      [
+        "Under a running session, not signed in, a change refused",
+        <Composer
+          autoFocus={false}
+          onSend={async () => false}
+          note={signInNote({ kind: "signedOut" }, { place: "session" })}
+          refusedChange="Ersa can't change the effort. The model takes no effort high."
+          controls={sessionControls({ changeable: true })}
+        />,
+      ],
+      [
+        "Under a running session, signing in",
+        <Composer autoFocus={false} onSend={async () => false} note={signInNote({ kind: "waiting" }, { place: "session" })} controls={sessionControls({ changeable: true })} />,
+      ],
+      // The note takes room at the top of the composer's column; the transcript above gives it up and keeps its end in view.
+      ["A session's stage, not signed in", <SessionStage noted />],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
       ["Send under the pointer", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="hover" />],
       ["Send pressed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="pressed" />],
