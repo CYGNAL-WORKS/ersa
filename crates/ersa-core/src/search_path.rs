@@ -64,10 +64,14 @@ pub fn compose(
     for value in stored_paths {
         let filled = fill(value, stored, own, 0);
         for folder in std::env::split_paths(&filled) {
-            let key = folder_key(&folder);
             // An empty entry, a repeat, or a folder the host could not
-            // write in a path (a stray quote) is left out.
-            if key.is_empty() || seen.contains(&key) || std::env::join_paths([&folder]).is_err() {
+            // write in a path (a stray quote) is left out. Empty is asked
+            // first: on Unix the key of an empty entry is the root, `/`.
+            if folder.to_string_lossy().trim().is_empty() {
+                continue;
+            }
+            let key = folder_key(&folder);
+            if seen.contains(&key) || std::env::join_paths([&folder]).is_err() {
                 continue;
             }
             seen.push(key);
