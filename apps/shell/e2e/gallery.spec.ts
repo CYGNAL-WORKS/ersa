@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 // Every component section in the gallery, photographed in both themes. Each is
 // photographed on a page showing it alone, so its baseline depends only on it.
@@ -728,4 +728,67 @@ test("a heading's trust note starts at its name, and an expanded trusted heading
     expect(await statusShown(theme, "Saving trust"), `expanded and trusted in ${theme}`).toBe(false);
     expect(await statusShown(theme, "Collapsed"), `collapsed in ${theme}`).toBe(true);
   }
+});
+
+// The sign-in note on the new-session screen (docs/design/COMPOSER.md, The sign-in note), in a stage's size: with
+// room, the box and the session controls keep their place whether the note shows or not and however tall its words
+// are, and the wordmark stays space-xl above the note; in Ersa's smallest window (640 by 400, less the rail) the
+// screen scrolls, so the session controls stay in reach.
+const RAIL = 288;
+/** A NewSessionScreen scene's screen, its specimen given a stage's size and clipped to it, as the window's stage is. */
+async function screenIn(page: Page, scene: string, width: number, height: number) {
+  const figure = page.locator('[data-theme="light"] [data-component="NewSessionScreen"] figure').filter({
+    has: page.getByText(scene, { exact: true }),
+  });
+  const section = figure.locator(".new-session");
+  await section.evaluate(
+    (el, size) => {
+      const stage = el.parentElement as HTMLElement;
+      Object.assign(stage.style, { display: "flex", flexDirection: "column", width: `${size.width}px`, height: `${size.height}px`, overflow: "hidden" });
+    },
+    { width, height },
+  );
+  return section;
+}
+
+test("the sign-in note leaves the box and the session controls in place, and the wordmark clear above it", async ({ page }) => {
+  await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
+  const scenes = ["Ready, at the defaults", "Backend signed out, the only one", "Signing in, waiting in the browser", "Sign-in didn't finish"];
+  const places: number[] = [];
+  for (const scene of scenes) {
+    const section = await screenIn(page, scene, 800, 600);
+    // Read once the note's entrance has finished.
+    await page.waitForTimeout(500);
+    const place = await section.evaluate((el) => {
+      const top = el.getBoundingClientRect().top;
+      const box = el.querySelector(".composer-box")!.getBoundingClientRect().top - top;
+      const controls = el.querySelector(".session-controls")!.getBoundingClientRect().top - top;
+      const note = el.querySelector(".sign-in-note")?.getBoundingClientRect();
+      const wordmark = el.querySelector(".new-session-wordmark")!.getBoundingClientRect();
+      const probe = el.appendChild(document.createElement("div"));
+      probe.style.height = "var(--space-xl)";
+      const xl = probe.getBoundingClientRect().height;
+      probe.remove();
+      return { box, controls, clear: note ? note.top - wordmark.bottom >= xl : true };
+    });
+    expect(place.clear, `${scene}: the wordmark is space-xl above the note`).toBe(true);
+    places.push(place.box, place.controls);
+  }
+  // Each scene's box and controls where the screen without a note has them.
+  for (let i = 2; i < places.length; i += 2) {
+    expect([places[i], places[i + 1]]).toEqual([places[0], places[1]]);
+  }
+});
+
+test("in Ersa's smallest window the screen with the sign-in note scrolls, so the session controls stay in reach", async ({ page }) => {
+  await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
+  const section = await screenIn(page, "Signed out, asking to trust a folder", 640 - RAIL, 400);
+  await page.waitForTimeout(500);
+  const reach = await section.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    const screen = (el.parentElement as HTMLElement).getBoundingClientRect();
+    const controls = el.querySelector(".session-controls")!.getBoundingClientRect();
+    return { scrolls: el.scrollHeight > el.clientHeight, inside: controls.top >= screen.top && controls.bottom <= screen.bottom };
+  });
+  expect(reach).toEqual({ scrolls: true, inside: true });
 });

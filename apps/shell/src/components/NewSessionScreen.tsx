@@ -19,7 +19,7 @@ import { ContextRing } from "./ContextRing";
 import { type ControlKey, DEFAULT_EFFORT, type Host, SessionControls } from "./SessionControls";
 import { SignInNote } from "./SignInNote";
 import { TrustQuestion } from "./TrustQuestion";
-import { HeightEase } from "../theme/motion";
+import { milliseconds, reducedMotion } from "../theme/motion";
 import "./NewSessionScreen.css";
 
 /**
@@ -399,19 +399,53 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     if (shown) backToWords();
   }, [noteFor, hostId, hostBackends, shown]);
 
-  // The note keeps its own place in the column, so it covers neither the wordmark above nor anything beneath it; the
-  // room it takes eases open and closed over motion-settle, as the column centres again (docs/design/DESIGN.md,
-  // Motion).
-  const zoneEase = useRef(new HeightEase()).current;
+  // While the note shows, the room above the box is in the screen's top row, beneath the wordmark: the box and the
+  // session controls keep their place, and the wordmark moves up to stay space-xl above the note and what stands
+  // beneath it (docs/design/COMPOSER.md, The sign-in note). The room eases to each new height over motion-settle,
+  // whatever changed it, clipped while it eases so the note never paints over the wordmark; with reduced motion it
+  // takes the new height at once.
   const noted = note !== undefined;
-  const wasNoted = useRef(noted);
-  useLayoutEffect(() => {
+  const aboveContent = useRef<HTMLDivElement>(null);
+  const room = useRef<{ to?: number; running?: Animation }>({});
+  const easeRoom = useRef(() => {});
+  easeRoom.current = () => {
     const zone = above.current;
-    if (!zone) return;
-    if (wasNoted.current !== noted) zoneEase.change(zone);
-    else zoneEase.hold(zone);
-    wasNoted.current = noted;
-  });
+    const content = aboveContent.current;
+    if (!zone || !content) return;
+    const to = noted ? content.offsetHeight : 0;
+    const r = room.current;
+    // Nothing changed: a running ease goes on.
+    if (to === r.to) return;
+    // From where a running ease has got to, else from the last height the room took.
+    const from = r.running ? zone.getBoundingClientRect().height : r.to;
+    r.to = to;
+    r.running?.cancel();
+    r.running = undefined;
+    delete zone.dataset.easing;
+    if (from === undefined || from === to || typeof zone.animate !== "function" || reducedMotion()) return;
+    const style = getComputedStyle(zone);
+    const duration = milliseconds(style.getPropertyValue("--motion-settle"));
+    const curve = style.getPropertyValue("--motion-ease-out").trim();
+    if (!duration || !curve) return;
+    zone.dataset.easing = "";
+    const animation = zone.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
+    r.running = animation;
+    animation.onfinish = () => {
+      if (r.running !== animation) return;
+      r.running = undefined;
+      delete zone.dataset.easing;
+    };
+  };
+  // On every render (the note arriving or going, its words) and on any change of what the room holds that no render
+  // made (a card fitting itself, the window narrowing its words).
+  useLayoutEffect(() => easeRoom.current());
+  useEffect(() => {
+    const content = aboveContent.current;
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => easeRoom.current());
+    watch.observe(content);
+    return () => watch.disconnect();
+  }, []);
 
   // While the note shows, the status line stands beneath it in the room above the box, so the note covers nothing it
   // says (docs/design/COMPOSER.md, The sign-in note).
@@ -419,46 +453,53 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   return (
     <section ref={screen} className="new-session" aria-label="New session" data-noted={note ? "" : undefined}>
-      <Wordmark />
-      <div className="new-session-start">
+      {/* Three rows: the wordmark with the room above the box at its foot, the box and the session controls, and a
+          spacer as tall as the wordmark and its gap; the free space is shared between the first and the last, so the box
+          keeps its place as what stands above it grows, until the screen has no room left. */}
+      <div className="new-session-top">
+        <Wordmark />
         {/* In the status line's place above the box (docs/design/COMPOSER.md, The trust question), opening upward:
             the box and the session controls stay where they are. */}
         <div ref={above} className="new-session-above">
-          {noteFor && note && (
-            <SignInNote
-              label={noteFor.label}
-              state={note}
-              onSignIn={() => props.onSignIn?.(hostId, noteFor.name)}
-              onCancel={() => props.onCancelSignIn?.(hostId, noteFor.name)}
-              // Nothing else on the screen can be acted on, unless the trust question is open, which holds the glow.
-              focal={asking === undefined}
-              force={props.forceSignIn}
-            />
-          )}
-          {asking !== undefined && (
-            <TrustQuestion
-              name={pathName(asking)}
-              path={asking}
-              purpose="add"
-              onTrust={() => void answer(true)}
-              onDismiss={() => void answer(false)}
-              takeFocus={props.initialAsking === undefined}
-              forceCancelFocus={props.forceCancelFocus}
-            />
-          )}
-          {folderWait && (
-            <p className="composer-status-line" role="status">
-              <ContextRing turning />
-              {folderWait === "finding" ? t("composer.findingFolderProgress") : t("composer.addingProjectProgress")}
-            </p>
-          )}
-          {asking === undefined && addFailed && (
-            <p className="problem new-session-problem" role="alert">
-              {addFailed.message}
-            </p>
-          )}
-          {note && !aboveTaken && <StatusLine unavailable={unavailable} sending={starting} dialogFailed={false} marked={false} />}
+          <div ref={aboveContent} className="new-session-above-content">
+            {noteFor && note && (
+              <SignInNote
+                label={noteFor.label}
+                state={note}
+                onSignIn={() => props.onSignIn?.(hostId, noteFor.name)}
+                onCancel={() => props.onCancelSignIn?.(hostId, noteFor.name)}
+                // Nothing else on the screen can be acted on, unless the trust question is open, which holds the glow.
+                focal={asking === undefined}
+                force={props.forceSignIn}
+              />
+            )}
+            {asking !== undefined && (
+              <TrustQuestion
+                name={pathName(asking)}
+                path={asking}
+                purpose="add"
+                onTrust={() => void answer(true)}
+                onDismiss={() => void answer(false)}
+                takeFocus={props.initialAsking === undefined}
+                forceCancelFocus={props.forceCancelFocus}
+              />
+            )}
+            {folderWait && (
+              <p className="composer-status-line" role="status">
+                <ContextRing turning />
+                {folderWait === "finding" ? t("composer.findingFolderProgress") : t("composer.addingProjectProgress")}
+              </p>
+            )}
+            {asking === undefined && addFailed && (
+              <p className="problem new-session-problem" role="alert">
+                {addFailed.message}
+              </p>
+            )}
+            {note && !aboveTaken && <StatusLine unavailable={unavailable} sending={starting} dialogFailed={false} marked={false} />}
+          </div>
         </div>
+      </div>
+      <div className="new-session-start">
         <Composer
           inputRef={words}
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
@@ -506,6 +547,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           force={props.force}
         />
       </div>
+      <div className="new-session-foot" aria-hidden="true" />
     </section>
   );
 }
