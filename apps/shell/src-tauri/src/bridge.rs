@@ -601,6 +601,15 @@ mod link_tests {
         assert_eq!(timeout_for("project.list"), REQUEST_TIMEOUT);
     }
 
+    /// A sign-in's start and its cancel each answer within Core's own
+    /// limits, which the Shell waits longer than, so Core's answer, a
+    /// refusal for a start that took too long included, reaches the window.
+    #[test]
+    fn a_sign_in_and_its_cancel_wait_longer_than_core_takes() {
+        assert!(timeout_for("backend.sign_in") > ersa_core::sign_in::SIGN_IN_START_LIMIT);
+        assert!(timeout_for("backend.cancel_sign_in") > ersa_core::sign_in::SIGN_IN_STOP_LIMIT);
+    }
+
     #[tokio::test]
     async fn a_slow_request_fails_alone() {
         let (link, mut core, _events) = open_fake(short()).await;

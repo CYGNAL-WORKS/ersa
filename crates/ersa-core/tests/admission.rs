@@ -11,7 +11,8 @@ use std::sync::Arc;
 use ersa_core::admission::{
     Admission, Command, Exclusive, Existing, ExistingWorkspace, Folder, Id, Input, Operation,
     Outcome, ProjectEntry, ProjectPhase, Refusal, Replaced, Report, RowChange, Run, SectionPhase,
-    SendIs, SendStage, Sending, SessionEntry, Setting, State, WorkspaceEntry, WorkspacePhase, step,
+    SendIs, SendStage, Sending, SessionEntry, Setting, SignInOf, SignInPhase, State,
+    WorkspaceEntry, WorkspacePhase, step,
 };
 use ersa_core::persistence::SessionRow;
 use ersa_protocol::core_api::Deleting;
@@ -2589,7 +2590,39 @@ fn worlds() -> Vec<(&'static str, Vec<Input>)> {
         // Putting a workspace away, against everything that can be under
         // way on a session there or on the workspace.
         ("put away", put_away_world()),
+        // Two backends' sign-ins and shutdown: a sign-in touches no
+        // project, workspace, session or section, and no row of theirs
+        // reads one.
+        ("signing in", signing_in_world()),
     ]
+}
+
+/// The backend `backend`'s sign-in on the local host.
+fn sign_in_of(backend: &str) -> SignInOf {
+    SignInOf {
+        host: "local".into(),
+        backend: backend.into(),
+    }
+}
+
+/// Every input of two backends' sign-ins.
+fn signing_in() -> Vec<Input> {
+    let mut inputs = Vec::new();
+    for backend in ["a", "b"] {
+        let of = || sign_in_of(backend);
+        inputs.push(Input::Command(Command::SignIn(of())));
+        inputs.push(Input::Command(Command::CancelSignIn(of())));
+        inputs.push(Input::Report(Report::SignInStarted(of())));
+        inputs.push(Input::Report(Report::Ended(Operation::SignIn(of()))));
+    }
+    inputs
+}
+
+/// Two backends' sign-ins, and shutdown.
+fn signing_in_world() -> Vec<Input> {
+    let mut inputs = signing_in();
+    inputs.push(Input::Report(Report::Closing));
+    inputs
 }
 
 /// Putting either workspace away and back, and every way a put-away or a
@@ -2681,6 +2714,7 @@ fn every_input_of_the_whole_world(sessions: &[&str]) -> Vec<Input> {
     let mut inputs = inputs_of(sessions, true, true, true, true);
     inputs.extend(worktree_change());
     inputs.extend(putting_away());
+    inputs.extend(signing_in());
     inputs
 }
 
@@ -3194,6 +3228,17 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
                 context()
             );
         }
+        // A cancel that is done stops the sign-in, and that is all it
+        // changes: once that sign-in ends, the two states are one.
+        (Input::Command(Command::CancelSignIn(of)), Outcome::Done) => {
+            let ended = |state: &State| {
+                let mut state = state.clone();
+                let end = Report::Ended(Operation::SignIn(of.clone()));
+                step(&mut state, Input::Report(end));
+                state
+            };
+            assert_eq!(ended(before), ended(after), "{}", context());
+        }
         (_, Outcome::Refused(_) | Outcome::Done | Outcome::Stale) => {
             assert_eq!(before, after, "{}", context());
         }
@@ -3246,6 +3291,52 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             Outcome::Admitted(Operation::Worktrees(project.clone()))
         };
         assert_eq!(outcome, &expected, "{}", context());
+    }
+    // One sign-in at a time for a backend on a host: one is admitted only
+    // when none is under way for it and Core is not closing, and starting;
+    // a second while one is under way is refused, to join it
+    // (PROTO-CORE-API-R156). A cancel stops one however far it got, and
+    // only a start no cancel overtook counts (R160).
+    if let Input::Command(Command::SignIn(of)) = input {
+        let expected = if before.closing() {
+            Outcome::Refused(Refusal::Closing)
+        } else if before.sign_in(of).is_some() {
+            Outcome::Refused(Refusal::SigningIn)
+        } else {
+            Outcome::Admitted(Operation::SignIn(of.clone()))
+        };
+        assert_eq!(outcome, &expected, "{}", context());
+        if let Outcome::Admitted(_) = outcome {
+            assert_eq!(
+                after.sign_in(of),
+                Some(SignInPhase::Starting),
+                "{}",
+                context()
+            );
+        }
+    }
+    if let Input::Command(Command::CancelSignIn(of)) = input {
+        match before.sign_in(of) {
+            None => assert_eq!(
+                outcome,
+                &Outcome::Refused(Refusal::NoSignIn),
+                "{}",
+                context()
+            ),
+            Some(_) => {
+                assert_eq!(outcome, &Outcome::Done, "{}", context());
+                assert_eq!(
+                    after.sign_in(of),
+                    Some(SignInPhase::Stopping),
+                    "{}",
+                    context()
+                );
+            }
+        }
+    }
+    if let Input::Report(Report::SignInStarted(of)) = input {
+        let started = before.sign_in(of) == Some(SignInPhase::Starting);
+        assert_eq!(outcome == &Outcome::Noted, started, "{}", context());
     }
     // A send is handed over only when it was not cancelled.
     if let (Input::Report(Report::SendStage { session, stage }), Outcome::Noted) = (input, outcome)
@@ -3438,8 +3529,9 @@ struct Reached {
     workspaces: Numbering<Vec<(Id, WorkspaceEntry)>>,
     sessions: Numbering<Vec<(Id, SessionEntry)>>,
     sections: Numbering<Vec<(Id, SectionPhase)>>,
+    sign_ins: Numbering<Vec<(SignInOf, SignInPhase)>>,
     held: Numbering<Vec<Command>>,
-    states: HashSet<([u32; 5], bool)>,
+    states: HashSet<([u32; 6], bool)>,
 }
 
 impl Reached {
@@ -3449,19 +3541,29 @@ impl Reached {
         let workspaces: Vec<_> = state.workspaces().map(owned).collect();
         let sessions: Vec<_> = state.sessions().map(owned).collect();
         let sections: Vec<_> = state.sections().map(owned).collect();
+        let sign_ins: Vec<_> = state.sign_ins().map(owned).collect();
         let held = state.held().to_vec();
         let closing = state.closing();
         // The parts are the whole state: in its fields' order they hash as
         // it does. A part the state gains and these leave out fails here
         // rather than make two states one.
         let hashing = BuildHasherDefault::<DefaultHasher>::default();
-        let parts = (&projects, &workspaces, &sessions, &sections, closing, &held);
+        let parts = (
+            &projects,
+            &workspaces,
+            &sessions,
+            &sections,
+            &sign_ins,
+            closing,
+            &held,
+        );
         assert_eq!(hashing.hash_one(parts), hashing.hash_one(state));
         let numbers = [
             self.projects.of(projects),
             self.workspaces.of(workspaces),
             self.sessions.of(sessions),
             self.sections.of(sections),
+            self.sign_ins.of(sign_ins),
             self.held.of(held),
         ];
         self.states.insert((numbers, closing))
@@ -3606,6 +3708,8 @@ fn every_input_is_in_a_world() {
                 Command::Launch { .. } => "Launch",
                 Command::AwaitRunEnd { .. } => "AwaitRunEnd",
                 Command::Worktrees { .. } => "Worktrees",
+                Command::SignIn(_) => "SignIn",
+                Command::CancelSignIn(_) => "CancelSignIn",
             },
             Input::Report(report) => match report {
                 Report::ProjectStored { .. } => "ProjectStored",
@@ -3630,6 +3734,7 @@ fn every_input_is_in_a_world() {
                 Report::StartEnded { .. } => "StartEnded",
                 Report::SessionGone { .. } => "SessionGone",
                 Report::RunEnding { .. } => "RunEnding",
+                Report::SignInStarted(_) => "SignInStarted",
                 Report::Closing => "Closing",
                 Report::GaveUp { .. } => "GaveUp",
                 Report::Ended(_) => "Ended",
@@ -3638,7 +3743,7 @@ fn every_input_is_in_a_world() {
     };
     let whole = every_input_of_the_whole_world(&["s1"]);
     let kinds: HashSet<&str> = whole.iter().map(kind).collect();
-    assert_eq!(kinds.len(), 22 + 25, "{kinds:#?}");
+    assert_eq!(kinds.len(), 24 + 26, "{kinds:#?}");
     // Every operation's end, and every kind of write.
     let ends: HashSet<_> = whole
         .iter()
@@ -3647,7 +3752,7 @@ fn every_input_is_in_a_world() {
             Input::Command(_) | Input::Report(_) => None,
         })
         .collect();
-    assert_eq!(ends.len(), 17, "the end of every kind of operation");
+    assert_eq!(ends.len(), 18, "the end of every kind of operation");
     for change in writes("s1") {
         let (session, change) = ("s1".to_string(), change);
         let written = Input::Report(Report::RowWritten { session, change });
@@ -5025,4 +5130,130 @@ fn a_put_back_of_a_workspace_that_has_its_folder_does_nothing() {
         command(&mut state, put_back("w-gone")),
         Outcome::Refused(Refusal::NoWorkspace)
     );
+}
+
+// verifies: PROTO-CORE-API-R156
+// verifies: PROTO-CORE-API-R160
+#[test]
+fn every_input_in_every_reachable_state_of_two_sign_ins_keeps_what_admission_promises() {
+    let states = explore_with(world_inputs("signing in"), 0, false);
+    let (a, b) = (sign_in_of("a"), sign_in_of("b"));
+    for phase in [
+        SignInPhase::Starting,
+        SignInPhase::Started,
+        SignInPhase::Stopping,
+    ] {
+        // Each backend's sign-in in every phase, whatever the other's is.
+        assert!(
+            states.iter().any(
+                |s| s.sign_in(&a) == Some(phase) && s.sign_in(&b) == Some(SignInPhase::Started)
+            )
+        );
+        assert!(
+            states
+                .iter()
+                .any(|s| s.sign_in(&a) == Some(phase) && s.closing())
+        );
+    }
+    // One backend's sign-in under way starts the other's all the same.
+    assert!(
+        states
+            .iter()
+            .any(|s| s.sign_in(&a).is_some() && s.sign_in(&b).is_some())
+    );
+}
+
+/// The sign-in of backend `a`, brought to `phase` from nothing, with Core
+/// `closing` or not.
+fn signing_in_at(phase: Option<SignInPhase>, closing: bool) -> State {
+    let mut state = State::default();
+    let of = sign_in_of("a");
+    if let Some(phase) = phase {
+        command(&mut state, Command::SignIn(of.clone()));
+        match phase {
+            SignInPhase::Starting => {}
+            SignInPhase::Started => {
+                report(&mut state, Report::SignInStarted(of.clone()));
+            }
+            SignInPhase::Stopping => {
+                command(&mut state, Command::CancelSignIn(of.clone()));
+            }
+        }
+        assert_eq!(state.sign_in(&of), Some(phase));
+    }
+    if closing {
+        report(&mut state, Report::Closing);
+    }
+    state
+}
+
+/// In every state of a sign-in: a second `backend.sign_in` joins the one
+/// under way, a cancel stops it, its end (its time limit run out, or any
+/// other) lets a new one begin, and shutdown starts no new one and leaves
+/// the one under way to stop itself.
+// verifies: PROTO-CORE-API-R156
+// verifies: PROTO-CORE-API-R160
+// verifies: PROTO-CORE-API-R161
+// verifies: PROTO-CORE-API-R162
+#[test]
+fn a_second_sign_in_a_cancel_its_end_and_shutdown_in_every_state_of_a_sign_in() {
+    let of = sign_in_of("a");
+    let phases = [
+        None,
+        Some(SignInPhase::Starting),
+        Some(SignInPhase::Started),
+        Some(SignInPhase::Stopping),
+    ];
+    for phase in phases {
+        for closing in [false, true] {
+            let at = || signing_in_at(phase, closing);
+            let context = format!("{phase:?}, closing {closing}");
+
+            let mut state = at();
+            let second = command(&mut state, Command::SignIn(of.clone()));
+            let expected = match (phase, closing) {
+                (_, true) => Outcome::Refused(Refusal::Closing),
+                (None, false) => admitted(Operation::SignIn(of.clone())),
+                (Some(_), false) => Outcome::Refused(Refusal::SigningIn),
+            };
+            assert_eq!(second, expected, "{context}");
+
+            let mut state = at();
+            let canceled = command(&mut state, Command::CancelSignIn(of.clone()));
+            match phase {
+                None => assert_eq!(canceled, Outcome::Refused(Refusal::NoSignIn), "{context}"),
+                Some(_) => {
+                    assert_eq!(canceled, Outcome::Done, "{context}");
+                    assert_eq!(state.sign_in(&of), Some(SignInPhase::Stopping), "{context}");
+                    // A start that answers after the cancel never counts.
+                    let started = report(&mut state, Report::SignInStarted(of.clone()));
+                    assert_eq!(started, Outcome::Stale, "{context}");
+                }
+            }
+
+            // However it ends, its time limit included, it is over, and
+            // the next one begins unless Core is closing.
+            let mut state = at();
+            let ended = report(&mut state, Report::Ended(Operation::SignIn(of.clone())));
+            let expected = if phase.is_some() {
+                Outcome::Noted
+            } else {
+                Outcome::Stale
+            };
+            assert_eq!(ended, expected, "{context}");
+            assert_eq!(state.sign_in(&of), None, "{context}");
+            let next = command(&mut state, Command::SignIn(of.clone()));
+            let expected = if closing {
+                Outcome::Refused(Refusal::Closing)
+            } else {
+                admitted(Operation::SignIn(of.clone()))
+            };
+            assert_eq!(next, expected, "{context}");
+
+            // Shutdown changes no sign-in under way: each stops itself.
+            let mut state = signing_in_at(phase, false);
+            report(&mut state, Report::Closing);
+            assert_eq!(state.sign_in(&of), phase, "{context}");
+        }
+    }
 }

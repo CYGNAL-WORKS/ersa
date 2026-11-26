@@ -122,12 +122,19 @@ pub(super) async fn backend_list(
     if params.host_id != LOCAL_HOST_ID {
         return Err(unreachable_host(&params.host_id));
     }
-    Ok(core
-        .local_backends()
-        .await
-        .iter()
-        .map(|d| d.info())
-        .collect())
+    // Each with the sign-in under way for it, once it has started
+    // (PROTO-CORE-API-R158).
+    let detected = core.local_backends().await;
+    let infos = detected.iter().map(|d| {
+        let mut info = d.info();
+        let of = crate::admission::SignInOf {
+            host: params.host_id.clone(),
+            backend: d.name.clone(),
+        };
+        info.signing_in = crate::sign_in::signing_in(core, &of);
+        info
+    });
+    Ok(infos.collect())
 }
 
 pub(super) fn unreachable_host(host_id: &str) -> ApiError {
@@ -250,6 +257,8 @@ pub(super) fn refused(refusal: Refusal, named: &str) -> ApiError {
         | Refusal::BeingForked
         | Refusal::Forking
         | Refusal::NoSection
+        | Refusal::SigningIn
+        | Refusal::NoSignIn
         | Refusal::GaveUp => ApiError::internal(format!("admission refused {named}: {refusal:?}")),
     }
 }

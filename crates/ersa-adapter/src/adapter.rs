@@ -290,6 +290,59 @@ pub trait Adapter: Send + Sync {
     ) -> Result<Option<ConversationEnd>, AdapterError> {
         Ok(None)
     }
+
+    /// Starts the backend's own sign-in on the host behind `transport`
+    /// (ADR 0040) and returns once it has started, with the address of the
+    /// vendor's sign-in page when the backend hands one over for the person
+    /// to open; Core opens none itself (PROTO-CORE-API-R155).
+    ///
+    /// Everything the sign-in runs is started through `transport`, which
+    /// ends it all when Core lets go of it, so a start Core gives up on
+    /// leaves nothing running. An `Io` error of kind `NotFound` means the
+    /// backend's command is not on the host; a `Protocol` error carries the
+    /// backend's own reason for refusing to start one. The default: the
+    /// adapter has no sign-in to start.
+    async fn start_sign_in(
+        &self,
+        _transport: Arc<dyn Transport>,
+    ) -> Result<StartedSignIn, AdapterError> {
+        Err(AdapterError::Protocol(format!(
+            "Ersa can't start a sign-in to {}",
+            self.label()
+        )))
+    }
+}
+
+/// A sign-in the backend has started ([`Adapter::start_sign_in`]).
+pub struct StartedSignIn {
+    /// The address of the vendor's sign-in page, when the backend handed one
+    /// over; `None` when opening it is the backend's own doing.
+    pub url: Option<String>,
+    /// The sign-in itself, until it ends.
+    pub sign_in: Box<dyn SignIn>,
+}
+
+/// A backend's sign-in under way. Core asks how it ends and stops it, and
+/// lets go of it once it has ended, however it ended.
+#[async_trait]
+pub trait SignIn: Send {
+    /// Waits until the backend says the sign-in is done or has failed.
+    /// Cancellation-safe: Core races it against a cancel, its time limit and
+    /// shutdown, and calls [`SignIn::stop`] when one of those wins.
+    async fn finished(&mut self) -> SignInEnd;
+
+    /// Ends whatever the sign-in still runs and returns once it has
+    /// exited. Called on every ending, a finished sign-in's included.
+    async fn stop(&mut self);
+}
+
+/// How a backend says its sign-in ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignInEnd {
+    /// It is done.
+    SignedIn,
+    /// It failed, for this reason, in the backend's own words.
+    Failed(String),
 }
 
 /// How a session's conversation ends, read from its record.
@@ -905,5 +958,57 @@ impl std::error::Error for AdapterError {
 impl From<io::Error> for AdapterError {
     fn from(e: io::Error) -> Self {
         AdapterError::Io(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An adapter with only what every adapter must have.
+    struct Bare;
+
+    #[async_trait]
+    impl Adapter for Bare {
+        fn backend(&self) -> &str {
+            "bare"
+        }
+        fn label(&self) -> &str {
+            "Bare Backend"
+        }
+        fn title_rules(&self) -> TitleRules {
+            TitleRules {
+                max_chars: 10,
+                one_line: true,
+            }
+        }
+        async fn start(
+            &self,
+            _: Arc<dyn Transport>,
+            _: SessionConfig,
+            _: Arc<dyn AdapterSink>,
+        ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+            unreachable!("a sign-in starts no session")
+        }
+        fn projector(&self) -> Box<dyn Projector> {
+            unreachable!("a sign-in projects nothing")
+        }
+    }
+
+    /// An adapter has no sign-in unless it says how to start one, and then
+    /// says so by its backend's label, starting nothing.
+    // verifies: PROTO-CORE-API-R157
+    #[tokio::test]
+    async fn an_adapter_has_no_sign_in_by_default() {
+        let transport = crate::fake::FakeTransport::new(Vec::<String>::new());
+        let started = Bare.start_sign_in(Arc::new(transport.clone())).await;
+        match started {
+            Err(AdapterError::Protocol(message)) => {
+                assert_eq!(message, "Ersa can't start a sign-in to Bare Backend");
+            }
+            Err(other) => panic!("{other}"),
+            Ok(_) => panic!("a sign-in started"),
+        }
+        assert!(transport.spawned().is_empty(), "nothing started");
     }
 }

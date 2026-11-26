@@ -98,6 +98,14 @@ pub struct CoreConfig {
     /// When Core sweeps (FLOW-CLEAN-UP-R06). [`Sweeps::Hourly`], except in
     /// tests.
     pub sweeps: Sweeps,
+    /// How long a backend's sign-in may take to start (PROTO-CORE-API-R157).
+    /// [`crate::sign_in::SIGN_IN_START_LIMIT`], except in tests that let it
+    /// run out.
+    pub sign_in_start_limit: Duration,
+    /// How long a backend's sign-in may run once started
+    /// (PROTO-CORE-API-R161). [`crate::sign_in::SIGN_IN_LIMIT`], except in
+    /// tests that let it run out.
+    pub sign_in_limit: Duration,
 }
 
 /// A source for [`CoreConfig::stored_environment`]. Its own type only so
@@ -284,6 +292,8 @@ impl CoreConfig {
             stored_environment: StoredEnvironmentSource(Arc::new(SystemStoredEnvironment)),
             backend_look_limit: LOOK_LIMIT,
             sweeps: Sweeps::Hourly,
+            sign_in_start_limit: crate::sign_in::SIGN_IN_START_LIMIT,
+            sign_in_limit: crate::sign_in::SIGN_IN_LIMIT,
         })
     }
 
@@ -453,21 +463,37 @@ impl Core {
     /// so the backend is asked again at every reading (R153), which starts
     /// its command each time while it stays signed out.
     pub async fn local_backends(&self) -> Vec<Detected> {
+        self.detect_local(None).await
+    }
+
+    /// Detects backend `name` on the local host again, whatever Core kept
+    /// of it, and keeps what it finds as any detection is kept: before a
+    /// sign-in is said to have ended signed in (PROTO-CORE-API-R159).
+    pub async fn detect_again(&self, name: &str) {
+        self.detect_local(Some(name)).await;
+    }
+
+    /// [`Core::local_backends`], detecting backend `again` whatever was
+    /// kept of it.
+    async fn detect_local(&self, again: Option<&str>) -> Vec<Detected> {
         let mut kept = self.local_backends.lock().await;
         let adapters = self.sessions.adapters();
         kept.resize(adapters.len(), None);
         let ttl = self.config.failed_detection_ttl;
         let stale: Vec<usize> = (0..adapters.len())
-            .filter(|&i| match &kept[i] {
-                None => true,
-                Some((at, detected)) => match detected.state {
-                    BackendState::Available => false,
-                    BackendState::Missing => true,
-                    BackendState::Error => at.elapsed() >= ttl,
-                    // Whether a backend is signed out is the backend's to say
-                    // each time: Core keeps no copy (PROTO-CORE-API-R153).
-                    BackendState::SignedOut => true,
-                },
+            .filter(|&i| {
+                again == Some(adapters[i].backend())
+                    || match &kept[i] {
+                        None => true,
+                        Some((at, detected)) => match detected.state {
+                            BackendState::Available => false,
+                            BackendState::Missing => true,
+                            BackendState::Error => at.elapsed() >= ttl,
+                            // Whether a backend is signed out is the backend's to say
+                            // each time: Core keeps no copy (PROTO-CORE-API-R153).
+                            BackendState::SignedOut => true,
+                        },
+                    }
             })
             .collect();
         if !stale.is_empty() {

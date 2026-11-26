@@ -53,6 +53,12 @@
 //! entry, which titles the session ahead of its last prompt, as Claude
 //! Code's does.
 //!
+//! Its sign-in ([`FakeSignIns`]) is the test's to drive: each start runs a
+//! real process tree through the transport Core gives it, as a backend's
+//! sign-in would, so a test sees that nothing it started is left; then it
+//! starts, refuses, or never answers, as the test set it, and ends when the
+//! test says how.
+//!
 //! Anything else gets a usage line and an echoed reply.
 
 use std::collections::{HashMap, HashSet};
@@ -64,8 +70,8 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, CallOff, ConversationEnd,
     Direction, ImageLimits, ModelReport, OpenElsewhere, OutgoingMessage, PermissionDecision,
     ProcessExit, ProcessSpec, Projected, Projector, RawLine, RecordDeletion, RecordEvent,
-    RecordSummary, RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules,
-    Transport, async_trait,
+    RecordSummary, RelaunchSettings, Requested, SessionConfig, SessionControl, SignIn, SignInEnd,
+    StartedSignIn, TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -379,6 +385,99 @@ pub struct FakeAdapter {
     /// What the command printed after its version, each time it ran, in
     /// order: `(why, line)`, `why` being `version`, `probe` or `start`.
     pub printed: Printed,
+    /// Its sign-in, which the test drives.
+    pub sign_ins: Arc<FakeSignIns>,
+}
+
+/// What the fake backend's sign-in does once its process runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignInMode {
+    /// It starts, handing over this address of its page, or none, and runs
+    /// until the test ends it ([`FakeSignIns::end`]).
+    Starts(Option<String>),
+    /// It refuses to start, for this reason.
+    Refuses(String),
+    /// It never says it started.
+    NeverStarts,
+    /// Its command is not on the host.
+    NotFound,
+}
+
+/// The fake backend's sign-in, shared with the test.
+#[derive(Debug)]
+pub struct FakeSignIns {
+    pub mode: Mutex<SignInMode>,
+    /// How many sign-ins Core asked the fake to start.
+    pub starts: AtomicUsize,
+    /// The process each start left running beneath the one it started, in
+    /// order, so a test can see it is gone.
+    pub processes: Mutex<Vec<u32>>,
+    /// How many times Core stopped a sign-in that started.
+    pub stops: AtomicUsize,
+    /// Held by a test to hold each start, once its process runs, until it
+    /// lets go.
+    pub start_gate: Arc<tokio::sync::Mutex<()>>,
+    /// How the sign-in under way ends, once the test says.
+    ending: tokio::sync::watch::Sender<Option<SignInEnd>>,
+}
+
+impl Default for FakeSignIns {
+    fn default() -> Self {
+        FakeSignIns {
+            mode: Mutex::new(SignInMode::Starts(None)),
+            starts: AtomicUsize::new(0),
+            processes: Mutex::default(),
+            stops: AtomicUsize::new(0),
+            start_gate: Arc::default(),
+            ending: tokio::sync::watch::Sender::new(None),
+        }
+    }
+}
+
+impl FakeSignIns {
+    /// Says how the sign-in under way ends.
+    pub fn end(&self, end: SignInEnd) {
+        self.ending.send_replace(Some(end));
+    }
+
+    /// The process the latest start left running, once it has one.
+    pub async fn latest_process(&self) -> u32 {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            if let Some(&pid) = self.processes.lock().unwrap().last() {
+                return pid;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "no sign-in process");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    }
+}
+
+/// A sign-in of the fake's that started.
+struct FakeSignIn {
+    process: Box<dyn ersa_adapter::Process>,
+    ending: tokio::sync::watch::Receiver<Option<SignInEnd>>,
+    sign_ins: Arc<FakeSignIns>,
+}
+
+#[async_trait]
+impl SignIn for FakeSignIn {
+    async fn finished(&mut self) -> SignInEnd {
+        // The guard is let go of before any further wait.
+        let end = match self.ending.wait_for(Option::is_some).await {
+            Ok(end) => end.clone(),
+            Err(_) => None,
+        };
+        match end {
+            Some(end) => end,
+            None => std::future::pending().await,
+        }
+    }
+
+    async fn stop(&mut self) {
+        self.sign_ins.stops.fetch_add(1, Ordering::SeqCst);
+        let _ = self.process.kill().await;
+    }
 }
 
 /// What a fake's [`FakeAdapter::command`] printed, shared with the test.
@@ -437,6 +536,7 @@ impl FakeAdapter {
             },
             command: None,
             printed: Arc::default(),
+            sign_ins: Arc::default(),
         }
     }
 
@@ -818,6 +918,45 @@ impl Adapter for FakeAdapter {
         };
         self.stats.record_deletion_ended.notify_one();
         deletion
+    }
+
+    /// Runs a process that leaves one beneath it running, through
+    /// `transport`, then does as [`FakeSignIns::mode`] says.
+    async fn start_sign_in(
+        &self,
+        transport: Arc<dyn Transport>,
+    ) -> Result<StartedSignIn, AdapterError> {
+        let sign_ins = Arc::clone(&self.sign_ins);
+        sign_ins.starts.fetch_add(1, Ordering::SeqCst);
+        sign_ins.ending.send_replace(None);
+        let mode = sign_ins.mode.lock().unwrap().clone();
+        let spec = match mode {
+            SignInMode::NotFound => ProcessSpec {
+                program: "ersa-test-no-such-sign-in".into(),
+                ..ProcessSpec::default()
+            },
+            SignInMode::Starts(_) | SignInMode::Refuses(_) | SignInMode::NeverStarts => {
+                super::procs::parent_of_a_grandchild(true)
+            }
+        };
+        let mut process = transport.spawn(spec).await?;
+        let mut stdout = process.take_stdout().expect("stdout");
+        let pid = stdout.next_line().await?.expect("the process's id");
+        let pid: u32 = pid.trim().parse().expect("a process id");
+        sign_ins.processes.lock().unwrap().push(pid);
+        drop(sign_ins.start_gate.lock().await);
+        match mode {
+            SignInMode::Starts(url) => Ok(StartedSignIn {
+                url,
+                sign_in: Box::new(FakeSignIn {
+                    process,
+                    ending: sign_ins.ending.subscribe(),
+                    sign_ins: Arc::clone(&sign_ins),
+                }),
+            }),
+            SignInMode::Refuses(reason) => Err(AdapterError::Protocol(reason)),
+            SignInMode::NeverStarts | SignInMode::NotFound => std::future::pending().await,
+        }
     }
 
     async fn conversation_end(

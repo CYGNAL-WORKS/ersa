@@ -214,10 +214,35 @@ pub struct State {
     sessions: BTreeMap<Id, SessionEntry>,
     /// The sections the user groups sessions in.
     sections: BTreeMap<Id, SectionPhase>,
+    /// The backends with a sign-in under way, each on its host. A sign-in
+    /// touches no project, workspace, session or section, so no other row
+    /// reads it (PROTO-CORE-API, Signing in).
+    sign_ins: BTreeMap<SignInOf, SignInPhase>,
     /// Whether Core is shutting down: from then nothing starts.
     closing: bool,
     /// Commands waiting for a report, in the order they arrived.
     held: Vec<Command>,
+}
+
+/// Where a sign-in under way is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SignInPhase {
+    /// The adapter is starting it.
+    Starting,
+    /// It started: the person signs in, and Core waits to learn how it
+    /// ends.
+    Started,
+    /// `backend.cancel_sign_in` stopped it: Core is letting go of what it
+    /// started. One stopped before it started never starts.
+    Stopping,
+}
+
+/// The backend a sign-in is for, on its host: one sign-in runs at a time
+/// for each (PROTO-CORE-API-R156).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SignInOf {
+    pub host: Id,
+    pub backend: Id,
 }
 
 /// What the store holds when Core starts.
@@ -323,6 +348,11 @@ impl State {
         self.sections.iter()
     }
 
+    /// Every sign-in under way, and where it is.
+    pub fn sign_ins(&self) -> impl Iterator<Item = (&SignInOf, &SignInPhase)> {
+        self.sign_ins.iter()
+    }
+
     /// Whether session `id` is being archived: an archive of it is under
     /// way, or is waiting its turn. No message is sent to it meanwhile, so
     /// none starts only to be stopped by the archive (PROTO-CORE-API-R85).
@@ -354,6 +384,11 @@ impl State {
     /// Whether Core is shutting down.
     pub fn closing(&self) -> bool {
         self.closing
+    }
+
+    /// Where the sign-in under way for `of` is, if one is.
+    pub fn sign_in(&self, of: &SignInOf) -> Option<SignInPhase> {
+        self.sign_ins.get(of).copied()
     }
 
     /// Whether a session found in the backend's records in `workspace` has
@@ -645,6 +680,13 @@ pub enum Command {
     Worktrees {
         project: Id,
     },
+    /// A `backend.sign_in`: admitted when none is under way for that
+    /// backend on that host, refused while one is, so the request joins it
+    /// (PROTO-CORE-API-R156), and while Core is closing. Never held.
+    SignIn(SignInOf),
+    /// A `backend.cancel_sign_in`: done, the sign-in stopping, while one is
+    /// under way; refused when none is (PROTO-CORE-API-R160).
+    CancelSignIn(SignInOf),
 }
 
 /// An operation admission has let begin, named by what it is on.
@@ -672,6 +714,9 @@ pub enum Operation {
     Run(Id),
     /// A change to the worktrees of the project's repository.
     Worktrees(Id),
+    /// A backend's sign-in, from its admission until Core has let go of
+    /// everything it started for it.
+    SignIn(SignInOf),
 }
 
 /// What happened, said once it is stored. A report is never refused or
@@ -777,6 +822,9 @@ pub enum Report {
     RunEnding {
         session: Id,
     },
+    /// The adapter started the sign-in. Stale for one stopped meanwhile,
+    /// which then never counts as started.
+    SignInStarted(SignInOf),
     /// Core is shutting down.
     Closing,
     /// Whoever waited for the held command at `place` in the queue has
@@ -891,6 +939,10 @@ pub enum Refusal {
     Running,
     /// What the command waited for did not come within its time limit.
     GaveUp,
+    /// A sign-in is under way for that backend on that host.
+    SigningIn,
+    /// No sign-in is under way for that backend on that host.
+    NoSignIn,
 }
 
 /// Admission's answer to one input.
@@ -1526,6 +1578,26 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 Outcome::Admitted(Operation::Worktrees(project.clone()))
             }
         },
+        Command::SignIn(of) => {
+            if state.closing {
+                Outcome::Refused(Refusal::Closing)
+            } else if state.sign_ins.contains_key(of) {
+                Outcome::Refused(Refusal::SigningIn)
+            } else {
+                state.sign_ins.insert(of.clone(), SignInPhase::Starting);
+                Outcome::Admitted(Operation::SignIn(of.clone()))
+            }
+        }
+        // Not refused while Core is closing: shutdown stops it anyway.
+        Command::CancelSignIn(of) => match state.sign_ins.get_mut(of) {
+            None => Outcome::Refused(Refusal::NoSignIn),
+            // However far it got, it stops, and a start that answers later
+            // no longer counts.
+            Some(phase) => {
+                *phase = SignInPhase::Stopping;
+                Outcome::Done
+            }
+        },
         Command::Launch { session } => {
             let closing = state.closing;
             let going = state
@@ -1960,6 +2032,11 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 },
                 None => Outcome::Stale,
             },
+            // Core has let go of everything the sign-in started.
+            Operation::SignIn(of) => match state.sign_ins.remove(&of) {
+                Some(_) => Outcome::Noted,
+                None => Outcome::Stale,
+            },
             // git is done with the repository's worktrees: the next change
             // waiting for them may begin.
             Operation::Worktrees(project) => match state.projects.get_mut(&project) {
@@ -1988,6 +2065,15 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 Run::Stopped | Run::Ending => Outcome::Stale,
             },
             None => Outcome::Stale,
+        },
+        // A start that a cancel overtook does not count: the sign-in is
+        // stopping, and never started for anyone.
+        Report::SignInStarted(of) => match state.sign_ins.get_mut(&of) {
+            Some(phase @ SignInPhase::Starting) => {
+                *phase = SignInPhase::Started;
+                Outcome::Noted
+            }
+            Some(SignInPhase::Started | SignInPhase::Stopping) | None => Outcome::Stale,
         },
         Report::Closing => {
             if state.closing {
@@ -2164,6 +2250,8 @@ struct Inner {
     sessions: HashMap<Id, Attached>,
     /// What Core attached to each run that is not stopped.
     runs: HashMap<Id, Attached>,
+    /// What Core attached to each sign-in under way.
+    sign_ins: HashMap<SignInOf, Attached>,
 }
 
 impl Admission {
@@ -2184,6 +2272,7 @@ impl Admission {
         let attached = (
             std::mem::take(&mut inner.sessions),
             std::mem::take(&mut inner.runs),
+            std::mem::take(&mut inner.sign_ins),
         );
         // Let go of once the lock is: what is attached is Core's, and its
         // destructor may ask admission.
@@ -2512,6 +2601,70 @@ impl Admission {
         self.answered(outcome)
     }
 
+    /// Asks to begin a sign-in for `of` ([`Command::SignIn`]), without
+    /// waiting. Admitted, what `attach` makes is attached to the sign-in in
+    /// that step, and goes in the step that ends it. Refused because one is
+    /// under way, the refusal comes with what is attached to that one, read
+    /// in the same step, so a second request joins the first and never
+    /// finds it gone in between (PROTO-CORE-API-R156).
+    pub fn begin_sign_in(
+        self: &Arc<Self>,
+        of: &SignInOf,
+        attach: impl FnOnce() -> Attached,
+    ) -> Result<UnderWay, (Refusal, Option<Attached>)> {
+        let mut under_way = None;
+        let (outcome, _) = self.apply_then(
+            Input::Command(Command::SignIn(of.clone())),
+            |inner, outcome| match outcome {
+                Outcome::Admitted(_) => {
+                    inner.sign_ins.insert(of.clone(), attach());
+                }
+                Outcome::Refused(Refusal::SigningIn) => {
+                    under_way = inner.sign_ins.get(of).cloned();
+                }
+                Outcome::Refused(_)
+                | Outcome::Done
+                | Outcome::Held
+                | Outcome::Noted
+                | Outcome::Stale => {}
+            },
+        );
+        self.answered(outcome)
+            .map_err(|refusal| (refusal, under_way))
+    }
+
+    /// Says the adapter started the sign-in for `of`
+    /// ([`Report::SignInStarted`]). False when a cancel came first: then it
+    /// never started for anyone.
+    pub fn sign_in_started(&self, of: &SignInOf) -> bool {
+        let report = Report::SignInStarted(of.clone());
+        matches!(self.apply(Input::Report(report)).0, Outcome::Noted)
+    }
+
+    /// Stops the sign-in under way for `of` ([`Command::CancelSignIn`]):
+    /// what is attached to it, read in the same step, or `None` when none
+    /// is under way.
+    pub fn cancel_sign_in(&self, of: &SignInOf) -> Option<Attached> {
+        let mut attached = None;
+        let command = Input::Command(Command::CancelSignIn(of.clone()));
+        self.apply_then(command, |inner, outcome| {
+            if let Outcome::Done = outcome {
+                attached = inner.sign_ins.get(of).cloned();
+            }
+        });
+        attached
+    }
+
+    /// What is attached to the sign-in under way for `of`, if one is.
+    pub fn sign_in(&self, of: &SignInOf) -> Option<Attached> {
+        self.lock().sign_ins.get(of).cloned()
+    }
+
+    /// What is attached to every sign-in under way.
+    pub fn all_sign_ins(&self) -> Vec<Attached> {
+        self.lock().sign_ins.values().cloned().collect()
+    }
+
     /// The handle of an admitted operation, or the refusal.
     fn answered(self: &Arc<Self>, outcome: Outcome) -> Result<UnderWay, Refusal> {
         match outcome {
@@ -2653,13 +2806,15 @@ impl Admission {
     }
 }
 
-/// Takes out what is attached to a session the state no longer has, and to
-/// a run that is stopped or whose session is gone.
+/// Takes out what is attached to a session the state no longer has, to a
+/// run that is stopped or whose session is gone, and to a sign-in that has
+/// ended.
 fn sweep(inner: &mut Inner) -> Vec<Attached> {
     let Inner {
         state,
         sessions,
         runs,
+        sign_ins,
         ..
     } = inner;
     let mut gone = Vec::new();
@@ -2674,6 +2829,12 @@ fn sweep(inner: &mut Inner) -> Vec<Attached> {
     };
     let ended: Vec<Id> = runs.keys().filter(|id| !running(id)).cloned().collect();
     gone.extend(ended.iter().filter_map(|id| runs.remove(id)));
+    let over: Vec<SignInOf> = sign_ins
+        .keys()
+        .filter(|of| state.sign_in(of).is_none())
+        .cloned()
+        .collect();
+    gone.extend(over.iter().filter_map(|of| sign_ins.remove(of)));
     gone
 }
 

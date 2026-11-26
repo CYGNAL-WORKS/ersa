@@ -280,6 +280,18 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "backend.sign_in";
+      params: BackendSignInParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "backend.cancel_sign_in";
+      params: BackendCancelSignInParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "mode.list";
       params?: ModeListParams;
     }
@@ -410,6 +422,11 @@ export type Notification =
       jsonrpc: "2.0";
       method: "host.status";
       params: HostStatusNotification;
+    }
+  | {
+      jsonrpc: "2.0";
+      method: "backend.sign_in_ended";
+      params: BackendSignInEndedNotification;
     }
   | {
       jsonrpc: "2.0";
@@ -739,6 +756,20 @@ export interface SectionRemoveParams {
 export interface BackendListParams {
   host_id: Id;
 }
+export interface BackendSignInParams {
+  host_id: Id;
+  /**
+   * The backend's name, such as claude-code.
+   */
+  name: string;
+}
+export interface BackendCancelSignInParams {
+  host_id: Id;
+  /**
+   * The backend's name, such as claude-code.
+   */
+  name: string;
+}
 /**
  * No fields.
  */
@@ -887,6 +918,18 @@ export interface HostStatusNotification {
   host_id: Id;
   status: HostStatus;
 }
+/**
+ * A sign-in Ersa started for the backend on the host has ended. Sent once, to every connection past core.hello, and never coalesced with another (PROTO-CORE-API-R159).
+ */
+export interface BackendSignInEndedNotification {
+  host_id: Id;
+  name: string;
+  outcome: "signed_in" | "failed" | "canceled" | "timed_out";
+  /**
+   * With failed, the backend's own reason.
+   */
+  message?: string;
+}
 export interface CoreNoticeNotification {
   level: "info" | "warning" | "error";
   message: string;
@@ -924,6 +967,15 @@ export interface BackendInfo {
    */
   version?: string;
   status: "available" | "missing" | "error" | "signed_out";
+  /**
+   * Present while a sign-in Ersa started is under way for the backend on the host; absent otherwise (PROTO-CORE-API-R158).
+   */
+  signing_in?: {
+    /**
+     * The address of the vendor's sign-in page that backend.sign_in answered, when it answered one.
+     */
+    url?: string;
+  };
   /**
    * The oldest and newest backend versions the adapter was tested with.
    */
@@ -2306,6 +2358,19 @@ export interface Section3 {
   created_at: string;
 }
 /**
+ * The sign-in has started (PROTO-CORE-API-R155).
+ */
+export interface BackendSignInResult {
+  /**
+   * The address of the vendor's sign-in page, for the Interface to open, when the backend's adapter handed one over. Core opens none itself.
+   */
+  url?: string;
+}
+/**
+ * No fields.
+ */
+export interface BackendCancelSignInResult {}
+/**
  * User settings, an open JSON object. Known keys: workspaces.root (string), the directory new worktrees go under.
  */
 export interface SettingsGetResult {}
@@ -2429,6 +2494,8 @@ export interface CoreApiMethods {
   "section.rename": { params: SectionRenameParams; result: SectionRenameResult };
   "section.remove": { params: SectionRemoveParams; result: SectionRemoveResult };
   "backend.list": { params: BackendListParams; result: BackendListResult };
+  "backend.sign_in": { params: BackendSignInParams; result: BackendSignInResult };
+  "backend.cancel_sign_in": { params: BackendCancelSignInParams; result: BackendCancelSignInResult };
   "mode.list": { params: ModeListParams; result: ModeListResult };
   "settings.get": { params: SettingsGetParams; result: SettingsGetResult };
   "settings.set": { params: SettingsSetParams; result: SettingsSetResult };
@@ -2447,6 +2514,7 @@ export interface CoreApiNotifications {
   "session.send_progress": SessionSendProgressNotification;
   "session.tile": SessionTileNotification;
   "host.status": HostStatusNotification;
+  "backend.sign_in_ended": BackendSignInEndedNotification;
   "core.notice": CoreNoticeNotification;
   "terminal.output": TerminalOutputNotification;
 }

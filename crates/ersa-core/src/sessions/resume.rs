@@ -436,7 +436,7 @@ mod tests {
     #[test]
     fn a_resume_withdraws_its_report_as_it_answers() {
         let tiles = Arc::new(TileHub::default());
-        let (mut quick, mut slow) = (tiles.feed(), tiles.feed());
+        let (mut quick, mut slow) = (tiles.feed(Kick::default()), tiles.feed(Kick::default()));
         let report = ResumeReport::new(&tiles, "s1");
         (report.putting_back())();
         let line = taken(&mut quick).expect("reported");

@@ -49,12 +49,15 @@ impl Detected {
         }
     }
 
+    /// The backend's entry in `backend.list`, without a sign-in: what is
+    /// under way is admission's, which `backend.list` adds.
     pub fn info(&self) -> BackendInfo {
         BackendInfo {
             name: self.name.clone(),
             label: self.label.clone(),
             version: self.version.clone(),
             status: self.state,
+            signing_in: None,
             tested: TestedRange {
                 min: self.tested.0.clone(),
                 max: self.tested.1.clone(),
