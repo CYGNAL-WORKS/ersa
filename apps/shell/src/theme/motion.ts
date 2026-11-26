@@ -19,20 +19,29 @@ export function milliseconds(time: string): number {
 export class HeightEase {
   private height: number | undefined;
   private running: Animation | undefined;
+  private target: number | undefined;
 
   /** Nothing in it changed: a running ease goes on; otherwise its height is the one to ease from next. */
   hold(el: HTMLElement): void {
     if (!this.running) this.height = el.getBoundingClientRect().height;
   }
 
-  /** What it holds changed: eases to the new height, or, when `eases` is false, takes it at once. */
-  change(el: HTMLElement, eases = true): void {
+  /**
+   * What it holds changed: eases to the new height, or, when `eases` is false, takes it at once. With `to`, the
+   * height it comes to rest at, given by a caller that knows it without measuring: a running ease toward that same
+   * height goes on rather than starting again. With `clipGrowth`, the element is marked `data-easing` while it grows,
+   * so what it holds can be clipped to it and never paints over what lies beyond it.
+   */
+  change(el: HTMLElement, eases = true, options: { to?: number; clipGrowth?: boolean } = {}): void {
+    if (this.running && options.to !== undefined && options.to === this.target) return;
     // An ease still running starts the next from where it has got to, and the new height is measured without it.
     const from = this.running ? el.getBoundingClientRect().height : this.height;
     this.running?.cancel();
     this.running = undefined;
-    const to = el.getBoundingClientRect().height;
+    delete el.dataset.easing;
+    const to = options.to ?? el.getBoundingClientRect().height;
     this.height = to;
+    this.target = to;
     if (!eases || from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
     const style = getComputedStyle(el);
     const duration = milliseconds(style.getPropertyValue("--motion-settle"));
@@ -40,9 +49,11 @@ export class HeightEase {
     if (!duration || !curve) return;
     const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
     this.running = animation;
+    if (options.clipGrowth && to > from) el.dataset.easing = "";
     animation.onfinish = () => {
       if (this.running !== animation) return;
       this.running = undefined;
+      delete el.dataset.easing;
       this.height = el.getBoundingClientRect().height;
     };
   }

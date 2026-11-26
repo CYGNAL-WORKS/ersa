@@ -219,6 +219,29 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SectionCreate, to_value(&section())),
         (Method::SectionRename, to_value(&section())),
         (Method::SectionRemove, to_value(&section())),
+        // One of each kind (FLOW-CLEAN-UP-R11), and an empty list.
+        (
+            Method::CleanupList,
+            to_value(&CleanupListResult {
+                items: cleanup_items(),
+                unread: vec![CleanupUnread {
+                    project_id: "p-2".into(),
+                    message: "git did not answer within 10 seconds".into(),
+                }],
+            }),
+        ),
+        (
+            Method::CleanupList,
+            to_value(&CleanupListResult {
+                items: Vec::new(),
+                unread: Vec::new(),
+            }),
+        ),
+        // What removing each kind would lose (FLOW-CLEAN-UP-R12, R26).
+        (Method::CleanupInspect, to_value(&cleanup_inspections()[0])),
+        (Method::CleanupInspect, to_value(&cleanup_inspections()[1])),
+        (Method::CleanupInspect, to_value(&cleanup_inspections()[2])),
+        (Method::CleanupInspect, to_value(&cleanup_inspections()[3])),
         (
             Method::SessionDelete,
             to_value(&SessionDeleteResult {
@@ -605,6 +628,14 @@ fn params_examples() -> Vec<(Method, Value)> {
         (
             Method::SectionRemove,
             to_value(&IdParams { id: "sec-1".into() }),
+        ),
+        (
+            Method::CleanupList,
+            to_value(&CleanupListParams { inactive_days: 30 }),
+        ),
+        (
+            Method::CleanupInspect,
+            to_value(&IdParams { id: "w:w-1".into() }),
         ),
         (
             Method::SessionDelete,
@@ -1100,4 +1131,118 @@ fn arrange_params_tell_a_missing_section_from_a_null_one() {
         unseen: None,
     });
     assert_eq!(null, json!({ "id": "s-1", "section_id": null }));
+}
+
+/// One Clean up item of each kind.
+fn cleanup_items() -> Vec<CleanupItem> {
+    let item = |id: &str, kind| CleanupItem {
+        id: id.into(),
+        kind,
+        project_id: "p-1".into(),
+        workspace_id: None,
+        path: None,
+        branch: None,
+        session_ids: None,
+        last_activity_at: None,
+    };
+    vec![
+        CleanupItem {
+            workspace_id: Some("w-1".into()),
+            path: Some("D:/worktrees/ersa/w-1".into()),
+            branch: Some("ersa/w-1".into()),
+            session_ids: Some(vec!["s-1".into()]),
+            last_activity_at: Some("2026-09-01T10:00:00Z".into()),
+            ..item("w:w-1", CleanupKind::Workspace)
+        },
+        CleanupItem {
+            workspace_id: Some("w-2".into()),
+            path: Some("D:/worktrees/ersa/w-2".into()),
+            branch: Some("ersa/w-2".into()),
+            ..item("w:w-2", CleanupKind::Leftover)
+        },
+        CleanupItem {
+            branch: Some("ersa/w-3".into()),
+            ..item("b:p-1:ersa/w-3", CleanupKind::Branch)
+        },
+        CleanupItem {
+            path: Some("D:/worktrees/ersa/stray".into()),
+            ..item("f:p-1:stray", CleanupKind::Folder)
+        },
+    ]
+}
+
+/// What `cleanup.inspect` says of each of [`cleanup_items`].
+fn cleanup_inspections() -> Vec<CleanupInspection> {
+    let items = cleanup_items();
+    let of = |i: usize| CleanupInspection::of(items[i].clone(), "9f2c".into());
+    let counts = |i: usize| CleanupInspection {
+        uncommitted: Some(2),
+        ignored: Some(1),
+        unshared: Some(3),
+        stranded: Some(1),
+        unrecorded: Some(false),
+        holds_repository: Some(true),
+        size_bytes: Some(4096),
+        ..of(i)
+    };
+    vec![
+        counts(0),
+        // Measuring took too long: no size.
+        CleanupInspection {
+            size_bytes: None,
+            ..counts(1)
+        },
+        CleanupInspection {
+            unshared: Some(1),
+            merged: Some(true),
+            ..of(2)
+        },
+        CleanupInspection {
+            size_bytes: Some(10),
+            ..of(3)
+        },
+    ]
+}
+
+/// Each kind carries only its own fields: a branch with a path, an
+/// inspected folder with counts, a workspace without its sessions, and an
+/// inspected branch without `merged` all fail.
+// verifies: FLOW-CLEAN-UP-R11
+// verifies: FLOW-CLEAN-UP-R12
+#[test]
+fn a_cleanup_item_carries_its_own_kinds_fields() {
+    let branch = to_value(&cleanup_items()[2]);
+    let mut with_path = branch.clone();
+    with_path["path"] = json!("D:/x");
+    assert!(validate_core_api("cleanup_item", &branch).is_ok());
+    assert!(validate_core_api("cleanup_item", &with_path).is_err());
+
+    let mut workspace = to_value(&cleanup_items()[0]);
+    workspace.as_object_mut().unwrap().remove("session_ids");
+    assert!(validate_core_api("cleanup_item", &workspace).is_err());
+
+    let mut folder = to_value(&cleanup_inspections()[3]);
+    folder["uncommitted"] = json!(1);
+    assert!(validate_core_api("cleanup.inspect.result", &folder).is_err());
+
+    let mut branch = to_value(&cleanup_inspections()[2]);
+    branch.as_object_mut().unwrap().remove("merged");
+    assert!(validate_core_api("cleanup.inspect.result", &branch).is_err());
+
+    let mut leftover = to_value(&cleanup_inspections()[1]);
+    leftover.as_object_mut().unwrap().remove("holds_repository");
+    assert!(validate_core_api("cleanup.inspect.result", &leftover).is_err());
+}
+
+/// `inactive_days` is 30, 60 or 90 (PROTO-CORE-API, Clean up).
+#[test]
+fn inactive_days_is_thirty_sixty_or_ninety() {
+    for days in [30, 60, 90] {
+        let params = json!({ "inactive_days": days });
+        assert!(validate_core_api("cleanup.list.params", &params).is_ok());
+    }
+    for days in [0, 45, 365] {
+        let params = json!({ "inactive_days": days });
+        assert!(validate_core_api("cleanup.list.params", &params).is_err());
+    }
 }

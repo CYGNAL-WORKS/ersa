@@ -12,6 +12,7 @@
 //!   (FLOW-CLEAN-UP-R22).
 //! - `sweep`: Core's own pass, which no method asks for either.
 
+mod cleanup;
 mod delete;
 mod handlers;
 mod inactive;
@@ -394,6 +395,8 @@ async fn answer(
         Method::SectionCreate => to_json(sections::create(core, parse(params)?).await),
         Method::SectionRename => to_json(sections::rename(core, parse(params)?).await),
         Method::SectionRemove => to_json(sections::remove(core, parse(params)?).await),
+        Method::CleanupList => to_json(cleanup::list(core, parse(params)?).await),
+        Method::CleanupInspect => to_json(cleanup::inspect(core, parse(params)?).await),
 
         // Refused above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -464,6 +467,9 @@ fn runs_apart(method: Method) -> bool {
         | Method::WorkspaceCreate
         | Method::WorkspaceRemove
         | Method::WorkspaceChanges
+        // Run git and read the worktrees folder.
+        | Method::CleanupList
+        | Method::CleanupInspect
         // Run each backend's version command when detecting.
         | Method::BackendList
         | Method::HostList

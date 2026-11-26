@@ -23,7 +23,7 @@ import { Workbench } from "./components/Workbench";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
-import type { BackendInfo, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
+import type { BackendInfo, BackendSignInEndedNotification, Project, Session, SessionArrangeParams, Workspace } from "./protocol/core-api.gen";
 import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { backendLabel, contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
@@ -35,6 +35,7 @@ import { type Follower, type SendProgress, type SessionView, type Sending, type 
 import { type Moving, sectionsUnavailable, useSections } from "./session/sections";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
+import { useSignIns } from "./session/signIn";
 import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
@@ -166,6 +167,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [answers, setAnswers] = useState<Answers>({});
   const sending = useMemo(() => answering(client, setAnswers), [client]);
 
+  // Core's word that a sign-in ended, for the sign-ins below (FLOW-SIGN-IN-R09).
+  const signInEnded = useRef<(ending: BackendSignInEndedNotification) => Promise<void>>(undefined);
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
       // Where a send is (FLOW-SEND-MESSAGE-R16): the active session's, or the first message of a session starting.
@@ -179,6 +182,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         if (progress?.phase === "puttingBack") {
           setResuming((r) => (r[id]?.state === "sending" ? { ...r, [id]: { state: "sending", progress } } : r));
         }
+        return;
+      }
+      if (notification.method === "backend.sign_in_ended") {
+        void signInEnded.current?.(notification.params);
         return;
       }
       if (notification.method !== "session.event") return;
@@ -371,19 +378,35 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // A host's backends, read on each new connection and again each time the new-session screen asks
   // (FLOW-NEW-SESSION-R50): Core may have found a backend since. A reading already out for the host answers for a
-  // second ask, as when the window's showing and its focus arrive together; a reading from a connection since gone
-  // is dropped, and holds back none on the new one.
-  const readings = useRef<{ link: unknown; hosts: Set<string> }>({ link: undefined, hosts: new Set() });
-  const readHostBackends = useCallback(
-    (hostId: string) => {
-      if (link === undefined) return;
-      if (readings.current.link !== link) readings.current = { link, hosts: new Set() };
-      const out = readings.current;
-      if (out.hosts.has(hostId)) return;
-      out.hosts.add(hostId);
-      void readBackends(client, hostId).then((read) => {
-        if (readings.current !== out) return;
-        out.hosts.delete(hostId);
+  // second ask, as when the window's showing and its focus arrive together. A fresh reading never answers from one
+  // already out: a sign-in's step must see what Core has done since (FLOW-SIGN-IN-R09), which a reading that left
+  // before it may not, so it follows that one. A reading from a connection since gone is dropped, and holds back none
+  // on the new one. Each resolves with the listing it read, or none when it failed or was dropped.
+  type Out = Promise<BackendInfo[] | undefined>;
+  const readings = useRef<{ link: unknown; out: Map<string, Out>; next: Map<string, Out> }>({ link: undefined, out: new Map(), next: new Map() });
+  const onListed = useRef<(hostId: string, listing: readonly BackendInfo[]) => void>(undefined);
+  const readHost = useCallback(
+    (hostId: string, fresh = false): Out => {
+      if (link === undefined) return Promise.resolve(undefined);
+      if (readings.current.link !== link) readings.current = { link, out: new Map(), next: new Map() };
+      const r = readings.current;
+      const already = r.out.get(hostId);
+      if (already) {
+        if (!fresh) return already;
+        // One reading follows the one out, for every fresh ask made meanwhile.
+        let next = r.next.get(hostId);
+        if (!next) {
+          next = already.then(() => {
+            r.next.delete(hostId);
+            return readings.current === r ? readHost(hostId) : undefined;
+          });
+          r.next.set(hostId, next);
+        }
+        return next;
+      }
+      const reading = readBackends(client, hostId).then((read) => {
+        if (readings.current !== r) return undefined;
+        r.out.delete(hostId);
         // Until the answer, the listing held stays, so a later reading shows nothing of itself (R50). A failure
         // keeps the last listing Core answered with behind it, and names the connection it failed on (below).
         setHostReadings((all) => ({
@@ -391,12 +414,23 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           [hostId]:
             read.failed === undefined
               ? { listing: read.backends }
-              : { listing: all[hostId]?.listing, failed: { reason: read.failed, link: out.link } },
+              : { listing: all[hostId]?.listing, failed: { reason: read.failed, link: r.link } },
         }));
+        if (read.failed !== undefined) return undefined;
+        onListed.current?.(hostId, read.backends);
+        return read.backends;
       });
+      r.out.set(hostId, reading);
+      return reading;
     },
     [client, link],
   );
+  const readHostBackends = useCallback((hostId: string) => void readHost(hostId), [readHost]);
+  // Sign in and Cancel on the sign-in note, and Core's word that a sign-in ended (FLOW-SIGN-IN).
+  const readFresh = useCallback((hostId: string) => readHost(hostId, true), [readHost]);
+  const signIns = useSignIns(client, shell?.openLink, readFresh);
+  onListed.current = signIns.listed;
+  signInEnded.current = signIns.ended;
   // Only this connection's failures count. A connection lost fails every reading still out on it, and the Shell
   // reports that failure and the loss by separate paths, in either order, so the failure may land before the window
   // knows the connection went. Counted by the connection it failed on, it says nothing from the new connection's
@@ -1198,6 +1232,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // Behind the sessions page the screen is not showing: coming back from it shows it again (R50).
               shown={!sessionsPage}
               onReadBackends={readHostBackends}
+              signIns={signIns.signIns}
+              onSignIn={signIns.signIn}
+              onCancelSignIn={signIns.cancel}
               onWindowBack={shell?.onWindowBack}
               lastUsed={lastUsed}
               projectId={composing?.projectId}

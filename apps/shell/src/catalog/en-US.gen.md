@@ -964,6 +964,46 @@ Resuming…
 
 Ersa can't resume this session.
 
+### `composer.signIn.signedOutNote`
+
+{label} isn't signed in on this host. Sign in to start a session.
+
+### `composer.signIn.signInButton`
+
+Sign in
+
+### `composer.signIn.startingProgress`
+
+Starting…
+
+### `composer.signIn.waitingProgress`
+
+Waiting for you to sign in to {label} in your browser…
+
+### `composer.signIn.cancelButton`
+
+Cancel
+
+### `composer.signIn.startError`
+
+{label}'s sign-in couldn't be started.
+
+### `composer.signIn.unopenedError`
+
+Ersa couldn't open {label}'s sign-in page.
+
+### `composer.signIn.failedError`
+
+{label}'s sign-in didn't finish.
+
+### `composer.signIn.timedOutError`
+
+{label}'s sign-in took too long and was stopped.
+
+### `composer.signIn.stillSignedOutError`
+
+The sign-in finished, but {label} still reports that it isn't signed in.
+
 ### `composer.messageLabel`
 
 Message

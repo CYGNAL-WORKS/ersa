@@ -1,4 +1,4 @@
-import { expect, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 // Every component section in the gallery, photographed in both themes. Each is
 // photographed on a page showing it alone, so its baseline depends only on it.
@@ -25,6 +25,7 @@ const components = [
   "ContextRing",
   "Workbench",
   "DeveloperPane",
+  "SignInNote",
   "ArchivedNote",
   "Composer",
   "Icon",
@@ -726,5 +727,138 @@ test("a heading's trust note starts at its name, and an expanded trusted heading
     }
     expect(await statusShown(theme, "Saving trust"), `expanded and trusted in ${theme}`).toBe(false);
     expect(await statusShown(theme, "Collapsed"), `collapsed in ${theme}`).toBe(true);
+  }
+});
+
+// The sign-in note on the new-session screen (docs/design/COMPOSER.md, The sign-in note), in a stage's size: with
+// room, the box and the session controls keep their place whether the note shows or not and however tall its words
+// are, and the wordmark stays space-xl above the note; in Ersa's smallest window (640 by 400, less the rail) the
+// screen scrolls, so the session controls stay in reach.
+const RAIL = 288;
+/** A NewSessionScreen scene's screen, its specimen given a stage's size and clipped to it, as the window's stage is. */
+async function screenIn(page: Page, scene: string, width: number, height: number) {
+  const figure = page.locator('[data-theme="light"] [data-component="NewSessionScreen"] figure').filter({
+    has: page.getByText(scene, { exact: true }),
+  });
+  const section = figure.locator(".new-session");
+  await section.evaluate(
+    (el, size) => {
+      const stage = el.parentElement as HTMLElement;
+      Object.assign(stage.style, { display: "flex", flexDirection: "column", width: `${size.width}px`, height: `${size.height}px`, overflow: "hidden" });
+    },
+    { width, height },
+  );
+  await settled(section);
+  return section;
+}
+
+/**
+ * Waits until nothing in the screen is still easing or arriving: the fonts loaded and two frames first, so what a
+ * resize or a change sets off has started, then until every animation with an end has ended.
+ */
+async function settled(section: Locator) {
+  // The fonts first: the box's place follows the composer's height, which the fonts set.
+  await section.evaluate(() => document.fonts.ready);
+  await section.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await expect
+    .poll(() => section.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).length))
+    .toBe(0);
+}
+
+test("the sign-in note leaves the box and the session controls in place, and the wordmark clear above it", async ({ page }) => {
+  await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
+  const scenes = ["Ready, at the defaults", "Backend signed out, the only one", "Signing in, waiting in the browser", "Sign-in didn't finish"];
+  const places: number[] = [];
+  for (const scene of scenes) {
+    const section = await screenIn(page, scene, 800, 600);
+    const place = await section.evaluate((el) => {
+      const top = el.getBoundingClientRect().top;
+      const box = el.querySelector(".composer-box")!.getBoundingClientRect().top - top;
+      const controls = el.querySelector(".session-controls")!.getBoundingClientRect().top - top;
+      const note = el.querySelector(".sign-in-note")?.getBoundingClientRect();
+      const wordmark = el.querySelector(".new-session-wordmark")!.getBoundingClientRect();
+      const probe = el.appendChild(document.createElement("div"));
+      probe.style.height = "var(--space-xl)";
+      const xl = probe.getBoundingClientRect().height;
+      probe.remove();
+      return { box, controls, clear: note ? note.top - wordmark.bottom >= xl : true };
+    });
+    expect(place.clear, `${scene}: the wordmark is space-xl above the note`).toBe(true);
+    places.push(place.box, place.controls);
+  }
+  // Each scene's box and controls where the screen without a note has them.
+  for (let i = 2; i < places.length; i += 2) {
+    expect([places[i], places[i + 1]]).toEqual([places[0], places[1]]);
+  }
+});
+
+test("in Ersa's smallest window the screen with the sign-in note scrolls, so the session controls stay in reach", async ({ page }) => {
+  await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
+  // A note whose words run long, with the status line beneath it, and no trust question, which would take its own
+  // place in the column whatever the note does: what stands above the box is taller than the window has room for.
+  const section = await screenIn(page, "Signed out, beside a backend that isn't working", 640 - RAIL, 400);
+  await section.evaluate((el) => {
+    const words = el.querySelector(".sign-in-words") as HTMLElement;
+    words.style.minHeight = "60vh";
+  });
+  await settled(section);
+  const reach = await section.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    const screen = (el.parentElement as HTMLElement).getBoundingClientRect();
+    const controls = el.querySelector(".session-controls")!.getBoundingClientRect();
+    return { scrolls: el.scrollHeight > el.clientHeight, inside: controls.top >= screen.top && controls.bottom <= screen.bottom };
+  });
+  expect(reach).toEqual({ scrolls: true, inside: true });
+});
+
+test("the room the sign-in note takes eases to each new height over motion-settle, and at once with reduced motion", async ({ page }) => {
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
+    const section = await screenIn(page, "Signing in, waiting in the browser", 800, 600);
+    // The note's words grow by a line, as a failure's reason would: the room eases to the new height, the wordmark
+    // riding up with it, and the box stays where it was.
+    const eased = await section.evaluate((el) => {
+      const zone = el.querySelector(".new-session-above") as HTMLElement;
+      // The box's place within its own screen, which is what keeps still; the page around the scene may move.
+      const box = () => el.querySelector(".composer-box")!.getBoundingClientRect().top - el.getBoundingClientRect().top;
+      const before = box();
+      const line = () => {
+        const p = document.createElement("p");
+        p.textContent = "A line more beneath the note.";
+        p.style.margin = "0";
+        return p;
+      };
+      el.querySelector(".new-session-above-content")!.append(line());
+      // The gallery stacks its scenes in one page, and a scene above this one may be easing its own note's room
+      // meanwhile, as the narrower scenes above do once the fonts have loaded and rewrapped their words (#655), which
+      // moves this scene in the page: one is made to, every time, so only a read within the screen passes.
+      const above = [...document.querySelectorAll('[data-theme="light"] [data-component="NewSessionScreen"] figure')].find(
+        (f) => f.querySelector("figcaption")?.textContent?.trim() === "Backend signed out, the only one",
+      );
+      above!.querySelector(".new-session-above-content")!.append(line());
+      return new Promise<{ eases: number; timing?: { duration: unknown; easing: unknown }; settle: string; curve: string; boxMoved: number }>((resolve) =>
+        // Two frames: the room is told of the new height after the first frame's layout.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const eases = zone.getAnimations();
+          const style = getComputedStyle(zone);
+          const timing = eases[0]?.effect?.getTiming();
+          resolve({
+            eases: eases.length,
+            timing: timing && { duration: timing.duration, easing: timing.easing },
+            settle: style.getPropertyValue("--motion-settle").trim(),
+            curve: style.getPropertyValue("--motion-ease-out").trim(),
+            boxMoved: box() - before,
+          });
+        })),
+      );
+    });
+    expect(eased.boxMoved).toBe(0);
+    if (reducedMotion === "reduce") {
+      expect(eased.eases).toBe(0);
+    } else {
+      expect(eased.eases).toBe(1);
+      expect(eased.timing).toEqual({ duration: parseFloat(eased.settle), easing: eased.curve });
+    }
   }
 });

@@ -274,6 +274,18 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "cleanup.list";
+      params: CleanupListParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "cleanup.inspect";
+      params: CleanupInspectParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "backend.list";
       params: BackendListParams;
     }
@@ -490,6 +502,23 @@ export type SessionRawLogResult = RawLogEntry[];
  * In the order they were made.
  */
 export type SectionListResult = Section[];
+/**
+ * workspace: the folder of an isolated workspace whose sessions are all archived, or all inactive; leftover: an isolated workspace no session refers to; branch: a local ersa/ branch no workspace names and no worktree has checked out; folder: a folder in a project's folder under the worktrees root that no workspace and no git worktree record names (FLOW-CLEAN-UP-R11).
+ */
+export type CleanupKind = "workspace" | "leftover" | "branch" | "folder";
+export type CleanupItem = CleanupItem1;
+/**
+ * An identifier Core issues.
+ */
+export type Id4 = string;
+/**
+ * The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R12, R26).
+ */
+export type CleanupInspectResult = CleanupInspectResult1;
+/**
+ * An identifier Core issues.
+ */
+export type Id5 = string;
 export type BackendListResult = BackendInfo[];
 export type ModeListResult = {
   name: string;
@@ -752,6 +781,18 @@ export interface SectionRenameParams {
  */
 export interface SectionRemoveParams {
   id: Id;
+}
+export interface CleanupListParams {
+  /**
+   * How many days without activity make a session inactive.
+   */
+  inactive_days: 30 | 60 | 90;
+}
+export interface CleanupInspectParams {
+  /**
+   * A cleanup.list item's id.
+   */
+  id: string;
 }
 export interface BackendListParams {
   host_id: Id;
@@ -2357,6 +2398,105 @@ export interface Section3 {
   name: string;
   created_at: string;
 }
+export interface CleanupItem1 {
+  /**
+   * Opaque; the same for the same thing from one list to the next. cleanup.inspect takes it.
+   */
+  id: string;
+  kind: CleanupKind;
+  project_id: Id;
+  workspace_id?: Id4;
+  /**
+   * The folder. Absent for a branch.
+   */
+  path?: string;
+  /**
+   * The branch, without refs/heads/. Absent for a folder, and for a workspace on no branch.
+   */
+  branch?: string;
+  /**
+   * For a workspace: the sessions that use it.
+   */
+  session_ids?: Id[];
+  /**
+   * For a workspace: the latest last_activity_at of its sessions; absent when none is known.
+   */
+  last_activity_at?: string;
+}
+export interface CleanupListResult {
+  items: CleanupItem[];
+  /**
+   * Projects whose git calls failed or ran past 10 seconds: they contribute no branch or folder item.
+   */
+  unread: {
+    project_id: Id;
+    /**
+     * Why.
+     */
+    message: string;
+  }[];
+}
+export interface CleanupInspectResult1 {
+  /**
+   * Opaque; the same for the same thing from one list to the next. cleanup.inspect takes it.
+   */
+  id: string;
+  kind: CleanupKind;
+  project_id: Id;
+  workspace_id?: Id5;
+  /**
+   * The folder. Absent for a branch.
+   */
+  path?: string;
+  /**
+   * The branch, without refs/heads/. Absent for a folder, and for a workspace on no branch.
+   */
+  branch?: string;
+  /**
+   * For a workspace: the sessions that use it.
+   */
+  session_ids?: Id[];
+  /**
+   * For a workspace: the latest last_activity_at of its sessions; absent when none is known.
+   */
+  last_activity_at?: string;
+  /**
+   * For a workspace and a leftover: as workspace.changes counts it.
+   */
+  uncommitted?: number;
+  /**
+   * For a workspace and a leftover: as workspace.changes counts it.
+   */
+  ignored?: number;
+  /**
+   * For a workspace and a leftover, as workspace.changes counts it; for a branch, the commits it holds that no other local branch and no remote-tracking branch holds.
+   */
+  unshared?: number;
+  /**
+   * For a workspace and a leftover: as workspace.changes counts it.
+   */
+  stranded?: number;
+  /**
+   * For a workspace and a leftover: as workspace.changes says it.
+   */
+  unrecorded?: boolean;
+  /**
+   * For a workspace and a leftover: whether its folder holds a repository of its own (a submodule checked out, a submodule's repository git keeps with its record of the folder, or a nested repository the ignore rules do not ignore), which goes with the folder.
+   */
+  holds_repository?: boolean;
+  /**
+   * For a workspace, a leftover and a folder: what the folder's files take. Absent when measuring took more than 30 seconds, and for a leftover with no folder.
+   */
+  size_bytes?: number;
+  /**
+   * For a branch: whether merging it into the project's base branch would change nothing.
+   */
+  merged?: boolean;
+  /**
+   * Opaque; changes whenever what removing the item would lose changes. cleanup.remove carries it.
+   */
+  token: string;
+}
 /**
  * The sign-in has started (PROTO-CORE-API-R155).
  */
@@ -2493,6 +2633,8 @@ export interface CoreApiMethods {
   "section.create": { params: SectionCreateParams; result: SectionCreateResult };
   "section.rename": { params: SectionRenameParams; result: SectionRenameResult };
   "section.remove": { params: SectionRemoveParams; result: SectionRemoveResult };
+  "cleanup.list": { params: CleanupListParams; result: CleanupListResult };
+  "cleanup.inspect": { params: CleanupInspectParams; result: CleanupInspectResult };
   "backend.list": { params: BackendListParams; result: BackendListResult };
   "backend.sign_in": { params: BackendSignInParams; result: BackendSignInResult };
   "backend.cancel_sign_in": { params: BackendCancelSignInParams; result: BackendCancelSignInResult };

@@ -638,7 +638,7 @@ impl Presented {
 
 /// The creation time of a session nothing remembers starting: one from
 /// before the app log, whose backend never wrote a record. It sorts first.
-const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
+pub(crate) const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
 
 impl Hub {
     /// The `seq` of the last event handed to subscribers; `None` before the
@@ -1264,6 +1264,13 @@ impl SessionManager {
         let mut sessions: Vec<Session> = handles.iter().filter_map(|h| h.describe()).collect();
         sessions.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
         sessions
+    }
+
+    /// Whether a connection is subscribed to session `id` now; false for
+    /// one Core does not hold.
+    pub fn is_subscribed(&self, id: &str) -> bool {
+        self.handle(id)
+            .is_ok_and(|handle| !lock(&handle.hub).subscribers.is_empty())
     }
 
     /// One session.
