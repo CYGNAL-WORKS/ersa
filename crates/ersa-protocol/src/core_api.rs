@@ -108,6 +108,7 @@ methods! {
     SectionRemove => "section.remove",
     CleanupList => "cleanup.list",
     CleanupInspect => "cleanup.inspect",
+    CleanupRemove => "cleanup.remove",
     BackendList => "backend.list",
     BackendSignIn => "backend.sign_in",
     BackendCancelSignIn => "backend.cancel_sign_in",
@@ -1232,6 +1233,32 @@ pub struct CleanupInspection {
     pub merged: Option<bool>,
     /// Opaque; changes whenever what removing the item would lose changes.
     pub token: String,
+}
+
+/// `cleanup.remove` params (FLOW-CLEAN-UP-R13).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupRemoveParams {
+    /// A `cleanup.list` item's id.
+    pub id: String,
+    /// The token `cleanup.inspect` gave: one that is not the item's now is
+    /// refused, removing nothing.
+    pub token: String,
+    /// True when the user approved losing what the item holds. Without it,
+    /// an item whose removal would lose unsaved work, and every folder item,
+    /// is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discard: Option<bool>,
+}
+
+/// `cleanup.remove` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupRemoveResult {
+    pub id: String,
+    /// A branch the item named that stays; absent when none does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_kept: Option<String>,
 }
 
 impl CleanupInspection {

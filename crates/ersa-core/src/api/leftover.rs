@@ -182,7 +182,7 @@ pub(super) async fn judge(core: &Core, workspace: &Workspace, said: &mut HashSet
     // removal that fails leaves it for the next pass to judge again
     // (FLOW-CLEAN-UP-R25); no client is told.
     match handlers::remove_workspace(core, workspace, Remover::Sweep).await {
-        Ok(()) => {
+        Ok(_) => {
             said.remove(id);
             tracing::info!(
                 workspace = %id,

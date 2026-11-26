@@ -6,13 +6,15 @@
 //! - This module: turns one request into one response, enforcing the
 //!   handshake and the reserved methods.
 //! - `handlers`: one function per implemented method.
-//! - [`put_away_workspace`]: putting a workspace away, which no method asks
-//!   for yet. The sweep puts one away through `put_away::put_away_for_sweep`,
+//! - [`put_away_workspace`]: putting a workspace away, for tests;
+//!   `cleanup.remove` puts one away once the user approved it. The sweep
+//!   puts one away through `put_away::put_away_for_sweep`,
 //!   which has admission refuse it unless every session there is archived
 //!   (FLOW-CLEAN-UP-R22).
 //! - `sweep`: Core's own pass, which no method asks for either.
 
 mod cleanup;
+mod cleanup_remove;
 mod delete;
 mod handlers;
 mod inactive;
@@ -397,6 +399,7 @@ async fn answer(
         Method::SectionRemove => to_json(sections::remove(core, parse(params)?).await),
         Method::CleanupList => to_json(cleanup::list(core, parse(params)?).await),
         Method::CleanupInspect => to_json(cleanup::inspect(core, parse(params)?).await),
+        Method::CleanupRemove => to_json(cleanup_remove::remove(core, parse(params)?).await),
 
         // Refused above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -470,6 +473,8 @@ fn runs_apart(method: Method) -> bool {
         // Run git and read the worktrees folder.
         | Method::CleanupList
         | Method::CleanupInspect
+        // Runs git and deletes files.
+        | Method::CleanupRemove
         // Run each backend's version command when detecting.
         | Method::BackendList
         | Method::HostList

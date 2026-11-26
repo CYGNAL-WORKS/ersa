@@ -168,6 +168,10 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
         ("workspace.create", json!({ "project_id": "p" })),
         ("workspace.remove", json!({ "id": workspace_id })),
         (
+            "cleanup.remove",
+            json!({ "id": format!("w:{}", workspace_id.as_str().unwrap()), "token": "t", "discard": true }),
+        ),
+        (
             "settings.set",
             json!({ "patch": { "workspaces": { "root": "." } } }),
         ),

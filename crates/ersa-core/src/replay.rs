@@ -146,6 +146,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SectionCreate
         | Method::SectionRename
         | Method::SectionRemove
+        | Method::CleanupRemove
         // A sign-in starts the backend's own, which a replay never runs.
         | Method::BackendSignIn
         | Method::BackendCancelSignIn
