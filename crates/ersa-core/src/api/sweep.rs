@@ -217,20 +217,28 @@ async fn sessions_keep(core: &Core, there: &[SessionRow]) -> Option<&'static str
         {
             return Some("a session there is running");
         }
-        let Some(transport) = core.session_transport_for(&row.host_id) else {
-            return Some("a session there is on a host Core can't reach");
-        };
-        match core.sessions.open_elsewhere(&row.id, transport).await {
-            Ok(OpenElsewhere::No) => {}
-            Ok(OpenElsewhere::Yes { .. }) => {
-                return Some("another process has a session there open");
-            }
-            Ok(OpenElsewhere::Unknown) | Err(_) => {
-                return Some("whether another process has a session there open can't be told");
-            }
+        if let Some(why) = open_elsewhere(core, &row.id, &row.host_id).await {
+            return Some(why);
         }
     }
     None
+}
+
+/// Why session `id`, on host `host`, must be left because another process
+/// may have it open, if it must: the backend's registry shows one, can't
+/// say, or the host can't be reached. Asked only of a session Core does not
+/// run, since the registry can't tell Core's own process from another.
+pub(super) async fn open_elsewhere(core: &Core, id: &str, host: &str) -> Option<&'static str> {
+    let Some(transport) = core.session_transport_for(host) else {
+        return Some("the session is on a host Core can't reach");
+    };
+    match core.sessions.open_elsewhere(id, transport).await {
+        Ok(OpenElsewhere::No) => None,
+        Ok(OpenElsewhere::Yes { .. }) => Some("another process has the session open"),
+        Ok(OpenElsewhere::Unknown) | Err(_) => {
+            Some("whether another process has the session open can't be told")
+        }
+    }
 }
 
 /// Why the workspace's folder must stay, if it must: `workspace.changes`

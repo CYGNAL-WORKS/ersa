@@ -5,8 +5,7 @@
 //! an archive frees is put away by the same pass (R22). Unset, which is the
 //! default, it archives none and reads nothing for it.
 
-use ersa_adapter::OpenElsewhere;
-
+use super::sweep;
 use crate::settings;
 use crate::state::Core;
 
@@ -56,24 +55,18 @@ pub(super) async fn archive(core: &Core) {
 }
 
 /// Why the session must stay because another process may have it open,
-/// if it must. A session Core runs is open in Core's own process, which the
-/// backend's registry cannot tell from another, so only a stopped one is
-/// asked about.
+/// if it must, as the put-away asks (FLOW-CLEAN-UP-R22). A session Core
+/// runs is open in Core's own process, which the backend's registry cannot
+/// tell from another, so only a stopped one is asked about.
 async fn open_elsewhere(core: &Core, id: &str) -> Option<&'static str> {
+    let gone = Some("the session is gone");
     match core.sessions.is_running(id).await {
         Ok(true) => return None,
         Ok(false) => {}
-        Err(_) => return Some("it is gone"),
+        Err(_) => return gone,
     }
-    let host = core.sessions.get(id).ok()?.host_id;
-    let Some(transport) = core.session_transport_for(&host) else {
-        return Some("it is on a host Core can't reach");
+    let Ok(session) = core.sessions.get(id) else {
+        return gone;
     };
-    match core.sessions.open_elsewhere(id, transport).await {
-        Ok(OpenElsewhere::No) => None,
-        Ok(OpenElsewhere::Yes { .. }) => Some("another process has it open"),
-        Ok(OpenElsewhere::Unknown) | Err(_) => {
-            Some("whether another process has it open can't be told")
-        }
-    }
+    sweep::open_elsewhere(core, id, &session.host_id).await
 }
