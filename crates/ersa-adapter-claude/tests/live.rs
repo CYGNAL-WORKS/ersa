@@ -538,7 +538,10 @@ async fn the_model_probe_lists_the_clis_models_and_leaves_no_record() {
     // Nobody is signed in under an empty configuration folder with every
     // credential the machine has taken away, and the CLI says so, still
     // listing its models (PROTO-CLAUDE-CODE-STREAM-R83).
-    assert!(report.signed_out, "an empty configuration lists as signed out");
+    assert!(
+        report.signed_out,
+        "an empty configuration lists as signed out"
+    );
     let models = report.models;
     assert_eq!(models.first().map(|m| m.id.as_str()), Some("default"));
     assert_eq!(models.iter().filter(|m| m.default).count(), 1);
