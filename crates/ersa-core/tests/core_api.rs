@@ -9,7 +9,7 @@ use std::sync::Arc;
 use ersa_adapter::Adapter;
 use ersa_core::{ServeError, Server};
 use ersa_protocol::core_api::ModelChoice;
-use serde_json::json;
+use serde_json::{Value, json};
 use support::fake::{FakeAdapter, ModelsAnswer};
 use support::suite::{self, Target};
 use support::{assert_valid, kind, start, start_with_adapters, tempdir, test_config};
@@ -313,6 +313,55 @@ async fn settings_are_patch_merged_and_persisted() {
         .await;
     assert_eq!(error["code"], json!(-32602));
     assert_eq!(client.result("settings.get", json!({})).await, expected);
+}
+
+/// Archive inactive sessions takes 1, 2, 7, 14 or 30 days and nothing else,
+/// and null clears it, which means never.
+// verifies: PROTO-CORE-API-R126
+#[tokio::test(flavor = "multi_thread")]
+async fn archive_inactive_days_takes_only_the_offered_values() {
+    let core = start().await;
+    let mut client = core.client().await;
+    let days =
+        |value: Value| json!({ "patch": { "sessions": { "archive_inactive_days": value } } });
+
+    for value in [1, 2, 7, 14, 30] {
+        let after = client.result("settings.set", days(json!(value))).await;
+        assert_eq!(after["sessions"]["archive_inactive_days"], json!(value));
+        let stored = client.result("settings.get", json!({})).await;
+        assert_eq!(stored["sessions"]["archive_inactive_days"], json!(value));
+    }
+
+    // 30 is in force; each refusal changes nothing.
+    let in_force = client.result("settings.get", json!({})).await;
+    let refused = [
+        json!(0),
+        json!(3),
+        json!(31),
+        json!(-1),
+        json!(7.5),
+        json!(7.0),
+        json!("7"),
+        json!(true),
+        json!([7]),
+        json!({}),
+    ];
+    for value in refused {
+        let error = client.error("settings.set", days(value.clone())).await;
+        assert_eq!(error["code"], json!(-32602), "{value} was not refused");
+        assert_eq!(client.result("settings.get", json!({})).await, in_force);
+    }
+    let error = client
+        .error("settings.set", json!({ "patch": { "sessions": 7 } }))
+        .await;
+    assert_eq!(error["code"], json!(-32602));
+    assert_eq!(client.result("settings.get", json!({})).await, in_force);
+
+    // Never: sent as null, the setting is gone.
+    let after = client.result("settings.set", days(Value::Null)).await;
+    assert_eq!(after["sessions"].get("archive_inactive_days"), None);
+    let stored = client.result("settings.get", json!({})).await;
+    assert_eq!(stored["sessions"].get("archive_inactive_days"), None);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -48,7 +48,43 @@ pub fn validate(settings: &Map<String, Value>) -> Result<(), String> {
             }
         }
     }
+    if let Some(sessions) = settings.get("sessions") {
+        let Some(sessions) = sessions.as_object() else {
+            return Err("sessions must be an object".into());
+        };
+        // Null never reaches here: the merge removed the key, which is
+        // Never (PROTO-CORE-API-R126).
+        if let Some(days) = sessions.get("archive_inactive_days")
+            && days_offered(days).is_none()
+        {
+            return Err(format!(
+                "sessions.archive_inactive_days must be one of {ARCHIVE_INACTIVE_DAYS:?}"
+            ));
+        }
+    }
     Ok(())
+}
+
+/// The numbers of days Archive inactive sessions offers besides Never
+/// (FLOW-CLEAN-UP Step 4, as Claude Desktop offers them).
+pub const ARCHIVE_INACTIVE_DAYS: [u64; 5] = [1, 2, 7, 14, 30];
+
+/// `value` as one of [`ARCHIVE_INACTIVE_DAYS`]. A JSON integer only: `7.0`
+/// and `"7"` are not one of them.
+fn days_offered(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .filter(|days| ARCHIVE_INACTIVE_DAYS.contains(days))
+}
+
+/// `sessions.archive_inactive_days`: after how many days without activity
+/// the sweep archives a session (FLOW-CLEAN-UP-R10). `None`, the default,
+/// is Never: the sweep archives none.
+pub fn archive_inactive_days(settings: &Map<String, Value>) -> Option<u64> {
+    settings
+        .get("sessions")
+        .and_then(|s| s.get("archive_inactive_days"))
+        .and_then(days_offered)
 }
 
 /// `workspaces.root`: the directory new worktrees go under. Defaults to
