@@ -72,6 +72,14 @@ pub struct CoreConfig {
     /// (PROTO-CORE-API-R113). [`crate::workspace::FOLDER_TRY_WINDOW`],
     /// except in tests that let it run out.
     pub folder_try_window: Duration,
+    /// How long `cleanup.inspect` measures a folder before it stops and
+    /// leaves its size unsaid (PROTO-CORE-API, Clean up).
+    /// [`crate::workspace::MEASURE_LIMIT`], except in tests that let it run out.
+    pub measure_limit: Duration,
+    /// Where measuring a folder for `cleanup.inspect` stops, on its own
+    /// thread before it reads the folder, until a test lets it go. `None`,
+    /// except in tests.
+    pub measure_gate: Option<Arc<Gate>>,
     /// How long a request waits for its turn at a project's worktrees
     /// while another change to them is under way (PROTO-CORE-API-R119).
     /// [`crate::workspace::WORKTREE_TURN_WAIT`], except in tests that let
@@ -312,6 +320,8 @@ impl CoreConfig {
             record_deletion_limit: RECORD_DELETION_LIMIT,
             folder_removal_limit: crate::workspace::GIT_TIMEOUT,
             folder_try_window: crate::workspace::FOLDER_TRY_WINDOW,
+            measure_limit: crate::workspace::MEASURE_LIMIT,
+            measure_gate: None,
             worktree_turn_wait: crate::workspace::WORKTREE_TURN_WAIT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,

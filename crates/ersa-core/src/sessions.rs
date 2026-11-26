@@ -1265,6 +1265,13 @@ impl SessionManager {
         sessions
     }
 
+    /// Whether a connection is subscribed to session `id` now; false for
+    /// one Core does not hold.
+    pub fn is_subscribed(&self, id: &str) -> bool {
+        self.handle(id)
+            .is_ok_and(|handle| !lock(&handle.hub).subscribers.is_empty())
+    }
+
     /// One session.
     pub fn get(&self, id: &str) -> Result<Session, SessionError> {
         self.handle(id)?.session()

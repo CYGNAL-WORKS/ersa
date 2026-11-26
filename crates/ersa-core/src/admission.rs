@@ -2774,6 +2774,13 @@ impl Admission {
         self.lock().state.workspace_held(workspace)
     }
 
+    /// Whether anything is under way on a session in `workspace`, or may
+    /// begin there ([`State::has_session_in_use`]): one arriving, being
+    /// removed, starting, sent to, forking, running or marked deleting.
+    pub fn session_in_use(&self, workspace: &str) -> bool {
+        self.lock().state.has_session_in_use(workspace)
+    }
+
     /// Whether a delete of `session` holds `workspace`, or the workspace
     /// went already, with that delete or with a removal.
     pub fn deleting(&self, workspace: &str, session: &str) -> bool {

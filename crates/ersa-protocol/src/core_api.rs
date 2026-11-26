@@ -106,6 +106,8 @@ methods! {
     SectionCreate => "section.create",
     SectionRename => "section.rename",
     SectionRemove => "section.remove",
+    CleanupList => "cleanup.list",
+    CleanupInspect => "cleanup.inspect",
     BackendList => "backend.list",
     BackendSignIn => "backend.sign_in",
     BackendCancelSignIn => "backend.cancel_sign_in",
@@ -1107,6 +1109,154 @@ pub struct SectionCreateParams {
 pub struct SectionRenameParams {
     pub id: String,
     pub name: String,
+}
+
+// ---------------------------------------------------------------------------
+// Clean up
+
+/// What a Clean up item is (FLOW-CLEAN-UP-R11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CleanupKind {
+    /// The folder of an isolated workspace whose sessions are all archived,
+    /// or all inactive.
+    Workspace,
+    /// An isolated workspace no session refers to.
+    Leftover,
+    /// A local `ersa/…` branch no workspace names and no worktree has
+    /// checked out.
+    Branch,
+    /// A folder in a project's folder under the worktrees root that no
+    /// workspace and no git worktree record names.
+    Folder,
+}
+
+/// `cleanup.list` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupListParams {
+    /// 30, 60 or 90: how many days without activity make a session inactive.
+    pub inactive_days: u32,
+}
+
+/// One thing `cleanup.list` says Core can remove.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupItem {
+    /// Opaque; the same for the same thing from one list to the next.
+    pub id: String,
+    pub kind: CleanupKind,
+    pub project_id: String,
+    /// For a workspace and a leftover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// The folder; absent for a branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Without `refs/heads/`; absent for a folder, and for a workspace on
+    /// no branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// For a workspace: the sessions that use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_ids: Option<Vec<String>>,
+    /// For a workspace: RFC 3339, the latest `last_activity_at` of its
+    /// sessions; absent when none is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<String>,
+}
+
+/// A project `cleanup.list` could not read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupUnread {
+    pub project_id: String,
+    pub message: String,
+}
+
+/// `cleanup.list` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupListResult {
+    pub items: Vec<CleanupItem>,
+    /// Projects whose git calls failed or ran out of time: they contribute
+    /// no branch or folder item.
+    pub unread: Vec<CleanupUnread>,
+}
+
+/// `cleanup.inspect` result: the item as `cleanup.list` gives it, its
+/// fields repeated here, with what removing it would lose
+/// (FLOW-CLEAN-UP-R12, R26). Each loss field is present only for the kinds
+/// it names. Params are [`IdParams`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CleanupInspection {
+    pub id: String,
+    pub kind: CleanupKind,
+    pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<String>,
+    /// Workspace and leftover: as `workspace.changes` counts them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncommitted: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored: Option<u64>,
+    /// Workspace and leftover: as `workspace.changes` counts it. Branch: the
+    /// commits it holds that no other local branch and no remote-tracking
+    /// branch holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unshared: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stranded: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unrecorded: Option<bool>,
+    /// Workspace and leftover: whether the folder holds a repository of its
+    /// own (PROTO-CORE-API-R147).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holds_repository: Option<bool>,
+    /// What the folder's files take; absent when measuring took too long,
+    /// and for a leftover with no folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// Branch: whether merging it into the project's base branch would
+    /// change nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merged: Option<bool>,
+    /// Opaque; changes whenever what removing the item would lose changes.
+    pub token: String,
+}
+
+impl CleanupInspection {
+    /// `item` with nothing yet said of what removing it would lose.
+    pub fn of(item: CleanupItem, token: String) -> CleanupInspection {
+        CleanupInspection {
+            id: item.id,
+            kind: item.kind,
+            project_id: item.project_id,
+            workspace_id: item.workspace_id,
+            path: item.path,
+            branch: item.branch,
+            session_ids: item.session_ids,
+            last_activity_at: item.last_activity_at,
+            uncommitted: None,
+            ignored: None,
+            unshared: None,
+            stranded: None,
+            unrecorded: None,
+            holds_repository: None,
+            size_bytes: None,
+            merged: None,
+            token,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

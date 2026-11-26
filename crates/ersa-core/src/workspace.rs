@@ -729,6 +729,52 @@ pub async fn carrying<F: std::future::Future>(
     CARRIED.scope(held, work).await
 }
 
+tokio::task_local! {
+    /// The one place under [`FILE_SYSTEM`]'s cap that [`in_one_place`]
+    /// holds for all of its work.
+    static PLACE: Arc<tokio::sync::SemaphorePermit<'static>>;
+}
+
+/// A place under [`FILE_SYSTEM`]'s cap, kept by a job until its thread
+/// returns: its own, or the one [`in_one_place`] holds. Each is kept only
+/// for its drop.
+#[allow(dead_code)]
+enum Place {
+    Own(tokio::sync::SemaphorePermit<'static>),
+    Shared(Arc<tokio::sync::SemaphorePermit<'static>>),
+}
+
+/// Runs `work` holding one place under [`FILE_SYSTEM`]'s cap from its
+/// start to its end, as `cleanup.inspect` does (PROTO-CORE-API, Clean up):
+/// every blocking file system job it starts uses that place rather than
+/// take another. With none free, answers [`VcsError::Busy`] at once,
+/// before any of `work` runs.
+pub async fn in_one_place<F: std::future::Future>(work: F) -> Result<F::Output, VcsError> {
+    let place = FILE_SYSTEM.try_acquire().map_err(|_| VcsError::Busy)?;
+    Ok(PLACE.scope(Arc::new(place), work).await)
+}
+
+/// The key of each of `paths` ([`location_key`]), as two spellings of one
+/// folder compare equal. Shares `workspace.changes`'s cap on blocking reads.
+pub async fn location_keys(paths: Vec<String>) -> Result<Vec<String>, VcsError> {
+    blocking(deadline(), "reading the workspaces' folders", move |_| {
+        Ok(paths.iter().map(|path| location_key(path)).collect())
+    })
+    .await
+}
+
+/// `path` canonicalised, as `workspace.create` makes workspaces under it;
+/// `None` when it does not exist. Shares `workspace.changes`'s cap on
+/// blocking reads.
+pub async fn canonical_folder(
+    path: std::path::PathBuf,
+) -> Result<Option<std::path::PathBuf>, VcsError> {
+    blocking(deadline(), "reading the worktrees folder", move |_| {
+        Ok(platform::canonicalize(&path).ok())
+    })
+    .await
+}
+
 /// Runs `work` on a blocking thread, answering by `deadline`; `what` names
 /// it in errors. `work` gets the deadline as a clock time, to stop itself
 /// between reads.
@@ -738,7 +784,12 @@ async fn blocking<T: Send + 'static>(
     work: impl FnOnce(std::time::Instant) -> Result<T, Halt> + Send + 'static,
 ) -> Result<T, VcsError> {
     let carried = CARRIED.try_with(Arc::clone).ok();
-    let place = FILE_SYSTEM.try_acquire().map_err(|_| VcsError::Busy)?;
+    // Inside [`in_one_place`] the job uses the place already held, and
+    // keeps it on its thread too, so a job left stuck still counts.
+    let place = match PLACE.try_with(Arc::clone) {
+        Ok(held) => Place::Shared(held),
+        Err(_) => Place::Own(FILE_SYSTEM.try_acquire().map_err(|_| VcsError::Busy)?),
+    };
     let stop = deadline.at.into_std();
     let job = tokio::task::spawn_blocking(move || {
         // Let go in the reverse order: the place first, then what is
@@ -1034,6 +1085,54 @@ pub async fn git_holds_repository(
         "--untracked-files=all",
     ];
     let output = query(transport, repo, &args, deadline).await?;
+    let entries = parse_status(&checked(output, "git status failed")?.stdout);
+    Ok(entries
+        .iter()
+        .any(|entry| entry.kind == '?' && entry.path.ends_with('/')))
+}
+
+/// [`git_holds_repository`] for a worktree git has lost its record of, as
+/// `workspace.changes` counts one (PROTO-CORE-API-R46). The submodule
+/// repositories git keeps went with the record, and with no index a
+/// checked-out submodule is listed, as a nested repository is, as an
+/// untracked folder. So a repository of its own is an untracked folder in
+/// `git status` against an empty index, the ignore rules applied; a folder
+/// that is gone holds none.
+pub async fn git_holds_repository_unrecorded(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+) -> Result<bool, VcsError> {
+    let deadline = Deadline::after(CHANGES_TIMEOUT);
+    let records = git_records(transport, repo, path, deadline).await?;
+    let folder = path.to_string();
+    let there = blocking(deadline, "looking for the workspace's folder", move |_| {
+        Ok(std::path::Path::new(&folder).try_exists()?)
+    })
+    .await?;
+    if !there {
+        return Ok(false);
+    }
+    // As `count_files` reads a folder with no record: the repository's own
+    // git folder, the folder named outright, and an index that does not
+    // exist, which reads as empty and is never written.
+    let git_dir = format!("--git-dir={}", records.common);
+    let work_tree = format!("--work-tree={path}");
+    let empty_index = std::env::temp_dir()
+        .join(format!("ersa-empty-index-{}", uuid::Uuid::new_v4()))
+        .display()
+        .to_string();
+    let env = [("GIT_INDEX_FILE", empty_index.as_str())];
+    let args = [
+        "--no-optional-locks",
+        git_dir.as_str(),
+        work_tree.as_str(),
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=all",
+    ];
+    let output = query_env(transport, repo, &args, &env, deadline).await?;
     let entries = parse_status(&checked(output, "git status failed")?.stdout);
     Ok(entries
         .iter()
@@ -1704,17 +1803,7 @@ pub async fn git_worktree_gone(
     path: &str,
 ) -> Result<bool, VcsError> {
     let listed = git_worktree_list(transport, repo).await?;
-    if find(&listed, path).await.is_some() {
-        return Ok(false);
-    }
-    let folder = path.to_string();
-    let exists = blocking(
-        deadline(),
-        "looking for the workspace's folder",
-        move |_| Ok(std::path::Path::new(&folder).try_exists()?),
-    )
-    .await?;
-    Ok(!exists)
+    worktree_gone_in(&listed, path).await
 }
 
 /// Whether `path` is a folder with nothing in it: a real one, not a link to
@@ -2022,6 +2111,278 @@ async fn git_within(
 
 fn check(output: Output, message: &str) -> Result<(), VcsError> {
     checked(output, message).map(drop)
+}
+
+// -- What the Clean up list reads (FLOW-CLEAN-UP-R11, R12) -----------------
+
+/// How long `cleanup.inspect` measures a folder before it stops and leaves
+/// its size unsaid (PROTO-CORE-API, Clean up).
+pub const MEASURE_LIMIT: Duration = Duration::from_secs(30);
+
+/// How long past [`MEASURE_LIMIT`] a measurement whose read does not answer
+/// is waited for before the inspect fails: the walk stops itself at the
+/// limit between reads, so only a read that hangs reaches this.
+const MEASURE_GRACE: Duration = Duration::from_secs(5);
+
+/// What the Clean up list reads of a project's repository with git.
+#[derive(Debug, Clone, Default)]
+pub struct Survey {
+    /// The key of the repository's own git folder, shared by every
+    /// worktree of it: two projects in one repository have the same one.
+    pub common: String,
+    /// Its local branches named `ersa/…`, without `refs/heads/`.
+    pub ersa_branches: Vec<String>,
+    /// Its worktrees, the main one and those whose folder is gone included.
+    pub worktrees: Vec<WorktreeEntry>,
+}
+
+/// Reads what the Clean up list needs of the repository at `repo`; all of
+/// it, three git calls, is given [`GIT_QUERY_TIMEOUT`] together.
+pub async fn git_cleanup_survey(transport: &dyn Transport, repo: &str) -> Result<Survey, VcsError> {
+    let deadline = deadline();
+    let args = ["rev-parse", "--git-common-dir"];
+    let output = query(transport, repo, &args, deadline).await?;
+    let output = checked(output, "git could not find the repository's folder")?;
+    let common = output
+        .stdout
+        .first()
+        .map(|line| line.trim().to_string())
+        .unwrap_or_default();
+    // Relative to `repo` when it is inside it; joining an absolute one
+    // replaces `repo`.
+    let common = std::path::Path::new(repo)
+        .join(common)
+        .display()
+        .to_string();
+    let common = blocking(deadline, "finding the repository's folder", move |_| {
+        Ok(location_key(&common))
+    })
+    .await?;
+
+    let args = ["for-each-ref", "--format=%(refname)", "refs/heads/ersa/"];
+    let output = query(transport, repo, &args, deadline).await?;
+    let output = checked(output, "git could not list the branches")?;
+    let ersa_branches = output
+        .stdout
+        .iter()
+        .filter_map(|line| line.trim().strip_prefix("refs/heads/"))
+        .map(str::to_string)
+        .collect();
+
+    let args = ["worktree", "list", "--porcelain"];
+    let output = query(transport, repo, &args, deadline).await?;
+    let output = checked(output, "git worktree list failed")?;
+    Ok(Survey {
+        common,
+        ersa_branches,
+        worktrees: parse_worktree_list(&output.stdout),
+    })
+}
+
+/// Whether nothing of a worktree at `path` is left: none of `listed`
+/// names it, and nothing is at `path`. [`git_worktree_gone`] with the list
+/// already read.
+pub async fn worktree_gone_in(listed: &[WorktreeEntry], path: &str) -> Result<bool, VcsError> {
+    if find(listed, path).await.is_some() {
+        return Ok(false);
+    }
+    let folder = path.to_string();
+    let exists = blocking(
+        deadline(),
+        "looking for the workspace's folder",
+        move |_| Ok(std::path::Path::new(&folder).try_exists()?),
+    )
+    .await?;
+    Ok(!exists)
+}
+
+/// Whether any of `entries` names the folder at `path`.
+pub async fn names_folder(entries: &[WorktreeEntry], path: &str) -> bool {
+    find(entries, path).await.is_some()
+}
+
+/// What deleting a local branch would lose (FLOW-CLEAN-UP-R12).
+#[derive(Debug, Clone, Default)]
+pub struct BranchLoss {
+    /// The commits it holds that no other local branch and no
+    /// remote-tracking branch holds.
+    pub unshared: BTreeSet<String>,
+    /// Whether merging it into the repository's default branch would change
+    /// nothing: it is already there, merged or squashed in. False when the
+    /// repository has no default branch.
+    pub merged: bool,
+    /// The commit it points at; `None` once it is gone.
+    pub tip: Option<String>,
+}
+
+/// What deleting the branch `branch` of the repository at `repo` would
+/// lose; all of it is given [`CHANGES_TIMEOUT`], as `workspace.changes`'s
+/// counts are.
+pub async fn git_branch_loss(
+    transport: &dyn Transport,
+    repo: &str,
+    branch: &str,
+) -> Result<BranchLoss, VcsError> {
+    let deadline = Deadline::after(CHANGES_TIMEOUT);
+    let tip_ref = format!("refs/heads/{branch}");
+    let tip = resolve_commit(transport, repo, &tip_ref, deadline).await?;
+    let tips = [tip_ref.clone()];
+    let unshared = unshared_from(transport, repo, &tips, &[branch], deadline).await?;
+    // The base branch is the one a workspace starts from without a base.
+    let merged = match default_branch(transport, repo, deadline).await? {
+        Some(base) if tip.is_some() => {
+            let base = format!("refs/heads/{base}");
+            merges_to_nothing(transport, repo, &base, &tip_ref, deadline).await?
+        }
+        _ => false,
+    };
+    Ok(BranchLoss {
+        unshared,
+        merged,
+        tip,
+    })
+}
+
+/// Whether merging `branch` into `base` would leave `base`'s tree as it
+/// is: `branch` is already in it, or what it changes is (a squash merge).
+async fn merges_to_nothing(
+    transport: &dyn Transport,
+    repo: &str,
+    base: &str,
+    branch: &str,
+    deadline: Deadline,
+) -> Result<bool, VcsError> {
+    // Computes the merge without touching any worktree, index or ref: the
+    // merged tree on the first line; exit 1 when it conflicts.
+    let args = ["merge-tree", "--write-tree", base, branch];
+    let output = query(transport, repo, &args, deadline).await?;
+    let merged = match output.exit.code {
+        Some(0) => output.stdout.first().map(|line| line.trim().to_string()),
+        Some(1) => return Ok(false),
+        _ => {
+            let output = checked(
+                output,
+                "git could not merge the branch into the base branch",
+            )?;
+            output.stdout.first().map(|line| line.trim().to_string())
+        }
+    };
+    let base_tree = format!("{base}^{{tree}}");
+    let args = ["rev-parse", "--verify", base_tree.as_str()];
+    let output = query(transport, repo, &args, deadline).await?;
+    let output = checked(output, "git could not read the base branch")?;
+    let base_tree = output.stdout.first().map(|line| line.trim().to_string());
+    Ok(merged.is_some() && merged == base_tree)
+}
+
+/// The names of the real folders in `path`: not files, links or junctions;
+/// none when `path` is not there. Shares `workspace.changes`'s cap on
+/// blocking reads.
+pub async fn real_folders_in(path: &std::path::Path) -> Result<Vec<String>, VcsError> {
+    let path = path.to_path_buf();
+    blocking(deadline(), "listing the worktrees folder", move |_| {
+        let entries = match std::fs::read_dir(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            other => other?,
+        };
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            // `symlink_metadata`: a link is never followed, so the folder
+            // it points at is never taken for one in here.
+            let meta = std::fs::symlink_metadata(entry.path())?;
+            if meta.is_dir() && !meta.file_type().is_symlink() {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        names.sort();
+        Ok(names)
+    })
+    .await
+}
+
+/// What measuring a folder found.
+#[derive(Debug, Clone, Default)]
+pub struct Measure {
+    /// What its files take; `None` when measuring took longer than its limit.
+    pub size_bytes: Option<u64>,
+    /// One line per entry read (its path, length and modified time): every
+    /// entry when the measuring finished, else the folder's own entries.
+    pub evidence: Vec<String>,
+}
+
+/// Measures the folder at `path`: what its files take, links not followed,
+/// for at most `limit` (PROTO-CORE-API, Clean up). `gate` stops the walk
+/// on its thread in tests. A folder that is not there measures nothing.
+pub async fn measure_folder(
+    path: &str,
+    limit: Duration,
+    gate: Option<Arc<Gate>>,
+) -> Result<Measure, VcsError> {
+    let root = std::path::PathBuf::from(path);
+    let runtime = tokio::runtime::Handle::current();
+    let started = std::time::Instant::now();
+    let deadline = Deadline::after(limit + MEASURE_GRACE);
+    blocking(deadline, "measuring the folder", move |_| {
+        // In tests, the folder that does not answer.
+        if let Some(gate) = gate {
+            runtime.block_on(gate.stop());
+        }
+        let stop = started + limit;
+        let mut evidence = Vec::new();
+        let mut top = Vec::new();
+        let mut size = 0u64;
+        // Breadth first, so the folder's own entries are read before any
+        // deeper one: they are the evidence when the measuring stops.
+        let mut folders = std::collections::VecDeque::from([(root.clone(), 0usize)]);
+        while let Some((folder, depth)) = folders.pop_front() {
+            let entries = match std::fs::read_dir(&folder) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && depth == 0 => {
+                    return Ok(Measure {
+                        size_bytes: Some(0),
+                        evidence,
+                    });
+                }
+                other => other?,
+            };
+            for entry in entries {
+                if std::time::Instant::now() >= stop {
+                    top.push("not measured to the end".to_string());
+                    return Ok(Measure {
+                        size_bytes: None,
+                        evidence: top,
+                    });
+                }
+                let entry = entry?;
+                let meta = std::fs::symlink_metadata(entry.path())?;
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map_or(0, |since| since.as_nanos());
+                let full = entry.path();
+                let relative = full.strip_prefix(&root).unwrap_or(&full);
+                let line = format!("{} {} {modified}", relative.display(), meta.len());
+                if depth == 0 {
+                    top.push(line.clone());
+                }
+                evidence.push(line);
+                if meta.file_type().is_symlink() {
+                    continue;
+                }
+                if meta.is_dir() {
+                    folders.push_back((full, depth + 1));
+                } else {
+                    size += meta.len();
+                }
+            }
+        }
+        Ok(Measure {
+            size_bytes: Some(size),
+            evidence,
+        })
+    })
+    .await
 }
 
 #[cfg(test)]

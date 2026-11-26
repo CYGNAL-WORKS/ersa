@@ -258,3 +258,24 @@ async fn suite_a_line_that_is_not_utf8_gets_a_parse_error_and_closes() {
 async fn suite_a_connection_without_hello_is_closed_after_the_deadline() {
     suite::a_connection_without_hello_is_closed_after_the_deadline(Target::Replay).await;
 }
+
+/// A replay server answers the Clean up list as a Core with nothing to
+/// list: its project is no git project, and its one workspace is the
+/// project's own folder.
+// verifies: FLOW-CLEAN-UP-R11
+// verifies: FLOW-CLEAN-UP-R12
+#[tokio::test(flavor = "multi_thread")]
+async fn the_clean_up_list_of_a_replay_is_empty() {
+    let replay = start_replay(Pace::Instant).await;
+    let mut client = replay.client().await;
+    let session = the_session(&mut client).await;
+
+    let response = client
+        .call("cleanup.list", json!({ "inactive_days": 30 }))
+        .await;
+    support::assert_valid("cleanup.list", &response);
+    assert_eq!(response["result"], json!({ "items": [], "unread": [] }));
+    let id = format!("w:{}", session["workspace_id"].as_str().unwrap());
+    let error = client.error("cleanup.inspect", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "not_found", "{error}");
+}
