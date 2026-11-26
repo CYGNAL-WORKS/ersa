@@ -374,10 +374,12 @@ async fn a_live_session_is_left_running_and_archived_once_it_has_stopped() {
 // verifies: FLOW-CLEAN-UP-R10
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_nothing_dates_is_left() {
-    let (mut s, clock) = swept().await;
+    let (mut s, _) = swept().await;
     let (_, undated, _) = left_alone(&mut s).await;
     // The lifecycle facts that dated it are gone, as for a session from
-    // before the app log; its backend never wrote a record.
+    // before the app log; its backend never wrote a record. The next Core
+    // sweeps by a clock of its own, whose first pass is its pass at start.
+    let clock = Arc::new(ersa_core::SweepClock::default());
     let fake: Vec<Arc<dyn ersa_core::Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
     let mut s = restarted_after(s, fake, &clock, |data| {
         for name in [
@@ -388,8 +390,7 @@ async fn a_session_nothing_dates_is_left() {
         }
     })
     .await;
-    let restarted = clock.ended();
-    passes(&clock, restarted + 1).await;
+    passes(&clock, 1).await;
     let listed = row(&mut s, &undated).await;
     assert_eq!(listed["created_at"], "1970-01-01T00:00:00.000Z", "{listed}");
     assert_eq!(listed.get("last_activity_at"), None);
