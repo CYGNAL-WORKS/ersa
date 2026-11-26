@@ -138,7 +138,9 @@ pub enum Sweeps {
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 /// The sweep's clock in a test ([`Sweeps::Driven`]): the test says when an
-/// hour has passed, and learns when each sweep has ended.
+/// hour has passed, and learns when each sweep has ended. The time the sweep
+/// reads, to tell a leftover's age (FLOW-CLEAN-UP-R23), is the wall clock
+/// moved on by whatever the test said has passed.
 #[derive(Debug)]
 pub struct SweepClock {
     /// One permit for each hour the test said has passed and the sweep has
@@ -146,6 +148,8 @@ pub struct SweepClock {
     hours: tokio::sync::Semaphore,
     /// How many sweeps have ended.
     ended: watch::Sender<u64>,
+    /// How far the test has moved the clock on.
+    passed: std::sync::Mutex<Duration>,
 }
 
 impl Default for SweepClock {
@@ -153,14 +157,36 @@ impl Default for SweepClock {
         SweepClock {
             hours: tokio::sync::Semaphore::new(0),
             ended: watch::Sender::new(0),
+            passed: std::sync::Mutex::new(Duration::ZERO),
         }
     }
 }
 
 impl SweepClock {
-    /// Says that an hour has passed: the sweep runs again.
+    /// Says that an hour has passed: the clock moves on an hour, and the
+    /// sweep runs again.
     pub fn hour_passed(&self) {
+        self.time_passed(SWEEP_INTERVAL);
+        self.sweep_again();
+    }
+
+    /// The sweep runs again, the clock where it is.
+    pub fn sweep_again(&self) {
         self.hours.add_permits(1);
+    }
+
+    /// Moves the clock on by `by`, without a sweep: the next one reads the
+    /// later time.
+    pub fn time_passed(&self, by: Duration) {
+        // A poisoned lock still holds a duration worth reading.
+        let mut passed = self.passed.lock().unwrap_or_else(|e| e.into_inner());
+        *passed += by;
+    }
+
+    /// The time the sweep reads now.
+    pub(crate) fn now(&self) -> time::OffsetDateTime {
+        let passed = *self.passed.lock().unwrap_or_else(|e| e.into_inner());
+        time::OffsetDateTime::now_utc() + passed
     }
 
     /// How many sweeps have ended so far.
@@ -423,6 +449,15 @@ impl Core {
     /// Waits until a sweep is asked for.
     pub(crate) async fn sweep_asked(&self) {
         self.sweep_asked.notified().await;
+    }
+
+    /// The time the sweep reads, to tell how long ago a workspace was made
+    /// (FLOW-CLEAN-UP-R23): the wall clock, or the test's ([`SweepClock`]).
+    pub(crate) fn sweep_now(&self) -> time::OffsetDateTime {
+        match &self.config.sweeps {
+            Sweeps::Driven(clock) => clock.now(),
+            Sweeps::Hourly | Sweeps::Never => time::OffsetDateTime::now_utc(),
+        }
     }
 
     /// The local host's name.

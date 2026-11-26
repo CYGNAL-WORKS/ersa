@@ -47,10 +47,18 @@ impl Log {
     /// Whether a line at `level` (`INFO`, `WARN`) holds `text` and the
     /// field `field`, as `workspace=w-…`.
     pub fn logged(&self, level: &str, text: &str, field: &str) -> bool {
+        self.count(level, text, field) > 0
+    }
+
+    /// How many lines at `level` hold `text` and the field `field`.
+    pub fn count(&self, level: &str, text: &str, field: &str) -> usize {
         let written = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
-        written.lines().any(|line| {
-            line.contains(&format!(" {level} ")) && line.contains(text) && line.contains(field)
-        })
+        written
+            .lines()
+            .filter(|line| {
+                line.contains(&format!(" {level} ")) && line.contains(text) && line.contains(field)
+            })
+            .count()
     }
 
     /// Whether a warning holds `text` and the field `field`, as

@@ -843,6 +843,35 @@ pub(super) async fn workspace_remove(
         .workspace(params.id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no workspace {}", params.id)))?;
+    let force = params.force.unwrap_or(false);
+    remove_workspace(core, &workspace, Remover::Request { force }).await?;
+    workspace.state = WorkspaceState::Removing;
+    Ok(workspace)
+}
+
+/// Who removes a workspace, which decides what the removal checks before
+/// git changes anything.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Remover {
+    /// `workspace.remove`: local changes, and a folder git does not list,
+    /// are refused unless `force`.
+    Request { force: bool },
+    /// The sweep, removing a leftover (FLOW-CLEAN-UP-R23): admitted only
+    /// while no session is there, never forced, and judged again in the
+    /// project's turn, just before git removes anything.
+    Sweep,
+}
+
+/// Removes isolated workspace `workspace` as every removal does
+/// (PROTO-CORE-API-R122): its folder, git's record of the worktree and its
+/// branch, unless the branch holds work of its own or another worktree has
+/// it checked out, then the workspace. Whether the branch was kept is not
+/// reported.
+pub(super) async fn remove_workspace(
+    core: &Core,
+    workspace: &Workspace,
+    by: Remover,
+) -> Result<(), ApiError> {
     // The root workspace is the project's own folder: it goes only with the
     // project, and nothing of it is ever deleted.
     if workspace.kind == WorkspaceKind::Root {
@@ -860,7 +889,7 @@ pub(super) async fn workspace_remove(
     // workspace is being made or removed, or has a session Ersa started or
     // one Core runs (FLOW-RESUME-SESSION-R14), as a project with workspaces
     // is, since removal never cascades and no backend may be left running
-    // in a deleted directory.
+    // in a deleted directory; for the sweep, while any session is there.
     // Once admitted it holds the workspace: no session is created in it,
     // none of its found sessions is sent to or resumed, no delete marks it
     // and no second removal starts (ARCH-CORE-R14). So from here to the
@@ -871,6 +900,7 @@ pub(super) async fn workspace_remove(
         .admission
         .command(Command::RemoveWorkspace {
             workspace: id.clone(),
+            leftover_only: by == Remover::Sweep,
         })
         .await
         .map_err(|refusal| refused(refusal, &id))?;
@@ -894,19 +924,48 @@ pub(super) async fn workspace_remove(
         return Err(e.into());
     }
 
-    // As every removal (PROTO-CORE-API-R122): the folder, git's record and
-    // the branch, unless the branch holds work of its own or another
-    // worktree has it checked out. Whether it was kept is not reported.
-    let checks = workspace::RemovalChecks {
-        force: params.force.unwrap_or(false),
-        // An `error` workspace may be an add that was killed mid-way; its
-        // leftover `initializing` lock must not block removal.
-        after_failed_add: replaced == WorkspaceState::Error,
+    let checks = match by {
+        Remover::Request { force } => workspace::RemovalChecks {
+            force,
+            // An `error` workspace may be an add that was killed mid-way;
+            // its leftover `initializing` lock must not block removal.
+            after_failed_add: replaced == WorkspaceState::Error,
+        },
+        // Nothing of the user's is ever lost to the sweep: what git would
+        // refuse, it refuses, a lock of any kind included (FLOW-CLEAN-UP-R08).
+        Remover::Sweep => workspace::RemovalChecks {
+            force: false,
+            after_failed_add: false,
+        },
     };
+    let turns = RepositoryTurns {
+        core,
+        project: &project.id,
+    };
+    // The project's turn first (R118), so the sweep can judge the
+    // workspace again where nothing of Ersa's changes the project's
+    // worktrees under it. Past the wait no git work begins (R119, R124).
+    let turn = match turns.turn().await {
+        Ok(turn) => turn,
+        Err(e) => {
+            core.store.set_workspace_state(id, replaced).await?;
+            removing.end(not_removed);
+            return Err(e.into());
+        }
+    };
+    if by == Remover::Sweep
+        && let Some(keep) = super::leftover::keeps(core, workspace).await
+    {
+        drop(turn);
+        core.store.set_workspace_state(id, replaced).await?;
+        removing.end(not_removed);
+        return Err(ApiError::invalid_state(keep.why()));
+    }
     // Shared with each try at the folder, which keeps it until its thread
     // returns: a try given up on that is still stuck holds the removal, so
     // trying again meanwhile is refused and begins no second removal beside
-    // it, as for a delete (PROTO-CORE-API-R107).
+    // it, as for a delete (PROTO-CORE-API-R107), or as the sweep's
+    // (PROTO-CORE-API-R131).
     let removing = Arc::new(removing);
     let removed = workspace::git_worktree_delete(
         transport.as_ref(),
@@ -915,10 +974,7 @@ pub(super) async fn workspace_remove(
         &workspace.vcs_ref,
         checks,
         workspace::FolderTries::from_config(&core.config, Arc::clone(&removing) as _),
-        &RepositoryTurns {
-            core,
-            project: &project.id,
-        },
+        &workspace::HeldFirst::new(turn, turns),
     )
     .await;
     if let Err(e) = removed {
@@ -960,8 +1016,7 @@ pub(super) async fn workspace_remove(
         },
     );
     core.sessions.forget_found(quiet).await;
-    workspace.state = WorkspaceState::Removing;
-    Ok(workspace)
+    Ok(())
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by

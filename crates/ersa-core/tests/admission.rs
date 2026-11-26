@@ -125,6 +125,7 @@ fn find_session(workspace: &str, session: &str) -> Command {
 fn remove_workspace(workspace: &str) -> Command {
     Command::RemoveWorkspace {
         workspace: workspace.into(),
+        leftover_only: false,
     }
 }
 
@@ -140,6 +141,13 @@ fn put_away_archived(workspace: &str) -> Command {
     Command::PutAway {
         workspace: workspace.into(),
         archived_only: true,
+    }
+}
+
+fn remove_leftover(workspace: &str) -> Command {
+    Command::RemoveWorkspace {
+        workspace: workspace.into(),
+        leftover_only: true,
     }
 }
 
@@ -212,6 +220,44 @@ fn a_removal_admitted_first_refuses_a_session_in_the_workspace() {
         Outcome::Refused(Refusal::WorkspaceNotReady)
     );
     assert!(state.session("s1").is_none() && state.session("s2").is_none());
+}
+
+// -- The sweep removing a leftover (FLOW-CLEAN-UP-R23) ---------------------
+
+/// A leftover is a workspace no session refers to: the sweep's removal is
+/// refused, never held, while any session is there, arriving or stored,
+/// found in the backend's records or started by Ersa, and while a delete
+/// holds it. With none, it is admitted as any removal, and a session asked
+/// for after it is refused.
+// verifies: FLOW-CLEAN-UP-R23
+#[test]
+fn the_sweep_removes_a_workspace_only_while_no_session_is_there() {
+    // Arriving: admitted, its row not stored yet.
+    let mut state = world();
+    command(&mut state, create_session(W, "s1"));
+    assert_eq!(
+        command(&mut state, remove_leftover(W)),
+        Outcome::Refused(Refusal::WorkspaceHasSessions)
+    );
+    // Found and stored, which a `workspace.remove` would take with it.
+    let mut state = world();
+    command(&mut state, find_session(W, "s1"));
+    report(&mut state, stored_in(W, "s1", true));
+    assert_eq!(
+        command(&mut state, remove_leftover(W)),
+        Outcome::Refused(Refusal::WorkspaceHasSessions)
+    );
+    assert_eq!(phase(&state, W), Some(WorkspacePhase::Ready));
+
+    let mut state = world();
+    assert_eq!(
+        command(&mut state, remove_leftover(W)),
+        admitted(Operation::RemoveWorkspace(W.into()))
+    );
+    assert_eq!(
+        command(&mut state, create_session(W, "s1")),
+        Outcome::Refused(Refusal::WorkspaceNotReady)
+    );
 }
 
 // verifies: FLOW-RESUME-SESSION-R13
@@ -3423,7 +3469,7 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
             Input::Command(Command::DeleteSession { session } | Command::RemoveSession { session }),
             Outcome::Admitted(_),
         ) => before.session(session).map(|s| s.workspace.clone()),
-        (Input::Command(Command::RemoveWorkspace { workspace }), Outcome::Admitted(_)) => {
+        (Input::Command(Command::RemoveWorkspace { workspace, .. }), Outcome::Admitted(_)) => {
             Some(workspace.clone())
         }
         _ => None,
