@@ -1,0 +1,35 @@
+Claude Code 2.1.330 (Windows), its sign-in as a host with no terminal starts it, recorded 2026-11-26 with `scripts/record-claude-sign-in.mjs` (#633, ADR 0040). Each ending ran against a new scratch configuration folder, deleted afterward, so the machine's own CLI was never signed in. Times are milliseconds from the start of that ending's run, as each `.meta.json` gives them.
+
+Files, by ending:
+- stopped: 00-sign-in-stopped (the sign-in), 01-sign-in-stopped-running, 02-sign-in-stopped-probe.
+- abandoned: 03-sign-in-abandoned, 04-sign-in-abandoned-running, 05-sign-in-abandoned-probe.
+- finished: 06-sign-in-finished, 07-sign-in-finished-running, 08-sign-in-finished-probe, 09-sign-in-finished-sign-out.
+`-running` is a session started signed out before the sign-in and sent one message after it; `-probe` is a new CLI started after the sign-in ended (`initialize`, `get_settings`); `-sign-out` is `claude auth logout` against the scratch folder.
+
+How the sign-in was started
+- The control route, in every ending: the CLI started with Ersa's session command line, `initialize`, then `claude_authenticate` with `loginWithClaudeAi: true`, then `claude_oauth_wait_for_completion`. Nothing was refused, so `claude auth login` (the process route) was never run, and `claude_oauth_callback` was never sent.
+- `claude_authenticate` answers within about 20 ms with two addresses and nothing else: `manualUrl`, whose return address is the vendor's own page (where a person would copy a code), and `automaticUrl`, whose return address is a local callback on the person's machine. Both carry `code=true`, a client id, `response_type`, the return address, the scopes, a PKCE challenge (`S256`) and a state; the challenge and the state read `REDACTED`.
+- The CLI does not open a browser itself: in the finished ending the person said no page had opened, and the recorder opened `automaticUrl`.
+- No line, either way, carries a token, a key or an authorization code (the redactor's check, `secretsIn`).
+
+What each ending looked like on the wire
+- finished (06): the recorder opened `automaticUrl` at 789. At 10586 the CLI wrote `system` `commands_changed` (55 commands, 49 before), and at 10816, about 10 s after the page opened, `claude_oauth_wait_for_completion` answered `success` with `account` holding `email`, `organization`, `subscriptionType` and `apiProvider` (each a placeholder here) and no `tokenSource`. Closing stdin then ended the process, exit 0, at 11137.
+- stopped (00): the host sent `control_cancel_request` for the pending `claude_oauth_wait_for_completion` 9 ms after the address arrived. The CLI wrote nothing more: no answer to the wait and no acknowledgment of the cancel within 5 s. Closing stdin ended it, exit 0, about 5.2 s after the cancel (the recorder's 5 s wait, then the close).
+- abandoned (03): the address arrived at 1004 and nothing more came for 120 s. The host then sent `control_cancel_request` (121021); as when stopped, the CLI wrote nothing more, no answer to the wait and no acknowledgment, and closing stdin ended it, exit 0, at 126176. Stopped and abandoned look the same on the wire: only the host's cancel ends the wait, and the CLI never says it was canceled.
+
+The session running all along (`-running`)
+- Each started signed out (`initialize` answered `account` `{tokenSource: "none", apiProvider: "firstParty"}`).
+- After a finished sign-in (07) it was not restarted: its one message was answered by the model, `result` `success`, `ok`, exit 0. Its `system` `init`, written as the message started, says `apiKeySource: "none"`, as before a sign-in, and the `result` carries `credential_expires_at`.
+- After the stopped sign-in (01) its message was answered by the CLI itself: an `assistant` message from model `<synthetic>` with `error: "authentication_failed"` and the text "Not logged in · Please run /login", then `result` with `is_error: true` and `terminal_reason: "api_error"`; exit 1 when stdin closed.
+- After the abandoned sign-in (04): the same as after the stopped one, "Not logged in · Please run /login", exit 1.
+
+What the probe answers after each ending (`-probe`)
+- After a finished sign-in (08), at once: `initialize` answers `account` with `email`, `organization`, `subscriptionType` and `apiProvider` and no `tokenSource`; more commands (62), agents (7) and models (14) than signed out (49, 6, 5); `feedback_mode` `post` (signed out: `bundle`).
+- After the stopped (02) and the abandoned (05) endings: signed out, as at the start.
+- `get_settings` answers the same in every ending: `effective` `{}`, no `sources`, `served_settings_state: "ineligible"`.
+
+Sign-out (09): `claude auth logout` writes one text line, "Successfully logged out from your Anthropic account.", and exits 0 about 1 s after it starts.
+
+The owner's run, and what it did not record
+- The stopped and finished endings (00 to 02, 06 to 09) are the owner's run of all three endings, signed in with a real account. Its abandoned ending did not stay abandoned: the recorder opened the page, and the sign-in finished about 14 s later, whether by a person or by the browser's existing sign-in the recording cannot tell. It recorded a second finished sign-in, the same on the wire as 06 to 09, under `abandoned` names, so it was dropped, and the finished ending's files were renumbered from 07-10 to 06-09 to follow the stopped ending's. A browser that is already signed in may therefore finish a sign-in within seconds of the page opening.
+- The abandoned ending here (03 to 05) was recorded afterward, with no account, by an agent: the address was handed to an opener that opens nothing, so the page was never shown to anyone, and the two questions were answered on standard input (Enter, then `n`, which is why its `.meta.json` says the recorder opened the address). It shows a sign-in that nobody completes. Not recorded: a person who refuses on the page instead of closing it, which may send the page back to the local callback with an error. The machine's own CLI read signed out before and after that run.
