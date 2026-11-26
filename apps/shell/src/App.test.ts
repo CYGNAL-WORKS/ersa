@@ -351,6 +351,7 @@ describe("adding a project from the new-session screen", () => {
   };
 
   // verifies: FLOW-NEW-SESSION-R42
+  // verifies: FLOW-NEW-SESSION-R53
   it("sends nothing while a picked folder is being found, before the trust question opens", async () => {
     const find = later<Project | null>();
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), { ...starts, "project.find": () => find.promise });
@@ -368,6 +369,7 @@ describe("adding a project from the new-session screen", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R42
+  // verifies: FLOW-NEW-SESSION-R53
   it("sends nothing after Trust while the folder is being added, and sends again once adding fails", async () => {
     const add = later<Project>();
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), { ...starts, "project.add": () => add.promise });

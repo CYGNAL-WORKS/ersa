@@ -90,6 +90,7 @@ describe("adding a project from the project chip", () => {
   };
 
   // verifies: FLOW-NEW-SESSION-R42
+  // verifies: FLOW-NEW-SESSION-R53
   it("says it is checking a picked folder, then adding it, with the ring, in the status line's place, sending nothing", () => {
     const { rerender } = render(createElement(NewSessionScreen, props([alpha], { adding: { state: "finding" }, initialText: "Fix the build" })));
     const line = () => document.querySelector(".new-session-above .composer-status-line");
@@ -106,6 +107,7 @@ describe("adding a project from the project chip", () => {
     expect(line()).toBeNull();
   });
 
+  // verifies: FLOW-NEW-SESSION-R53
   it("says Ersa can't reach the sessions in place of the folder's wait, which that line comes before", () => {
     render(createElement(NewSessionScreen, props([alpha], { adding: { state: "adding" }, away: "reconnecting" })));
     const lines = [...document.querySelectorAll(".composer-status-line")].map((l) => l.textContent);
