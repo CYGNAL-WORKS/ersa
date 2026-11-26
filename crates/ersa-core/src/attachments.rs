@@ -1184,6 +1184,42 @@ mod tests {
         assert_eq!(left, vec![std::ffi::OsString::from(".gitignore")]);
     }
 
+    /// The other half of what the test above races, held still: a job's
+    /// rename replaces Core's ignore file while another job has it open to
+    /// read, and leaves no name behind that is still being deleted, so a
+    /// further job's rename replaces it again. The replaced file lives on,
+    /// deleted, only under the reader's handle: the state in which another
+    /// job's open by name is refused on Windows (#606), and why the job
+    /// makes the file again rather than refusing when its open is refused.
+    // verifies: PROTO-CORE-API-R110
+    #[test]
+    fn a_job_replaces_cores_ignore_file_while_another_job_reads_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let attachments = dir.path().join(ATTACHMENTS);
+        fs::create_dir_all(&attachments).unwrap();
+        let ignore = attachments.join(".gitignore");
+        let make_again = |job: &str| {
+            let staging = attachments.join(format!(".gitignore.{job}"));
+            ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
+                Fail::Reason(reason) => reason,
+                Fail::Stopped => "stopped".into(),
+            })
+        };
+        fs::write(&ignore, b"").unwrap();
+        // Opened as a job's check opens it.
+        let mut reader = open_file(&ignore).unwrap();
+        assert_eq!(make_again("s-1"), Ok(()));
+        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
+        // The file written in place holds something else again, while the
+        // replaced one is still open under the reader.
+        fs::write(&ignore, b"!keep\n").unwrap();
+        assert_eq!(make_again("s-2"), Ok(()));
+        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
+        let mut held = Vec::new();
+        reader.read_to_end(&mut held).unwrap();
+        assert_eq!(held, b"", "the reader still reads the file it opened");
+    }
+
     #[test]
     fn relative_paths_use_forward_slashes() {
         assert_eq!(
