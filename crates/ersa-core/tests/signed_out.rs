@@ -160,6 +160,7 @@ async fn nothing_is_refused_because_the_backend_was_found_signed_out() {
         json!("signed_out"),
         "still signed out throughout"
     );
-    // A start for each: the session, its fork, and the resume.
-    assert!(fake.stats.starts.load(Ordering::SeqCst) >= 3);
+    // A start for each: the session, its fork, and the resume. The resume
+    // answers while its backend is still starting, so wait for the third.
+    fake.stats.started(3).await;
 }
