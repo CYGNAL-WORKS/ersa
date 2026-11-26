@@ -169,6 +169,10 @@ describe("the new-session screen reading the host's backends again", () => {
     const out = deferred<BackendInfo[]>();
     core.listing = () => out.promise;
     await windowBack();
+    // Every state the page is drawn in from here on, so a failure shown for a single frame is caught.
+    const drawn: string[] = [];
+    const watch = new MutationObserver(() => drawn.push(document.body.textContent ?? ""));
+    watch.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
     // The Shell fails what waits on the connection and reports the loss by separate paths, in either order.
     const fail = () => act(async () => out.reject(closed));
     if (order === "before") await fail();
@@ -178,6 +182,14 @@ describe("the new-session screen reading the host's backends again", () => {
     core.listing = () => next.promise;
     if (order === "after") await fail();
     await reattached(core);
+    watch.disconnect();
+    // Once attached again, no frame says detection failed, nor detects what is held. (Before the window learns of
+    // the loss, a failure that lands first is the connection it still has failing, which R11 says.)
+    const away = (text: string) => /reach the sessions|Reconnecting|trying again/i.test(text);
+    const lost = drawn.findIndex(away);
+    const sinceBack = drawn.slice(lost + drawn.slice(lost).findIndex((text) => !away(text)));
+    expect(lost).toBeGreaterThanOrEqual(0);
+    expect(sinceBack.filter((text) => text.includes("couldn't detect the backends") || text.includes("Detecting"))).toEqual([]);
     expect(document.body.textContent).not.toContain("couldn't detect the backends");
     expect(document.body.textContent).not.toContain("Detecting");
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
@@ -205,6 +217,24 @@ describe("the new-session screen reading the host's backends again", () => {
     await act(async () => next.resolve([claudeCode()]));
     await settle();
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R11
+  it("keeps what the new connection read over a late answer from the lost one", async () => {
+    const core = fakeCore([claudeCode()]);
+    await start(core);
+    const out = deferred<BackendInfo[]>();
+    core.listing = () => out.promise;
+    await windowBack();
+    await core.drop();
+    // The new connection reads and Core refuses; then the lost connection's reading answers after all.
+    core.listing = () => Promise.reject(refusal("backend.list: the host did not answer"));
+    await waitFor(() => expect(core.attached).toBe(2), { timeout: 5_000 });
+    await waitFor(() => expect(statusLine()?.textContent).toContain("couldn't detect the backends"), { timeout: 5_000 });
+    await act(async () => out.resolve([claudeCode()]));
+    await settle();
+    expect(statusLine()?.textContent).toBe("Ersa couldn't detect the backends on this host. the host did not answer");
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Detection failed");
   });
 
   // verifies: FLOW-NEW-SESSION-R50
