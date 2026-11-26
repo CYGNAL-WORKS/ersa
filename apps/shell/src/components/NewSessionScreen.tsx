@@ -19,7 +19,7 @@ import { ContextRing } from "./ContextRing";
 import { type ControlKey, DEFAULT_EFFORT, type Host, SessionControls } from "./SessionControls";
 import { SignInNote } from "./SignInNote";
 import { TrustQuestion } from "./TrustQuestion";
-import { milliseconds, reducedMotion } from "../theme/motion";
+import { HeightEase } from "../theme/motion";
 import "./NewSessionScreen.css";
 
 /**
@@ -144,6 +144,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     return onWindowBack?.(read);
   }, [shown, hostId, onWindowBack]);
 
+  // Whether the sign-in note shows: the trust question fits itself afresh when it comes or goes, since the room above
+  // the box is in the column only with it (docs/design/COMPOSER.md, The sign-in note).
+  const noteShown = noteBackend(backends[hostId]) !== undefined;
   // The folder the trust question asks about, while it is open.
   const [asking, setAsking] = useState(props.initialAsking);
   const addFailed = adding?.state === "failed" ? adding : undefined;
@@ -191,7 +194,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       // With the sign-in note, the room above the box is already in the column, the note at its top: the question
       // takes its place in the column beneath the note, capped to what the note leaves (docs/design/COMPOSER.md).
       const signInNote = zone.querySelector<HTMLElement>(".sign-in-note");
-      const noteRoom = signInNote ? signInNote.offsetHeight + (parseFloat(getComputedStyle(zone).rowGap) || 0) : 0;
+      const noteRoom = signInNote ? signInNote.offsetHeight + (parseFloat(getComputedStyle(zone.querySelector(".new-session-above-content") ?? zone).rowGap) || 0) : 0;
       const path = card.querySelector<HTMLElement>(".trust-question-path");
       // Uncapped, at the width the card has now. What must show over the room above the box: the title, the folder,
       // the answers and the explanation's first paragraph. In the column, where the cap is the screen's height, a long
@@ -255,7 +258,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       watch?.disconnect();
       if (screen.current) delete screen.current.dataset.tight;
     };
-  }, [asking]);
+  }, [asking, noteShown]);
 
   // The folder dialog is the local host's (FLOW-NEW-SESSION-R27, R19): a remote host's folders are not this computer's.
   const canAdd = onChooseFolder !== undefined && hostId === localHostId && !busy && asking === undefined;
@@ -406,38 +409,22 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   // takes the new height at once.
   const noted = note !== undefined;
   const aboveContent = useRef<HTMLDivElement>(null);
-  const room = useRef<{ to?: number; running?: Animation }>({});
+  const roomEase = useRef(new HeightEase()).current;
+  const wasNoted = useRef(noted);
   const easeRoom = useRef(() => {});
   easeRoom.current = () => {
     const zone = above.current;
     const content = aboveContent.current;
     if (!zone || !content) return;
-    const to = noted ? content.offsetHeight : 0;
-    const r = room.current;
-    // Nothing changed: a running ease goes on.
-    if (to === r.to) return;
-    // From where a running ease has got to, else from the last height the room took.
-    const from = r.running ? zone.getBoundingClientRect().height : r.to;
-    r.to = to;
-    r.running?.cancel();
-    r.running = undefined;
-    delete zone.dataset.easing;
-    if (from === undefined || from === to || typeof zone.animate !== "function" || reducedMotion()) return;
-    const style = getComputedStyle(zone);
-    const duration = milliseconds(style.getPropertyValue("--motion-settle"));
-    const curve = style.getPropertyValue("--motion-ease-out").trim();
-    if (!duration || !curve) return;
-    zone.dataset.easing = "";
-    const animation = zone.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
-    r.running = animation;
-    animation.onfinish = () => {
-      if (r.running !== animation) return;
-      r.running = undefined;
-      delete zone.dataset.easing;
-    };
+    // Where the room comes to rest: in the column with the note, or with a question too tall for the room above
+    // (data-tight), else no height, what it holds opening upward over the wordmark.
+    const inColumn = noted || screen.current?.hasAttribute("data-tight") === true;
+    const to = inColumn ? content.offsetHeight : 0;
+    // Only the note's room eases: a question with no note takes its place in the column at once, as it always has.
+    const eases = noted || wasNoted.current;
+    wasNoted.current = noted;
+    roomEase.change(zone, eases, { to, clipGrowth: true });
   };
-  // On every render (the note arriving or going, its words) and on any change of what the room holds that no render
-  // made (a card fitting itself, the window narrowing its words).
   useLayoutEffect(() => easeRoom.current());
   useEffect(() => {
     const content = aboveContent.current;

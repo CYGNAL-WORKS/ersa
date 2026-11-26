@@ -748,7 +748,15 @@ async function screenIn(page: Page, scene: string, width: number, height: number
     },
     { width, height },
   );
+  await settled(section);
   return section;
+}
+
+/** Waits until nothing in the screen is still easing or arriving: every animation with an end has ended. */
+async function settled(section: Locator) {
+  await expect
+    .poll(() => section.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).length))
+    .toBe(0);
 }
 
 test("the sign-in note leaves the box and the session controls in place, and the wordmark clear above it", async ({ page }) => {
@@ -757,8 +765,6 @@ test("the sign-in note leaves the box and the session controls in place, and the
   const places: number[] = [];
   for (const scene of scenes) {
     const section = await screenIn(page, scene, 800, 600);
-    // Read once the note's entrance has finished.
-    await page.waitForTimeout(500);
     const place = await section.evaluate((el) => {
       const top = el.getBoundingClientRect().top;
       const box = el.querySelector(".composer-box")!.getBoundingClientRect().top - top;
@@ -782,8 +788,9 @@ test("the sign-in note leaves the box and the session controls in place, and the
 
 test("in Ersa's smallest window the screen with the sign-in note scrolls, so the session controls stay in reach", async ({ page }) => {
   await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
-  const section = await screenIn(page, "Signed out, asking to trust a folder", 640 - RAIL, 400);
-  await page.waitForTimeout(500);
+  // A note with long words and the status line beneath it, and no trust question, which would take its own place in
+  // the column whatever the note does.
+  const section = await screenIn(page, "Signed out, beside a backend that isn't working", 640 - RAIL, 400);
   const reach = await section.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
     const screen = (el.parentElement as HTMLElement).getBoundingClientRect();
@@ -791,4 +798,45 @@ test("in Ersa's smallest window the screen with the sign-in note scrolls, so the
     return { scrolls: el.scrollHeight > el.clientHeight, inside: controls.top >= screen.top && controls.bottom <= screen.bottom };
   });
   expect(reach).toEqual({ scrolls: true, inside: true });
+});
+
+test("the room the sign-in note takes eases to each new height over motion-settle, and at once with reduced motion", async ({ page }) => {
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
+    const section = await screenIn(page, "Signing in, waiting in the browser", 800, 600);
+    // The note's words grow by a line, as a failure's reason would: the room eases to the new height, the wordmark
+    // riding up with it, and the box stays where it was.
+    const eased = await section.evaluate((el) => {
+      const zone = el.querySelector(".new-session-above") as HTMLElement;
+      const box = () => el.querySelector(".composer-box")!.getBoundingClientRect().top;
+      const before = box();
+      const line = document.createElement("p");
+      line.textContent = "A line more beneath the note.";
+      line.style.margin = "0";
+      el.querySelector(".new-session-above-content")!.append(line);
+      return new Promise<{ eases: number; timing?: { duration: unknown; easing: unknown }; settle: string; curve: string; boxMoved: number }>((resolve) =>
+        // Two frames: the room is told of the new height after the first frame's layout.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const eases = zone.getAnimations();
+          const style = getComputedStyle(zone);
+          const timing = eases[0]?.effect?.getTiming();
+          resolve({
+            eases: eases.length,
+            timing: timing && { duration: timing.duration, easing: timing.easing },
+            settle: style.getPropertyValue("--motion-settle").trim(),
+            curve: style.getPropertyValue("--motion-ease-out").trim(),
+            boxMoved: box() - before,
+          });
+        })),
+      );
+    });
+    expect(eased.boxMoved).toBe(0);
+    if (reducedMotion === "reduce") {
+      expect(eased.eases).toBe(0);
+    } else {
+      expect(eased.eases).toBe(1);
+      expect(eased.timing).toEqual({ duration: parseFloat(eased.settle), easing: eased.curve });
+    }
+  }
 });
