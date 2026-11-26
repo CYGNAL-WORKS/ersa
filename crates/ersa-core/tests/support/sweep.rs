@@ -9,7 +9,7 @@ use ersa_core::{Adapter, CoreConfig, SweepClock, Sweeps};
 
 use super::fake::FakeAdapter;
 use super::put_away::Setup;
-use super::{start_with_adapters, tempdir};
+use super::{shut_down, start_with_adapters, tempdir};
 
 /// How long a test waits for a pass to end before it fails.
 pub const PASS: Duration = Duration::from_secs(120);
@@ -51,4 +51,43 @@ pub async fn later(clock: &SweepClock, by: Duration) {
     clock.time_passed(by);
     clock.sweep_again();
     passes(clock, before + 1).await;
+}
+
+/// Core restarted over `s`'s data, with `adapters` and the sweep on `clock`,
+/// after `between` has run on the data folder.
+pub async fn restarted_after(
+    s: Setup,
+    adapters: Vec<Arc<dyn Adapter>>,
+    clock: &Arc<SweepClock>,
+    between: impl FnOnce(&std::path::Path),
+) -> Setup {
+    let Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    } = s;
+    drop(client);
+    let dir = shut_down(core).await;
+    between(&dir.path().join("data"));
+    let sweeps = Sweeps::Driven(Arc::clone(clock));
+    let core = start_with_adapters(dir, move |config| config.sweeps = sweeps, adapters).await;
+    let client = core.client().await;
+    Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    }
+}
+
+/// Core restarted over `s`'s data, with `adapters` and the sweep on `clock`.
+pub async fn restarted(
+    s: Setup,
+    adapters: Vec<Arc<dyn Adapter>>,
+    clock: &Arc<SweepClock>,
+) -> Setup {
+    restarted_after(s, adapters, clock, |_| {}).await
 }

@@ -1,7 +1,7 @@
 //! Archive inactive sessions (FLOW-CLEAN-UP Step 4, FLOW-CLEAN-UP-R10):
 //! with `sessions.archive_inactive_days` set, the sweep archives each
-//! session with no activity for that many days, as `session.set_archived`
-//! does, and the same pass puts its folder away. Against a real git
+//! stopped session with no activity for that many days, stopping none, and
+//! the same pass puts its folder away. Against a real git
 //! repository and the fake backend, with the sweep's clock in the test's
 //! hands: days pass when the test says so.
 
@@ -222,7 +222,7 @@ async fn a_session_with_no_activity_is_archived_by_its_creation() {
     put_away(&mut s, &workspace).await;
 }
 
-/// Pinned, unseen, subscribed to, marked deleting or in a turn, a session
+/// Pinned, unseen, subscribed to, marked deleting or live in a turn, a session
 /// stays however long it was left; one beside them with none of those is
 /// archived by the same pass.
 // verifies: FLOW-CLEAN-UP-R10
@@ -320,11 +320,12 @@ async fn a_session_another_process_has_open_stays() {
     assert!(archived(&mut s, &session).await);
 }
 
-/// A live session nobody is subscribed to is stopped, as Archive stops
-/// one, and archived, and the same pass puts its folder away.
+/// A live session nobody is subscribed to is left, however long it has sat
+/// idle, and not stopped: the sweep stops no session. Once the user stops
+/// it, the next pass archives it and puts its folder away.
 // verifies: FLOW-CLEAN-UP-R10
 #[tokio::test(flavor = "multi_thread")]
-async fn a_live_session_nobody_watches_is_stopped_then_archived() {
+async fn a_live_session_is_left_running_and_archived_once_it_has_stopped() {
     let (mut s, clock) = swept().await;
     let workspace = s.workspace().await;
     let params = json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND });
@@ -347,11 +348,60 @@ async fn a_live_session_nobody_watches_is_stopped_then_archived() {
     let stops = s.stats.stops.load(Ordering::SeqCst);
     archive_after(&mut s, json!(14)).await;
 
-    later(&clock, 14 * DAY + MARGIN).await;
+    later(&clock, 30 * DAY).await;
 
     let after = row(&mut s, &session).await;
-    assert_eq!(after["archived"], true);
-    assert_eq!(after["state"], "ended", "{after}");
-    assert_eq!(s.stats.stops.load(Ordering::SeqCst), stops + 1);
+    assert_eq!(after["archived"], false, "{after}");
+    assert_eq!(after["state"], "idle", "the sweep stopped it: {after}");
+    assert_eq!(
+        s.stats.stops.load(Ordering::SeqCst),
+        stops,
+        "a stop was sent"
+    );
+    assert_eq!(s.listed(&workspace).await["state"], "ready");
+
+    s.client
+        .result("session.stop", json!({ "id": session }))
+        .await;
+    later(&clock, Duration::ZERO).await;
+    assert!(archived(&mut s, &session).await);
     put_away(&mut s, &workspace).await;
+}
+
+/// A session nothing dates is left: no last activity, and no record or
+/// lifecycle fact that says when it was made, so it lists as made at the
+/// start of 1970 and would read as decades inactive.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_nothing_dates_is_left() {
+    let (mut s, clock) = swept().await;
+    let (_, undated, _) = left_alone(&mut s).await;
+    // The lifecycle facts that dated it are gone, as for a session from
+    // before the app log; its backend never wrote a record.
+    let fake: Vec<Arc<dyn ersa_core::Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let mut s = restarted_after(s, fake, &clock, |data| {
+        for name in [
+            ersa_core::app_log::FILE_NAME,
+            ersa_core::app_log::PREVIOUS_FILE_NAME,
+        ] {
+            let _ = std::fs::remove_file(data.join(name));
+        }
+    })
+    .await;
+    let restarted = clock.ended();
+    passes(&clock, restarted + 1).await;
+    let listed = row(&mut s, &undated).await;
+    assert_eq!(listed["created_at"], "1970-01-01T00:00:00.000Z", "{listed}");
+    assert_eq!(listed.get("last_activity_at"), None);
+
+    // A session beside it that Core dates is archived by the same pass.
+    let (_, dated, _) = left_alone(&mut s).await;
+    archive_after(&mut s, json!(1)).await;
+    later(&clock, 2 * DAY).await;
+
+    assert!(archived(&mut s, &dated).await, "the dated one is archived");
+    assert!(
+        !archived(&mut s, &undated).await,
+        "the undated one was archived"
+    );
 }

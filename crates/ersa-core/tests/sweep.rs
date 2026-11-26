@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use support::fake::FakeAdapter;
 use support::put_away::*;
 use support::sweep::*;
-use support::{Client, git, shut_down, start_with_adapters};
+use support::{Client, git};
 
 /// Archives `session`, then waits for the pass the archive asked for.
 async fn archive(s: &mut Setup, clock: &SweepClock, session: &str) {
@@ -273,29 +273,6 @@ async fn a_root_workspace_is_never_put_away() {
 }
 
 // -- At start and every hour (FLOW-CLEAN-UP-R06) ---------------------------
-
-/// Core restarted over `s`'s data, with `adapters` and the sweep on `clock`.
-async fn restarted(s: Setup, adapters: Vec<Arc<dyn Adapter>>, clock: &Arc<SweepClock>) -> Setup {
-    let Setup {
-        core,
-        client,
-        repo,
-        project,
-        stats,
-    } = s;
-    drop(client);
-    let dir = shut_down(core).await;
-    let sweeps = Sweeps::Driven(Arc::clone(clock));
-    let core = start_with_adapters(dir, move |config| config.sweeps = sweeps, adapters).await;
-    let client = core.client().await;
-    Setup {
-        core,
-        client,
-        repo,
-        project,
-        stats,
-    }
-}
 
 /// An archived session's folder the last Core kept, for a file since
 /// deleted: the next Core's pass at start puts it away, except while the

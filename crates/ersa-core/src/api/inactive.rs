@@ -1,8 +1,9 @@
 //! The sweep's archiving of inactive sessions (FLOW-CLEAN-UP Step 4,
 //! FLOW-CLEAN-UP-R10): while `sessions.archive_inactive_days` is set, each
-//! pass archives the sessions with no activity for that many days, as
-//! `session.set_archived` does, before it judges the workspaces, so a folder
-//! an archive frees is put away by the same pass (R22). Unset, which is the
+//! pass archives the stopped sessions with no activity for that many days,
+//! before it judges the workspaces, so a folder an archive frees is put away
+//! by the same pass (R22). It stops no session: one still running is
+//! archived by a later pass, once it has stopped. Unset, which is the
 //! default, it archives none and reads nothing for it.
 
 use super::sweep;
@@ -45,7 +46,7 @@ pub(super) async fn archive(core: &Core) {
                 days,
                 "the sweep archived the session: it had no activity for that many days"
             ),
-            // Busy, pinned or opened since it was listed, or refused as
+            // Started, pinned or opened since it was listed, or refused as
             // `session.set_archived` refuses one: left as it is.
             Err(e) => {
                 tracing::debug!(session = %id, error = %e, "the sweep left the session unarchived")
@@ -55,18 +56,13 @@ pub(super) async fn archive(core: &Core) {
 }
 
 /// Why the session must stay because another process may have it open,
-/// if it must, as the put-away asks (FLOW-CLEAN-UP-R22). A session Core
-/// runs is open in Core's own process, which the backend's registry cannot
-/// tell from another, so only a stopped one is asked about.
+/// if it must, as the put-away asks (FLOW-CLEAN-UP-R22). Every candidate
+/// was stopped when listed; one Core has started since shows its own
+/// process in the registry and stays, as the archive's second look would
+/// leave it anyway.
 async fn open_elsewhere(core: &Core, id: &str) -> Option<&'static str> {
-    let gone = Some("the session is gone");
-    match core.sessions.is_running(id).await {
-        Ok(true) => return None,
-        Ok(false) => {}
-        Err(_) => return gone,
-    }
     let Ok(session) = core.sessions.get(id) else {
-        return gone;
+        return Some("the session is gone");
     };
     sweep::open_elsewhere(core, id, &session.host_id).await
 }
