@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -46,6 +46,9 @@ function run(t, args, { input = "", play = "", keepRunning = false } = {}) {
     ERSA_SIGN_IN_OPENER: t.opener,
     FAKE_SIGN_IN_PLAY: play,
     FAKE_SIGN_IN_TRIGGER: t.trigger,
+    // A key the recorder must keep from the CLI: given it, the stand-in starts
+    // with a key in place of a sign-in, and the run fails as not signed out.
+    ANTHROPIC_API_KEY: "placeholder-key-for-tests",
     TEMP: t.temp,
     TMP: t.temp,
     TMPDIR: t.temp,
@@ -153,6 +156,37 @@ test("a control route the CLI refuses is noted, and the sign-in is recorded by t
   }
 });
 
+test("a control route that never answers falls back to the process route, which has its own time to print an address", async () => {
+  const t = setup();
+  try {
+    const { code } = await run(t, ["--ending", "finished", "--answer-within", "1"], { input: "\nn\n", play: "silent-control" }).exited;
+    assert.equal(code, 0);
+    const signIn = metaOf(t, "01-sign-in-finished.meta.json");
+    assert.deepEqual(signIn.tried, [
+      { route: "control", refused: "no answer to claude_authenticate in 1 s, or the CLI exited" },
+      { route: "process", refused: null },
+    ]);
+    assert.equal(signIn.outcome, "finished");
+    assert.deepEqual(scratchLeft(t), []);
+  } finally {
+    t.done();
+  }
+});
+
+test("a run where no route gives an address fails, and says so", async () => {
+  const t = setup();
+  try {
+    const { code, stdout, stderr } = await run(t, ["--ending", "finished"], { input: "\n", play: "refuse-control,no-address" }).exited;
+    assert.equal(code, 1);
+    assert.match(stderr, /finished: no route gave a sign-in address/);
+    assert.doesNotMatch(stdout, /^Done\. Check/m);
+    assert.equal(metaOf(t, "01-sign-in-finished.meta.json").outcome, "no route gave an address");
+    assert.deepEqual(scratchLeft(t), []);
+  } finally {
+    t.done();
+  }
+});
+
 test("an abandoned sign-in is stopped by the host after the wait, and the recorder ends", async () => {
   const t = setup();
   try {
@@ -230,7 +264,9 @@ test("the account's own words are replaced wherever the CLI writes them", async 
   try {
     const { code } = await run(t, ["--ending", "finished"], { input: "\nn\n", play: "leak-name" }).exited;
     assert.equal(code, 0);
-    assert.match(read(t, "00-sign-in-finished.meta.json"), /welcome back, redacted/);
+    assert.match(read(t, "00-sign-in-finished.meta.json"), /welcome back, redacted; cache in D:\\\\builds\\\\user\\\\cache/);
+    const name = userInfo().username.toLowerCase();
+    if (name.length >= 3) for (const f of written(t)) assert.ok(!read(t, f).toLowerCase().includes(name), `${f} carries the machine's user name`);
     assertClean(t);
   } finally {
     t.done();

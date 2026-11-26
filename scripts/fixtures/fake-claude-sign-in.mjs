@@ -16,10 +16,16 @@
 // CLAUDE_CONFIG_DIR, and a later process there starts signed in.
 // FAKE_SIGN_IN_PLAY, a comma-separated list, changes what it plays:
 //   refuse-control   claude_authenticate answers an error
+//   silent-control   claude_authenticate is never answered
+//   no-address       auth login prints no address and exits 1
 //   leak-token       a line carrying a token is written when the sign-in finishes
-//   leak-name        the email's local part is written to stderr when the sign-in finishes
+//   leak-name        the email's local part and the machine's user name are written
+//                    to stderr when the sign-in finishes
+// A key in the environment (ANTHROPIC_API_KEY) shows in `account` as the real
+// CLI shows one (2.1.330/01-probe-key-in-environment).
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -29,7 +35,9 @@ const CREDENTIAL = CONFIG && join(CONFIG, ".credentials.json");
 const TRIGGER = process.env.FAKE_SIGN_IN_TRIGGER;
 const EMAIL = "quillon.doe@mail.example";
 const ACCOUNT = { email: EMAIL, organization: `${EMAIL}'s Organization`, subscriptionType: "max", apiProvider: "firstParty" };
-const SIGNED_OUT = { tokenSource: "none", apiProvider: "firstParty" };
+const SIGNED_OUT = process.env.ANTHROPIC_API_KEY
+  ? { tokenSource: "none", apiKeySource: "ANTHROPIC_API_KEY", apiProvider: "firstParty" }
+  : { tokenSource: "none", apiProvider: "firstParty" };
 const FAKE_TOKEN = "sk-ant-oat01-" + "Zq3vXk9TmB2wLp7RcY4nHs8dJf6GaE1u".repeat(3);
 
 const signedIn = () => !!CREDENTIAL && existsSync(CREDENTIAL);
@@ -50,7 +58,7 @@ function personSignsIn() {
       rmSync(TRIGGER, { force: true });
       writeFileSync(CREDENTIAL, JSON.stringify({ claudeAiOauth: { accessToken: FAKE_TOKEN } }));
       if (PLAY.has("leak-token")) say({ type: "system", subtype: "debug", accessToken: FAKE_TOKEN });
-      if (PLAY.has("leak-name")) process.stderr.write(`welcome back, ${EMAIL.split("@")[0]}\n`);
+      if (PLAY.has("leak-name")) process.stderr.write(`welcome back, ${EMAIL.split("@")[0]}; cache in D:\\builds\\${userInfo().username}\\cache\n`);
       resolve();
     }, 20);
   });
@@ -61,6 +69,7 @@ if (args[0] === "--version") {
   console.log("0.0.0-fake (Claude Code)");
 } else if (args[0] === "auth" && args[1] === "login") {
   console.log("Opening browser to sign in…");
+  if (PLAY.has("no-address")) process.exit(1);
   console.log(`If the browser didn't open, visit: ${address("https://console.anthropic.com/oauth/code/callback")}`);
   // Stdin stays open and unread, as for a host that relays no code.
   await personSignsIn();
@@ -81,6 +90,7 @@ if (args[0] === "--version") {
     } else if (msg.type === "control_request" && request.subtype === "get_settings") {
       answer({ applied: { effort: "medium" } });
     } else if (msg.type === "control_request" && request.subtype === "claude_authenticate") {
+      if (PLAY.has("silent-control")) return;
       if (PLAY.has("refuse-control")) fail("Signing in during a session isn't available in this host yet. Sign in first, then start the session.");
       else answer({ manualUrl: address("https://console.anthropic.com/oauth/code/callback"), automaticUrl: address("http://localhost:54545/callback") });
     } else if (msg.type === "control_request" && request.subtype === "claude_oauth_wait_for_completion") {

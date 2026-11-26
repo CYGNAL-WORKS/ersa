@@ -108,15 +108,15 @@ export const CHECKOUT = join(fileURLToPath(import.meta.url), "..", "..").replace
 const common = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: CHECKOUT, encoding: "utf8", timeout: 5000 }).stdout?.trim();
 export const REPO = common ? dirname(common).replace(/\\/g, "/").replace(/\/+$/, "") : CHECKOUT;
 
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // The repository path in any spelling of its separators (`\`, `/`, JSON-escaped
 // `\\`), whole: `<repo>2` and `<repo>-x` are other folders, while `<repo>.`
 // ends a sentence. A Unix path's munged form starts with `-`, where `\b`
 // would never match, so the boundary is spelled out.
 export function repoRules(repo) {
   return {
-    plain: new RegExp(repo.split("/").map(escape).join("[\\\\/]+") + "(?![A-Za-z0-9_-])", "gi"),
-    munged: new RegExp("(?<![A-Za-z0-9])" + escape(repo.replace(/[^A-Za-z0-9]/g, "-")) + "(?![A-Za-z0-9])", "gi"),
+    plain: new RegExp(repo.split("/").map(escapeRegExp).join("[\\\\/]+") + "(?![A-Za-z0-9_-])", "gi"),
+    munged: new RegExp("(?<![A-Za-z0-9])" + escapeRegExp(repo.replace(/[^A-Za-z0-9]/g, "-")) + "(?![A-Za-z0-9])", "gi"),
   };
 }
 export const { plain: REPO_RE, munged: MUNGED_REPO_RE } = repoRules(REPO);
@@ -154,7 +154,7 @@ export function redact(text) {
 // three letters would match too much and is left.
 export function scrubUserName(text, name = userInfo().username) {
   if (name.length < 3) return text;
-  return text.replace(new RegExp(`\\b${escape(name)}\\b`, "gi"), "user");
+  return text.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gi"), "user");
 }
 
 // What a token, a key or an authorization code looks like. A recording that

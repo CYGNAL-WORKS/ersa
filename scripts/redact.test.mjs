@@ -255,6 +255,8 @@ test("redacts the one-time values in a sign-in address and keeps its shape", () 
   assert.deepEqual(secretsIn(out), []);
   // Before redaction the one-time values look random, so the check fails them.
   assert.notDeepEqual(secretsIn(address), []);
+  // A nonce, which an OpenID sign-in address carries, in a fragment too.
+  assert.equal(redact("https://x.example/a?nonce=Zq3vXk9TmB2wLp7R#nonce=abc"), "https://x.example/a?nonce=REDACTED#nonce=REDACTED");
 });
 
 test("redacts an email address written into an address", () => {
