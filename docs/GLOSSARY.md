@@ -5,7 +5,9 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 ## Product
 
 - **Ersa**: the application. Capitalized as a proper noun in prose, lowercase `ersa` as an identifier.
-- **Backend**: a vendor agent product that Ersa drives, such as Claude Code or GitHub Copilot, or a local-inference harness. The user installs and authenticates it themselves. *Not: the AI.*
+- **Backend**: a vendor agent product that Ersa drives, such as Claude Code or GitHub Copilot, or a local-inference harness. The user installs it, and signs in to it through its own sign-in, which Ersa can start for them (ADR 0040). *Not: the AI.*
+- **Sign-in**: a backend's own way of tying it to the person's account with its vendor, on the vendor's page in the person's browser. Ersa can start one and learns how it ended; what is exchanged stays between the person, the vendor and the backend, and Ersa never sees, stores or relays it (ADR 0040). The protocols' ids `log_in` and `authentication_failed` are older than the term and mean it.
+- **Signed out**: said of a backend that is installed on a host and reports that it has neither a sign-in there nor anything given it in place of one, such as a key. The person signs in before it can run a session. It is the backend's own report each time Ersa asks, never something Ersa keeps.
 - **Adapter**: the Ersa code that drives one backend through its structured-event protocol and provides the projection from that backend's live stream and session record to Ersa events. One adapter per backend.
 - **Mode**: a named preset applied to a session at start: base instructions, allowed tools, and tool servers.
 - **Pack**: a backend-neutral, versioned description of agents, skills, tool servers, and prompts, rendered into each backend's native format when applied to a project.
@@ -54,7 +56,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence. Interface copy never names it (CONTENT.md); where a message has to refer to it, it is "Ersa's background process". *Not: daemon.*
 - **Core API**: the request/response protocol between Interface and Core.
 - **Admission**: the one place in Core that decides every change to which projects, workspaces, sessions and sections exist and to what is under way on each. It holds that state, and one table says, for each state and each input, whether the input is done, refused or held (ADR 0037).
-- **Operation**: work on a session or workspace that takes time: a start, a stop, an archive, a delete, a removal, a send, a fork, putting a workspace away or back. Admission records it from when it is admitted until its end is reported.
+- **Operation**: work on a session or workspace that takes time: a start, a stop, an archive, a delete, a removal, a send, a fork, putting a workspace away or back; and a sign-in Ersa started, which is on a backend on a host. Admission records it from when it is admitted until its end is reported.
 - **App log**: Core's log of its own operational records (process started, exited, failed to start, Core restarted). Not part of any session record; Core reads it back at startup for each session's first and last facts.
 - **Diagnostic log**: what Core writes for a person to read when something goes wrong: warnings and errors with their reasons, kept in a file in Ersa's data folder. Not the app log: Core never reads it back.
 - **Harness tools server**: the MCP tools Core exposes to every session's backend: cross-session messaging, session metadata, user-defined tools, and interface-driving tools. Never permission prompting.

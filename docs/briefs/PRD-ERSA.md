@@ -4,8 +4,8 @@ type: product
 title: Ersa
 status: ready
 verified-by: review
-references: [FLOW-NEW-SESSION, FLOW-APPROVE-PERMISSION, FLOW-RESUME-SESSION, FLOW-REMOTE-SESSION, FLOW-APPLY-PACK, FLOW-SHOW-ME]
-adrs: [0002, 0004, 0006, 0007, 0009, 0011, 0012, 0017, 0019]
+references: [FLOW-NEW-SESSION, FLOW-SIGN-IN, FLOW-APPROVE-PERMISSION, FLOW-RESUME-SESSION, FLOW-REMOTE-SESSION, FLOW-APPLY-PACK, FLOW-SHOW-ME]
+adrs: [0002, 0004, 0006, 0007, 0009, 0011, 0012, 0017, 0019, 0040]
 ---
 
 # Ersa
@@ -30,7 +30,7 @@ Alongside those, the everyday problem that started this: with ten sessions open 
 
 ## Solution
 
-Ersa is a desktop application that hosts many agent sessions in one window. Each session drives a vendor's own CLI (Claude Code first, GitHub Copilot second, others and local inference later) through that CLI's structured-event interface, using the login the user already has. Each session runs in an isolated workspace on a local or remote host; isolation is provided by a pluggable version-control layer, git worktrees first and Perforce next.
+Ersa is a desktop application that hosts many agent sessions in one window. Each session drives a vendor's own CLI (Claude Code first, GitHub Copilot second, others and local inference later) through that CLI's structured-event interface, using the person's own sign-in with that vendor. Each session runs in an isolated workspace on a local or remote host; isolation is provided by a pluggable version-control layer, git worktrees first and Perforce next.
 
 The window has four regions. The rail lists projects and, under each, its sessions; each session is a rich tile showing title, backend, activity state, a context ring, and cost as the backend reports it, and a tile pulls out a shelf when the session needs the user (a permission, a question) so it can be answered without leaving the current session. The transcript renders the active session as a document with cards for tool calls and diffs. The composer is where the user writes. The workbench holds purpose-built panes: files, diff, a full hosted terminal in the workspace, browser.
 
@@ -40,7 +40,7 @@ Ersa exposes its own tool server to every session, so agents can message other s
 
 - **A wrapper that extends.** Ersa wraps the vendor CLIs and adds what they lack; it never rebuilds what they already do.
 - **Plain for everyone.** Agentic game development is the target, and non-technical people work in Ersa beside programmers. What a person needs to do never asks them to understand the machinery underneath.
-- **The user's existing tools, the user's existing auth.** Ersa drives CLIs the user already has. It never asks for or stores a model API key.
+- **The user's existing tools, the user's existing auth.** Ersa drives CLIs the user already has. It never asks for or stores a model API key. A backend that isn't signed in yet is signed in through its own sign-in, which Ersa starts and never takes part in (ADR 0040).
 - **Structured events, never console scraping.** Every backend is driven through a machine-readable protocol. If a backend has none, it is not supported.
 - **Many sessions, one glance.** Anything that needs the user is visible and actionable from the rail without opening the session.
 - **Isolation by default, whatever the VCS.** A session cannot accidentally work in another session's checkout, in git or otherwise.
@@ -52,6 +52,7 @@ Ersa exposes its own tool server to every session, so agents can message other s
 ## Flows
 
 - `FLOW-NEW-SESSION`: add a project, create a workspace, start a session with a chosen backend and mode.
+- `FLOW-SIGN-IN`: sign in to a backend that is installed and signed out, without a terminal.
 - `FLOW-APPROVE-PERMISSION`: a session needs the user; answer it from the rail shelf without switching sessions.
 - `FLOW-RESUME-SESSION`: close Ersa, reopen it, and continue every session where it left off.
 - `FLOW-REMOTE-SESSION`: add a remote host, create a workspace there, run a session on it.
@@ -98,6 +99,7 @@ Verified by review at this level; testable requirements live in the flow and pro
 
 ## Changes
 
+- 2026-11-25: owner's decision of 2026-11-25 that a person signs in to a backend through Ersa (ADR 0040): the principle on the user's existing auth says so, the Solution speaks of the person's own sign-in where it said the login the user already has, and FLOW-SIGN-IN joins the flows. PRD-ERSA-R01 is unchanged: Ersa still never prompts for, stores or transmits a key. No requirement IDs changed.
 - 2026-11-12: owner's direction: Ersa is a wrapper around the vendor CLIs that extends them, aimed at agentic game development, with designers, artists and other non-technical people among its users. Two principles and one user added. No requirement IDs changed.
 - 2026-11-05: the rail lists projects and their sessions; workspaces are not a level in it (LAY-SHELL). No requirement IDs changed.
 - 2026-11-02: the "Beautiful and calm" principle follows ADR 0019's visual direction, and ADR 0019 joins the front matter. No requirement IDs changed.
