@@ -84,3 +84,45 @@
   color: var(--color-ink-faint);
   border-color: var(--color-ink);
 }
+
+/* A button's labels share one cell, so it is as wide as the widest; only the one shown is seen. */
+.button-labels {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.button-label {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+
+.button-label[data-shown] {
+  visibility: visible;
+}
+
+/* The ring before a busy label, open by a quarter, one turn per motion-loop-ring at constant speed. */
+.button-ring {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-inline-end: var(--space-xs);
+  color: var(--color-ink-muted);
+  animation: button-ring-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes button-ring-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* A ring loops only while its work runs: in a label not shown, it holds still. With reduced motion on, it holds still
+   at full tone. */
+.button-label:not([data-shown]) .button-ring {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-ring {
+    animation: none;
+  }
+}

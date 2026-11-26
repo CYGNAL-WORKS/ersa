@@ -112,7 +112,7 @@ function RetryingFoot({ view }: { view: CoreView }) {
     const timer = setTimeout(() => setShown(tries === 1 ? view : connected), 500);
     return () => clearTimeout(timer);
   }, [tries, view]);
-  return <RailFoot view={shown} onRetry={() => setTries((n) => n + 1)} />;
+  return <RailFoot view={shown} retried={tries > 0} onRetry={() => setTries((n) => n + 1)} />;
 }
 
 const session = (id: string, title: string, created_at: string, tile: Session["tile"]): Session => ({
@@ -702,6 +702,20 @@ const severalCall: Event = {
   ],
 };
 
+// Two stretches of one file, far apart: two hunks, divided (issue 483).
+const twoChangesCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "MultiEdit",
+  input: {},
+  target_kind: "path",
+  target: appFile,
+  edits: [
+    { path: appFile, old_text: "working?: boolean;", new_text: "working?: boolean;\n  since?: string;" },
+    { path: appFile, old_text: "      return { ...next, working: false };", new_text: "      return { ...next, working: false, since: undefined };" },
+  ],
+};
+
 /** One call's card as the transcript shows it, with its subagent's calls, against the gallery's clock and workspace. */
 function Card({
   steps,
@@ -1097,10 +1111,14 @@ const entries: Entry[] = [
   },
   {
     name: "RailFoot",
-    states: coreViews.map(([label, view]) => [
-      label,
-      view.phase === "failed" ? <RetryingFoot view={view} /> : <RailFoot view={view} onRetry={() => {}} />,
-    ]),
+    states: [
+      ...coreViews.map(([label, view]): [string, ReactNode] => [
+        label,
+        view.phase === "failed" ? <RetryingFoot view={view} /> : <RailFoot view={view} onRetry={() => {}} />,
+      ]),
+      // Retry pressed, and the try under way (issue 483).
+      ["Trying again after Retry", <RailFoot view={{ phase: "connecting" }} retried onRetry={() => {}} />],
+    ],
   },
   {
     name: "QuitQuestion",
@@ -1423,6 +1441,7 @@ const entries: Entry[] = [
       ["Made at every occurrence", <Card steps={[[0, renameCall], [1, editDone]]} id="e1" />],
       ["A line wider than the column", <Card steps={[[0, wideCall], [1, editDone]]} id="e1" />],
       ["Several files", <Card steps={[[0, severalCall], [1, editDone]]} id="e1" />],
+      ["Two changes in one file", <Card steps={[[0, twoChangesCall], [1, editDone]]} id="e1" />],
     ],
   },
   {
@@ -1478,6 +1497,9 @@ const entries: Entry[] = [
         "Asking, from the keyboard",
         <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" forceCancelFocus />,
       ],
+      // FLOW-NEW-SESSION-R42: while a picked folder is checked, then added after Trust, the screen says so and sends nothing.
+      ["Checking a folder", <NewSessionScreen {...newSession} backends={oneBackend} initialText="Fix the build" adding={{ state: "finding" }} />],
+      ["Adding a project", <NewSessionScreen {...newSession} backends={oneBackend} initialText="Fix the build" adding={{ state: "adding" }} />],
       [
         "Adding a folder refused",
         <NewSessionScreen {...newSession} backends={oneBackend} adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }} />,

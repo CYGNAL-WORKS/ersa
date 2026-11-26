@@ -351,6 +351,7 @@ describe("adding a project from the new-session screen", () => {
   };
 
   // verifies: FLOW-NEW-SESSION-R42
+  // verifies: FLOW-NEW-SESSION-R53
   it("sends nothing while a picked folder is being found, before the trust question opens", async () => {
     const find = later<Project | null>();
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), { ...starts, "project.find": () => find.promise });
@@ -358,6 +359,8 @@ describe("adding a project from the new-session screen", () => {
     await addFromChip();
     expect(trustQuestion()).toBeNull();
     expect(sendButton().getAttribute("aria-disabled")).toBe("true");
+    // The screen says what it is doing meanwhile (issue #483).
+    expect(document.querySelector(".new-session-above .composer-status-line")?.textContent).toBe("Checking the folder…");
     await pressEnter();
     expect(methods(core)).not.toContain("workspace.create");
     find.resolve(null);
@@ -366,6 +369,7 @@ describe("adding a project from the new-session screen", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R42
+  // verifies: FLOW-NEW-SESSION-R53
   it("sends nothing after Trust while the folder is being added, and sends again once adding fails", async () => {
     const add = later<Project>();
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), { ...starts, "project.add": () => add.promise });
@@ -375,6 +379,8 @@ describe("adding a project from the new-session screen", () => {
     await settle();
     expect(trustQuestion()).toBeNull();
     expect(sendButton().getAttribute("aria-disabled")).toBe("true");
+    // The screen says what it is doing meanwhile (issue #483).
+    expect(document.querySelector(".new-session-above .composer-status-line")?.textContent).toBe("Adding the project…");
     await pressEnter();
     expect(methods(core)).not.toContain("workspace.create");
     add.reject({ kind: "invalid_params", message: "Ersa couldn't add the folder." });
@@ -564,6 +570,28 @@ describe("adding a project from the new-session screen", () => {
 
 // The rail's wiring (LAY-SHELL, The rail; FLOW-NEW-SESSION-R13): App hands the tree the sessions and the workspaces it
 // read, so each session sits under its own project. session/tree.test.ts covers the grouping itself.
+// LAY-SHELL, The foot; issue #483: a Retry that is under way says so, rather than leaving the foot empty.
+describe("the rail's foot after Retry", () => {
+  it("shows Ersa trying again while the retry attaches, where it showed nothing", async () => {
+    let attaches = 0;
+    const client: CoreClient = {
+      // The first attach fails; the retry never answers.
+      attach: () => (attaches++ === 0 ? Promise.reject({ kind: "unavailable", message: "Core did not start." }) : new Promise(() => {})),
+      call: () => new Promise(() => {}) as never,
+    };
+    render(createElement(App, { client }));
+    await settle();
+    const rail = screen.getByRole("navigation", { name: "Rail" });
+    fireEvent.click(within(rail).getByRole("button", { name: "Retry" }));
+    await settle();
+    expect(attaches).toBe(2);
+    expect(within(rail).queryByRole("button", { name: "Retry" })).toBeNull();
+    const trying = rail.querySelector(".rail-foot .problem.rail-foot-trying");
+    expect(trying?.textContent).toBe("Ersa can't reach your sessions. It's trying again.");
+    expect(trying?.closest("[role=status]")).not.toBeNull();
+  });
+});
+
 describe("the tree App draws in the rail", () => {
   /** Each project heading's name with how many tiles sit beneath it, in the rail's order. */
   function headings(): [string, number][] {
@@ -1076,6 +1104,22 @@ describe("a tile's menu, and renaming on the tile", () => {
     await settle();
     expect(renames(core)).toEqual([{ id: "s1", title: "Fix the flaky build" }]);
     expect(field()).toBeNull();
+  });
+
+  // Issue #483: Core answers with the title as the backend lists it, and its tile carries it from then on
+  // (PROTO-CORE-API-R84), so the rail shows it from the answer with no list read.
+  it("shows the title Core answers with, and reads the session list no more for a rename", async () => {
+    const core = await open({ "session.set_title": () => ({ title: "Fix the flaky build (listed)" }) });
+    const lists = () => core.calls.filter((c) => c.method === "session.list").length;
+    const listed = lists();
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Rename/ }));
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix the flaky build" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    await settle();
+    expect(tile("Fix the flaky build (listed)")).toBeTruthy();
+    expect(lists()).toBe(listed);
   });
 
   it("turns the title into a field with F2, and Escape restores it, sending nothing", async () => {

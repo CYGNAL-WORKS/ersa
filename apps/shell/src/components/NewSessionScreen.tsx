@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../catalog";
 import type { BackendInfo, Project } from "../protocol/core-api.gen";
 import {
   type SessionValues,
@@ -13,6 +14,7 @@ import { type Attached, pathName } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import type { AttachWhat } from "./AttachMenu";
 import { Composer, type Unavailable } from "./Composer";
+import { ContextRing } from "./ContextRing";
 import { type ControlKey, DEFAULT_EFFORT, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion } from "./TrustQuestion";
 import "./NewSessionScreen.css";
@@ -21,6 +23,12 @@ import "./NewSessionScreen.css";
  * What came of the folder dialog: the user canceled it, picked a folder that is already a project on the host
  * (`project.find`, FLOW-NEW-SESSION-R18), picked one that is not yet, or it failed, with the reason in `adding`.
  */
+/**
+ * A folder the user picked, on its way to being a project: Ersa finding whether it is one already (`project.find`),
+ * adding it after Trust (`project.add`), or why either failed.
+ */
+export type Adding = { state: "finding" } | { state: "adding" } | { state: "failed"; message: string };
+
 export type FolderChoice = { kind: "canceled" } | { kind: "found"; project: Project } | { kind: "new"; path: string } | { kind: "failed" };
 
 interface NewSessionScreenProps {
@@ -60,8 +68,8 @@ interface NewSessionScreenProps {
   onStop?: () => void;
   /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
   away?: Extract<Unavailable, "reconnecting" | "unreachable">;
-  /** Choosing or adding a folder: on its way, or why it failed. */
-  adding?: Sending;
+  /** Finding or adding a picked folder, or why it failed. */
+  adding?: Adding;
   /**
    * The user moved past a failed add, by choosing another project or host or by sending (FLOW-NEW-SESSION-R44): App
    * drops the failure, which it keeps across New session.
@@ -105,6 +113,11 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   // The folder the trust question asks about, while it is open.
   const [asking, setAsking] = useState(props.initialAsking);
   const addFailed = adding?.state === "failed" ? adding : undefined;
+  // Finding or adding a picked folder: nothing is sent meanwhile (FLOW-NEW-SESSION-R42), and the screen says so in the
+  // status line's place with the ring for work of unknown length, unless it says Ersa can't reach the sessions,
+  // which comes first (docs/design/COMPOSER.md, The status line).
+  const folderBusy = adding?.state === "finding" || adding?.state === "adding";
+  const folderWait = folderBusy && props.away === undefined ? adding.state : undefined;
   // While the dialog is open, or a folder is being found or added, another Add project does nothing.
   const choosing = useRef(false);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -339,6 +352,12 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
               forceCancelFocus={props.forceCancelFocus}
             />
           )}
+          {folderWait && (
+            <p className="composer-status-line" role="status">
+              <ContextRing turning />
+              {folderWait === "finding" ? t("composer.findingFolderProgress") : t("composer.addingProjectProgress")}
+            </p>
+          )}
           {asking === undefined && addFailed && (
             <p className="problem new-session-problem" role="alert">
               {addFailed.message}
@@ -349,10 +368,10 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           inputRef={words}
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
           // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
-          statusTaken={asking !== undefined || addFailed !== undefined}
+          statusTaken={asking !== undefined || addFailed !== undefined || folderWait !== undefined}
           // Nothing is sent while a picked folder is found, asked about or added, so no session starts in the project
           // chosen before it (FLOW-NEW-SESSION-R42); the words stay the user's to edit. A failed add frees send again.
-          held={asking !== undefined || adding?.state === "sending"}
+          held={asking !== undefined || folderBusy}
           quietFocus={asking !== undefined}
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}
@@ -387,7 +406,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           values={values}
           onChoose={onChoose}
           onAddProject={canAdd ? () => void addProject() : undefined}
-          disabled={busy || adding?.state === "sending"}
+          disabled={busy || folderBusy}
           open={props.open}
           force={props.force}
         />

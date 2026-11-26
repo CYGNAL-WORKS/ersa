@@ -24,11 +24,12 @@ Their fills and edges change over `motion-quick` with `motion-ease-out`. Send be
 
 ## The status line
 
-One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then, while the box is available, a system dialog for attachments that failed to open, then a send whose outcome Ersa can't tell, then a refused message, then a refused change to the session, then, on the new-session screen, detecting backends, then a host that couldn't list its backends or has none that can run, then a send on its way, then a message waiting in the backend; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The sign-in note (below) is a row of its own above the status line, which goes on saying what it says. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
+One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then, on the new-session screen, a picked folder being checked or added, then, while the box is available, a system dialog for attachments that failed to open, then a send whose outcome Ersa can't tell, then a refused message, then a refused change to the session, then, on the new-session screen, detecting backends, then a host that couldn't list its backends or has none that can run, then a send on its way, then a message waiting in the backend; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The sign-in note (below) is a row of its own above the status line, which goes on saying what it says. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
 
 | When | It says | Leading mark | The box |
 |---|---|---|---|
 | Ersa can't reach the sessions | that, and that it is trying again | none | unavailable |
+| On the new-session screen, a picked folder is being checked or added (FLOW-NEW-SESSION-R53) | "Checking the folder…" while Ersa finds whether the folder is already a project, then "Adding the project…" after Trust; a line it stands in place of shows again when the wait ends | the ring at `size-ring`, turning as the detecting chip's does | as it would be without this line, except that send is as it is with nothing to send (FLOW-NEW-SESSION-R42) |
 | Ersa can't tell whether a message was sent | that, and that the transcript shows it if it arrived | a glyph at `size-glyph` in `caution` | as at rest, the message kept |
 | A message was refused | the reason, in the user's terms | a glyph at `size-glyph` in `danger` | as at rest, the message kept |
 | On the new-session screen, the host's backends are being read for the first time (FLOW-NEW-SESSION-R23); a later reading shows nothing (FLOW-NEW-SESSION-R50) | that it is detecting the backends on this host | none | unavailable |
@@ -39,7 +40,7 @@ One line above the box, `size-control` high at least, showing one message at a t
 | Changing the model, effort or permission mode was refused | the reason, in the user's terms, until the user sends or opens a chip in that session; it is kept for its session, so it is still there when the user comes back to it | a glyph at `size-glyph` in `danger` | as at rest |
 | A message is waiting in the backend | One message: that it is waiting, and, in the window that sent it, its first line, cut with an ellipsis where the status line ends, else its file's name, else "Pasted image". Several: how many are waiting | none | as at rest, stop offered |
 
-The line for a refused message, a refused change or a dialog that failed to open is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
+The line for a refused message, a refused change or a dialog that failed to open is announced to assistive technology as an alert; the line for a folder being checked or added is a status to it. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
 
 ## The sign-in note
 
@@ -127,4 +128,4 @@ The question fits the window it opens in. The room above the box is what lies be
 
 Why the folder dialog couldn't open, or a picked folder couldn't be found or added, shows above the composer's box, in the status line's place, as a refused message does: the reason led by a glyph in `danger`, announced as an alert, until the user chooses another project or host from the chips, picks a folder again or sends a message (FLOW-NEW-SESSION-R44).
 
-With reduced motion on, nothing here moves or fades: the glow, the status line, attachments and lists appear and go at once, and the detecting ring holds still at full tone.
+With reduced motion on, nothing here moves or fades: the glow, the status line, attachments and lists appear and go at once, and a turning ring holds still at full tone.

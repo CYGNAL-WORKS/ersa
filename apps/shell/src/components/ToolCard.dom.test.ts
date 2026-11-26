@@ -296,6 +296,34 @@ describe("a diff card", () => {
     expect(diffLines(row)).toEqual(["+# New", "+", "+Text"]);
   });
 
+  // Issue #483: two stretches of one file are two hunks, divided, never run together.
+  it("divides the hunks of one file, each holding its own lines", () => {
+    const path = "D:\\Projects\\ersa\\src\\app.ts";
+    show(
+      [
+        {
+          type: "tool.requested",
+          tool_use_id: "m1",
+          name: "MultiEdit",
+          input: {},
+          target_kind: "path",
+          target: path,
+          edits: [
+            { path, old_text: "let a = 1;", new_text: "let a = 2;" },
+            { path, old_text: "let z = 1;", new_text: "let z = 2;" },
+          ],
+        },
+      ],
+      ws,
+    );
+    const row = screen.getByRole("button", { name: /^MultiEdit src\\app\.ts/ });
+    const hunks = [...openPart(row).querySelectorAll(".diff-file .diff-hunk")];
+    expect(hunks.map((h) => [...h.querySelectorAll(".diff-text")].map((t) => t.textContent))).toEqual([
+      ["let a = 1;", "let a = 2;"],
+      ["let z = 1;", "let z = 2;"],
+    ]);
+  });
+
   // verifies: FLOW-READ-TRANSCRIPT-R09
   it("says it waits for the user and still shows the change and its counts while its permission request is open", () => {
     show([editCall, editPermission], ws);

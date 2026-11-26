@@ -108,6 +108,13 @@ describe("when Delete is unavailable", () => {
     for (const state of ["idle", "ended", "error", "disconnected"]) expect(deleteUnavailable(session(state), false)).toBeUndefined();
   });
 
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R05
+  it("says to stop the session first while a message is being sent to it, at every phase of the send", () => {
+    for (const sending of ["checking", "putting_back", "copying", "starting", "handing_over"] as const) {
+      expect(deleteUnavailable({ ...session("idle"), sending }, false)).toBe("Stop the session to delete it");
+    }
+  });
+
   it("says Ersa is deleting it while a deletion runs, and offers it again once one failed", () => {
     expect(deleteUnavailable({ ...session("idle"), deleting: "running" }, false)).toBe("Ersa is deleting this session");
     expect(deleteUnavailable({ ...session("idle"), deleting: "failed" }, false)).toBeUndefined();

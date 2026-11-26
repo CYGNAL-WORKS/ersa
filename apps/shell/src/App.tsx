@@ -9,7 +9,7 @@ import { DeleteQuestion } from "./components/DeleteQuestion";
 import { DeveloperPane } from "./components/DeveloperPane";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
+import { type Adding, type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { SessionsPage } from "./components/SessionsPage";
@@ -117,7 +117,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The projects whose trust the user withdrew in this window, by id. Kept for the life of the Interface, which
   // closing the window hides rather than ends (FLOW-CLOSE-AND-QUIT-R01), and never saved.
   const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(new Set());
-  const [adding, setAdding] = useState<Sending>();
+  const [adding, setAdding] = useState<Adding>();
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
@@ -508,7 +508,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return true;
   };
 
-  // The backend keeps the title (PROTO-CORE-API-R12); the list is read again to show it, in the rail and here.
+  // The backend keeps the title (PROTO-CORE-API-R12); Core's answer shows it, in the rail and here, with no list read.
   const rename = async (id: string, title: string) => {
     setRenaming((r) => ({ ...r, [id]: { state: "sending" } }));
     try {
@@ -639,7 +639,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             // A canceled dialog leaves everything as it was, an earlier failure's reason included (R17).
             const path = await pickFolder();
             if (path === null) return { kind: "canceled" };
-            setAdding({ state: "sending" });
+            setAdding({ state: "finding" });
             const found = await client.call("project.find", { host_id, path });
             setAdding(undefined);
             return found ? { kind: "found", project: found } : { kind: "new", path };
@@ -780,7 +780,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Every project the Interface adds is trusted: Trust is the trust question's one answer that adds (FLOW-NEW-SESSION-R25).
   const addProject = async (path: string) => {
     if (view.phase !== "connected") return undefined;
-    setAdding({ state: "sending" });
+    setAdding({ state: "adding" });
     try {
       const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
@@ -995,7 +995,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} failed={quitAsk.failed} onQuit={quit} onCancel={cancel} />
           )}
           <ErrorBoundary what={t("rail.foot.boundaryName")} resetKey={coreVersion} action={<Button onClick={retry}>{t("rail.foot.retryButton")}</Button>}>
-            <RailFoot view={view} onRetry={retry} />
+            <RailFoot view={view} retried={attempt > 0} onRetry={retry} />
           </ErrorBoundary>
         </div>
       </nav>

@@ -126,40 +126,9 @@
   color: var(--color-danger);
 }
 
-/* Its labels share one cell, so the button is as wide as the widest; only the one shown is seen. */
-.delete-question-confirm {
-  display: inline-grid;
-  justify-items: center;
-}
-
-.delete-question-label {
-  grid-area: 1 / 1;
-  visibility: hidden;
-}
-
-.delete-question-label[data-shown] {
-  visibility: visible;
-}
-
-/* While the deletion runs, the ring before its label, open by a quarter, one turn per motion-loop-ring. */
-.delete-question-ring {
-  display: inline-flex;
-  vertical-align: middle;
-  margin-inline-end: var(--space-xs);
-  color: var(--color-ink-muted);
-  animation: delete-question-turn var(--motion-loop-ring) var(--motion-linear) infinite;
-}
-
-@keyframes delete-question-turn {
-  to {
-    transform: rotate(1turn);
-  }
-}
-
-/* With reduced motion on, the question appears at once and the ring holds still. */
+/* With reduced motion on, the question appears at once; its ring holds still as every button's does. */
 @media (prefers-reduced-motion: reduce) {
-  .delete-question,
-  .delete-question-ring {
+  .delete-question {
     animation: none;
   }
 }
