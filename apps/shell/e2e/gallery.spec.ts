@@ -820,12 +820,23 @@ test("the room the sign-in note takes eases to each new height over motion-settl
     // riding up with it, and the box stays where it was.
     const eased = await section.evaluate((el) => {
       const zone = el.querySelector(".new-session-above") as HTMLElement;
-      const box = () => el.querySelector(".composer-box")!.getBoundingClientRect().top;
+      // The box's place within its own screen, which is what keeps still; the page around the scene may move.
+      const box = () => el.querySelector(".composer-box")!.getBoundingClientRect().top - el.getBoundingClientRect().top;
       const before = box();
-      const line = document.createElement("p");
-      line.textContent = "A line more beneath the note.";
-      line.style.margin = "0";
-      el.querySelector(".new-session-above-content")!.append(line);
+      const line = () => {
+        const p = document.createElement("p");
+        p.textContent = "A line more beneath the note.";
+        p.style.margin = "0";
+        return p;
+      };
+      el.querySelector(".new-session-above-content")!.append(line());
+      // The gallery stacks its scenes in one page, and a scene above this one may be easing its own note's room
+      // meanwhile, as the narrower scenes above do once the fonts have loaded and rewrapped their words (#655), which
+      // moves this scene in the page: one is made to, every time, so only a read within the screen passes.
+      const above = [...document.querySelectorAll('[data-theme="light"] [data-component="NewSessionScreen"] figure')].find(
+        (f) => f.querySelector("figcaption")?.textContent?.trim() === "Backend signed out, the only one",
+      );
+      above!.querySelector(".new-session-above-content")!.append(line());
       return new Promise<{ eases: number; timing?: { duration: unknown; easing: unknown }; settle: string; curve: string; boxMoved: number }>((resolve) =>
         // Two frames: the room is told of the new height after the first frame's layout.
         requestAnimationFrame(() => requestAnimationFrame(() => {
