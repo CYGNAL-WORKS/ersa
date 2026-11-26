@@ -1513,7 +1513,7 @@ const entries: Entry[] = [
         "Backend signed out, beside one available",
         room(<NewSessionScreen {...newSession} backends={{ local: [claudeCode, { ...copilot("signed_out"), version: "1.0.0" }] }} open="backend" />),
       ],
-      ["Backend signed out, the only one", room(<NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "signed_out" }] }} open="backend" />)],
+      ["Backend signed out, the only one", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "signed_out" }] }} />],
       ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
       ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
       // FLOW-NEW-SESSION-R11: the listing failed, which is not a host without backends.
