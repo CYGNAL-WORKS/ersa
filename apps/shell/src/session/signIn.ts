@@ -110,8 +110,10 @@ export function useNoteClears() {
 
 /**
  * The marks a sign-in that ended `signed_in` for `name` on `hostId` sets (R17): every session of that backend on that
- * host is cleared through the latest event the window knows of it, its listed `last_event_seq` or, for the session
- * shown, its transcript's, whichever is later, so only a failure that arrives after the sign-in shows the note again.
+ * host is cleared through the latest event the window knew of it when the sign-in ended: for the session shown, its
+ * transcript's, which follows each event as it arrives; for the others, their `last_event_seq` in `sessions`, a listing
+ * read as the sign-in ended. So only a failure that arrives after the sign-in shows the note again. Core's answer to
+ * that reading may already count a later failure of the session shown, which must not be cleared.
  */
 export function signedInClears(
   hostId: string,
@@ -122,7 +124,7 @@ export function signedInClears(
   const marks: Record<string, number> = {};
   for (const s of sessions) {
     if (s.host_id !== hostId || s.backend !== name) continue;
-    marks[s.id] = Math.max(s.last_event_seq ?? -1, shown?.id === s.id ? shown.lastSeq : -1);
+    marks[s.id] = shown?.id === s.id ? shown.lastSeq : (s.last_event_seq ?? -1);
   }
   return marks;
 }

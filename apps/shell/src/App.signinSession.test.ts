@@ -62,11 +62,12 @@ type Answer = (params: never) => unknown;
 function fakeCore({ listed = [session()], backends = [backend("claude-code", "Claude Code (work)")] } = {}) {
   const calls: { method: Method; params: unknown }[] = [];
   let onEvent: (event: CoreEvent) => void = () => {};
-  const core = { listed, backends, send: (() => ({ turn: 2 })) as Answer };
+  // `listing`, when set, is what the next `session.list` waits on before it answers.
+  const core = { listed, backends, send: (() => ({ turn: 2 })) as Answer, listing: undefined as Promise<void> | undefined };
   const answers: Partial<Record<Method, Answer>> = {
     "core.status": () => ({ sessions_running: 1, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => [{ id: "alpha", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "none", trusted: true }],
-    "session.list": () => core.listed,
+    "session.list": () => (core.listing ? core.listing.then(() => core.listed) : core.listed),
     "workspace.list": () => [{ id: "w1", project_id: "alpha", kind: "root", path: "D:/code/alpha", state: "ready" }],
     "backend.list": () => core.backends,
     "backend.sign_in": () => ({ url: PAGE }),
@@ -235,6 +236,26 @@ describe("the sign-in note under a session", () => {
     expect(note()).toBeNull();
     // A failure after it shows the note.
     await core.on(2, failure, "s2");
+    await settled();
+    expect(note()).not.toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  it("shows again for the shown session's failure that arrives after the sign-in ended, before Core lists the sessions", async () => {
+    const core = fakeCore();
+    await open(core);
+    await failedTurn(core);
+    // Core lists the sessions again only after the next failure has arrived.
+    let answer!: () => void;
+    core.listing = new Promise((resolve) => (answer = resolve));
+    core.listed = [{ ...session(), last_event_seq: 2 }];
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    expect(note()).toBeNull();
+    await core.on(2, failure);
+    await settled();
+    expect(note()).not.toBeNull();
+    await act(async () => answer());
     await settled();
     expect(note()).not.toBeNull();
   });
