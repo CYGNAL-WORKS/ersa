@@ -133,13 +133,15 @@ process.once("exit", () => {
   }
 });
 
-export const test = base.extend<{ backend: Backend; installedLater: boolean; ersa: Ersa }>({
+export const test = base.extend<{ backend: Backend; installedLater: boolean; signedOut: boolean; ersa: Ersa }>({
   backend: ["stand-in", { option: true }],
   /** With the stand-in: Core finds no backend until the test calls `installBackend()`. */
   installedLater: [false, { option: true }],
+  /** With the stand-in: it reports that it is signed out, as a signed-out Claude Code does (FLOW-SIGN-IN). */
+  signedOut: [false, { option: true }],
 
   ersa: [
-    async ({ backend, installedLater }, use, testInfo) => {
+    async ({ backend, installedLater, signedOut }, use, testInfo) => {
       const bin = binaries();
       // Which backend this test ran, beside its screenshots: scripts/live-shots.mjs publishes screenshots only from a
       // test whose record says `stand-in` (the file name is its BACKEND_RECORD). Written first, so no screenshot is
@@ -180,6 +182,7 @@ export const test = base.extend<{ backend: Backend; installedLater: boolean; ers
         if (backend === "stand-in") {
           coreEnv.ERSA_CLAUDE = installedLater ? later : bin.standIn;
           coreEnv.ERSA_STAND_IN_ANSWER = "1";
+          if (signedOut) coreEnv.ERSA_STAND_IN_SIGNED_OUT = "1";
           // Session records go to the test's own folder, never the owner's: the stand-in writes one with a session's
           // first message, as the CLI does, and Core reads them from there.
           coreEnv.CLAUDE_CONFIG_DIR = path.join(dir, "claude");

@@ -1,0 +1,89 @@
+/* The sign-in note (docs/design/COMPOSER.md, The sign-in note): the archived note's anatomy, a row of its own above
+   the status line. Quiet, like the unavailable box: canvas with a line edge. */
+
+.sign-in-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--color-canvas);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  /* It opens upward as the status line does, growing and fading in. */
+  animation: sign-in-note-in var(--motion-settle) var(--motion-ease-out);
+  transition: box-shadow var(--motion-settle) var(--motion-ease-out);
+}
+
+/* On the new-session screen, while nothing else there can be acted on, the note holds the screen's focal glow. */
+.sign-in-note[data-focal] {
+  box-shadow: var(--glow-focal);
+}
+
+@keyframes sign-in-note-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-xs));
+  }
+}
+
+/* The glyph, or the waiting ring, centered in a cell of the ring's size so the words never move between them. */
+.sign-in-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-ring);
+  height: var(--size-ring);
+}
+
+.sign-in-words {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+/* The words going and the words coming share one cell, and crossfade over motion-quick. */
+.sign-in-line {
+  grid-area: 1 / 1;
+}
+
+.sign-in-line[data-arriving] {
+  animation: sign-in-words-in var(--motion-quick) var(--motion-ease-out);
+}
+
+.sign-in-line[data-leaving] {
+  animation: sign-in-words-out var(--motion-quick) var(--motion-ease-out) forwards;
+}
+
+@keyframes sign-in-words-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sign-in-words-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.sign-in-note .button {
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sign-in-note,
+  .sign-in-line[data-arriving],
+  .sign-in-line[data-leaving] {
+    animation: none;
+  }
+
+  .sign-in-note {
+    transition: none;
+  }
+}
