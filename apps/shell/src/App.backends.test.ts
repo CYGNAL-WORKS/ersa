@@ -208,17 +208,6 @@ describe("the new-session screen reading the host's backends again", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R50
-  it("goes on showing the listing it holds when Core doesn't answer a later reading", async () => {
-    const core = fakeCore([claudeCode()]);
-    await start(core);
-    core.listing = () => Promise.reject({ kind: "unavailable", message: "Core didn't answer in time" });
-    await windowBack();
-    expect(statusLine()).toBeNull();
-    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
-    expect(words().disabled).toBe(false);
-  });
-
-  // verifies: FLOW-NEW-SESSION-R50
   it("reads them again behind the sessions page only once the screen shows again", async () => {
     const core = fakeCore([claudeCode()]);
     await start(core);

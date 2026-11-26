@@ -110,14 +110,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // status line names it again on coming back (FLOW-SEND-MESSAGE-R19). In memory only: a reload names none.
   const waitingKept = useRef<Record<string, readonly WaitingHere[] | undefined>>({});
 
-  // What each host's last readings of its backends left, by host id: the last listing Core answered with, and why
-  // the latest reading failed, if it did. Held together so that one update settles both.
+  // What each host's readings of its backends left, by host id: the last listing Core answered with, and why the
+  // latest reading failed, if it did. Held together so that one update settles both.
   const [hostReadings, setHostReadings] = useState<Record<string, HostReading>>({});
-  // What the screen offers: each host's backends, absent while none has been read; none when the reading failed.
+  // What the screen offers: each host's backends, absent while none has been read. A host whose latest reading
+  // failed offers none, and the screen says why (FLOW-NEW-SESSION-R11), even when it held a listing before.
   const backends = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(hostReadings).flatMap(([host, r]) => (r.listing ? [[host, r.listing]] : r.failed !== undefined ? [[host, []]] : [])),
+        Object.entries(hostReadings).flatMap(([host, r]) => (r.failed !== undefined ? [[host, []]] : r.listing ? [[host, r.listing]] : [])),
       ) as Record<string, BackendInfo[]>,
     [hostReadings],
   );
@@ -391,16 +392,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       void readBackends(client, hostId).then((read) => {
         if (readings.current !== out) return;
         out.hosts.delete(hostId);
-        // Until the answer, the listing held stays, so a later reading shows nothing of itself (R50). Core refusing
-        // to list the host's backends leaves none, and the screen says why (FLOW-NEW-SESSION-R11), even when it held
-        // a listing before. A reading with no answer at all says nothing of the backends: the listing held stays,
-        // and the failure is noted for a host that holds none.
+        // Until the answer, the listing held stays, so a later reading shows nothing of itself (R50). A failure
+        // keeps the last listing Core answered with behind it, for a new connection to show (below).
         setHostReadings((all) => ({
           ...all,
-          [hostId]:
-            read.failed === undefined
-              ? { listing: read.backends }
-              : { listing: read.unanswered ? all[hostId]?.listing : undefined, failed: read.failed },
+          [hostId]: read.failed === undefined ? { listing: read.backends } : { listing: all[hostId]?.listing, failed: read.failed },
         }));
       });
     },
@@ -408,8 +404,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   );
   // A new connection forgets why the last one's readings failed: a connection lost fails every reading still out on
   // it, and the Shell reports that failure and the loss by separate paths, in either order, so any of them may have
-  // landed. A host whose failure left it no listing is detected again (R23); one holding a listing shows it until
-  // this connection's reading answers. The answers still out from the last connection are dropped above.
+  // landed. A host that holds a listing shows it until this connection's reading answers (R50); one Core never
+  // listed is detected again (R23). The answers still out from the last connection are dropped above.
   useEffect(() => {
     if (link === undefined) return;
     setHostReadings((all) =>
