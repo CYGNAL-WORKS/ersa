@@ -417,6 +417,8 @@ pub struct FakeSignIns {
     /// Held by a test to hold each start, once its process runs, until it
     /// lets go.
     pub start_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Held by a test to hold each stop, once counted, until it lets go.
+    pub stop_gate: Arc<tokio::sync::Mutex<()>>,
     /// How the sign-in under way ends, once the test says.
     ending: tokio::sync::watch::Sender<Option<SignInEnd>>,
 }
@@ -429,6 +431,7 @@ impl Default for FakeSignIns {
             processes: Mutex::default(),
             stops: AtomicUsize::new(0),
             start_gate: Arc::default(),
+            stop_gate: Arc::default(),
             ending: tokio::sync::watch::Sender::new(None),
         }
     }
@@ -476,6 +479,7 @@ impl SignIn for FakeSignIn {
 
     async fn stop(&mut self) {
         self.sign_ins.stops.fetch_add(1, Ordering::SeqCst);
+        drop(self.sign_ins.stop_gate.lock().await);
         let _ = self.process.kill().await;
     }
 }

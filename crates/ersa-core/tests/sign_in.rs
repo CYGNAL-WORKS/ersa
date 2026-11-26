@@ -179,6 +179,43 @@ async fn a_second_sign_in_while_one_is_under_way_starts_none_and_answers_as_the_
     ended(&mut first).await;
 }
 
+/// A `backend.sign_in` while the one under way is ending, as a cancel stops
+/// it, joins nothing on its way out: it waits for that one to end, and then
+/// starts afresh, answering with the new sign-in's address.
+// verifies: PROTO-CORE-API-R156
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_asked_for_while_one_is_ending_starts_afresh_once_it_has_ended() {
+    let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), |_| {}).await;
+    let mut other = core.client().await;
+    client.result("backend.sign_in", the_fake()).await;
+
+    let stopping = fake.sign_ins.stop_gate.lock().await;
+    let canceling = other.request("backend.cancel_sign_in", the_fake()).await;
+    while fake.sign_ins.stops.load(Ordering::SeqCst) < 1 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let fresh = "https://sign-in.example/again";
+    *fake.sign_ins.mode.lock().unwrap() = SignInMode::Starts(Some(fresh.into()));
+    let asked = client.request("backend.sign_in", the_fake()).await;
+    client.result("core.status", json!({})).await;
+    assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 1, "it waits");
+    drop(stopping);
+
+    assert_eq!(other.response(canceling).await["result"], json!({}));
+    assert_eq!(
+        client.response(asked).await["result"],
+        json!({ "url": fresh })
+    );
+    assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 2);
+    assert_eq!(ended(&mut other).await["outcome"], json!("canceled"));
+    fake.sign_ins
+        .end(SignInEnd::Failed("stopped by the test".into()));
+    let ending = other
+        .notification_where(|n| n["method"] == "backend.sign_in_ended")
+        .await;
+    assert_eq!(ending["params"]["outcome"], json!("failed"));
+}
+
 /// `backend_missing` for a backend Core has no adapter for, and
 /// `invalid_state` when its command is not found, when its adapter has no
 /// sign-in, when the backend refuses, with its own reason, and when the

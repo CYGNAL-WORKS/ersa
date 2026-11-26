@@ -232,9 +232,11 @@ pub enum SignInPhase {
     /// It started: the person signs in, and Core waits to learn how it
     /// ends.
     Started,
-    /// `backend.cancel_sign_in` stopped it: Core is letting go of what it
-    /// started. One stopped before it started never starts.
-    Stopping,
+    /// It is ending: `backend.cancel_sign_in` stopped it, or Core stopped
+    /// waiting for it, and is letting go of what it started and saying how
+    /// it ended. One stopped before it started never starts. A sign-in asked
+    /// for now waits for it to end, and then starts afresh.
+    Ending,
 }
 
 /// The backend a sign-in is for, on its host: one sign-in runs at a time
@@ -681,10 +683,12 @@ pub enum Command {
         project: Id,
     },
     /// A `backend.sign_in`: admitted when none is under way for that
-    /// backend on that host, refused while one is, so the request joins it
-    /// (PROTO-CORE-API-R156), and while Core is closing. Never held.
+    /// backend on that host; refused while one is starting or started, so
+    /// the request joins it (PROTO-CORE-API-R156), and while Core is
+    /// closing; held while one is ending, so it starts afresh once that one
+    /// has ended, rather than join a sign-in on its way out.
     SignIn(SignInOf),
-    /// A `backend.cancel_sign_in`: done, the sign-in stopping, while one is
+    /// A `backend.cancel_sign_in`: done, the sign-in ending, while one is
     /// under way; refused when none is (PROTO-CORE-API-R160).
     CancelSignIn(SignInOf),
 }
@@ -825,6 +829,8 @@ pub enum Report {
     /// The adapter started the sign-in. Stale for one stopped meanwhile,
     /// which then never counts as started.
     SignInStarted(SignInOf),
+    /// Core stopped waiting for the sign-in, which started: it is ending.
+    SignInEnding(SignInOf),
     /// Core is shutting down.
     Closing,
     /// Whoever waited for the held command at `place` in the queue has
@@ -1581,8 +1587,13 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
         Command::SignIn(of) => {
             if state.closing {
                 Outcome::Refused(Refusal::Closing)
-            } else if state.sign_ins.contains_key(of) {
-                Outcome::Refused(Refusal::SigningIn)
+            } else if let Some(phase) = state.sign_ins.get(of) {
+                match phase {
+                    SignInPhase::Starting | SignInPhase::Started => {
+                        Outcome::Refused(Refusal::SigningIn)
+                    }
+                    SignInPhase::Ending => Outcome::Held,
+                }
             } else {
                 state.sign_ins.insert(of.clone(), SignInPhase::Starting);
                 Outcome::Admitted(Operation::SignIn(of.clone()))
@@ -1594,7 +1605,7 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             // However far it got, it stops, and a start that answers later
             // no longer counts.
             Some(phase) => {
-                *phase = SignInPhase::Stopping;
+                *phase = SignInPhase::Ending;
                 Outcome::Done
             }
         },
@@ -2073,7 +2084,14 @@ fn note(state: &mut State, report: Report) -> Outcome {
                 *phase = SignInPhase::Started;
                 Outcome::Noted
             }
-            Some(SignInPhase::Started | SignInPhase::Stopping) | None => Outcome::Stale,
+            Some(SignInPhase::Started | SignInPhase::Ending) | None => Outcome::Stale,
+        },
+        Report::SignInEnding(of) => match state.sign_ins.get_mut(&of) {
+            Some(phase @ SignInPhase::Started) => {
+                *phase = SignInPhase::Ending;
+                Outcome::Noted
+            }
+            Some(SignInPhase::Starting | SignInPhase::Ending) | None => Outcome::Stale,
         },
         Report::Closing => {
             if state.closing {
@@ -2252,6 +2270,9 @@ struct Inner {
     runs: HashMap<Id, Attached>,
     /// What Core attached to each sign-in under way.
     sign_ins: HashMap<SignInOf, Attached>,
+    /// What to attach to a held `backend.sign_in`, by its waiter's number,
+    /// in the step that admits it.
+    sign_ins_held: HashMap<u64, Attached>,
 }
 
 impl Admission {
@@ -2273,6 +2294,7 @@ impl Admission {
             std::mem::take(&mut inner.sessions),
             std::mem::take(&mut inner.runs),
             std::mem::take(&mut inner.sign_ins),
+            std::mem::take(&mut inner.sign_ins_held),
         );
         // Let go of once the lock is: what is attached is Core's, and its
         // destructor may ask admission.
@@ -2590,7 +2612,7 @@ impl Admission {
         let command = Command::Launch {
             session: session.to_string(),
         };
-        let (outcome, _) = self.apply_then(Input::Command(command), |inner, outcome| {
+        let (outcome, _) = self.apply_then(Input::Command(command), |inner, outcome, _| {
             if let Outcome::Admitted(_) = outcome {
                 inner.runs.insert(session.to_string(), live);
                 if let Some(first) = first {
@@ -2601,36 +2623,60 @@ impl Admission {
         self.answered(outcome)
     }
 
-    /// Asks to begin a sign-in for `of` ([`Command::SignIn`]), without
-    /// waiting. Admitted, what `attach` makes is attached to the sign-in in
-    /// that step, and goes in the step that ends it. Refused because one is
-    /// under way, the refusal comes with what is attached to that one, read
-    /// in the same step, so a second request joins the first and never
-    /// finds it gone in between (PROTO-CORE-API-R156).
-    pub fn begin_sign_in(
+    /// Asks to begin a sign-in for `of` ([`Command::SignIn`]), waiting
+    /// while one is ending. Admitted, what `attach` makes is attached to
+    /// the sign-in in the step that admits it, and goes in the step that
+    /// ends it. Refused because one is under way, the refusal comes with
+    /// what is attached to that one, read in the same step, so a second
+    /// request joins the first (PROTO-CORE-API-R156).
+    pub async fn begin_sign_in(
         self: &Arc<Self>,
         of: &SignInOf,
-        attach: impl FnOnce() -> Attached,
+        attach: impl Fn() -> Attached,
     ) -> Result<UnderWay, (Refusal, Option<Attached>)> {
-        let mut under_way = None;
-        let (outcome, _) = self.apply_then(
-            Input::Command(Command::SignIn(of.clone())),
-            |inner, outcome| match outcome {
-                Outcome::Admitted(_) => {
-                    inner.sign_ins.insert(of.clone(), attach());
-                }
+        loop {
+            let mut under_way = None;
+            let command = Input::Command(Command::SignIn(of.clone()));
+            let (outcome, waiter) =
+                self.apply_then(command, |inner, outcome, held| match outcome {
+                    Outcome::Admitted(_) => {
+                        inner.sign_ins.insert(of.clone(), attach());
+                    }
+                    Outcome::Refused(Refusal::SigningIn) => {
+                        under_way = inner.sign_ins.get(of).cloned();
+                    }
+                    Outcome::Held => {
+                        if let Some(number) = held {
+                            inner.sign_ins_held.insert(number, attach());
+                        }
+                    }
+                    Outcome::Refused(_) | Outcome::Done | Outcome::Noted | Outcome::Stale => {}
+                });
+            let outcome = match waiter {
+                // Waited for outside the lock; the sender lives in `self`.
+                Some((_, waiter)) => waiter.await.expect("a held command is always answered"),
+                None => outcome,
+            };
+            match outcome {
                 Outcome::Refused(Refusal::SigningIn) => {
-                    under_way = inner.sign_ins.get(of).cloned();
+                    // Released as refused: another request held beside this
+                    // one was admitted first, and this one joins it, unless
+                    // that one ended already, when this one asks again.
+                    if under_way.is_none() {
+                        under_way = self.sign_in(of);
+                    }
+                    if under_way.is_some() {
+                        return Err((Refusal::SigningIn, under_way));
+                    }
                 }
-                Outcome::Refused(_)
+                outcome @ (Outcome::Admitted(_)
+                | Outcome::Refused(_)
                 | Outcome::Done
                 | Outcome::Held
                 | Outcome::Noted
-                | Outcome::Stale => {}
-            },
-        );
-        self.answered(outcome)
-            .map_err(|refusal| (refusal, under_way))
+                | Outcome::Stale) => return self.answered(outcome).map_err(|r| (r, None)),
+            }
+        }
     }
 
     /// Says the adapter started the sign-in for `of`
@@ -2641,13 +2687,20 @@ impl Admission {
         matches!(self.apply(Input::Report(report)).0, Outcome::Noted)
     }
 
+    /// Says Core stopped waiting for the sign-in for `of`, which started
+    /// ([`Report::SignInEnding`]): a sign-in asked for from now on waits for
+    /// it to end.
+    pub fn sign_in_ending(&self, of: &SignInOf) {
+        self.report(Report::SignInEnding(of.clone()));
+    }
+
     /// Stops the sign-in under way for `of` ([`Command::CancelSignIn`]):
     /// what is attached to it, read in the same step, or `None` when none
     /// is under way.
     pub fn cancel_sign_in(&self, of: &SignInOf) -> Option<Attached> {
         let mut attached = None;
         let command = Input::Command(Command::CancelSignIn(of.clone()));
-        self.apply_then(command, |inner, outcome| {
+        self.apply_then(command, |inner, outcome, _| {
             if let Outcome::Done = outcome {
                 attached = inner.sign_ins.get(of).cloned();
             }
@@ -2759,19 +2812,19 @@ impl Admission {
     /// One step under the lock. For a command that is held, also its
     /// waiter's number and the channel its answer arrives on.
     fn apply(&self, input: Input) -> (Outcome, Option<(u64, oneshot::Receiver<Outcome>)>) {
-        self.apply_then(input, |_, _| {})
+        self.apply_then(input, |_, _, _| {})
     }
 
     /// [`Admission::apply`], with `then` run under the same lock right
-    /// after the step, with its outcome.
+    /// after the step, with its outcome and, for a held command, its
+    /// waiter's number.
     fn apply_then(
         &self,
         input: Input,
-        then: impl FnOnce(&mut Inner, &Outcome),
+        then: impl FnOnce(&mut Inner, &Outcome, Option<u64>),
     ) -> (Outcome, Option<(u64, oneshot::Receiver<Outcome>)>) {
         let mut inner = self.lock();
         let Step { outcome, released } = step(&mut inner.state, input);
-        then(&mut inner, &outcome);
         let waiter = match outcome {
             Outcome::Held => {
                 let (answer, waiter) = oneshot::channel();
@@ -2786,6 +2839,11 @@ impl Admission {
             | Outcome::Noted
             | Outcome::Stale => None,
         };
+        then(
+            &mut inner,
+            &outcome,
+            waiter.as_ref().map(|(number, _)| *number),
+        );
         answer_released(&mut inner, released);
         // What was attached to a session or a run that this step, or one it
         // set off, took away goes with it. Dropped once the lock is let
@@ -2857,8 +2915,20 @@ impl Drop for Withdraw {
 fn answer_released(inner: &mut Inner, released: Vec<(usize, Outcome)>) {
     let mut abandoned = Vec::new();
     // From the last place down, so the places before it stay where they are.
+    // A held sign-in admitted now has what Core keeps for it attached
+    // before anyone is answered, so a request this step refuses, to join
+    // it, finds it.
+    for (place, answer) in &released {
+        if let Outcome::Admitted(Operation::SignIn(of)) = answer {
+            let number = inner.waiting[*place].0;
+            if let Some(attached) = inner.sign_ins_held.remove(&number) {
+                inner.sign_ins.insert(of.clone(), attached);
+            }
+        }
+    }
     for (place, answer) in released.into_iter().rev() {
-        let (_, waiter) = inner.waiting.remove(place);
+        let (number, waiter) = inner.waiting.remove(place);
+        inner.sign_ins_held.remove(&number);
         if let Err(Outcome::Admitted(operation)) = waiter.send(answer) {
             abandoned.push(operation);
         }
@@ -2900,7 +2970,7 @@ impl UnderWay {
         // Admission takes its own hold on it under the lock; the caller's,
         // and what it replaced, are let go of once the lock is. For a
         // session that went meanwhile, the step's sweep takes it out again.
-        self.admission.apply_then(stored, |inner, _| {
+        self.admission.apply_then(stored, |inner, _, _| {
             replaced = inner.sessions.insert(session, Arc::clone(&mine));
         });
         drop((replaced, mine));

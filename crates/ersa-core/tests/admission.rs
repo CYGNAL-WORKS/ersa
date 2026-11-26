@@ -2613,6 +2613,7 @@ fn signing_in() -> Vec<Input> {
         inputs.push(Input::Command(Command::SignIn(of())));
         inputs.push(Input::Command(Command::CancelSignIn(of())));
         inputs.push(Input::Report(Report::SignInStarted(of())));
+        inputs.push(Input::Report(Report::SignInEnding(of())));
         inputs.push(Input::Report(Report::Ended(Operation::SignIn(of()))));
     }
     inputs
@@ -3082,6 +3083,9 @@ fn check_state(state: &State) {
 /// drop would, or stores what is being stored.
 fn ends_of_what_is_under_way(state: &State) -> Vec<Report> {
     let mut reports = Vec::new();
+    for (of, _) in state.sign_ins() {
+        reports.push(Report::Ended(Operation::SignIn(of.clone())));
+    }
     for (id, phase) in state.sections() {
         match phase {
             SectionPhase::Removing => {
@@ -3298,12 +3302,14 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     // (PROTO-CORE-API-R156). A cancel stops one however far it got, and
     // only a start no cancel overtook counts (R160).
     if let Input::Command(Command::SignIn(of)) = input {
-        let expected = if before.closing() {
-            Outcome::Refused(Refusal::Closing)
-        } else if before.sign_in(of).is_some() {
-            Outcome::Refused(Refusal::SigningIn)
-        } else {
-            Outcome::Admitted(Operation::SignIn(of.clone()))
+        let expected = match (before.closing(), before.sign_in(of)) {
+            (true, _) => Outcome::Refused(Refusal::Closing),
+            (false, Some(SignInPhase::Starting | SignInPhase::Started)) => {
+                Outcome::Refused(Refusal::SigningIn)
+            }
+            // One on its way out is waited for, never joined.
+            (false, Some(SignInPhase::Ending)) => Outcome::Held,
+            (false, None) => Outcome::Admitted(Operation::SignIn(of.clone())),
         };
         assert_eq!(outcome, &expected, "{}", context());
         if let Outcome::Admitted(_) = outcome {
@@ -3327,7 +3333,7 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
                 assert_eq!(outcome, &Outcome::Done, "{}", context());
                 assert_eq!(
                     after.sign_in(of),
-                    Some(SignInPhase::Stopping),
+                    Some(SignInPhase::Ending),
                     "{}",
                     context()
                 );
@@ -3336,6 +3342,10 @@ fn check_step(before: &State, input: &Input, outcome: &Outcome, after: &State) {
     }
     if let Input::Report(Report::SignInStarted(of)) = input {
         let started = before.sign_in(of) == Some(SignInPhase::Starting);
+        assert_eq!(outcome == &Outcome::Noted, started, "{}", context());
+    }
+    if let Input::Report(Report::SignInEnding(of)) = input {
+        let started = before.sign_in(of) == Some(SignInPhase::Started);
         assert_eq!(outcome == &Outcome::Noted, started, "{}", context());
     }
     // A send is handed over only when it was not cancelled.
@@ -3735,6 +3745,7 @@ fn every_input_is_in_a_world() {
                 Report::SessionGone { .. } => "SessionGone",
                 Report::RunEnding { .. } => "RunEnding",
                 Report::SignInStarted(_) => "SignInStarted",
+                Report::SignInEnding(_) => "SignInEnding",
                 Report::Closing => "Closing",
                 Report::GaveUp { .. } => "GaveUp",
                 Report::Ended(_) => "Ended",
@@ -3743,7 +3754,7 @@ fn every_input_is_in_a_world() {
     };
     let whole = every_input_of_the_whole_world(&["s1"]);
     let kinds: HashSet<&str> = whole.iter().map(kind).collect();
-    assert_eq!(kinds.len(), 24 + 26, "{kinds:#?}");
+    assert_eq!(kinds.len(), 24 + 27, "{kinds:#?}");
     // Every operation's end, and every kind of write.
     let ends: HashSet<_> = whole
         .iter()
@@ -5136,12 +5147,13 @@ fn a_put_back_of_a_workspace_that_has_its_folder_does_nothing() {
 // verifies: PROTO-CORE-API-R160
 #[test]
 fn every_input_in_every_reachable_state_of_two_sign_ins_keeps_what_admission_promises() {
-    let states = explore_with(world_inputs("signing in"), 0, false);
+    // Up to two requests waiting for a sign-in that is ending.
+    let states = explore_with(world_inputs("signing in"), 2, false);
     let (a, b) = (sign_in_of("a"), sign_in_of("b"));
     for phase in [
         SignInPhase::Starting,
         SignInPhase::Started,
-        SignInPhase::Stopping,
+        SignInPhase::Ending,
     ] {
         // Each backend's sign-in in every phase, whatever the other's is.
         assert!(
@@ -5161,6 +5173,8 @@ fn every_input_in_every_reachable_state_of_two_sign_ins_keeps_what_admission_pro
             .iter()
             .any(|s| s.sign_in(&a).is_some() && s.sign_in(&b).is_some())
     );
+    // Two requests wait for an ending sign-in at once.
+    assert!(states.iter().any(|s| s.held().len() == 2));
 }
 
 /// The sign-in of backend `a`, brought to `phase` from nothing, with Core
@@ -5175,8 +5189,9 @@ fn signing_in_at(phase: Option<SignInPhase>, closing: bool) -> State {
             SignInPhase::Started => {
                 report(&mut state, Report::SignInStarted(of.clone()));
             }
-            SignInPhase::Stopping => {
-                command(&mut state, Command::CancelSignIn(of.clone()));
+            SignInPhase::Ending => {
+                report(&mut state, Report::SignInStarted(of.clone()));
+                report(&mut state, Report::SignInEnding(of.clone()));
             }
         }
         assert_eq!(state.sign_in(&of), Some(phase));
@@ -5202,7 +5217,7 @@ fn a_second_sign_in_a_cancel_its_end_and_shutdown_in_every_state_of_a_sign_in() 
         None,
         Some(SignInPhase::Starting),
         Some(SignInPhase::Started),
-        Some(SignInPhase::Stopping),
+        Some(SignInPhase::Ending),
     ];
     for phase in phases {
         for closing in [false, true] {
@@ -5214,9 +5229,35 @@ fn a_second_sign_in_a_cancel_its_end_and_shutdown_in_every_state_of_a_sign_in() 
             let expected = match (phase, closing) {
                 (_, true) => Outcome::Refused(Refusal::Closing),
                 (None, false) => admitted(Operation::SignIn(of.clone())),
-                (Some(_), false) => Outcome::Refused(Refusal::SigningIn),
+                (Some(SignInPhase::Starting | SignInPhase::Started), false) => {
+                    Outcome::Refused(Refusal::SigningIn)
+                }
+                (Some(SignInPhase::Ending), false) => Outcome::Held,
             };
             assert_eq!(second, expected, "{context}");
+            // One waiting for an ending sign-in starts afresh once it ends,
+            // or is refused if Core closes first.
+            if second == Outcome::Held {
+                let mut closed = state.clone();
+                let ended = ended(&mut state, Operation::SignIn(of.clone()));
+                let fresh = admitted(Operation::SignIn(of.clone()));
+                assert_eq!(ended.released, vec![(0, fresh)], "{context}");
+                assert_eq!(state.sign_in(&of), Some(SignInPhase::Starting), "{context}");
+                let closing = step(&mut closed, Input::Report(Report::Closing));
+                let refused = Outcome::Refused(Refusal::Closing);
+                assert_eq!(closing.released, vec![(0, refused)], "{context}");
+            }
+
+            // Core stops waiting for one that started: it is ending.
+            let mut state = at();
+            let ending = report(&mut state, Report::SignInEnding(of.clone()));
+            let started = phase == Some(SignInPhase::Started);
+            let expected = if started {
+                Outcome::Noted
+            } else {
+                Outcome::Stale
+            };
+            assert_eq!(ending, expected, "{context}");
 
             let mut state = at();
             let canceled = command(&mut state, Command::CancelSignIn(of.clone()));
@@ -5224,7 +5265,7 @@ fn a_second_sign_in_a_cancel_its_end_and_shutdown_in_every_state_of_a_sign_in() 
                 None => assert_eq!(canceled, Outcome::Refused(Refusal::NoSignIn), "{context}"),
                 Some(_) => {
                     assert_eq!(canceled, Outcome::Done, "{context}");
-                    assert_eq!(state.sign_in(&of), Some(SignInPhase::Stopping), "{context}");
+                    assert_eq!(state.sign_in(&of), Some(SignInPhase::Ending), "{context}");
                     // A start that answers after the cancel never counts.
                     let started = report(&mut state, Report::SignInStarted(of.clone()));
                     assert_eq!(started, Outcome::Stale, "{context}");

@@ -105,9 +105,10 @@ pub fn signing_in(core: &Core, of: &SignInOf) -> Option<SigningIn> {
     handle.signing_in()
 }
 
-/// Starts `adapter`'s sign-in for `of`, or joins the one under way for it,
-/// and answers once it has started, as the first request for it was
-/// answered (PROTO-CORE-API-R155, R156).
+/// Starts `adapter`'s sign-in for `of`, or joins the one starting or
+/// started for it, and answers once it has started, as the first request
+/// for it was answered (PROTO-CORE-API-R155, R156). While one is ending it
+/// waits, and then starts afresh.
 pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) -> Started {
     let (started_tx, started) = watch::channel(None);
     let (stopped_tx, stopped) = watch::channel(false);
@@ -118,7 +119,7 @@ pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) ->
         cancel,
     });
     let attach = || Arc::clone(&handle) as Attached;
-    match core.admission.begin_sign_in(&of, attach) {
+    match core.admission.begin_sign_in(&of, attach).await {
         Ok(under_way) => {
             let task = Task {
                 core: Arc::clone(core),
@@ -274,6 +275,8 @@ impl Task {
             // cancel does.
             _ = interrupted(&core, &mut canceled) => (SignInOutcome::Canceled, None),
         };
+        // From now a sign-in asked for waits for this one to end.
+        core.admission.sign_in_ending(&of);
         // However it ended, nothing Core started for it is left (R162): its
         // own stop first, then letting go, which ends the rest.
         let _ = tokio::time::timeout(SIGN_IN_STOP_LIMIT, sign_in.stop()).await;
