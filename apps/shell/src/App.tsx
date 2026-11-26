@@ -13,6 +13,7 @@ import { type Adding, type FolderChoice, NewSessionScreen } from "./components/N
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { SessionsPage } from "./components/SessionsPage";
+import { SignInNote } from "./components/SignInNote";
 import { unseenWrites } from "./session/unseen";
 import { RailTop } from "./components/RailTop";
 import { RailTree } from "./components/RailTree";
@@ -35,7 +36,7 @@ import { type Follower, type SendProgress, type SessionView, type Sending, type 
 import { type Moving, sectionsUnavailable, useSections } from "./session/sections";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
-import { useSignIns } from "./session/signIn";
+import { noteState, sessionNoteFailure, signInKey, signedInClears, useNoteClears, useSignIns } from "./session/signIn";
 import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
@@ -429,8 +430,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Sign in and Cancel on the sign-in note, and Core's word that a sign-in ended (FLOW-SIGN-IN).
   const readFresh = useCallback((hostId: string) => readHost(hostId, true), [readHost]);
   const signIns = useSignIns(client, shell?.openLink, readFresh);
-  onListed.current = signIns.listed;
-  signInEnded.current = signIns.ended;
+  // The sign-in note under the shown session (FLOW-SIGN-IN-R17): where this window has cleared each session's note,
+  // the backend the shown session's note is for, by `signInKey`, and the shown session's latest event, set as the
+  // window renders below.
+  const noteClears = useNoteClears();
+  const sessionNoteKey = useRef<string>(undefined);
+  const shownSeq = useRef<{ id: string; lastSeq: number }>(undefined);
+  onListed.current = (hostId, listing) => signIns.listed(hostId, listing, sessionNoteKey.current);
+  signInEnded.current = (ending) => {
+    // Signed in: every session of that backend on that host loses its note, until a failure after this one (R17).
+    if (ending.outcome === "signed_in") noteClears.clear(signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownSeq.current));
+    return signIns.ended(ending);
+  };
   // Only this connection's failures count. A connection lost fails every reading still out on it, and the Shell
   // reports that failure and the loss by separate paths, in either order, so the failure may land before the window
   // knows the connection went. Counted by the connection it failed on, it says nothing from the new connection's
@@ -967,6 +978,32 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const used = listed && contextUsed(listed.tile);
   const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
 
+  // The sign-in note under the shown session (FLOW-SIGN-IN-R17): while it is live, not archived, and its latest
+  // failure as not signed in has no message of the person's after it and was not cleared since, for the session's
+  // backend on its host. It follows the session's own failure, not the listing, which may still say available.
+  const noteFailure =
+    shown && listed && !listed.archived && runs(listed) ? sessionNoteFailure(shown.transcript.items, noteClears.clears[shown.id] ?? -1) : undefined;
+  const noteKey = listed && noteFailure !== undefined ? signInKey(listed.host_id, listed.backend) : undefined;
+  sessionNoteKey.current = noteKey;
+  shownSeq.current = shown && { id: shown.id, lastSeq: shown.transcript.lastSeq };
+  const sessionNote = listed && noteKey !== undefined && (
+    <SignInNote
+      label={backendLabel(listed, backends)}
+      place="session"
+      // The sign-in under way, as the host's listing reports it, whatever it says of the backend's status (R06).
+      state={noteState({ signing_in: backends[listed.host_id]?.find((b) => b.name === listed.backend)?.signing_in }, signIns.signIns[noteKey])}
+      onSignIn={() => void signIns.signIn(listed.host_id, listed.backend)}
+      onCancel={() => void signIns.cancel(listed.host_id, listed.backend)}
+    />
+  );
+  // A mark holds only while its session stays live on this connection (useNoteClears).
+  const liveIds = sessions.state === "ready" ? sessions.sessions.filter((s) => runs(s)).map((s) => s.id).sort().join(" ") : undefined;
+  const keepClears = noteClears.keep;
+  useEffect(() => {
+    if (!connected) keepClears(new Set());
+    else if (liveIds !== undefined) keepClears(new Set(liveIds.split(" ").filter(Boolean)));
+  }, [connected, liveIds, keepClears]);
+
   // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
   const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
   const shelfShows =
@@ -1180,8 +1217,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onSend={(text, attachments) => {
                 // Sending clears a refused change's line (FLOW-NEW-SESSION-R30).
                 resetChange(shown.id);
-                return follower.current?.send(text, sendable(attachments), waitingName(text, attachments)) ?? Promise.resolve(false);
+                // A message of the person's clears the sign-in note once Core has it (FLOW-SIGN-IN-R17), through the
+                // events known as it was sent, so a failure of this message that arrives before Core's answer still shows.
+                const id = shown.id;
+                const through = shown.transcript.lastSeq;
+                const sent = follower.current?.send(text, sendable(attachments), waitingName(text, attachments)) ?? Promise.resolve(false);
+                return sent.then((accepted) => {
+                  if (accepted) noteClears.clear({ [id]: through });
+                  return accepted;
+                });
               }}
+              note={sessionNote || undefined}
               refusedChange={changeHere.refused}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
               // While it works, Enter still sends, and the message waits in the backend (R18).

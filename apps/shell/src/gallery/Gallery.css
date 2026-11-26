@@ -195,3 +195,13 @@
   background: var(--color-surface);
   border-left: var(--line-hairline) solid var(--color-line);
 }
+
+/* A session's stage at a stage's height: its transcript above, its composer at the foot (SessionStage). */
+.gallery-stage {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: var(--size-workbench);
+  overflow: hidden;
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}

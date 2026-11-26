@@ -9,3 +9,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
+- [ ] 2026-11-26 FLOW-SIGN-IN: under a session R17 removes the note as soon as a sign-in for the session's backend ends `signed_in`, yet R17 also says the note behaves as R12 says, and R12's words ("The sign-in finished, but Claude Code still reports that it isn't signed in.") only follow a `signed_in` end, so under a session they can never show: a person whose sign-in "worked" but whose backend still says signed out loses the note and finds out only when the next message fails. Built as R17 reads (the note goes on any `signed_in` end). The alternative is to clear it only when the listing read after that end no longer reports the backend `signed_out`, and otherwise show R12's words.

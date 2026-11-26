@@ -6,7 +6,7 @@ import { type Attached, addAll, overInline, pastedImage, same, willCopy } from "
 import type { Sending, Waiting } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
 import { AttachmentChip } from "./AttachmentChip";
-import { reducedMotion } from "../theme/motion";
+import { HeightEase, reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import "./Composer.css";
@@ -67,6 +67,11 @@ interface ComposerProps {
   /** The session controls, beneath the box in the same column, space-xs below it (docs/design/COMPOSER.md). */
   controls?: ReactNode;
   /**
+   * The sign-in note under a session (FLOW-SIGN-IN-R17): at the top of the column, above the status line, taking
+   * height there, so the box and the session controls keep their place and what stands above the composer gives it up.
+   */
+  note?: ReactNode;
+  /**
    * The agent is working on a turn: stop is offered, and Enter still sends, the message waiting in the backend
    * (FLOW-SEND-MESSAGE-R18).
    */
@@ -97,7 +102,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, forceDialogFailed, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, held: heldByScreen, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, forceDialogFailed, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, held: heldByScreen, controls, note, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -264,6 +269,50 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
     }
   };
 
+  // The sign-in note's room (docs/design/COMPOSER.md, The sign-in note, under a session): with a note, the room above
+  // the box holds the note and the status line beneath it, and takes their height, so the note covers nothing the
+  // status line says; without one it takes none, and the status line opens upward over what stands above, as always.
+  // The room eases to each new height over motion-settle, and the note fades out as it goes; with reduced motion both
+  // happen at once. The box never moves: the column grows upward.
+  const noted = note !== undefined;
+  const lastNote = useRef(note);
+  if (noted) lastNote.current = note;
+  const [noteLeaving, setNoteLeaving] = useState(false);
+  const [wasNoted, setWasNoted] = useState(noted);
+  const noteRow = useRef<HTMLDivElement>(null);
+  // Whether the note went with keyboard focus in it: read as it goes, while its row is still on the page.
+  const focusWords = useRef(false);
+  if (wasNoted !== noted) {
+    setWasNoted(noted);
+    setNoteLeaving(!noted && fades());
+    focusWords.current = !noted && noteRow.current?.contains(document.activeElement) === true;
+  }
+  const noteShown = noted ? note : noteLeaving ? lastNote.current : undefined;
+  const room = useRef<HTMLDivElement>(null);
+  const roomContent = useRef<HTMLDivElement>(null);
+  const roomEase = useRef(new HeightEase()).current;
+  const easeRoom = useRef(() => {});
+  easeRoom.current = () => {
+    const zone = room.current;
+    const content = roomContent.current;
+    if (zone && content) roomEase.change(zone, true, { to: noted ? content.offsetHeight : 0, clipGrowth: true });
+  };
+  useLayoutEffect(() => easeRoom.current());
+  useEffect(() => {
+    const content = roomContent.current;
+    // jsdom has no ResizeObserver; the tests there need no layout.
+    if (!content || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => easeRoom.current());
+    watch.observe(content);
+    return () => watch.disconnect();
+  }, []);
+  // When the note goes with keyboard focus in it, focus goes to the words, as on the new-session screen.
+  useLayoutEffect(() => {
+    if (noted || !focusWords.current) return;
+    focusWords.current = false;
+    words.current?.focus();
+  }, [noted]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       // While a message is on its way or the agent works, Enter does nothing and the words stay.
@@ -273,10 +322,28 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
   };
 
   return (
-    <div className="composer">
-      {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
-      <div className="composer-status">
-        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} dialogFailed={dialogFailed || !!forceDialogFailed} marked={refusedHere} waiting={waiting} />}
+    <div className="composer" data-noted={noted || undefined}>
+      <div ref={room} className="composer-room">
+        <div ref={roomContent} className="composer-room-content">
+          {noteShown !== undefined && (
+            <div
+              ref={noteRow}
+              className="composer-note"
+              data-leaving={!noted || undefined}
+              inert={!noted}
+              onAnimationEnd={(event) => {
+                if (!noted && event.target === event.currentTarget) setNoteLeaving(false);
+              }}
+            >
+              {noteShown}
+            </div>
+          )}
+          {/* Takes no height and grows upward, unless the note stands above it: the box and the session controls stay
+              where they are. */}
+          <div className="composer-status">
+            {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} dialogFailed={dialogFailed || !!forceDialogFailed} marked={refusedHere} waiting={waiting} />}
+          </div>
+        </div>
       </div>
       <form
         ref={box}
@@ -494,7 +561,7 @@ export function StatusLine({ unavailable, sending, refusedChange, dialogFailed, 
   return null;
 }
 
-/** Whether a removed attachment fades out: not with reduced motion, nor where the window can't say (a test's DOM). */
+/** Whether a removed attachment, or the sign-in note, fades out: not with reduced motion, nor where the window can't say (a test's DOM). */
 function fades(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && !reducedMotion();
 }

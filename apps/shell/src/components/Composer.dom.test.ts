@@ -79,7 +79,7 @@ describe("the status line above the box", () => {
     const line = screen.getByRole("alert");
     expect(line.textContent).toBe("The session has ended.");
     expect(line.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
-    expect(line.closest(".composer-status")?.nextElementSibling?.classList.contains("composer-box")).toBe(true);
+    expect(line.closest(".composer-room")?.nextElementSibling?.classList.contains("composer-box")).toBe(true);
     expect(words().value).toBe("Fix the build");
     expect(words().disabled).toBe(false);
   });
@@ -301,5 +301,37 @@ describe("stop once chosen", () => {
     rerender(draw({ working: true, onStop: () => stops++ }));
     fireEvent.click(button());
     expect(stops).toBe(1);
+  });
+});
+
+// The sign-in note under a session (docs/design/COMPOSER.md, The sign-in note): at the top of the column, above the
+// status line, which goes on saying what it says beneath it; when the note goes with keyboard focus in it, focus goes
+// to the words.
+describe("the sign-in note in the composer's column", () => {
+  const note = createElement("button", { type: "button", className: "fake-note" }, "Sign in");
+  const drawNoted = (shown: boolean, props: Props = {}) => createElement(Composer, { autoFocus: false, onSend: async () => true, note: shown ? note : undefined, ...props });
+
+  it("stands above the status line and the box, and the status line still says what it says", () => {
+    render(drawNoted(true, { refusedChange: "Ersa can't change the effort." }));
+    const column = document.querySelector(".composer")!;
+    expect(column.hasAttribute("data-noted")).toBe(true);
+    const order = [...column.querySelectorAll(".fake-note, .composer-status-line, .composer-box")].map((el) => el.className.split(" ")[0]);
+    expect(order).toEqual(["fake-note", "composer-status-line", "composer-box"]);
+    expect(statusLine()?.textContent).toContain("Ersa can't change the effort.");
+  });
+
+  it("gives keyboard focus to the words when it goes with focus in it, and leaves focus alone otherwise", () => {
+    const { rerender } = render(drawNoted(true));
+    (document.querySelector(".fake-note") as HTMLButtonElement).focus();
+    rerender(drawNoted(false));
+    expect(document.querySelector(".fake-note")).toBeNull();
+    expect(document.activeElement).toBe(words());
+    // Focus elsewhere stays where it is.
+    rerender(drawNoted(true));
+    const outside = document.body.appendChild(document.createElement("button"));
+    outside.focus();
+    rerender(drawNoted(false));
+    expect(document.activeElement).toBe(outside);
+    outside.remove();
   });
 });

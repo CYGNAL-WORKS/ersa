@@ -14,12 +14,58 @@
   padding: 0 var(--space-lg) var(--space-lg);
 }
 
-/* The status line takes no height and grows upward from the box, so the box and the session controls stay put. */
+/* The room above the box: the status line alone takes no height and grows upward from the box, so the box and the
+   session controls stay put. With the sign-in note (docs/design/COMPOSER.md, The sign-in note, under a session), the
+   room takes the height of the note and the status line beneath it, space-xs apart: the column grows upward, and the
+   transcript above gives that height up. */
+.composer-room {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 0;
+}
+
+.composer-room-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.composer[data-noted] .composer-room {
+  height: auto;
+}
+
+/* While the room grows, what it holds is clipped to it, so the arriving note never paints over the transcript. */
+.composer-room[data-easing] {
+  overflow: clip;
+}
+
 .composer-status {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   height: 0;
+}
+
+/* Beneath the note the status line takes its height, so the note covers nothing it says; with nothing to say it is
+   not there, and the note stands space-xs above the box. */
+.composer[data-noted] .composer-status {
+  height: auto;
+}
+
+.composer[data-noted] .composer-status:empty {
+  display: none;
+}
+
+/* The note leaves the way it came: it fades out as its room closes. */
+.composer-note[data-leaving] {
+  animation: composer-note-out var(--motion-settle) var(--motion-ease-out) forwards;
+}
+
+@keyframes composer-note-out {
+  to {
+    opacity: 0;
+  }
 }
 
 /* One line, size-control high at least, padded space-sm at the sides, in ui-small and ink-muted. */

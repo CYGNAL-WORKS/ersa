@@ -6,7 +6,8 @@
 import { useCallback, useRef, useState } from "react";
 import { type CoreClient, describeError } from "../core/client";
 import type { ShellControl } from "../core/shell";
-import type { BackendInfo, BackendSignInEndedNotification } from "../protocol/core-api.gen";
+import type { BackendInfo, BackendSignInEndedNotification, Session } from "../protocol/core-api.gen";
+import type { Item } from "./transcript";
 
 /** What a failure adds to the note, kept until the person chooses Sign in or the note goes (FLOW-SIGN-IN-R15). */
 export type SignInWords =
@@ -55,11 +56,74 @@ export function noteBackend(listing: readonly BackendInfo[] | undefined): Backen
  * Sign in that reached Core first would join the sign-in on its way out (PROTO-CORE-API-R156); waiting while the
  * listing reports a sign-in under way (R06); else signed out, with what a failure added.
  */
-export function noteState(backend: BackendInfo, local: SignInLocal | undefined): NoteState {
+export function noteState(backend: Pick<BackendInfo, "signing_in">, local: SignInLocal | undefined): NoteState {
   if (local?.phase === "starting") return { kind: "starting" };
   if (local?.phase === "canceling") return { kind: "canceling" };
   if (backend.signing_in) return { kind: "waiting" };
   return { kind: "signedOut", said: local?.said };
+}
+
+/**
+ * The failure a session's sign-in note is for (FLOW-SIGN-IN-R17), by its event's `seq`: the latest error in the
+ * session's transcript that asks the person to sign in (`action: log_in`), while no message of theirs follows it and
+ * it came after `cleared`, the latest event this window knew of when it last cleared the note (a send Core accepted,
+ * or a sign-in for the session's backend that ended `signed_in`). None otherwise.
+ */
+export function sessionNoteFailure(items: readonly Item[], cleared: number): number | undefined {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const item = items[i]!;
+    // A message of the person's after any such failure: the note has gone with it.
+    if (item.kind === "user") return undefined;
+    if (item.kind === "problem" && item.signIn) return item.seq > cleared ? item.seq : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Where this window has cleared each session's sign-in note (FLOW-SIGN-IN-R17), by session id: the latest event of the
+ * session it knew of then (`sessionNoteFailure`'s `cleared`). A session's event numbers count within one view of it
+ * (PROTO-AGENT-EVENTS, Opening a session), and a live session keeps its view while Core runs it, so a mark holds only
+ * while the session stays live on this connection: `keep` drops the rest, and a lost connection drops them all, so a
+ * window that reconnects shows a session's note again (FLOW-SIGN-IN, Open questions).
+ */
+export function useNoteClears() {
+  const [clears, setClears] = useState<Readonly<Record<string, number>>>({});
+  /** Clears a session's note through `seq`, never back. */
+  const clear = useCallback((marks: Readonly<Record<string, number>>) => {
+    setClears((all) => {
+      let next: Record<string, number> | undefined;
+      for (const [id, seq] of Object.entries(marks)) {
+        if ((all[id] ?? -1) >= seq) continue;
+        next ??= { ...all };
+        next[id] = seq;
+      }
+      return next ?? all;
+    });
+  }, []);
+  /** Keeps only the marks of the sessions `live` names; none when the connection is lost. */
+  const keep = useCallback((live: ReadonlySet<string>) => {
+    setClears((all) => (Object.keys(all).every((id) => live.has(id)) ? all : Object.fromEntries(Object.entries(all).filter(([id]) => live.has(id)))));
+  }, []);
+  return { clears, clear, keep };
+}
+
+/**
+ * The marks a sign-in that ended `signed_in` for `name` on `hostId` sets (R17): every session of that backend on that
+ * host is cleared through the latest event the window knows of it, its listed `last_event_seq` or, for the session
+ * shown, its transcript's, whichever is later, so only a failure that arrives after the sign-in shows the note again.
+ */
+export function signedInClears(
+  hostId: string,
+  name: string,
+  sessions: readonly Pick<Session, "id" | "host_id" | "backend" | "last_event_seq">[],
+  shown?: { id: string; lastSeq: number },
+): Record<string, number> {
+  const marks: Record<string, number> = {};
+  for (const s of sessions) {
+    if (s.host_id !== hostId || s.backend !== name) continue;
+    marks[s.id] = Math.max(s.last_event_seq ?? -1, shown?.id === s.id ? shown.lastSeq : -1);
+  }
+  return marks;
 }
 
 /** Whether Ersa may open `url` as a sign-in page: only over `https` (FLOW-SIGN-IN-R04, R05). */
@@ -148,14 +212,15 @@ export function useSignIns(client: Pick<CoreClient, "call">, openLink: ShellCont
     }
   };
 
-  // The note went for this host's listing: what a failure said about any backend the note is no longer for goes with
-  // it (R15).
-  const listed = useCallback((hostId: string, listing: readonly BackendInfo[]) => {
+  // The new-session screen's note went for this host's listing: what a failure said about any backend no note is for
+  // goes with it (R15). `kept`, by `signInKey`, is the backend the shown session's note is for (R17), whose words stay
+  // while that note does, whatever the listing says.
+  const listed = useCallback((hostId: string, listing: readonly BackendInfo[], kept?: string) => {
     const shown = noteBackend(listing)?.name;
     setSignIns((all) => {
       let next: Record<string, SignInLocal> | undefined;
       for (const [key, local] of Object.entries(all)) {
-        if (!key.startsWith(`${hostId}\n`) || local.said === undefined || key === signInKey(hostId, shown ?? "")) continue;
+        if (!key.startsWith(`${hostId}\n`) || local.said === undefined || key === signInKey(hostId, shown ?? "") || key === kept) continue;
         next ??= { ...all };
         next[key] = { ...local, said: undefined };
       }

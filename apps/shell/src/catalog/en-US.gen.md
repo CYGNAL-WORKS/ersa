@@ -968,6 +968,10 @@ Ersa can't resume this session.
 
 {label} isn't signed in on this host. Sign in to start a session.
 
+### `composer.signIn.sessionNote`
+
+{label} isn't signed in on this host. Sign in, then send your message again.
+
 ### `composer.signIn.signInButton`
 
 Sign in

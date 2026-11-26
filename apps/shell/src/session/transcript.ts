@@ -62,8 +62,8 @@ export type Item =
   | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean; declined?: true; unanswered?: true }
   /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. `signIn` when the error
    *  asks the person to sign in (`action: log_in`): the line then says so in Ersa's words, by the backend's label, in
-   *  place of `message` (FLOW-SIGN-IN-R16). */
-  | { kind: "problem"; key: string; message: string; signIn?: true }
+   *  place of `message` (FLOW-SIGN-IN-R16). `seq` is the event's, so a window can tell what came after it (R17). */
+  | { kind: "problem"; key: string; seq: number; message: string; signIn?: true }
   | { kind: "notice"; key: string; message: string }
   | { kind: "ended"; key: string; reason: string };
 
@@ -176,7 +176,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "permission.decided":
       return patch(next, `permission:${event.request_id}`, "permission", (item) => ({ ...item, decision: event }));
     case "permission.denied_unanswered":
-      return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
+      return add(next, { kind: "problem", key: `problem:${envelope.seq}`, seq: envelope.seq, message: event.message });
     case "question.asked":
       // Shown once, like a permission request: a repeat must not reopen an answered question.
       if (next.items.some((i) => i.key === `question:${event.request_id}`)) return next;
@@ -184,7 +184,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "question.answered":
       return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true, ...(event.declined ? { declined: true as const } : {}) }));
     case "error":
-      return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message, ...(event.action === "log_in" ? { signIn: true as const } : {}) });
+      return add(next, { kind: "problem", key: `problem:${envelope.seq}`, seq: envelope.seq, message: event.message, ...(event.action === "log_in" ? { signIn: true as const } : {}) });
     // Shown elsewhere (the tile carries usage), or nowhere (passthrough: the developer pane lists the raw log's lines,
     // not events), or implied by the items around them.
     case "turn.completed": {
