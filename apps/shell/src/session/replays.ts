@@ -8,7 +8,7 @@ import type { Envelope } from "../protocol/agent-events.gen";
 import type { Session } from "../protocol/core-api.gen";
 
 export interface Capture {
-  /** `session.list` on attach, and once the replay has played out. */
+  /** `session.list` on attach once Core lists the session's start, and once the replay has played out. */
   sessions: Session[];
   sessions_after: Session[];
   /** The commit the capture was written from, `-dirty` if uncommitted. */

@@ -35,6 +35,7 @@ async fn played_through(client: &mut Client, id: &Value) {
 }
 
 // verifies: PROTO-CORE-API-R09
+// verifies: PROTO-CORE-API-R165
 #[tokio::test(flavor = "multi_thread")]
 async fn read_only_requests_are_answered_as_core_answers_them() {
     let replay = start_replay(Pace::Instant).await;
