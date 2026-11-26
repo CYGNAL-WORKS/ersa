@@ -150,23 +150,70 @@ describe("the new-session screen reading the host's backends again", () => {
     expect(core.readings()).toBe(first + 3);
   });
 
+  // How the Shell fails a request still waiting when Core's connection closes: unanswered, not refused by Core.
+  const closed = { kind: "unavailable", message: "connection closed", sent: true };
+  /** Waits until the window has attached again and says nothing of the lost connection. */
+  const reattached = async (core: ReturnType<typeof fakeCore>) => {
+    await waitFor(() => expect(core.attached).toBe(2), { timeout: 5_000 });
+    await waitFor(() => expect(screen.queryByText(/reach the sessions|Reconnecting|trying again/i)).toBeNull(), { timeout: 5_000 });
+    await settle();
+  };
+
   // verifies: FLOW-NEW-SESSION-R50
-  it("drops a reading out when the connection is lost, so the next connection shows nothing of it", async () => {
+  it.each([
+    ["after the loss reaches the window", "after"],
+    ["before the loss reaches the window", "before"],
+  ] as const)("shows nothing on the next connection of a reading the lost connection failed, %s", async (_, order) => {
     const core = fakeCore([claudeCode()]);
     await start(core);
     const out = deferred<BackendInfo[]>();
     core.listing = () => out.promise;
     await windowBack();
-    // The connection drops with the reading out, and the reading fails as a lost connection fails what waits on it.
+    // The Shell fails what waits on the connection and reports the loss by separate paths, in either order.
+    const fail = () => act(async () => out.reject(closed));
+    if (order === "before") await fail();
+    await core.drop();
+    // The next connection's reading is held, so whatever shows meanwhile is the lost reading's doing.
+    const next = deferred<BackendInfo[]>();
+    core.listing = () => next.promise;
+    if (order === "after") await fail();
+    await reattached(core);
+    expect(document.body.textContent).not.toContain("couldn't detect the backends");
+    expect(document.body.textContent).not.toContain("Detecting");
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+    expect(words().disabled).toBe(false);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R23
+  it.each([
+    ["before the loss", "before"],
+    ["only once the window has attached again", "reattached"],
+  ] as const)("detects the backends again on the next connection when the lost one failed the first reading %s", async (_, order) => {
+    const first = deferred<BackendInfo[]>();
+    const core = fakeCore(() => first.promise);
+    await start(core);
+    const fail = () => act(async () => first.reject(closed));
+    if (order === "before") await fail();
     await core.drop();
     const next = deferred<BackendInfo[]>();
     core.listing = () => next.promise;
-    await act(async () => out.reject({ kind: "transport", message: "connection closed" }));
-    // Attached again, and reading: the listing held from before shows, with nothing of the lost reading.
-    await waitFor(() => expect(core.attached).toBe(2), { timeout: 5_000 });
-    await waitFor(() => expect(screen.queryByText(/reach the sessions|Reconnecting|trying again/i)).toBeNull(), { timeout: 5_000 });
-    await settle();
+    await reattached(core);
+    if (order === "reattached") await fail();
+    // No listing is held, so the new connection's first reading is detection, not a failure Ersa can't vouch for.
+    expect(statusLine()?.textContent).toBe("Detecting the backends on this host…");
     expect(document.body.textContent).not.toContain("couldn't detect the backends");
+    await act(async () => next.resolve([claudeCode()]));
+    await settle();
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R50
+  it("goes on showing the listing it holds when Core doesn't answer a later reading", async () => {
+    const core = fakeCore([claudeCode()]);
+    await start(core);
+    core.listing = () => Promise.reject({ kind: "unavailable", message: "Core didn't answer in time" });
+    await windowBack();
+    expect(statusLine()).toBeNull();
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
     expect(words().disabled).toBe(false);
   });

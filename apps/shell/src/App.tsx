@@ -84,6 +84,12 @@ function useVersion(value: unknown): string {
   return String(seen.current.version);
 }
 
+/** What a host's readings of its backends left: the last listing Core answered with, and why the latest failed. */
+interface HostReading {
+  listing?: BackendInfo[];
+  failed?: string;
+}
+
 export function App({ client, shell }: { client: CoreClient; shell?: ShellControl }) {
   const [view, setView] = useState<CoreView>({ phase: "connecting" });
   // The labeled endpoint a debug build is attached to, kept once Core has named it: the Shell fixes it at start, so it
@@ -104,10 +110,22 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // status line names it again on coming back (FLOW-SEND-MESSAGE-R19). In memory only: a reload names none.
   const waitingKept = useRef<Record<string, readonly WaitingHere[] | undefined>>({});
 
-  // What the screen offers: each host's backends, and the values each project last started a session with.
-  const [backends, setBackends] = useState<Record<string, BackendInfo[]>>({});
+  // What each host's last readings of its backends left, by host id: the last listing Core answered with, and why
+  // the latest reading failed, if it did. Held together so that one update settles both.
+  const [hostReadings, setHostReadings] = useState<Record<string, HostReading>>({});
+  // What the screen offers: each host's backends, absent while none has been read; none when the reading failed.
+  const backends = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(hostReadings).flatMap(([host, r]) => (r.listing ? [[host, r.listing]] : r.failed !== undefined ? [[host, []]] : [])),
+      ) as Record<string, BackendInfo[]>,
+    [hostReadings],
+  );
   // Why each host's backends could not be listed, by host id: the screen says detection failed (FLOW-NEW-SESSION-R11).
-  const [backendFailures, setBackendFailures] = useState<Record<string, string>>({});
+  const backendFailures = useMemo(
+    () => Object.fromEntries(Object.entries(hostReadings).flatMap(([host, r]) => (r.failed !== undefined ? [[host, r.failed]] : []))),
+    [hostReadings],
+  );
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
   // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
   // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.
@@ -373,20 +391,30 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       void readBackends(client, hostId).then((read) => {
         if (readings.current !== out) return;
         out.hosts.delete(hostId);
-        // Until the answer, the listing held stays, so a later reading shows nothing of itself. A host whose
-        // backends could not be read offers none, and the screen says why (FLOW-NEW-SESSION-R11), even when it held
-        // a listing before.
-        setBackends((b) => ({ ...b, [hostId]: read.backends }));
-        setBackendFailures(({ [hostId]: _, ...rest }) => (read.failed === undefined ? rest : { ...rest, [hostId]: read.failed }));
+        // Until the answer, the listing held stays, so a later reading shows nothing of itself (R50). Core refusing
+        // to list the host's backends leaves none, and the screen says why (FLOW-NEW-SESSION-R11), even when it held
+        // a listing before. A reading with no answer at all says nothing of the backends: the listing held stays,
+        // and the failure is noted for a host that holds none.
+        setHostReadings((all) => ({
+          ...all,
+          [hostId]:
+            read.failed === undefined
+              ? { listing: read.backends }
+              : { listing: read.unanswered ? all[hostId]?.listing : undefined, failed: read.failed },
+        }));
       });
     },
     [client, link],
   );
-  // A connection lost fails every reading still out on it ("connection closed"); forgetting them here drops those
-  // answers, so the next connection shows nothing of them. A new connection's first reading starts afresh above,
-  // since the screen's own effects can ask before this one runs.
+  // A new connection forgets why the last one's readings failed: a connection lost fails every reading still out on
+  // it, and the Shell reports that failure and the loss by separate paths, in either order, so any of them may have
+  // landed. A host whose failure left it no listing is detected again (R23); one holding a listing shows it until
+  // this connection's reading answers. The answers still out from the last connection are dropped above.
   useEffect(() => {
-    if (link === undefined) readings.current = { link: undefined, hosts: new Set() };
+    if (link === undefined) return;
+    setHostReadings((all) =>
+      Object.fromEntries(Object.entries(all).flatMap(([host, r]) => (r.listing ? [[host, { listing: r.listing }]] : []))),
+    );
   }, [link]);
   const hostId = view.phase === "connected" ? view.hello.host.id : undefined;
   useEffect(() => {

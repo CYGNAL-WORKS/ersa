@@ -15,6 +15,11 @@ export interface Backends {
   backends: BackendInfo[];
   /** Why `backend.list` failed, in the user's terms: the screen says detection failed, not that none is available (FLOW-NEW-SESSION-R11). */
   failed?: string;
+  /**
+   * The reading got no answer at all: the connection to Core closed under it, there was none, or Core timed out. Only
+   * a refusal is Core's word on the host; this says nothing of the backends.
+   */
+  unanswered?: true;
 }
 
 /**
@@ -25,7 +30,8 @@ export async function readBackends(client: Pick<CoreClient, "call">, hostId: str
   try {
     return { backends: await client.call("backend.list", { host_id: hostId }) };
   } catch (error) {
-    return { backends: [], failed: describeError(error) };
+    const unanswered = typeof error === "object" && error !== null && "kind" in error && error.kind === "unavailable";
+    return { backends: [], failed: describeError(error), ...(unanswered && { unanswered: true as const }) };
   }
 }
 
