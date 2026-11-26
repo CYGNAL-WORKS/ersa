@@ -27,6 +27,7 @@ function fakes(listed: Session[] | Error | "never", wasHidden = true) {
     }),
   } as unknown as CoreClient;
   const shell: ShellControl = {
+    onWindowBack: () => () => {},
     onQuitRequested: vi.fn(() => () => {}),
     quitHeard: vi.fn(async () => {}),
     show: vi.fn(async () => wasHidden),

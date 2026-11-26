@@ -16,6 +16,11 @@ export type DragDrop =
 
 /** The Shell's controls the window uses, beside the bridge to Core. */
 export interface ShellControl {
+  /**
+   * Calls `handler` each time the Shell shows the window, from the tray or for a second launch, and each time the
+   * window takes the focus; returns a way to stop (FLOW-NEW-SESSION-R50).
+   */
+  onWindowBack(handler: () => void): () => void;
   /** Calls `handler` each time the user chooses Quit from the tray icon; returns a way to stop. */
   onQuitRequested(handler: () => void): () => void;
   /** Tells the Shell the window heard a Quit and will answer; one that does not hear is quit without it. */
