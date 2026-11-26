@@ -31,6 +31,7 @@ use super::handlers::{self, find_project};
 use super::leftover::LEFTOVER_AGE;
 use crate::persistence::SessionRow;
 use crate::platform;
+use crate::sessions::UNKNOWN_TIME;
 use crate::settings;
 use crate::state::Core;
 use crate::workspace::{self, Checkout, Survey};
@@ -392,6 +393,11 @@ async fn judge_workspace(
         let now = core.sweep_now();
         let inactive = |session: &Option<&Session>| {
             session.is_some_and(|s| {
+                // One Core can't date, with no activity and a creation
+                // nothing remembers, has no age, so it is never inactive.
+                if s.last_activity_at.is_none() && s.created_at == UNKNOWN_TIME {
+                    return false;
+                }
                 let at = s.last_activity_at.as_deref().unwrap_or(&s.created_at);
                 OffsetDateTime::parse(at, &Rfc3339)
                     .is_ok_and(|at| now - at >= time::Duration::days(i64::from(days)))

@@ -637,7 +637,7 @@ impl Presented {
 
 /// The creation time of a session nothing remembers starting: one from
 /// before the app log, whose backend never wrote a record. It sorts first.
-const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
+pub(crate) const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
 
 impl Hub {
     /// The `seq` of the last event handed to subscribers; `None` before the

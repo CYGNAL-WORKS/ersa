@@ -738,3 +738,56 @@ async fn a_workspace_git_has_no_record_of_is_still_checked_for_a_repository() {
     assert_eq!(gone["holds_repository"], false, "{gone}");
     assert_ne!(gone["token"], nested["token"]);
 }
+
+/// A session Core can't date, with no activity and a creation nothing
+/// remembers (`session.list` gives it the earliest time there is), has no
+/// age: it never counts as inactive, so its workspace is listed only when
+/// its sessions are all archived.
+// verifies: FLOW-CLEAN-UP-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_core_cannot_date_is_never_inactive() {
+    let (mut s, clock) = listing().await;
+    let undated = s.workspace().await;
+    let session = session_in(&mut s, &undated).await;
+    let archived = s.workspace().await;
+    let other = session_in(&mut s, &archived).await;
+    std::fs::write(folder(&archived).join("notes.txt"), "mine\n").unwrap();
+    archive(&mut s, &clock, &other).await;
+
+    // The next Core finds no app log: nothing remembers either start.
+    let Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    } = s;
+    drop(client);
+    let dir = support::shut_down(core).await;
+    std::fs::remove_file(dir.path().join("data").join("app-log.jsonl")).unwrap();
+    let clock = Arc::new(SweepClock::default());
+    let sweeps = Sweeps::Driven(Arc::clone(&clock));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, move |c| c.sweeps = sweeps, adapters).await;
+    let client = core.client().await;
+    let mut s = Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    };
+    let row = support::listed(&mut s.client, &session).await.unwrap();
+    assert_eq!(row["created_at"], "1970-01-01T00:00:00.000Z", "{row}");
+    assert!(row.get("last_activity_at").is_none(), "{row}");
+
+    clock.time_passed(100 * DAY);
+    for days in [30, 60, 90] {
+        let listed = list(&mut s, days).await;
+        assert_eq!(
+            ids(&listed, "workspace"),
+            vec![ws_id(&archived)],
+            "{listed}"
+        );
+    }
+}
