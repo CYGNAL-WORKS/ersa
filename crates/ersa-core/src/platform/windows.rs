@@ -735,3 +735,19 @@ fn registry_string(key: HKEY, subkey: &str, value: &str) -> io::Result<Option<St
 pub fn open_without_waiting(path: &Path) -> io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
+
+/// For tests: holds the file at `path` open without delete sharing, so a
+/// rename onto it is refused while it can still be read, as a program
+/// holding it open that way would do. The rename is allowed again once the
+/// returned value is dropped.
+#[cfg(test)]
+pub fn refuse_renames_onto(path: &Path) -> Option<Box<dyn std::any::Any>> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(path)
+        .ok()?;
+    Some(Box::new(held))
+}
