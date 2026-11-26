@@ -406,7 +406,7 @@ function Attachment({
  * (docs/design/COMPOSER.md, The status line); nothing, and no height, while there is nothing to say. A message refused
  * for one of its attachments says why beside that attachment instead.
  */
-function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked, waiting }: { unavailable?: Unavailable; sending?: Sending; refusedChange?: string; dialogFailed: boolean; marked: boolean; waiting?: Waiting }) {
+export function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked, waiting }: { unavailable?: Unavailable; sending?: Sending; refusedChange?: string; dialogFailed: boolean; marked: boolean; waiting?: Waiting }) {
   if (unavailable === "reconnecting" || unavailable === "unreachable") {
     // The rail's foot says the same and is the one that announces it.
     return <p className="composer-status-line">{t(unavailable === "reconnecting" ? "rail.foot.reconnectingError" : "rail.foot.unreachableError")}</p>;

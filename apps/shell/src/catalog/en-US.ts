@@ -393,6 +393,26 @@ export const enUS = {
       // Before Core's reason, when Core refuses the resume.
       resumeError: "Ersa can't resume this session.",
     },
+    // The sign-in note above the composer while a backend isn't signed in (FLOW-SIGN-IN; docs/design/COMPOSER.md, The
+    // sign-in note). {label} is the backend's label. A failure's sentence is followed by the reason Core or the
+    // backend gave, when there is one.
+    signIn: {
+      // On the new-session screen, while no backend on the host can run and this one is signed out (FLOW-SIGN-IN-R01).
+      signedOutNote: "{label} isn't signed in on this host. Sign in to start a session.",
+      signInButton: "Sign in",
+      // From Sign in until Core refuses, or until the backends read on Core's answer arrive (FLOW-SIGN-IN-R03).
+      startingProgress: "Starting…",
+      // While the host's listing reports the sign-in under way (FLOW-SIGN-IN-R06).
+      waitingProgress: "Waiting for you to sign in to {label} in your browser…",
+      cancelButton: "Cancel",
+      // Core refused to start it (R03), the page's address wasn't https (R05), it failed (R13) or timed out (R14),
+      // or it ended and the backend still reports that it is signed out (R12).
+      startError: "{label}'s sign-in couldn't be started.",
+      unopenedError: "Ersa couldn't open {label}'s sign-in page.",
+      failedError: "{label}'s sign-in didn't finish.",
+      timedOutError: "{label}'s sign-in took too long and was stopped.",
+      stillSignedOutError: "The sign-in finished, but {label} still reports that it isn't signed in.",
+    },
     messageLabel: "Message",
     writePlaceholder: "Write to the agent",
     attachButton: "Attach",

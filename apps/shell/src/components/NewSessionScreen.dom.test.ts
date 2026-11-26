@@ -338,3 +338,19 @@ describe("the effort chip on the new-session screen", () => {
     expect(effort().hasAttribute("disabled")).toBe(true);
   });
 });
+
+// The trust question beneath the sign-in note (docs/design/COMPOSER.md, The sign-in note): with the note the room above
+// the box is in the column and the question takes its place there; when the note goes, the question fits itself
+// afresh, so the room is not held at the question's height in the column with no note to keep it there.
+describe("the trust question when the sign-in note goes", () => {
+  it("fits itself afresh, so the room above the box goes back to opening upward", () => {
+    const signedOut = { local: [{ ...claude, status: "signed_out" as const }] };
+    const { rerender } = render(createElement(NewSessionScreen, props([alpha], { backends: signedOut, initialAsking: "D:\Clones\stranger" })));
+    const section = screen.getByRole("region", { name: "New session" });
+    expect(section.hasAttribute("data-noted")).toBe(true);
+    expect(section.hasAttribute("data-tight")).toBe(true);
+    rerender(createElement(NewSessionScreen, props([alpha], { initialAsking: "D:\Clones\stranger" })));
+    expect(section.hasAttribute("data-noted")).toBe(false);
+    expect(section.hasAttribute("data-tight")).toBe(false);
+  });
+});

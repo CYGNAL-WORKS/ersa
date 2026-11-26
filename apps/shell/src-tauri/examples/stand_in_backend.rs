@@ -20,6 +20,9 @@
 //!   CLI's `rate_limit_event` does, with made-up shares: a 5-hour limit at
 //!   84 percent resetting in 1 hr 15 min, and a weekly limit at 62 percent
 //!   resetting in three days.
+//!   With `ERSA_STAND_IN_SIGNED_OUT` set too, its `initialize` answer
+//!   carries the account a signed-out CLI reports, so Core lists it as
+//!   signed out (PROTO-CLAUDE-CODE-STREAM-R83).
 //! - Otherwise it starts that grandchild, writes `<own pid> <grandchild pid>`
 //!   to the file named by `ERSA_STAND_IN_PIDS`, and reads its input until
 //!   the input closes, which is how Core tells the CLI to stop. Its
@@ -190,7 +193,7 @@ fn answer_initialize() {
             continue;
         }
         if message["request"]["subtype"] == "initialize" {
-            let answer = serde_json::json!({
+            let mut answer = serde_json::json!({
                 "type": "control_response",
                 "response": {
                     "subtype": "success",
@@ -205,6 +208,11 @@ fn answer_initialize() {
                     },
                 },
             });
+            // The shape a signed-out CLI was recorded giving: no token, the first-party provider, and no key.
+            if std::env::var_os("ERSA_STAND_IN_SIGNED_OUT").is_some() {
+                answer["response"]["response"]["account"] =
+                    serde_json::json!({ "tokenSource": "none", "apiProvider": "firstParty" });
+            }
             let mut out = std::io::stdout().lock();
             let _ = writeln!(out, "{answer}");
             let _ = out.flush();
