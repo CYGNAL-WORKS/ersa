@@ -1162,10 +1162,12 @@ mod tests {
         // The race this checks (#606: one job's open finding the file
         // another job's rename just replaced) is a window inside the file
         // system, so it shows only over many rounds. At 100 rounds it failed
-        // about 6 runs in 100 on CI's Windows runner; 1,000 rounds give each
-        // run ten times the chances, about 45 runs in 100 without the fix,
-        // for about 5 seconds. More jobs a round does not raise the rate.
-        const ROUNDS: usize = 1_000;
+        // about 6 runs in 100 on CI's Windows runner. 500 rounds give each run
+        // five times the chances, about 26 runs in 100 without the fix, and
+        // take about as long there (some 17 seconds) as the rest of this
+        // crate's tests beside them. More jobs a round does not raise the
+        // rate.
+        const ROUNDS: usize = 500;
         let dir = tempfile::tempdir().unwrap();
         let attachments = dir.path().join(ATTACHMENTS);
         fs::create_dir_all(&attachments).unwrap();
