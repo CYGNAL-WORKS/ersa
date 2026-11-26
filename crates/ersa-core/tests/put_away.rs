@@ -175,6 +175,99 @@ async fn a_folder_whose_checkout_git_cannot_read_is_not_put_away() {
     }
 }
 
+// -- A folder that holds a repository of its own (PROTO-CORE-API-R147) -----
+
+/// Refused before anything is stored or removed: the workspace `ready`,
+/// nothing stored, its folder whole and still git's worktree.
+async fn refused_and_whole(s: &mut Setup, workspace: &Value, inside: &str) {
+    let refused = s.put_away(workspace).await;
+
+    let error = refused.expect_err("refused");
+    assert!(
+        error.0.message.contains("repository of its own"),
+        "{error:?}"
+    );
+    assert_eq!(error_kind(&error), "vcs_error", "{error:?}");
+    assert!(
+        folder(workspace).join(inside).exists(),
+        "the folder is whole"
+    );
+    assert!(listed_by_git(&s.repo, workspace));
+    assert_eq!(s.listed(workspace).await["state"], "ready");
+    admitted_ready(&s.core.core(), workspace);
+    assert_eq!(s.stored(workspace).await, None);
+}
+
+/// A submodule checked out in the folder: git would refuse to remove the
+/// worktree only once the workspace was stored `put_away`, leaving its
+/// whole folder for a put-back to remove unchecked. The put-away refuses
+/// first. So it does after `git submodule deinit`, which empties the
+/// submodule's folder but leaves its repository with git's record of the
+/// worktree.
+// verifies: PROTO-CORE-API-R147
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_with_a_submodule_is_not_put_away() {
+    let mut s = setup().await;
+    s.add_submodule();
+    let workspace = s.workspace().await;
+    check_out_submodules(&folder(&workspace));
+
+    refused_and_whole(&mut s, &workspace, "sub/sub.txt").await;
+
+    git(
+        &folder(&workspace),
+        &["submodule", "deinit", "--quiet", "--all", "--force"],
+    );
+    assert!(!folder(&workspace).join("sub/sub.txt").exists());
+    refused_and_whole(&mut s, &workspace, "sub").await;
+
+    // A submodule's folder holding a clone made there by hand: git keeps
+    // nothing with its record, and the clone is still checked out.
+    let cloned = s.workspace().await;
+    let path = folder(&cloned);
+    std::fs::remove_dir(path.join("sub")).unwrap();
+    let source = s.core.dir.path().join("sub-source").display().to_string();
+    git(&path, &["clone", "--quiet", &source, "sub"]);
+    refused_and_whole(&mut s, &cloned, "sub/sub.txt").await;
+}
+
+/// A nested repository the ignore rules do not ignore, even one with
+/// nothing uncommitted, is refused; one they ignore goes with the folder,
+/// as every ignored file does.
+// verifies: PROTO-CORE-API-R147
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_with_a_nested_repository_not_ignored_is_not_put_away() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    nested_repository(&folder(&workspace).join("nested"));
+
+    refused_and_whole(&mut s, &workspace, "nested/nested.txt").await;
+
+    let ignored = s.workspace().await;
+    let path = folder(&ignored);
+    std::fs::write(path.join(".gitignore"), "nested/\n").unwrap();
+    git(&path, &["add", ".gitignore"]);
+    git(&path, &["commit", "--quiet", "-m", "ignore nested"]);
+    nested_repository(&path.join("nested"));
+    s.put_away(&ignored).await.expect("put away");
+    assert!(!path.exists());
+}
+
+/// A submodule never checked out in the folder holds nothing of its own:
+/// the folder is put away.
+// verifies: PROTO-CORE-API-R147
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_whose_submodule_was_never_checked_out_is_put_away() {
+    let mut s = setup().await;
+    s.add_submodule();
+    let workspace = s.workspace().await;
+
+    s.put_away(&workspace).await.expect("put away");
+
+    assert!(!folder(&workspace).exists());
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+}
+
 // -- As every removal does (PROTO-CORE-API-R122, R124, R131) ---------------
 
 /// git's removal fails after it dropped its record of the worktree: the
@@ -433,6 +526,44 @@ async fn deleting_a_session_in_a_put_away_workspace_deletes_no_folder() {
         Value::Null,
         "the workspace went"
     );
+}
+
+/// Deleting one of the sessions that share a workspace deletes neither the
+/// workspace nor its branch, with the folder in place and with the
+/// workspace put away.
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R15
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_one_of_the_sessions_sharing_a_workspace_keeps_it_and_its_branch() {
+    let mut s = setup().await;
+    let workspace = s.workspace().await;
+    let first = s.stopped_session(&workspace).await;
+    let second = s.stopped_session(&workspace).await;
+    let third = s.stopped_session(&workspace).await;
+
+    for (session, put_away) in [(&first, false), (&second, true)] {
+        if put_away {
+            s.put_away(&workspace).await.expect("put away");
+        }
+        let token = s
+            .client
+            .result("workspace.changes", json!({ "id": workspace["id"] }))
+            .await["token"]
+            .clone();
+
+        let deleted = s
+            .client
+            .result("session.delete", json!({ "id": session, "token": token }))
+            .await;
+
+        assert_eq!(deleted["workspace_deleted"], false, "{deleted}");
+        assert!(has_branch(&s.repo, branch(&workspace)), "the branch stays");
+        let state = if put_away { "put_away" } else { "ready" };
+        assert_eq!(s.listed(&workspace).await["state"], state);
+        assert_eq!(folder(&workspace).exists(), !put_away);
+    }
+    let sessions = s.client.result("session.list", json!({})).await;
+    let listed = sessions.as_array().unwrap();
+    assert!(listed.iter().any(|x| x["id"] == third), "{sessions:#}");
 }
 
 /// `workspace.remove` of a put-away workspace removes its branch, as every

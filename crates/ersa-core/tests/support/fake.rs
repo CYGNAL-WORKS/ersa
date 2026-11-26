@@ -110,6 +110,9 @@ pub struct Stats {
     /// open: the backend's id for it, and how many record renames had
     /// been written by then.
     pub open_checks: Mutex<Vec<(String, usize)>>,
+    /// Registry checks that have come to `open_check_gate`, counted as
+    /// each arrives there, before it waits.
+    pub open_checks_arrived: AtomicUsize,
     /// Registry checks and record reads waiting now at the gate a test
     /// holds (`open_check_gate`, `read_gate`), so the test can wait for
     /// Core to get there.
@@ -763,6 +766,9 @@ impl Adapter for FakeAdapter {
         _transport: Arc<dyn Transport>,
         backend_session_id: &str,
     ) -> OpenElsewhere {
+        self.stats
+            .open_checks_arrived
+            .fetch_add(1, Ordering::SeqCst);
         self.stats.at_gate.fetch_add(1, Ordering::SeqCst);
         drop(self.open_check_gate.lock().await);
         self.stats.at_gate.fetch_sub(1, Ordering::SeqCst);

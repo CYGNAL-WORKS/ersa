@@ -130,6 +130,15 @@ fn remove_workspace(workspace: &str) -> Command {
 fn put_away(workspace: &str) -> Command {
     Command::PutAway {
         workspace: workspace.into(),
+        archived_only: false,
+    }
+}
+
+/// A put-away for the sweep (FLOW-CLEAN-UP-R22).
+fn put_away_archived(workspace: &str) -> Command {
+    Command::PutAway {
+        workspace: workspace.into(),
+        archived_only: true,
     }
 }
 
@@ -4716,6 +4725,53 @@ fn a_put_away_holds_its_workspace_against_every_other_removal() {
         },
     );
     assert_eq!(phase(&refused, W), Some(WorkspacePhase::Ready));
+}
+
+/// A put-away for the sweep is admitted only while a session uses the
+/// workspace and every one there is archived, as admission has their rows
+/// now: an unarchive stored after the sweep looked refuses it, and so does a
+/// workspace no session uses. Any other put-away asks neither.
+// verifies: FLOW-CLEAN-UP-R22
+#[test]
+fn a_put_away_for_the_sweep_needs_every_session_there_archived() {
+    let archived = |id: &str| {
+        let mut row = row(id, W, false);
+        row.archived = true;
+        row
+    };
+
+    let state = State::restored(existing());
+    let mut asked = state.clone();
+    assert_eq!(
+        command(&mut asked, put_away_archived(W)),
+        Outcome::Refused(Refusal::NotAllArchived),
+        "no session uses it"
+    );
+
+    let mut one_not = existing();
+    one_not.sessions.push(archived("s1"));
+    one_not.sessions.push(row("s2", W, false));
+    let state = State::restored(one_not);
+    let mut asked = state.clone();
+    assert_eq!(
+        command(&mut asked, put_away_archived(W)),
+        Outcome::Refused(Refusal::NotAllArchived),
+        "s2 is not archived"
+    );
+    let mut asked = state;
+    assert_eq!(
+        command(&mut asked, put_away(W)),
+        admitted(Operation::PutAway(W.into()))
+    );
+
+    let mut both = existing();
+    both.sessions.push(archived("s1"));
+    both.sessions.push(archived("s2"));
+    let mut state = State::restored(both);
+    assert_eq!(
+        command(&mut state, put_away_archived(W)),
+        admitted(Operation::PutAway(W.into()))
+    );
 }
 
 /// A put-away workspace takes no new session of Ersa's, but goes on taking

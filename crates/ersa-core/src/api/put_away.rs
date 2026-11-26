@@ -3,9 +3,8 @@
 //! workspace, its sessions and every branch stay, with what the folder had
 //! checked out stored so the folder can come back as it was.
 //!
-//! Nothing in the product puts a workspace away yet: the sweep and
-//! `cleanup.remove` will, each checking first that the workspace holds no
-//! unsaved work (FLOW-CLEAN-UP-R01).
+//! The sweep puts a workspace away once it has checked that the workspace
+//! holds no unsaved work (FLOW-CLEAN-UP-R22), and `cleanup.remove` will.
 
 use std::sync::Arc;
 
@@ -23,19 +22,38 @@ use crate::workspace;
 /// 3. What the folder has checked out is read: a branch, or the commit when
 ///    it is on none. Read in the turn, so it is what the folder has when
 ///    its removal begins.
-/// 4. That and the state `put_away` are stored together, before anything
+/// 4. A folder that holds a repository of its own is refused, in the turn
+///    (PROTO-CORE-API-R147).
+/// 5. That and the state `put_away` are stored together, before anything
 ///    is removed, so however Core stops from here the workspace is put away
 ///    with its checkout known.
-/// 5. The folder goes as every removal takes one (PROTO-CORE-API-R122),
+/// 6. The folder goes as every removal takes one (PROTO-CORE-API-R122),
 ///    starting in the turn already held, keeping every branch.
 ///
-/// A refusal before anything was removed (no turn in time, a checkout that
-/// can't be read, a lock, local changes, a folder git does not list)
-/// leaves the workspace `ready`, as it was (PROTO-CORE-API-R140): put
+/// A refusal before anything was removed (a repository of its own, no turn
+/// in time, a checkout that can't be read, a lock, local changes, a folder
+/// git does not list) leaves the workspace `ready`, as it was
+/// (PROTO-CORE-API-R140, R147): put
 /// away, its whole folder would go unchecked when it is put back. Any
 /// other failure leaves it `put_away` (R141), what is left of the folder
 /// going when it is put back (FLOW-CLEAN-UP-R03).
+///
+/// It does not ask whether the workspace's sessions are archived: the Clean
+/// up list also puts away the folders of sessions that are only inactive
+/// (FLOW-CLEAN-UP-R11, R13), so whoever calls it decides which sessions may
+/// be there. The sweep calls [`put_away_for_sweep`], never this.
 pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
+    put_away(core, id, false).await
+}
+
+/// [`put_away_workspace`] for the sweep: refused also unless a session uses
+/// the workspace and every one there is archived, which admission decides
+/// as it admits the put-away (FLOW-CLEAN-UP-R22).
+pub(super) async fn put_away_for_sweep(core: &Core, id: &str) -> Result<(), ApiError> {
+    put_away(core, id, true).await
+}
+
+async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiError> {
     let workspace = core
         .store
         .workspace(id.to_string())
@@ -53,6 +71,7 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
         .admission
         .command(Command::PutAway {
             workspace: id.to_string(),
+            archived_only,
         })
         .await
         .map_err(|refusal| handlers::refused(refusal, id))?;
@@ -83,7 +102,25 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
             return Err(e.into());
         }
     };
-    // (4) Before anything is removed.
+    // (4) A folder that holds a repository of its own stays
+    // (PROTO-CORE-API-R147): git would refuse it only once the workspace
+    // was stored `put_away`, leaving the whole folder for a put-back to
+    // remove unchecked. Looked at in the turn, after any wait for it, so
+    // nothing checked out meanwhile is missed; a check that fails keeps the
+    // folder too.
+    match workspace::git_holds_repository(transport.as_ref(), &project.path, &workspace.path).await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            putting_away.end(refused());
+            return Err(workspace::VcsError::HoldsRepository.into());
+        }
+        Err(e) => {
+            putting_away.end(refused());
+            return Err(e.into());
+        }
+    }
+    // (5) Before anything is removed.
     if let Err(e) = core
         .store
         .put_workspace_away(id.to_string(), checkout)
@@ -93,7 +130,7 @@ pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
         return Err(e.into());
     }
 
-    // (5) The folder and git's record; no branch is deleted, since the
+    // (6) The folder and git's record; no branch is deleted, since the
     // branch is how the folder comes back. Not forced: whoever puts away has
     // checked that nothing in the folder is unsaved, and a change since then
     // refuses the removal rather than lose it.
