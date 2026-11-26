@@ -706,21 +706,36 @@ async fn a_leftover_that_holds_a_repository_of_its_own_stays() {
 // verifies: FLOW-CLEAN-UP-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_workspace_a_session_refers_to_is_no_leftover() {
-    let fake = FakeAdapter::new(1);
-    let refusal = Arc::clone(&fake.delete_refusal);
-    let (mut s, clock) = swept_with(fake, |_| {}).await;
+    let failing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let transport = Arc::new(FailingWhile {
+        failing: Arc::clone(&failing),
+        inner: ersa_core::transport::LocalTreeTransport::for_commands(),
+    });
+    let (mut s, clock) = swept_with(FakeAdapter::new(1), move |config| {
+        config.command_transport = Some(ersa_core::CommandTransport(transport));
+    })
+    .await;
     let (stopped, session) = used(&mut s).await;
     let (marked, deleting) = used(&mut s).await;
-    *refusal.lock().unwrap() = Some(OpenElsewhere::Yes { pids: vec![4242] });
+    // Its delete fails at the folder, before git touches it: the session
+    // stays marked deleting, its folder and git's record whole.
+    failing.store(true, std::sync::atomic::Ordering::SeqCst);
     let token = changes_token(&mut s, &marked).await;
     let delete = json!({ "id": deleting, "token": token });
     s.client.error("session.delete", delete).await;
+    failing.store(false, std::sync::atomic::Ordering::SeqCst);
+    let row = support::listed(&mut s.client, &deleting).await.unwrap();
+    assert_eq!(row["deleting"], "failed", "{row}");
 
     an_hour_passes(&clock).await;
 
     left(&mut s, &stopped, "README.md").await;
-    // Its failed delete took its folder and branch: the workspace stays.
-    assert_ne!(s.listed(&marked).await, Value::Null);
+    assert_ne!(s.listed(&marked).await, Value::Null, "the workspace stays");
+    assert!(
+        folder(&marked).join("README.md").exists(),
+        "its folder stays"
+    );
+    assert!(has_branch(&s.repo, branch(&marked)), "its branch stays");
     for session in [&session, &deleting] {
         let listed = support::listed(&mut s.client, session).await;
         assert!(listed.is_some(), "{session} is not deleted");
@@ -734,6 +749,32 @@ async fn a_workspace_a_session_refers_to_is_no_leftover() {
     // Not listed while dormant: its row is what stays.
     let rows = s.core.core().store.sessions().await.unwrap();
     assert!(rows.iter().any(|row| row.id == session), "not deleted");
+}
+
+/// A leftover whose folder is missing with the folder above it, as on a
+/// drive that is not plugged in, can't be checked: it stays, with git's
+/// record of it and its branch.
+// verifies: FLOW-CLEAN-UP-R08
+// verifies: FLOW-CLEAN-UP-R23
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_out_of_reach_stays() {
+    let log = support::log::Log::installed();
+    let (mut s, clock) = swept().await;
+    let workspace = s.workspace().await;
+    let above = folder(&workspace).parent().unwrap().to_path_buf();
+    let away = above.with_extension("unplugged");
+    std::fs::rename(&above, &away).unwrap();
+
+    an_hour_passes(&clock).await;
+
+    assert_eq!(s.listed(&workspace).await["state"], "ready");
+    assert!(listed_by_git(&s.repo, &workspace), "git's record stays");
+    assert!(has_branch(&s.repo, branch(&workspace)), "the branch stays");
+    let field = format!("workspace={}", id(&workspace));
+    assert!(log.logged("INFO", "its folder can't be reached", &field));
+    // Plugged in again, it is whole.
+    std::fs::rename(&away, &above).unwrap();
+    left(&mut s, &workspace, "README.md").await;
 }
 
 /// A put-away workspace no session uses, here its last session removed (a

@@ -1742,6 +1742,24 @@ pub async fn is_empty_folder(path: &std::path::Path) -> Result<bool, VcsError> {
     .await
 }
 
+/// Whether `path` can be looked at: it is there, or the folder above it is,
+/// so a missing `path` was removed rather than out of reach (a drive not
+/// plugged in, a share that is down). Shares `workspace.changes`'s cap on
+/// blocking reads.
+pub async fn within_reach(path: &std::path::Path) -> Result<bool, VcsError> {
+    let path = path.to_path_buf();
+    blocking(deadline(), "looking for a workspace's folder", move |_| {
+        if path.try_exists()? {
+            return Ok(true);
+        }
+        Ok(match path.parent() {
+            Some(parent) => parent.try_exists()?,
+            None => false,
+        })
+    })
+    .await
+}
+
 /// Removes `path` when it is a real folder with nothing in it, and says
 /// whether it did. The file system's own removal of a folder refuses one
 /// that is not empty, so a file written there since the look is never lost.

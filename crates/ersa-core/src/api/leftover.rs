@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use ersa_protocol::core_api::{Project, Workspace, WorkspaceState};
 
 use super::handlers::{self, Remover, RepositoryTurns};
+use crate::platform;
 use crate::settings;
 use crate::state::Core;
 use crate::workspace::{self, Worktrees as _};
@@ -72,6 +73,21 @@ pub(super) async fn keeps(core: &Core, workspace: &Workspace) -> Option<Keep> {
             Err(e) => {
                 return Some(Keep::Holds(format!(
                     "whether anything is left at its path can't be told: {e}"
+                )));
+            }
+        }
+    } else {
+        // A folder that is missing counts nothing, which is right for one
+        // deleted by hand and wrong for one on a drive that is not plugged
+        // in: there, with the folder above it gone too, it can't be checked.
+        match workspace::within_reach(std::path::Path::new(&workspace.path)).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return Some(Keep::Holds("its folder can't be reached".to_string()));
+            }
+            Err(e) => {
+                return Some(Keep::Holds(format!(
+                    "whether its folder can be reached can't be told: {e}"
                 )));
             }
         }
@@ -198,8 +214,10 @@ fn kept(said: &mut HashSet<String>, workspace: &Workspace, why: &str) {
 }
 
 /// Removes the project's folder under the worktrees root when it is empty,
-/// as it is once its last workspace is gone. In the project's turn, so no
-/// `workspace.create` is adding a worktree there meanwhile.
+/// as it is once its last workspace is gone. In the turn of every project
+/// whose workspaces go in that folder (projects of one name share it), so
+/// no `workspace.create`, fork or put-back is adding a worktree there
+/// meanwhile.
 pub(super) async fn tidy_project_folder(core: &Core, project: &Project) {
     let stored = match core.store.settings().await {
         Ok(stored) => stored,
@@ -208,18 +226,32 @@ pub(super) async fn tidy_project_folder(core: &Core, project: &Project) {
             return;
         }
     };
-    let folder = settings::workspaces_root(&stored, &core.config.data_dir).join(&project.name);
+    let root = settings::workspaces_root(&stored, &core.config.data_dir);
+    let folder = root.join(&project.name);
     // Looked at first, so a project with workspaces takes no turn.
     if !matches!(workspace::is_empty_folder(&folder).await, Ok(true)) {
         return;
     }
-    let turns = RepositoryTurns {
-        core,
-        project: &project.id,
-    };
-    let Ok(_turn) = turns.turn().await else {
+    let Ok(projects) = core.store.projects().await else {
         return;
     };
+    // Compared as the file system compares names: without case on Windows.
+    let key = |name: &str| platform::path_key(&root.join(name).display().to_string());
+    let mut sharing: Vec<String> = projects
+        .into_iter()
+        .filter(|other| key(&other.name) == key(&project.name))
+        .map(|other| other.id)
+        .collect();
+    // Always taken in one order. No other request holds two turns at once.
+    sharing.sort();
+    let mut turns = Vec::new();
+    for id in &sharing {
+        let asked = RepositoryTurns { core, project: id };
+        match asked.turn().await {
+            Ok(turn) => turns.push(turn),
+            Err(_) => return,
+        }
+    }
     match workspace::remove_empty_folder(&folder).await {
         Ok(true) => tracing::info!(
             project = %project.id,
