@@ -1,0 +1,103 @@
+{
+  "recorded_at": "2026-11-26T20:21:47.140Z",
+  "claude_code_version": "2.1.330",
+  "recorder": "scripts/record-claude-sign-in.mjs",
+  "ending": "finished",
+  "executable": "claude",
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa",
+    "CLAUDE_CONFIG_DIR": "<a new scratch folder, deleted afterward>"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "role": "the sign-in",
+  "route": "control",
+  "tried": [
+    {
+      "route": "control",
+      "refused": null
+    }
+  ],
+  "outcome": "finished",
+  "final_answer": "success",
+  "address_field": "automaticUrl",
+  "person_said_page_opened": false,
+  "recorder_opened_address": true,
+  "steps": [
+    {
+      "t": 780,
+      "step": "claude_authenticate answered an address; claude_oauth_wait_for_completion sent"
+    },
+    {
+      "t": 789,
+      "step": "the recorder opened the address in the browser"
+    },
+    {
+      "t": 10816,
+      "step": "the sign-in ended by itself: finished"
+    },
+    {
+      "t": 11137,
+      "step": "the sign-in's process exited: 0"
+    }
+  ],
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "371fbba1-6aa2-4fe3-971c-2b0d4c663bfa"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "killed": false,
+  "stdout_lines": 4,
+  "stdout_timing_ms": [
+    769,
+    780,
+    10586,
+    10816
+  ],
+  "stderr": [],
+  "sent": [
+    {
+      "t": 399,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-initialize-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 769,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_authenticate-2\",\"request\":{\"subtype\":\"claude_authenticate\",\"loginWithClaudeAi\":true}}"
+    },
+    {
+      "t": 780,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_oauth_wait_for_completion-3\",\"request\":{\"subtype\":\"claude_oauth_wait_for_completion\"}}"
+    }
+  ]
+}
