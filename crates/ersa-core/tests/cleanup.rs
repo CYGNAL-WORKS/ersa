@@ -322,7 +322,7 @@ async fn a_project_git_cannot_read_is_named_in_unread() {
     assert_eq!(ids(&listed, "branch").len(), 1, "{listed}");
 }
 
-// -- Inspect (FLOW-CLEAN-UP-R12, R26) -------------------------------------
+// -- Inspect (FLOW-CLEAN-UP-R30, R26) -------------------------------------
 
 /// A workspace item's counts are `workspace.changes`'s; its size is what
 /// its folder's files take; its token stays while nothing changes and
@@ -538,7 +538,7 @@ async fn inspecting_what_is_no_longer_an_item_is_not_found() {
 }
 
 /// The default limit on measuring a folder is 30 seconds.
-// verifies: FLOW-CLEAN-UP-R31
+// verifies: FLOW-CLEAN-UP-R30
 #[test]
 fn a_folder_is_measured_for_thirty_seconds() {
     assert_eq!(ersa_core::workspace::MEASURE_LIMIT, Duration::from_secs(30));

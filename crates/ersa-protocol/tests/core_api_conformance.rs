@@ -237,7 +237,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 unread: Vec::new(),
             }),
         ),
-        // What removing each kind would lose (FLOW-CLEAN-UP-R12, R26).
+        // What removing each kind would lose (FLOW-CLEAN-UP-R30, R26).
         (Method::CleanupInspect, to_value(&cleanup_inspections()[0])),
         (Method::CleanupInspect, to_value(&cleanup_inspections()[1])),
         (Method::CleanupInspect, to_value(&cleanup_inspections()[2])),
