@@ -32,11 +32,12 @@ function fades(): boolean {
  * backend's label, that it isn't signed in, with one button that follows the sign-in: Sign in, Starting… while Core
  * answers, Cancel while the person signs in in their browser. It is one button throughout, so keyboard focus stays on
  * it through its changes. Nothing in it takes typing (FLOW-SIGN-IN-R08): the sign-in is the backend's own, on its
- * vendor's page. The words it says while signed out are the place's own: the new-session screen's here.
+ * vendor's page. The words it says while signed out are the place's own: what signing in lets the person do there.
  */
 export function SignInNote({
   label,
   state,
+  place = "newSession",
   onSignIn,
   onCancel,
   focal,
@@ -45,6 +46,8 @@ export function SignInNote({
   /** The backend's label, such as "Claude Code". */
   label: string;
   state: NoteState;
+  /** Where it stands: on the new-session screen, or under a session whose message failed as not signed in (FLOW-SIGN-IN-R17). */
+  place?: "newSession" | "session";
   onSignIn: () => void;
   onCancel: () => void;
   /** The note holds the screen's focal glow: on the new-session screen, while nothing else there can be acted on. */
@@ -58,7 +61,7 @@ export function SignInNote({
     ? failureWords(label, said)
     : waiting
       ? t("composer.signIn.waitingProgress", { label })
-      : t("composer.signIn.signedOutNote", { label });
+      : t(place === "session" ? "composer.signIn.sessionNote" : "composer.signIn.signedOutNote", { label });
 
   // The words crossfade over motion-quick: the ones going fade out in the same cell as the ones coming fade in, so
   // the row keeps its place (docs/design/COMPOSER.md).

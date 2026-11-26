@@ -862,3 +862,99 @@ test("the room the sign-in note takes eases to each new height over motion-settl
     }
   }
 });
+
+// The sign-in note under a session (docs/design/COMPOSER.md, The sign-in note): it takes height at the top of the
+// composer's column, so the box and the session controls keep their place within the stage, and the transcript gives
+// that height up, keeping its end in view when it was there. Every reading waits until each ease has ended.
+async function sessionStage(page: Page) {
+  const figure = page.locator('[data-theme="light"] [data-component="Composer"] figure').filter({
+    has: page.getByText("A session's stage, not signed in", { exact: true }),
+  });
+  const stage = figure.locator(".gallery-stage");
+  await settled(stage);
+  return stage;
+}
+
+/** Where the box and the session controls stand within the stage, and how the transcript is scrolled. */
+const stageReading = (stage: Locator) =>
+  stage.evaluate((el) => {
+    const top = el.getBoundingClientRect().top;
+    const scroll = el.querySelector(".transcript-scroll") as HTMLElement;
+    return {
+      noted: el.querySelector(".sign-in-note") !== null,
+      box: el.querySelector(".composer-box")!.getBoundingClientRect().top - top,
+      controls: el.querySelector(".session-controls")!.getBoundingClientRect().top - top,
+      // How far the transcript's end is from the foot of its area: 0 while its end is in view.
+      fromEnd: scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight,
+      area: scroll.clientHeight,
+      scrolls: scroll.scrollHeight > scroll.clientHeight,
+    };
+  });
+
+const toggleNote = async (stage: Locator) => {
+  await stage.evaluate((el) => el.dispatchEvent(new Event("gallery-note")));
+  await settled(stage);
+};
+
+for (const reducedMotion of ["no-preference", "reduce"] as const) {
+  test(`under a session the sign-in note leaves the box and the session controls in place (reduced motion: ${reducedMotion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto("/gallery.html?component=Composer&theme=light");
+    const stage = await sessionStage(page);
+    const noted = await stageReading(stage);
+    await toggleNote(stage);
+    const bare = await stageReading(stage);
+    await toggleNote(stage);
+    const again = await stageReading(stage);
+    expect([noted.noted, bare.noted, again.noted]).toEqual([true, false, true]);
+    expect([bare.box, bare.controls]).toEqual([noted.box, noted.controls]);
+    expect([again.box, again.controls]).toEqual([noted.box, noted.controls]);
+  });
+
+  test(`under a session the transcript gives the sign-in note its height and keeps its end in view (reduced motion: ${reducedMotion})`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto("/gallery.html?component=Composer&theme=light");
+    const stage = await sessionStage(page);
+    // Chromium's scroll anchoring may keep the end in view by itself; WebKit has none. Off, the check reads Ersa's own.
+    await stage.evaluate((el) => {
+      (el.querySelector(".transcript-scroll") as HTMLElement).style.overflowAnchor = "none";
+    });
+    // Without the note, read at the transcript's end; then the note arrives.
+    await toggleNote(stage);
+    const before = await stageReading(stage);
+    expect(before).toMatchObject({ noted: false, fromEnd: 0, scrolls: true });
+    await toggleNote(stage);
+    const after = await stageReading(stage);
+    expect(after.noted).toBe(true);
+    // The transcript's area is shorter by the note's room, and its end still in view.
+    const room = await stage.evaluate((el) => el.querySelector(".composer-room")!.getBoundingClientRect().height);
+    expect(room).toBeGreaterThan(0);
+    // clientHeight is whole pixels, the room's height may not be.
+    expect(Math.abs(before.area - after.area - room)).toBeLessThan(1);
+    expect(after.fromEnd).toBeLessThan(1);
+    // Scrolled back to read, the reader stays where they were as the note goes and comes.
+    await stage.evaluate((el) => {
+      (el.querySelector(".transcript-scroll") as HTMLElement).scrollTop = 0;
+    });
+    await toggleNote(stage);
+    await toggleNote(stage);
+    expect(await stage.evaluate((el) => (el.querySelector(".transcript-scroll") as HTMLElement).scrollTop)).toBe(0);
+  });
+}
+
+test("under a session the status line stands beneath the sign-in note, so the note covers nothing it says", async ({ page }) => {
+  await page.goto("/gallery.html?component=Composer&theme=light");
+  const figure = page.locator('[data-theme="light"] [data-component="Composer"] figure').filter({
+    has: page.getByText("Under a running session, not signed in, a change refused", { exact: true }),
+  });
+  await settled(figure);
+  const rows = await figure.evaluate((el) => {
+    const box = (selector: string) => el.querySelector(selector)!.getBoundingClientRect();
+    const note = box(".sign-in-note");
+    const line = box(".composer-status-line");
+    const composer = box(".composer-box");
+    return { lineBelowNote: line.top - note.bottom, boxBelowLine: composer.top - line.bottom };
+  });
+  expect(rows.lineBelowNote).toBeGreaterThanOrEqual(0);
+  expect(rows.boxBelowLine).toBeGreaterThanOrEqual(0);
+});

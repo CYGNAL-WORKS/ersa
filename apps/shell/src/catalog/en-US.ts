@@ -399,6 +399,8 @@ export const enUS = {
     signIn: {
       // On the new-session screen, while no backend on the host can run and this one is signed out (FLOW-SIGN-IN-R01).
       signedOutNote: "{label} isn't signed in on this host. Sign in to start a session.",
+      // Under a live session whose latest message failed as not signed in (FLOW-SIGN-IN-R17).
+      sessionNote: "{label} isn't signed in on this host. Sign in, then send your message again.",
       signInButton: "Sign in",
       // From Sign in until Core refuses, or until the backends read on Core's answer arrive (FLOW-SIGN-IN-R03).
       startingProgress: "Starting…",

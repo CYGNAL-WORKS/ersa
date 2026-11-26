@@ -1,5 +1,5 @@
 import { Image } from "lucide-react";
-import { type CSSProperties, type ReactNode, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { Answer, Decision, Reply } from "../session/answers";
@@ -83,6 +83,19 @@ export function Transcript({
     const el = scroller.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
   });
+
+  // The area itself changes height too, as when the sign-in note takes room at the top of the composer's column
+  // (docs/design/COMPOSER.md, The sign-in note): a reader at the end stays there, through each frame of its ease.
+  // (jsdom has no ResizeObserver; the tests there need no layout.)
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      if (atEnd.current) el.scrollTop = el.scrollHeight;
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
 
   const onScroll = () => {
     const el = scroller.current;
