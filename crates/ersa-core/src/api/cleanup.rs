@@ -167,6 +167,12 @@ async fn inspect_held(core: &Core, id: &str) -> Result<CleanupInspection, ApiErr
         for line in &measure.evidence {
             digest.add(line);
         }
+        // Not walked to the end, what is in it can't all go into the token:
+        // one made new each time never matches, so no removal goes ahead on
+        // what the user saw of it.
+        if measure.size_bytes.is_none() {
+            digest.add(&uuid::Uuid::new_v4().to_string());
+        }
         let item = folder_item(project_id, name, path);
         return Ok(CleanupInspection {
             size_bytes: measure.size_bytes,
@@ -373,14 +379,10 @@ async fn judge_workspace(
     if workspace.state != WorkspaceState::Ready {
         return Ok(None);
     }
-    // One marked deleting admission counts as in use, above. One whose
-    // backend has no adapter in this build is dormant.
-    let dormant = there
-        .iter()
-        .any(|row| core.sessions.adapter(&row.backend).is_none());
-    if dormant {
-        return Ok(None);
-    }
+    // One marked deleting admission counts as in use, above. A dormant
+    // one, whose backend has no adapter in this build, can't be asked
+    // whether another process has it open, below, so it keeps the
+    // workspace off the list too.
     let sessions: Vec<Option<&Session>> = there
         .iter()
         .map(|row| world.sessions.iter().find(|s| s.id == row.id))
@@ -403,7 +405,8 @@ async fn judge_workspace(
             return Ok(None);
         }
     }
-    // Last, since it asks the operating system about each session.
+    // Last, since it asks the operating system about each session. One
+    // Core can't ask, a dormant one among them, may be open.
     for row in &there {
         let Some(transport) = core.session_transport_for(&row.host_id) else {
             return Ok(None);
@@ -530,10 +533,27 @@ async fn folder_items(
 ) -> Result<(Vec<CleanupItem>, Vec<CleanupUnread>), ApiError> {
     let mut items = Vec::new();
     let mut unread = Vec::new();
-    let Some(root) = worktrees_root(core).await? else {
-        return Ok((items, unread));
+    // What can't be read leaves every project's folder unread, as a
+    // project's git calls that fail leave its own.
+    let read_all = |found: ApiError| -> Vec<CleanupUnread> {
+        world
+            .git_projects()
+            .iter()
+            .map(|p| CleanupUnread {
+                project_id: p.id.clone(),
+                message: found.0.message.clone(),
+            })
+            .collect()
     };
-    let named = world.workspace_keys().await?;
+    let root = match worktrees_root(core).await {
+        Ok(Some(root)) => root,
+        Ok(None) => return Ok((items, unread)),
+        Err(e) => return Ok((items, read_all(e))),
+    };
+    let named = match world.workspace_keys().await {
+        Ok(named) => named,
+        Err(e) => return Ok((items, read_all(e))),
+    };
     let mut done: HashSet<String> = HashSet::new();
     for project in world.git_projects() {
         let folder = root.join(&project.name);
@@ -563,8 +583,16 @@ async fn folder_items(
         };
         for name in names {
             let path = folder.join(&name).display().to_string();
-            if unidentified(&path, &named, &read).await? {
-                items.push(folder_item(&project.id, &name, path));
+            match unidentified(&path, &named, &read).await {
+                Ok(true) => items.push(folder_item(&project.id, &name, path)),
+                Ok(false) => {}
+                Err(e) => {
+                    unread.push(CleanupUnread {
+                        project_id: project.id.clone(),
+                        message: e.0.message,
+                    });
+                    break;
+                }
             }
         }
     }

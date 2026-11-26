@@ -262,6 +262,24 @@ async fn a_workspace_no_session_refers_to_is_a_leftover_after_an_hour() {
     assert_eq!(it["branch"], away["vcs_ref"]);
     // An id is the same for the same thing from one list to the next.
     assert_eq!(ids(&list(&mut s, 30).await, "leftover"), leftovers);
+
+    // A leftover with its folder: counted and measured as a workspace is.
+    let inspected = inspect(&mut s, &ws_id(&used)).await;
+    assert_eq!(inspected["kind"], "leftover");
+    assert_eq!(inspected["uncommitted"], 1, "{inspected}");
+    assert_eq!(inspected["holds_repository"], false);
+    assert!(inspected["size_bytes"].as_u64().is_some(), "{inspected}");
+    assert!(inspected.get("session_ids").is_none());
+    // A put-away one has no folder: no size, and no repository of its own.
+    let inspected = inspect(&mut s, &ws_id(&away)).await;
+    assert_eq!(inspected["kind"], "leftover");
+    assert_eq!(inspected["uncommitted"], 0, "{inspected}");
+    assert_eq!(inspected["holds_repository"], false);
+    assert!(inspected.get("size_bytes").is_none(), "{inspected}");
+    // A ready one whose folder was deleted by hand has no size either.
+    std::fs::remove_dir_all(folder(&bare)).unwrap();
+    let inspected = inspect(&mut s, &ws_id(&bare)).await;
+    assert!(inspected.get("size_bytes").is_none(), "{inspected}");
 }
 
 // -- Branches (FLOW-CLEAN-UP-R11) -----------------------------------------
@@ -554,9 +572,13 @@ async fn a_size_not_measured_within_its_limit_is_left_out() {
     let stray = worktrees(&s).join("stray");
     std::fs::create_dir_all(&stray).unwrap();
     std::fs::write(stray.join("a.bin"), vec![1u8; 300]).unwrap();
-    let inspected = inspect(&mut s, &format!("f:{project}:stray")).await;
+    let id = format!("f:{project}:stray");
+    let inspected = inspect(&mut s, &id).await;
     assert!(inspected.get("size_bytes").is_none(), "{inspected}");
-    assert!(!inspected["token"].as_str().unwrap().is_empty());
+    // Not walked to the end, its token can't follow what is in it: it
+    // never matches, so a removal never goes ahead on what was seen.
+    let again = inspect(&mut s, &id).await;
+    assert_ne!(again["token"], inspected["token"]);
 }
 
 /// An id that names nothing, or a thing that is no longer an item, is

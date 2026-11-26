@@ -2252,8 +2252,10 @@ async fn merges_to_nothing(
     branch: &str,
     deadline: Deadline,
 ) -> Result<bool, VcsError> {
-    // Computes the merge without touching any worktree, index or ref: the
-    // merged tree on the first line; exit 1 when it conflicts.
+    // Computes the merge without touching any worktree, index or ref (it
+    // writes the merged tree's objects, which git collects later): the
+    // merged tree on the first line; exit 1 when it conflicts. Needs git
+    // 2.38 or later.
     let args = ["merge-tree", "--write-tree", base, branch];
     let output = query(transport, repo, &args, deadline).await?;
     let merged = match output.exit.code {
@@ -2304,7 +2306,8 @@ pub async fn real_folders_in(path: &std::path::Path) -> Result<Vec<String>, VcsE
 /// What measuring a folder found.
 #[derive(Debug, Clone, Default)]
 pub struct Measure {
-    /// What its files take; `None` when measuring took longer than its limit.
+    /// What its files take; `None` when measuring took longer than its
+    /// limit, or there is no folder.
     pub size_bytes: Option<u64>,
     /// One line per entry read (its path, length and modified time): every
     /// entry when the measuring finished, else the folder's own entries.
@@ -2313,7 +2316,7 @@ pub struct Measure {
 
 /// Measures the folder at `path`: what its files take, links not followed,
 /// for at most `limit` (PROTO-CORE-API, Clean up). `gate` stops the walk
-/// on its thread in tests. A folder that is not there measures nothing.
+/// on its thread in tests. A folder that is not there has no size.
 pub async fn measure_folder(
     path: &str,
     limit: Duration,
@@ -2339,8 +2342,8 @@ pub async fn measure_folder(
             let entries = match std::fs::read_dir(&folder) {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound && depth == 0 => {
                     return Ok(Measure {
-                        size_bytes: Some(0),
-                        evidence,
+                        size_bytes: None,
+                        evidence: vec!["no folder".to_string()],
                     });
                 }
                 other => other?,

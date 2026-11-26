@@ -9,3 +9,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
+- [ ] 2026-11-26 FLOW-CLEAN-UP: R12 asks for a `folder` item's `token` to change whenever what removing it would lose changes, and PROTO-CORE-API stops measuring a folder at 30 seconds; a folder too big to walk in that time can't have a token that follows everything in it. Meanwhile (#542) such a folder's token is made new on every inspect, so it never matches and `cleanup.remove` (#543) would refuse it as changed every time: nothing is removed on what the user did not see, and a folder that large can't be removed from the list at all. A planning pass should say what a folder too big to measure should do: stay unremovable, be removed on the user's word with what can't be counted said plainly, or have more time.
