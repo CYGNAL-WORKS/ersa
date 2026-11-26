@@ -322,7 +322,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
   };
 
   return (
-    <div className="composer" data-noted={noted || undefined}>
+    <div className="composer" data-noted={noted || undefined} data-note-leaving={(!noted && noteShown !== undefined) || undefined}>
       <div ref={room} className="composer-room">
         <div ref={roomContent} className="composer-room-content">
           {noteShown !== undefined && (

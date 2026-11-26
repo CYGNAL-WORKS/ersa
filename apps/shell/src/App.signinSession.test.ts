@@ -59,14 +59,14 @@ const session = (more: Partial<Session> = {}): Session => ({
 
 type Answer = (params: never) => unknown;
 
-function fakeCore({ listed = session(), backends = [backend("claude-code", "Claude Code (work)")] } = {}) {
+function fakeCore({ listed = [session()], backends = [backend("claude-code", "Claude Code (work)")] } = {}) {
   const calls: { method: Method; params: unknown }[] = [];
   let onEvent: (event: CoreEvent) => void = () => {};
   const core = { listed, backends, send: (() => ({ turn: 2 })) as Answer };
   const answers: Partial<Record<Method, Answer>> = {
     "core.status": () => ({ sessions_running: 1, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => [{ id: "alpha", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "none", trusted: true }],
-    "session.list": () => [core.listed],
+    "session.list": () => core.listed,
     "workspace.list": () => [{ id: "w1", project_id: "alpha", kind: "root", path: "D:/code/alpha", state: "ready" }],
     "backend.list": () => core.backends,
     "backend.sign_in": () => ({ url: PAGE }),
@@ -89,12 +89,12 @@ function fakeCore({ listed = session(), backends = [backend("claude-code", "Clau
   };
   const emit = (event: CoreEvent) => act(async () => onEvent(event));
   /** An event on s1, from the live stream. */
-  const on = (seq: number, event: Envelope["event"]) =>
+  const on = (seq: number, event: Envelope["event"], session_id = "s1") =>
     emit({
       kind: "notification",
       method: "session.event",
       params: {
-        event: { v: EVENT_VERSION, session_id: "s1", seq, ts: "2026-11-26T09:00:00Z", source: { backend: "claude-code", backend_version: "2.1.316", input: "live" }, event },
+        event: { v: EVENT_VERSION, session_id, seq, ts: "2026-11-26T09:00:00Z", source: { backend: "claude-code", backend_version: "2.1.316", input: "live" }, event },
       },
     } as CoreEvent);
   const ended = (ending: Omit<BackendSignInEndedNotification, "host_id" | "name">, who: { host_id?: string; name?: string } = {}) =>
@@ -161,10 +161,13 @@ describe("the sign-in note under a session", () => {
     const core = fakeCore();
     await open(core);
     await failedTurn(core);
-    await act(async () => fireEvent.click(within(note()!).getByRole("button", { name: "Sign in" })));
-    // The listing read on Core's answer reports it under way (R06).
+    // The listing read on Core's answer reports it under way (R06): the note says so, and offers Cancel.
     core.backends = [backend("claude-code", "Claude Code (work)", { signing_in: { url: PAGE } })];
+    await act(async () => fireEvent.click(within(note()!).getByRole("button", { name: "Sign in" })));
     await settled();
+    expect(note()?.textContent).toContain("Waiting for you to sign in to Claude Code (work) in your browser…");
+    expect(within(note()!).queryByRole("button", { name: "Sign in" })).toBeNull();
+    within(note()!).getByRole("button", { name: "Cancel" });
     // Read again on its end (R09); still listed available, which on the new-session screen means no note at all.
     core.backends = [backend("claude-code", "Claude Code (work)")];
     await core.ended({ outcome: "timed_out" });
@@ -174,8 +177,99 @@ describe("the sign-in note under a session", () => {
   });
 
   // verifies: FLOW-SIGN-IN-R17
+  it("is for the session's own host, not the window's", async () => {
+    const core = fakeCore({ listed: [session({ host_id: "devbox-2" })] });
+    await open(core);
+    await failedTurn(core);
+    await act(async () => fireEvent.click(within(note()!).getByRole("button", { name: "Sign in" })));
+    await settled();
+    expect(core.called("backend.sign_in").map((c) => c.params)).toEqual([{ host_id: "devbox-2", name: "claude-code" }]);
+    // The listing read on Core's answer, for that host, reports the sign-in under way: Cancel stops it there (R07).
+    core.backends = [backend("claude-code", "Claude Code (work)", { signing_in: { url: PAGE } })];
+    await core.ended({ outcome: "canceled" }, { host_id: "devbox-2" });
+    await settled();
+    await act(async () => fireEvent.click(within(note()!).getByRole("button", { name: "Cancel" })));
+    await settled();
+    expect(core.called("backend.cancel_sign_in").map((c) => c.params)).toEqual([{ host_id: "devbox-2", name: "claude-code" }]);
+    // How a sign-in on that host ended is what its note says (R14), and one on the window's host says nothing here.
+    core.backends = [backend("claude-code", "Claude Code (work)")];
+    // Canceled there, which adds no words; its listing, read again, no longer reports it under way.
+    await core.ended({ outcome: "canceled" }, { host_id: "devbox-2" });
+    await settled();
+    expect(note()?.textContent).toContain("isn't signed in on this host");
+    await core.ended({ outcome: "timed_out" });
+    await settled();
+    expect(note()?.textContent).not.toContain("took too long");
+    await core.ended({ outcome: "timed_out" }, { host_id: "devbox-2" });
+    await settled();
+    expect(note()?.textContent).toContain("took too long and was stopped");
+    // A sign-in that ends signed in on the window's own host leaves this session's note; one on its host clears it.
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    expect(note()).not.toBeNull();
+    await core.ended({ outcome: "signed_in" }, { host_id: "devbox-2" });
+    await settled();
+    expect(note()).toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  it("goes, once a sign-in ends signed in, from a session not shown whose failure arrived after the sessions were listed", async () => {
+    const shownOne = session({ title: "Fix the build", created_at: "2026-11-26T10:00:00Z" });
+    const other = session({ id: "s2", title: "Read the logs", created_at: "2026-11-26T09:00:00Z" });
+    const core = fakeCore({ listed: [shownOne, other] });
+    await open(core);
+    await failedTurn(core);
+    // Meanwhile Read the logs failed the same way, out of view: Core lists its latest event now, the window does not.
+    core.listed = [shownOne, { ...other, last_event_seq: 1 }];
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    expect(note()).toBeNull();
+    // Opened, its failure arrived before the sign-in ended: no note.
+    const tile = [...document.querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes("Read the logs"))!;
+    await act(async () => fireEvent.click(tile));
+    await settled();
+    await core.on(0, { type: "user.message", text: "Read the logs", origin: "human" }, "s2");
+    await core.on(1, failure, "s2");
+    await settled();
+    expect(screen.getByRole("region", { name: "Transcript" }).textContent).toContain("wasn't signed in");
+    expect(note()).toBeNull();
+    // A failure after it shows the note.
+    await core.on(2, failure, "s2");
+    await settled();
+    expect(note()).not.toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  it("says nothing of an earlier sign-in when it shows again for a later failure", async () => {
+    const core = fakeCore();
+    await open(core);
+    await failedTurn(core);
+    await act(async () => fireEvent.click(within(note()!).getByRole("button", { name: "Sign in" })));
+    await settled();
+    await core.ended({ outcome: "timed_out" });
+    await settled();
+    expect(note()?.textContent).toContain("took too long");
+    // Sent again, the note goes; that message fails too, and the note is back with the session's own words.
+    await send("Try again");
+    expect(note()).toBeNull();
+    await failedTurn(core, 2);
+    expect(note()?.textContent).toContain("Claude Code (work) isn't signed in on this host. Sign in, then send your message again.");
+    expect(note()?.textContent).not.toContain("took too long");
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  it("stays for a message the backend wrote itself, which is not the person's", async () => {
+    const core = fakeCore();
+    await open(core);
+    await failedTurn(core);
+    await core.on(2, { type: "user.message", text: "A background task finished.", origin: "system" });
+    await settled();
+    expect(note()).not.toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
   it("shows for a session that is not live no note", async () => {
-    const core = fakeCore({ listed: session({ state: "ended", tile: { state: "ended", pending: [] } }) });
+    const core = fakeCore({ listed: [session({ state: "ended", tile: { state: "ended", pending: [] } })] });
     await open(core);
     await failedTurn(core);
     // The failure's line is in the transcript, and the composer has no note.
@@ -190,7 +284,7 @@ describe("the sign-in note under a session", () => {
     await failedTurn(core);
     expect(note()).not.toBeNull();
     // Archived elsewhere while shown (which stops it): a new session's tile makes App list the sessions again.
-    core.listed = session({ archived: true, state: "ended", tile: { state: "ended", pending: [] } });
+    core.listed = [session({ archived: true, state: "ended", tile: { state: "ended", pending: [] } })];
     await core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s9", tile: { state: "idle", pending: [] }, created_at: "2026-11-27T09:00:00Z" } } as CoreEvent);
     await settled();
     expect(screen.getByText("This session is archived. Resume it to send a message.")).toBeTruthy();

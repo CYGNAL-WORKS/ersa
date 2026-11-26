@@ -47,13 +47,13 @@
   height: 0;
 }
 
-/* Beneath the note the status line takes its height, so the note covers nothing it says; with nothing to say it is
-   not there, and the note stands space-xs above the box. */
-.composer[data-noted] .composer-status {
+/* Beneath the note the status line takes its height, so the note covers nothing it says, until the note has faded
+   out; with nothing to say it is not there, and the note stands space-xs above the box. */
+.composer:is([data-noted], [data-note-leaving]) .composer-status {
   height: auto;
 }
 
-.composer[data-noted] .composer-status:empty {
+.composer:is([data-noted], [data-note-leaving]) .composer-status:empty {
   display: none;
 }
 

@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
@@ -438,8 +438,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const shownSeq = useRef<{ id: string; lastSeq: number }>(undefined);
   onListed.current = (hostId, listing) => signIns.listed(hostId, listing, sessionNoteKey.current);
   signInEnded.current = (ending) => {
-    // Signed in: every session of that backend on that host loses its note, until a failure after this one (R17).
-    if (ending.outcome === "signed_in") noteClears.clear(signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownSeq.current));
+    // Signed in: every session of that backend on that host loses its note, until a failure after this one (R17). The
+    // shown one at once; the others through their latest event as Core lists it now, since the window's list only
+    // learns a session's latest event when it is read, and one out of view may have failed since.
+    if (ending.outcome === "signed_in") {
+      const shownThen = shownSeq.current;
+      noteClears.clear(signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownThen));
+      void client.call("session.list").then(
+        (listing) => noteClears.clear(signedInClears(ending.host_id, ending.name, listing, shownThen)),
+        () => {},
+      );
+    }
     return signIns.ended(ending);
   };
   // Only this connection's failures count. A connection lost fails every reading still out on it, and the Shell
@@ -996,6 +1005,19 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       onCancel={() => void signIns.cancel(listed.host_id, listed.backend)}
     />
   );
+  // A failure the shown session's note has not shown for before starts it afresh, so it says nothing of an earlier
+  // sign-in (R15). Before the page is painted, so the earlier words never show with it.
+  const noteShownFor = useRef(new Map<string, number>());
+  const forgetSaid = signIns.forget;
+  const noteSessionId = shown?.id;
+  useLayoutEffect(() => {
+    if (noteSessionId === undefined) return;
+    // While the note is not shown, the next failure is new to it, whatever its number in whichever view.
+    if (noteFailure === undefined || noteKey === undefined) return void noteShownFor.current.delete(noteSessionId);
+    if (noteShownFor.current.get(noteSessionId) === noteFailure) return;
+    noteShownFor.current.set(noteSessionId, noteFailure);
+    forgetSaid(noteKey);
+  }, [noteSessionId, noteFailure, noteKey, forgetSaid]);
   // A mark holds only while its session stays live on this connection (useNoteClears).
   const liveIds = sessions.state === "ready" ? sessions.sessions.filter((s) => runs(s)).map((s) => s.id).sort().join(" ") : undefined;
   const keepClears = noteClears.keep;

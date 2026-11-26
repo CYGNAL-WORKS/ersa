@@ -72,8 +72,9 @@ export function noteState(backend: Pick<BackendInfo, "signing_in">, local: SignI
 export function sessionNoteFailure(items: readonly Item[], cleared: number): number | undefined {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const item = items[i]!;
-    // A message of the person's after any such failure: the note has gone with it.
-    if (item.kind === "user") return undefined;
+    // A message of the person's after any such failure: the note has gone with it. One the backend or another
+    // session wrote is not theirs.
+    if (item.kind === "user" && item.origin === undefined) return undefined;
     if (item.kind === "problem" && item.signIn) return item.seq > cleared ? item.seq : undefined;
   }
   return undefined;
@@ -228,5 +229,11 @@ export function useSignIns(client: Pick<CoreClient, "call">, openLink: ShellCont
     });
   }, []);
 
-  return { signIns, signIn, cancel, ended, listed };
+  // A session's note shows for a failure it has not shown for before: what an earlier sign-in's failure said is not
+  // about this one, and goes (R15), so the note says only that the backend isn't signed in.
+  const forget = useCallback((key: string) => {
+    setSignIns((all) => (all[key]?.said === undefined ? all : { ...all, [key]: { ...all[key], said: undefined } }));
+  }, []);
+
+  return { signIns, signIn, cancel, ended, listed, forget };
 }

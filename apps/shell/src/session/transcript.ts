@@ -27,7 +27,8 @@ export type TargetKind = NonNullable<ToolRequested["target_kind"]>;
 
 export type Item =
   /** The user's words, and what came with them in the order sent (FLOW-SEND-MESSAGE-R11). */
-  | { kind: "user"; key: string; text: string; attachments?: MessageAttachment[] }
+  /** A message to the agent; `origin` when it is not the person's own (the backend's, or another session's). */
+  | { kind: "user"; key: string; text: string; attachments?: MessageAttachment[]; origin?: "peer_session" | "system" }
   /** The agent's words. Several events share a block and grow its text until one is `final`. */
   | { kind: "assistant"; key: string; text: string; final: boolean }
   | { kind: "thinking"; key: string; summary?: string; final: boolean }
@@ -128,6 +129,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
         key: `user:${envelope.seq}`,
         text: event.text,
         ...(event.attachments?.length ? { attachments: event.attachments } : {}),
+        ...(event.origin !== "human" ? { origin: event.origin } : {}),
       });
     case "assistant.text":
       return put(next, { kind: "assistant", key: `text:${event.block_id}`, text: event.text, final: event.final });
