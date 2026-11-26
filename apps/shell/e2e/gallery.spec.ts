@@ -752,8 +752,14 @@ async function screenIn(page: Page, scene: string, width: number, height: number
   return section;
 }
 
-/** Waits until nothing in the screen is still easing or arriving: every animation with an end has ended. */
+/**
+ * Waits until nothing in the screen is still easing or arriving: the fonts loaded and two frames first, so what a
+ * resize or a change sets off has started, then until every animation with an end has ended.
+ */
 async function settled(section: Locator) {
+  // The fonts first: the box's place follows the composer's height, which the fonts set.
+  await section.evaluate(() => document.fonts.ready);
+  await section.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
   await expect
     .poll(() => section.evaluate((el) => el.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).length))
     .toBe(0);
@@ -788,9 +794,14 @@ test("the sign-in note leaves the box and the session controls in place, and the
 
 test("in Ersa's smallest window the screen with the sign-in note scrolls, so the session controls stay in reach", async ({ page }) => {
   await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
-  // A note with long words and the status line beneath it, and no trust question, which would take its own place in
-  // the column whatever the note does.
+  // A note whose words run long, with the status line beneath it, and no trust question, which would take its own
+  // place in the column whatever the note does: what stands above the box is taller than the window has room for.
   const section = await screenIn(page, "Signed out, beside a backend that isn't working", 640 - RAIL, 400);
+  await section.evaluate((el) => {
+    const words = el.querySelector(".sign-in-words") as HTMLElement;
+    words.style.minHeight = "60vh";
+  });
+  await settled(section);
   const reach = await section.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
     const screen = (el.parentElement as HTMLElement).getBoundingClientRect();
