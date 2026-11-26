@@ -392,7 +392,7 @@ async fn a_project_git_cannot_read_is_named_in_unread() {
 /// A workspace item's counts are `workspace.changes`'s; its size is what
 /// its folder's files take; its token stays while nothing changes and
 /// changes with what removing it would lose.
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn inspecting_a_workspace_counts_what_workspace_changes_counts() {
     let (mut s, clock) = listing().await;
@@ -499,7 +499,7 @@ async fn inspect_says_when_a_folder_holds_a_repository_of_its_own() {
 /// A branch item's `unshared` counts the commits nothing else holds, and
 /// `merged` is true once the base branch holds what it changes, merged or
 /// squashed in; the token changes with either.
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn inspecting_a_branch_says_what_only_it_holds_and_whether_it_is_merged() {
     let (mut s, _clock) = listing().await;
@@ -542,7 +542,7 @@ async fn inspecting_a_branch_says_what_only_it_holds_and_whether_it_is_merged() 
 
 /// A folder item's size is what its files take, and its token changes
 /// when what is in it does.
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn inspecting_a_folder_measures_it() {
     let (mut s, _clock) = listing().await;
@@ -564,7 +564,6 @@ async fn inspecting_a_folder_measures_it() {
 }
 
 /// Measuring that takes past its limit stops, and the size is left out.
-// verifies: FLOW-CLEAN-UP-R12
 #[tokio::test(flavor = "multi_thread")]
 async fn a_size_not_measured_within_its_limit_is_left_out() {
     let (mut s, _clock) = listing_with(|config| config.measure_limit = Duration::ZERO).await;
@@ -583,7 +582,7 @@ async fn a_size_not_measured_within_its_limit_is_left_out() {
 
 /// An id that names nothing, or a thing that is no longer an item, is
 /// `not_found`.
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn inspecting_what_is_no_longer_an_item_is_not_found() {
     let (mut s, _clock) = listing().await;
@@ -604,7 +603,7 @@ async fn inspecting_what_is_no_longer_an_item_is_not_found() {
 }
 
 /// The default limit on measuring a folder is 30 seconds.
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R31
 #[test]
 fn a_folder_is_measured_for_thirty_seconds() {
     assert_eq!(ersa_core::workspace::MEASURE_LIMIT, Duration::from_secs(30));

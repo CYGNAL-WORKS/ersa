@@ -19,7 +19,7 @@ const CAP: usize = 8;
 /// every place, one each: a ninth inspect, even of a branch, which reads
 /// no folder, answers `vcs_error` at once. Once they go on, an inspect is
 /// answered again.
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn an_inspect_holds_one_place_and_with_none_free_answers_at_once() {
     let gate = Arc::new(Gate::default());

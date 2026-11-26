@@ -1208,7 +1208,7 @@ fn cleanup_inspections() -> Vec<CleanupInspection> {
 /// inspected folder with counts, a workspace without its sessions, and an
 /// inspected branch without `merged` all fail.
 // verifies: FLOW-CLEAN-UP-R11
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[test]
 fn a_cleanup_item_carries_its_own_kinds_fields() {
     let branch = to_value(&cleanup_items()[2]);

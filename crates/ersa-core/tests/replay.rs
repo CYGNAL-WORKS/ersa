@@ -263,7 +263,7 @@ async fn suite_a_connection_without_hello_is_closed_after_the_deadline() {
 /// list: its project is no git project, and its one workspace is the
 /// project's own folder.
 // verifies: FLOW-CLEAN-UP-R11
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn the_clean_up_list_of_a_replay_is_empty() {
     let replay = start_replay(Pace::Instant).await;
