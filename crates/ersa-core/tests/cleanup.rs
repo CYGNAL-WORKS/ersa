@@ -791,3 +791,74 @@ async fn a_session_core_cannot_date_is_never_inactive() {
         );
     }
 }
+
+/// A dormant session its backend never named (stored before a start that
+/// failed, say) has no record another process could have open, so only
+/// its being dormant keeps its workspace off the list.
+// verifies: FLOW-CLEAN-UP-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dormant_session_its_backend_never_named_keeps_its_workspace_off_the_list() {
+    let (mut s, clock) = listing().await;
+    let workspace = s.workspace().await;
+    let session = session_in(&mut s, &workspace).await;
+    std::fs::write(folder(&workspace).join("notes.txt"), "mine\n").unwrap();
+    archive(&mut s, &clock, &session).await;
+    assert_eq!(
+        ids(&list(&mut s, 30).await, "workspace"),
+        vec![ws_id(&workspace)]
+    );
+    // An archived session there of a backend this build has no adapter for,
+    // never named by it.
+    let row = ersa_core::persistence::SessionRow {
+        id: "s-ghost".into(),
+        workspace_id: id(&workspace).to_string(),
+        host_id: "local".into(),
+        backend: "ghost".into(),
+        backend_session_id: None,
+        mode: None,
+        model: None,
+        effort: None,
+        permission_mode: None,
+        model_at: None,
+        effort_at: None,
+        permission_mode_at: None,
+        cwd: workspace["path"].as_str().unwrap().to_string(),
+        archived: true,
+        deleting: None,
+        pinned: false,
+        section_id: None,
+        forked_from: None,
+        forked_through: None,
+        started_elsewhere: false,
+        unseen: false,
+    };
+    s.core.core().store.insert_session(row).await.unwrap();
+
+    // The next Core knows it from the store, as it is: dormant.
+    let Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    } = s;
+    drop(client);
+    let dir = support::shut_down(core).await;
+    let sweeps = Sweeps::Driven(Arc::new(SweepClock::default()));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, move |c| c.sweeps = sweeps, adapters).await;
+    let client = core.client().await;
+    let mut s = Setup {
+        core,
+        client,
+        repo,
+        project,
+        stats,
+    };
+    assert!(ids(&list(&mut s, 30).await, "workspace").is_empty());
+    let error = s
+        .client
+        .error("cleanup.inspect", json!({ "id": ws_id(&workspace) }))
+        .await;
+    assert_eq!(kind(&error), "not_found", "{error}");
+}

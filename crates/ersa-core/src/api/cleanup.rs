@@ -87,9 +87,14 @@ pub(super) async fn list(
         }
     }
     items.extend(branch_items(core, &world, &surveys).await?);
-    let (folders, unreadable) = folder_items(core, &world, &surveys).await?;
+    let (folders, unreadable) = folder_items(core, &world, &surveys).await;
     items.extend(folders);
-    unread.extend(unreadable);
+    // Each project once, with the first reason found.
+    for more in unreadable {
+        if !unread.iter().any(|u| u.project_id == more.project_id) {
+            unread.push(more);
+        }
+    }
     Ok(CleanupListResult { items, unread })
 }
 
@@ -380,10 +385,8 @@ async fn judge_workspace(
     if workspace.state != WorkspaceState::Ready {
         return Ok(None);
     }
-    // One marked deleting admission counts as in use, above. A dormant
-    // one, whose backend has no adapter in this build, can't be asked
-    // whether another process has it open, below, so it keeps the
-    // workspace off the list too.
+    // One marked deleting admission counts as in use, above; a dormant
+    // one, below.
     let sessions: Vec<Option<&Session>> = there
         .iter()
         .map(|row| world.sessions.iter().find(|s| s.id == row.id))
@@ -412,7 +415,10 @@ async fn judge_workspace(
         }
     }
     // Last, since it asks the operating system about each session. One
-    // Core can't ask, a dormant one among them, may be open.
+    // Core can't ask may be open: a dormant one, whose backend has no
+    // adapter in this build, is never loaded, so Core can't find it to ask
+    // whether or not its backend ever named it, and it keeps the workspace
+    // off the list.
     for row in &there {
         let Some(transport) = core.session_transport_for(&row.host_id) else {
             return Ok(None);
@@ -536,7 +542,7 @@ async fn folder_items(
     core: &Core,
     world: &World,
     surveys: &BTreeMap<String, Survey>,
-) -> Result<(Vec<CleanupItem>, Vec<CleanupUnread>), ApiError> {
+) -> (Vec<CleanupItem>, Vec<CleanupUnread>) {
     let mut items = Vec::new();
     let mut unread = Vec::new();
     // What can't be read leaves every project's folder unread, as a
@@ -553,12 +559,12 @@ async fn folder_items(
     };
     let root = match worktrees_root(core).await {
         Ok(Some(root)) => root,
-        Ok(None) => return Ok((items, unread)),
-        Err(e) => return Ok((items, read_all(e))),
+        Ok(None) => return (items, unread),
+        Err(e) => return (items, read_all(e)),
     };
     let named = match world.workspace_keys().await {
         Ok(named) => named,
-        Err(e) => return Ok((items, read_all(e))),
+        Err(e) => return (items, read_all(e)),
     };
     let mut done: HashSet<String> = HashSet::new();
     for project in world.git_projects() {
@@ -587,22 +593,30 @@ async fn folder_items(
                 continue;
             }
         };
+        // A folder that can't be judged leaves the whole project's folder
+        // unread, with none of its items.
+        let mut found = Vec::new();
+        let mut failed = None;
         for name in names {
             let path = folder.join(&name).display().to_string();
             match unidentified(&path, &named, &read).await {
-                Ok(true) => items.push(folder_item(&project.id, &name, path)),
+                Ok(true) => found.push(folder_item(&project.id, &name, path)),
                 Ok(false) => {}
                 Err(e) => {
-                    unread.push(CleanupUnread {
-                        project_id: project.id.clone(),
-                        message: e.0.message,
-                    });
+                    failed = Some(e);
                     break;
                 }
             }
         }
+        match failed {
+            None => items.extend(found),
+            Some(e) => unread.push(CleanupUnread {
+                project_id: project.id.clone(),
+                message: e.0.message,
+            }),
+        }
     }
-    Ok((items, unread))
+    (items, unread)
 }
 
 /// Whether no workspace (by `named`, their keys) and no worktree record in
