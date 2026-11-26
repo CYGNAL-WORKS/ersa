@@ -11,7 +11,8 @@ use std::time::Duration;
 use common::{RecordingSink, fixture, is_kind, settings_answer};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{
-    Adapter, AdapterError, Direction, PermissionDecision, ProcessSpec, QuestionReply, SessionConfig,
+    Adapter, AdapterError, Direction, ModelReport, PermissionDecision, ProcessSpec, QuestionReply,
+    SessionConfig,
 };
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_protocol::events::{Answer, AnswerValue, PermissionBehavior};
@@ -456,6 +457,90 @@ async fn the_probe_gives_up_on_get_settings_60_seconds_after_it_started() {
         waited >= Duration::from_secs(60) && waited < Duration::from_secs(61),
         "{waited:?}"
     );
+}
+
+/// The recorded `initialize` answer of `name`, the line that lists the models.
+fn recorded_init_answer(name: &str) -> String {
+    fixture(name)
+        .stdout
+        .into_iter()
+        .find(|line| parse(line)["response"]["response"]["models"].is_array())
+        .unwrap_or_else(|| panic!("{name} answers initialize with its models"))
+}
+
+/// What the probe reports for a CLI that answers `initialize` with `answer`.
+async fn probe_report(answer: String) -> ModelReport {
+    adapter()
+        .models(Arc::new(probe_stub(answer)))
+        .await
+        .expect("models")
+}
+
+/// The probe's recorded answers on 2.1.330 and 2.1.316, signed out on the
+/// machine's own configuration, list the CLI as signed out, with the models
+/// they list and the default effort `get_settings` names.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R83
+#[tokio::test]
+async fn a_recorded_signed_out_probe_reports_signed_out_with_its_models() {
+    for name in [
+        "2.1.330/00-probe-get-settings",
+        "2.1.316/55-probe-get-settings",
+    ] {
+        let answer = recorded_init_answer(name);
+        let listed = parse(&answer)["response"]["response"]["models"]
+            .as_array()
+            .unwrap()
+            .len();
+        let report = probe_report(answer).await;
+        assert!(report.signed_out, "{name}");
+        assert!(listed > 0, "{name}");
+        assert_eq!(report.models.len(), listed, "{name}");
+        assert_eq!(report.default_effort.as_deref(), Some("medium"), "{name}");
+    }
+}
+
+/// A CLI given a key by its environment reports `tokenSource: "none"` too,
+/// beside `apiKeySource`; it is not signed out, and neither is a signed-in
+/// one, which names an account and no `tokenSource`. Both recorded.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R83
+#[tokio::test]
+async fn a_recorded_key_or_sign_in_is_not_signed_out() {
+    for name in [
+        "2.1.330/01-probe-key-in-environment",
+        "2.1.316/00-session-tools",
+    ] {
+        let report = probe_report(recorded_init_answer(name)).await;
+        assert!(!report.signed_out, "{name}");
+        assert!(!report.models.is_empty(), "{name}");
+    }
+}
+
+/// Only the whole recorded shape is signed out: `tokenSource` `none`,
+/// `apiProvider` `firstParty`, no `apiKeySource`. Change any one of them,
+/// or leave `account` out, and the CLI lists as before.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R83
+#[tokio::test]
+async fn any_other_account_lists_as_before() {
+    let signed_out = parse(&recorded_init_answer("2.1.330/00-probe-get-settings"));
+    let with = |change: &dyn Fn(&mut Value)| {
+        let mut answer = signed_out.clone();
+        change(&mut answer["response"]["response"]["account"]);
+        answer.to_string()
+    };
+    let others = [
+        with(&|a| a["tokenSource"] = json!("claude.ai")),
+        with(&|a| a["apiProvider"] = json!("bedrock")),
+        with(&|a| a["apiKeySource"] = json!("apiKeyHelper")),
+        with(&|a| *a = Value::Null),
+        with(&|a| {
+            a.as_object_mut().unwrap().remove("tokenSource");
+        }),
+    ];
+    for answer in others {
+        let report = probe_report(answer.clone()).await;
+        assert!(!report.signed_out, "{answer}");
+        assert!(!report.models.is_empty(), "{answer}");
+    }
 }
 
 /// A CLI that never answers is one that cannot report its models.

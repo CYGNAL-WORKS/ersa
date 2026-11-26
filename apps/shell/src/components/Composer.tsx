@@ -16,7 +16,8 @@ import "./Composer.css";
  * again, or has stopped trying (FLOW-SEND-MESSAGE-R06); the host's backends are being detected
  * (FLOW-NEW-SESSION-R23); the host could not list its backends, with the reason (FLOW-NEW-SESSION-R11); or the host
  * has no backend to run: by its label, one that failed detection (FLOW-NEW-SESSION-R07), else none Ersa can find
- * (FLOW-NEW-SESSION-R52).
+ * (FLOW-NEW-SESSION-R52); or none can run and one is signed out, which the line leaves to the backend chip and the
+ * sign-in note (docs/design/COMPOSER.md, The status line).
  */
 export type Unavailable =
   | "reconnecting"
@@ -24,6 +25,7 @@ export type Unavailable =
   | "detecting"
   /** Every backend on the host is missing (FLOW-NEW-SESSION-R52): the label of the host's lone backend, if it lists one. */
   | { cantFind: string | undefined }
+  | "signed-out"
   | { failedBackend: string }
   | { detectionFailed: string };
 
@@ -450,6 +452,8 @@ function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked,
     const words = unavailable.cantFind === undefined ? t("composer.cantFindAnyError") : t("composer.cantFindOneError", { label: unavailable.cantFind });
     return <p className="composer-status-line">{words}</p>;
   }
+  // A signed-out backend is said by the backend chip and the sign-in note, not here (docs/design/COMPOSER.md).
+  if (unavailable === "signed-out") return null;
   if (typeof unavailable === "object" && "detectionFailed" in unavailable) {
     return <p className="composer-status-line">{t("composer.detectionFailedError")} {unavailable.detectionFailed}</p>;
   }

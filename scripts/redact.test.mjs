@@ -28,6 +28,8 @@ import {
   nextFixtureNumber,
   redact,
   repoRules,
+  scrubUserName,
+  secretsIn,
 } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
@@ -172,6 +174,102 @@ test("a new fixture takes one past the highest number in its folder, whatever th
   }
 });
 
+// Values a test invents to look like what a sign-in could leak. None is real.
+const FAKE_OAUTH_TOKEN = "sk-ant-oat01-" + "Zq3vXk9TmB2wLp7RcY4nHs8dJf6GaE1u".repeat(3);
+const FAKE_JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXBhcnQ";
+const FAKE_CODE = "Xk9TmB2wLp7RcY4nHs8dJf6GaE1uZq3v";
+
+test("a token, a key or an authorization code fails the check, which names its line and kind and never its value", () => {
+  for (const [line, kind] of [
+    [`{"accessToken":"${FAKE_OAUTH_TOKEN}"}`, "an Anthropic key or token"],
+    [`stored ${FAKE_OAUTH_TOKEN} for later`, "an Anthropic key or token"],
+    ["ANTHROPIC_API_KEY=sk-ant-api03-abcDEF123456", "an Anthropic key or token"],
+    [`{"id":"${FAKE_JWT}"}`, "a JSON web token"],
+    ["Authorization: Bearer abcdefghij0123", "a bearer token"],
+    [`http://localhost:54545/callback?code=${FAKE_CODE.slice(0, 12)}&state=REDACTED`, "a code or token in an address"],
+    ["https://x.example/cb#access_token=abc123def456", "a code or token in an address"],
+    ['{"refresh_token":"abc123def"}', "a token, key or code field"],
+    ['{"authorizationCode": "short-code"}', "a token, key or code field"],
+    ['{\\"apiKey\\":\\"abcdefgh\\"}', "a token, key or code field"],
+    [`{"code":"${FAKE_CODE}"}`, "a random-looking string"],
+    [`paste this: ${FAKE_CODE}`, "a random-looking string"],
+  ]) {
+    const found = secretsIn(`{"type":"ok"}\n${line}\n`);
+    assert.deepEqual([...new Set(found.map((f) => f.line))], [2], line);
+    assert.ok(found.some((f) => f.kind === kind), `${line}: ${JSON.stringify(found)}`);
+    const said = JSON.stringify(found);
+    assert.ok(!said.includes(FAKE_CODE.slice(0, 12)) && !said.includes("abc123") && !said.includes("abcdefg"), "a finding never carries the value");
+  }
+});
+
+test("the check passes what a recording carries that is not a secret", () => {
+  for (const line of [
+    '{"type":"assistant","message":{"id":"msg_01AbCdEfGh1234567890XyZaBc","content":[{"type":"tool_use","id":"toolu_01AbCdEfGh1234567890XyZaBcDe"}]}}',
+    '{"error":{"request_id":"req_011CVaBcDeFgHiJkLmNoPq12Rs34"}}',
+    '{"type":"thinking","signature":"CAQSzgYKEAgTGAI4AUIIdGhpbmtpbmcSDGhAqBpU9xYz1kT3wQ7Lm2VnR8"}',
+    '{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"}}',
+    "projects\\\\C--Users-user-AppData-Local-Temp-ersa-rec-AbC123xYz9Q8w7",
+    '{"session_id":"1b2c3d4e-0000-4000-8000-123456789abc","sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}',
+    '{"code":"ENOENT","subtype":"error_during_execution","tokenSource":"none","apiKeySource":"ANTHROPIC_API_KEY"}',
+    '{"usage":{"input_tokens":12,"cache_read_input_tokens":0},"tokens":3}',
+    "https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&code_challenge=REDACTED&state=REDACTED",
+    '{"name":"ReadMcpResourceToolWithLongName","description":"ListMcpResourcesTool returns MCP resources"}',
+  ]) {
+    assert.deepEqual(secretsIn(line), [], line);
+  }
+});
+
+// A fixed stream of pseudo-random bytes, so the measure below is the same on every run.
+function* seededBytes(seed) {
+  let x = seed;
+  for (;;) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    x >>>= 0;
+    yield x & 0xff;
+  }
+}
+
+test("the check catches a random token of an unknown kind nearly always", () => {
+  const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const bytes = seededBytes(633);
+  let missed = 0;
+  for (let i = 0; i < 2000; i++) {
+    let token = "";
+    for (let j = 0; j < 32 + (i % 48); j++) token += ALPHABET[bytes.next().value & 63];
+    if (secretsIn(`{"value":"${token}"}`).length === 0) missed++;
+  }
+  assert.ok(missed <= 20, `missed ${missed} of 2000`);
+});
+
+test("redacts the one-time values in a sign-in address and keeps its shape", () => {
+  const address =
+    "https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A54545%2Fcallback&scope=user%3Aprofile&code_challenge=Xk9TmB2wLp7RcY4nHs8dJf6GaE1uZq3vAb12Cd34Ef5&code_challenge_method=S256&state=Zq3vXk9TmB2wLp7RcY4nHs8dJf6GaE1uAb12Cd34Ef5&login_hint=jo%40mail.com";
+  const out = redact(`{"automaticUrl":"${address}"}`);
+  assert.equal(
+    out,
+    '{"automaticUrl":"https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A54545%2Fcallback&scope=user%3Aprofile&code_challenge=REDACTED&code_challenge_method=S256&state=REDACTED&login_hint=REDACTED"}',
+  );
+  assert.equal(redact(out), out);
+  assert.deepEqual(secretsIn(out), []);
+  // Before redaction the one-time values look random, so the check fails them.
+  assert.notDeepEqual(secretsIn(address), []);
+  // A nonce, which an OpenID sign-in address carries, in a fragment too.
+  assert.equal(redact("https://x.example/a?nonce=Zq3vXk9TmB2wLp7R#nonce=abc"), "https://x.example/a?nonce=REDACTED#nonce=REDACTED");
+});
+
+test("redacts an email address written into an address", () => {
+  assert.equal(redact("https://x.example/?email=jo.doe%40mail.com&x=1"), "https://x.example/?email=REDACTED&x=1");
+  assert.equal(redact("see jo.doe%40mail.com"), `see ${PLACEHOLDER_EMAIL}`);
+});
+
+test("replaces the machine's user name as a word, in any case", () => {
+  assert.equal(scrubUserName("C:/x/jodoe/y and JoDoe's", "jodoe"), "C:/x/user/y and user's");
+  assert.equal(scrubUserName("jodoesmith", "jodoe"), "jodoesmith");
+  assert.equal(scrubUserName("al and al", "al"), "al and al", "a name under three letters is left, since it would match too much");
+});
+
 function* recordings() {
   // The protocol fixtures, every adapter's tests, where its goldens live, and
   // the Shell's replays, which Core builds from the fixtures.
@@ -200,7 +298,7 @@ const allowed = (m) => /^C:(?:\\\\|\/)(?:Users(?:\\\\|\/)user|Windows)\b/i.test(
 const lineOf = (text, index) => text.slice(0, index).split("\n").length;
 const USED_RE = /"used"\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
 
-test("guard: no recording or golden carries a real email, home path, path on the owner's disk or account detail", () => {
+test("guard: no recording or golden carries a real email, home path, path on the owner's disk, account detail, token, key or code", () => {
   const found = [];
   for (const file of recordings()) {
     const text = readFileSync(file, "utf8");
@@ -215,6 +313,7 @@ test("guard: no recording or golden carries a real email, home path, path on the
       for (const m of text.matchAll(re)) if (!allowed(m[0])) at(m, "a path on the recording machine");
     }
     for (const { line, field } of accountDetails(text)) found.push(`${file}:${line}: ${field} as recorded`);
+    for (const { line, kind } of secretsIn(text)) found.push(`${file}:${line}: ${kind}`);
     // Goldens and replays carry a window's share as Ersa projects it, `used`.
     for (const m of text.matchAll(USED_RE)) if (Number(m[1]) !== PLACEHOLDER_USAGE) at(m, "a usage window's share (used) as recorded");
   }

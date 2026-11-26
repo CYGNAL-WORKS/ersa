@@ -515,6 +515,7 @@ impl Transport for ScratchProbe {
 /// folder. Under a scratch configuration folder, so it reads nothing of the
 /// user's and makes no model call.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R39
+// verifies: PROTO-CLAUDE-CODE-STREAM-R83
 #[tokio::test]
 #[ignore = "drives the installed Claude Code CLI; run by hand"]
 async fn the_model_probe_lists_the_clis_models_and_leaves_no_record() {
@@ -533,6 +534,13 @@ async fn the_model_probe_lists_the_clis_models_and_leaves_no_record() {
         levels.contains(&report.default_effort.as_deref().unwrap_or("")),
         "{:?}",
         report.default_effort
+    );
+    // Nobody is signed in under an empty configuration folder with every
+    // credential the machine has taken away, and the CLI says so, still
+    // listing its models (PROTO-CLAUDE-CODE-STREAM-R83).
+    assert!(
+        report.signed_out,
+        "an empty configuration lists as signed out"
     );
     let models = report.models;
     assert_eq!(models.first().map(|m| m.id.as_str()), Some("default"));

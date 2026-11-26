@@ -726,6 +726,10 @@ Loading…
 
 Nothing yet. Write to the agent below.
 
+### `transcript.notSignedInError`
+
+{backend} wasn't signed in.
+
 ### `transcript.thinkingProgress`
 
 Thinking…
@@ -1201,6 +1205,10 @@ Detection failed
 ### `sessionControls.notFoundStatus`
 
 Not found
+
+### `sessionControls.signedOutStatus`
+
+Signed out
 
 ### `sessionControls.noBackendStatus`
 

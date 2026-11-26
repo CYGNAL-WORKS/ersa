@@ -70,11 +70,23 @@ interface SessionControlsProps {
   force?: { key: ControlKey; state: "hover" | "focus" | "pressed" };
 }
 
+/**
+ * A backend in the backend chip's list: its version while it can run, else why it can't, and then it is shown and not
+ * choosable (FLOW-NEW-SESSION-R07); a signed-out one reads Signed out, as a missing one reads its status
+ * (FLOW-SIGN-IN-R02).
+ */
 const backendOption = (b: BackendInfo): ChipOption => ({
   id: b.name,
   label: b.label,
   // A missing backend is one Ersa didn't find where it looked, never one said to be uninstalled (FLOW-NEW-SESSION-R52).
-  status: b.status === "missing" ? t("sessionControls.notFoundStatus") : b.status === "error" ? t("sessionControls.detectionFailedStatus") : b.version,
+  status:
+    b.status === "missing"
+      ? t("sessionControls.notFoundStatus")
+      : b.status === "error"
+        ? t("sessionControls.detectionFailedStatus")
+        : b.status === "signed_out"
+          ? t("sessionControls.signedOutStatus")
+          : b.version,
   failed: b.status === "error",
   unavailable: b.status !== "available",
 });

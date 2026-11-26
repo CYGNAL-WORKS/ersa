@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 7;
+export const CORE_API_VERSION = 8;
 
 /**
  * Any line on the socket.
@@ -799,7 +799,6 @@ export interface ErrorData {
     | "not_found"
     | "invalid_state"
     | "backend_missing"
-    | "backend_not_logged_in"
     | "vcs_error"
     | "transport_error"
     | "permission"
@@ -912,7 +911,7 @@ export interface BackendStatus {
    * Absent when the backend is not installed or its version could not be read.
    */
   version?: string;
-  status: "available" | "missing" | "error";
+  status: "available" | "missing" | "error" | "signed_out";
 }
 export interface BackendInfo {
   name: string;
@@ -924,7 +923,7 @@ export interface BackendInfo {
    * Absent when the backend is not installed or its version could not be read.
    */
   version?: string;
-  status: "available" | "missing" | "error";
+  status: "available" | "missing" | "error" | "signed_out";
   /**
    * The oldest and newest backend versions the adapter was tested with.
    */

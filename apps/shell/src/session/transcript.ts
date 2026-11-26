@@ -60,8 +60,10 @@ export type Item =
   /** A question, answered once its answer arrives, `declined` when the user chose not to answer; `unanswered` once
    *  the session ended without one. */
   | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean; declined?: true; unanswered?: true }
-  /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. */
-  | { kind: "problem"; key: string; message: string }
+  /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. `signIn` when the error
+   *  asks the person to sign in (`action: log_in`): the line then says so in Ersa's words, by the backend's label, in
+   *  place of `message` (FLOW-SIGN-IN-R16). */
+  | { kind: "problem"; key: string; message: string; signIn?: true }
   | { kind: "notice"; key: string; message: string }
   | { kind: "ended"; key: string; reason: string };
 
@@ -182,7 +184,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "question.answered":
       return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true, ...(event.declined ? { declined: true as const } : {}) }));
     case "error":
-      return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
+      return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message, ...(event.action === "log_in" ? { signIn: true as const } : {}) });
     // Shown elsewhere (the tile carries usage), or nowhere (passthrough: the developer pane lists the raw log's lines,
     // not events), or implied by the items around them.
     case "turn.completed": {

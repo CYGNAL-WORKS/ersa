@@ -18,7 +18,7 @@ async fn open_fake() -> (CoreLink, BufReader<DuplexStream>) {
     let answer = async {
         let mut hello = String::new();
         core.read_line(&mut hello).await.expect("hello arrives");
-        reply_to(&mut core, &hello, json!({ "api_version": 7 })).await;
+        reply_to(&mut core, &hello, json!({ "api_version": 8 })).await;
     };
     let (link, ()) = tokio::join!(open, answer);
     (link.expect("handshake"), core)

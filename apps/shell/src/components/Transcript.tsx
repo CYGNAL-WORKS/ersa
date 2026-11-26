@@ -47,6 +47,12 @@ interface TranscriptProps {
   workspace?: string;
   /** Now, for the gallery's running cards; the window reads the clock. */
   now?: number;
+  /**
+   * The session's backend by its label, which the line for a message that failed as not signed in names
+   * (FLOW-SIGN-IN-R16). Absent where no session's backend is known, as in the gallery: that line then shows the
+   * backend's own message.
+   */
+  backend?: string;
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
@@ -65,6 +71,7 @@ export function Transcript({
   onOpenLink,
   workspace,
   now,
+  backend,
 }: TranscriptProps) {
   const { transcript, stream } = view;
   const scroller = useRef<HTMLDivElement>(null);
@@ -122,6 +129,7 @@ export function Transcript({
               onDecide={onDecide}
               onAnswer={onAnswer}
               onOpenLink={onOpenLink}
+              backend={backend}
             />
             ),
           )}
@@ -190,6 +198,8 @@ interface BlockProps {
   onDecide: Decide;
   onAnswer: AnswerQuestion;
   onOpenLink?: OpenLink;
+  /** The session's backend by its label (TranscriptProps). */
+  backend?: string;
 }
 
 /** The answer on its way or refused for a request still open, if any. */
@@ -263,7 +273,7 @@ function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
  * One block. Memoised: items keep their identity until their own event
  * changes them, so a streamed delta re-renders one block, not the page.
  */
-const Block = memo(function Block({ item, answer, tools, live, onDecide, onAnswer, onOpenLink }: BlockProps) {
+const Block = memo(function Block({ item, answer, tools, live, onDecide, onAnswer, onOpenLink, backend }: BlockProps) {
   switch (item.kind) {
     case "user":
       return <UserBubble item={item} />;
@@ -281,7 +291,8 @@ const Block = memo(function Block({ item, answer, tools, live, onDecide, onAnswe
     case "problem":
       return (
         <p className="problem" role="alert">
-          {item.message}
+          {/* A failure to sign in, in Ersa's words: the backend's own names a command nobody using Ersa can run (FLOW-SIGN-IN-R16). */}
+          {item.signIn && backend !== undefined ? t("transcript.notSignedInError", { backend }) : item.message}
         </p>
       );
     case "notice":
