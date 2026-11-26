@@ -1507,6 +1507,13 @@ const entries: Entry[] = [
       ["Ready, at the defaults", <NewSessionScreen {...newSession} backends={oneBackend} forceFocus />],
       ["Project without version control", <NewSessionScreen {...newSession} backends={oneBackend} projectId="p3" />],
       ["Backend missing, beside one available", room(<NewSessionScreen {...newSession} open="backend" />)],
+      // FLOW-SIGN-IN-R02: a signed-out backend reads Signed out, shown and not choosable; alone, the chip reads No
+      // backend and the status line leaves it to the sign-in note, which a later change adds.
+      [
+        "Backend signed out, beside one available",
+        room(<NewSessionScreen {...newSession} backends={{ local: [claudeCode, { ...copilot("signed_out"), version: "1.0.0" }] }} open="backend" />),
+      ],
+      ["Backend signed out, the only one", room(<NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "signed_out" }] }} open="backend" />)],
       ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
       ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
       // FLOW-NEW-SESSION-R11: the listing failed, which is not a host without backends.

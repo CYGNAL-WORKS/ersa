@@ -197,6 +197,28 @@ describe("the new-session screen", () => {
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 
+  // verifies: FLOW-SIGN-IN-R02
+  it("lists a signed-out backend as Signed out, shown and not choosable, as it shows a missing one", () => {
+    const html = render({ backends: { local: [claude(), { ...copilot("signed_out"), version: "1.0.0" }] }, open: "backend" });
+    expect(chips(html)).toContain("Backend: Claude Code");
+    // Its status in place of its version, unavailable, and not marked as failed.
+    expect(html).toMatch(/aria-disabled="true"[^>]*>.*GitHub Copilot.*Signed out/);
+    expect(html).not.toMatch(/GitHub Copilot[^<]*<[^>]*>[^<]*1\.0\.0/);
+    expect(html).not.toContain("data-failed");
+  });
+
+  // verifies: FLOW-SIGN-IN-R02
+  it("offers no backend while the lone one is signed out, and the status line leaves it to the chip", () => {
+    const html = render({ backends: { local: [claude("signed_out")] }, open: "backend" });
+    expect(chips(html)).toContain("Backend: No backend");
+    expect(html).toMatch(/aria-disabled="true"[^>]*>.*Claude Code.*Signed out/);
+    // Not said to be missing or broken: the sign-in note says it, once it lands (docs/design/COMPOSER.md).
+    expect(html).not.toContain("No backend is available on this host.");
+    expect(html).not.toContain("isn&#x27;t working");
+    expect(html).not.toContain("composer-status-line");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
+  });
+
   // verifies: FLOW-NEW-SESSION-R07
   it("names a backend that failed detection, by its label, when none can run", () => {
     const copilot: BackendInfo = { ...claude("missing"), name: "copilot", label: "GitHub Copilot" };
