@@ -237,7 +237,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 unread: Vec::new(),
             }),
         ),
-        // What removing each kind would lose (FLOW-CLEAN-UP-R12, R26).
+        // What removing each kind would lose (FLOW-CLEAN-UP-R30, R26).
         (Method::CleanupInspect, to_value(&cleanup_inspections()[0])),
         (Method::CleanupInspect, to_value(&cleanup_inspections()[1])),
         (Method::CleanupInspect, to_value(&cleanup_inspections()[2])),
@@ -1239,7 +1239,7 @@ fn cleanup_inspections() -> Vec<CleanupInspection> {
 /// inspected folder with counts, a workspace without its sessions, and an
 /// inspected branch without `merged` all fail.
 // verifies: FLOW-CLEAN-UP-R11
-// verifies: FLOW-CLEAN-UP-R12
+// verifies: FLOW-CLEAN-UP-R30
 #[test]
 fn a_cleanup_item_carries_its_own_kinds_fields() {
     let branch = to_value(&cleanup_items()[2]);
