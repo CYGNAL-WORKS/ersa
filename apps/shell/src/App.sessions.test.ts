@@ -90,6 +90,7 @@ function fakeShell() {
   const stopped = vi.fn();
   return {
     stopped,
+    onWindowBack: () => () => {},
     onQuitRequested: () => () => {},
     quitHeard: async () => {},
     show: async () => false,

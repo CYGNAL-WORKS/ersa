@@ -35,7 +35,7 @@ import { type Follower, type SendProgress, type SessionView, type Sending, type 
 import { type Moving, sectionsUnavailable, useSections } from "./session/sections";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
-import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
+import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
 import { type RawLogReader, type RawLogView, readRawLog } from "./session/rawLog";
@@ -84,6 +84,18 @@ function useVersion(value: unknown): string {
   return String(seen.current.version);
 }
 
+/**
+ * What a host's readings of its backends left: the last listing Core answered with, and why the latest failed, with
+ * the connection it failed on.
+ */
+interface HostReading {
+  listing?: BackendInfo[];
+  failed?: { reason: string; link: unknown };
+}
+
+/** Whether a host's latest reading failed on `link`, the connection now: only its failures count. */
+const failedOn = (r: HostReading, link: unknown) => r.failed !== undefined && r.failed.link === link;
+
 export function App({ client, shell }: { client: CoreClient; shell?: ShellControl }) {
   const [view, setView] = useState<CoreView>({ phase: "connecting" });
   // The labeled endpoint a debug build is attached to, kept once Core has named it: the Shell fixes it at start, so it
@@ -104,10 +116,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // status line names it again on coming back (FLOW-SEND-MESSAGE-R19). In memory only: a reload names none.
   const waitingKept = useRef<Record<string, readonly WaitingHere[] | undefined>>({});
 
-  // What the screen offers: each host's backends, and the values each project last started a session with.
-  const [backends, setBackends] = useState<Record<string, BackendInfo[]>>({});
-  // Why each host's backends could not be listed, by host id: the screen says detection failed (FLOW-NEW-SESSION-R11).
-  const [backendFailures, setBackendFailures] = useState<Record<string, string>>({});
+  // What each host's readings of its backends left, by host id: the last listing Core answered with, and why the
+  // latest reading failed, if it did. Held together so that one update settles both.
+  const [hostReadings, setHostReadings] = useState<Record<string, HostReading>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
   // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
   // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.
@@ -358,32 +369,79 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setQuitAsk(undefined);
   };
 
-  // The screen's choices, read again on each new connection: Core may have found a backend since.
+  // A host's backends, read on each new connection and again each time the new-session screen asks
+  // (FLOW-NEW-SESSION-R50): Core may have found a backend since. A reading already out for the host answers for a
+  // second ask, as when the window's showing and its focus arrive together; a reading from a connection since gone
+  // is dropped, and holds back none on the new one.
+  const readings = useRef<{ link: unknown; hosts: Set<string> }>({ link: undefined, hosts: new Set() });
+  const readHostBackends = useCallback(
+    (hostId: string) => {
+      if (link === undefined) return;
+      if (readings.current.link !== link) readings.current = { link, hosts: new Set() };
+      const out = readings.current;
+      if (out.hosts.has(hostId)) return;
+      out.hosts.add(hostId);
+      void readBackends(client, hostId).then((read) => {
+        if (readings.current !== out) return;
+        out.hosts.delete(hostId);
+        // Until the answer, the listing held stays, so a later reading shows nothing of itself (R50). A failure
+        // keeps the last listing Core answered with behind it, and names the connection it failed on (below).
+        setHostReadings((all) => ({
+          ...all,
+          [hostId]:
+            read.failed === undefined
+              ? { listing: read.backends }
+              : { listing: all[hostId]?.listing, failed: { reason: read.failed, link: out.link } },
+        }));
+      });
+    },
+    [client, link],
+  );
+  // Only this connection's failures count. A connection lost fails every reading still out on it, and the Shell
+  // reports that failure and the loss by separate paths, in either order, so the failure may land before the window
+  // knows the connection went. Counted by the connection it failed on, it says nothing from the new connection's
+  // first frame: a host that holds a listing shows it until this connection's reading answers (R50), and one Core
+  // never listed is detected again (R23). The answers still out from the last connection are dropped above.
+  // What the screen offers: each host's backends, absent while none has been read. A host whose latest reading
+  // failed offers none, and the screen says why (FLOW-NEW-SESSION-R11), even when it held a listing before.
+  const backends = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(hostReadings).flatMap(([host, r]) => (failedOn(r, link) ? [[host, []]] : r.listing ? [[host, r.listing]] : [])),
+      ) as Record<string, BackendInfo[]>,
+    [hostReadings, link],
+  );
+  // Why each host's backends could not be listed, by host id: the screen says detection failed (FLOW-NEW-SESSION-R11).
+  const backendFailures = useMemo(
+    () => Object.fromEntries(Object.entries(hostReadings).flatMap(([host, r]) => (r.failed && failedOn(r, link) ? [[host, r.failed.reason]] : []))),
+    [hostReadings, link],
+  );
   const hostId = view.phase === "connected" ? view.hello.host.id : undefined;
   useEffect(() => {
-    if (link === undefined || hostId === undefined) return;
+    if (hostId !== undefined) readHostBackends(hostId);
+  }, [readHostBackends, hostId]);
+  useEffect(() => {
+    if (link === undefined) return;
     let live = true;
     // Read once and shared: the new-session screen's remembered values, and the rail's arrangement (R13).
-    const settings = client.call("settings.get");
-    settings.then(
+    // Remembered values that cannot be read leave the screen at the defaults.
+    client.call("settings.get").then(
       (read) => {
         if (!live) return;
         readArrangement(read);
         readWorkbench(read);
+        setLastUsed(lastUsedFrom(read));
       },
-      (error) => live && arrangementUnread(describeError(error)),
+      (error) => {
+        if (!live) return;
+        arrangementUnread(describeError(error));
+        setLastUsed({});
+      },
     );
-    readChoices(client, hostId, settings).then((choices) => {
-      if (!live) return;
-      // A host whose backends could not be read offers none, and the screen says why (FLOW-NEW-SESSION-R11).
-      setBackends((b) => ({ ...b, [hostId]: choices.backends }));
-      setBackendFailures(({ [hostId]: _, ...rest }) => (choices.failed === undefined ? rest : { ...rest, [hostId]: choices.failed }));
-      setLastUsed(choices.lastUsed);
-    });
     return () => {
       live = false;
     };
-  }, [client, link, hostId, readArrangement, arrangementUnread, readWorkbench]);
+  }, [client, link, readArrangement, arrangementUnread, readWorkbench]);
 
   // Each host's name, by id, read on each new connection: the rail names a project's host when it is not this
   // machine. Best effort: a host not listed, or a read that failed or has not answered, is named by its id.
@@ -1137,6 +1195,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projects={screenProjects}
               backends={backends}
               backendFailures={backendFailures}
+              // Behind the sessions page the screen is not showing: coming back from it shows it again (R50).
+              shown={!sessionsPage}
+              onReadBackends={readHostBackends}
+              onWindowBack={shell?.onWindowBack}
               lastUsed={lastUsed}
               projectId={composing?.projectId}
               onStart={start}

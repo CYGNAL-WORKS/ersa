@@ -43,6 +43,7 @@ function listening(registered: Promise<() => void>): () => void {
 }
 
 export const tauriShell: ShellControl = {
+  onWindowBack: (handler) => listening(listen("window-back", () => handler())),
   onQuitRequested: (handler) => listening(listen("quit-requested", () => handler())),
   onDragDrop: (handler) =>
     listening(

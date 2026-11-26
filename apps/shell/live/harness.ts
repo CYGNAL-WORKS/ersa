@@ -15,7 +15,7 @@
 
 import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createWriteStream, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -64,6 +64,13 @@ export interface Ersa {
   restart(): Promise<void>;
   /** Closes the window as its close button does: the system's close message to the window. */
   closeWindow(): Promise<void>;
+  /**
+   * Opens the window again as a second launch of Ersa does: the Shell started once more finds the one running, which
+   * shows its window with the function the tray icon's click calls, and the second exits.
+   */
+  openWindow(): Promise<void>;
+  /** With `installedLater`: puts the stand-in where Core looks for the backend, as installing it while Ersa runs would. */
+  installBackend(): void;
   /** Whether the window is on screen: the Shell's process has a visible top-level window titled Ersa. */
   windowShown(): Promise<boolean>;
   /** Whether the Shell's process and Core's are both still running. */
@@ -126,11 +133,13 @@ process.once("exit", () => {
   }
 });
 
-export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
+export const test = base.extend<{ backend: Backend; installedLater: boolean; ersa: Ersa }>({
   backend: ["stand-in", { option: true }],
+  /** With the stand-in: Core finds no backend until the test calls `installBackend()`. */
+  installedLater: [false, { option: true }],
 
   ersa: [
-    async ({ backend }, use, testInfo) => {
+    async ({ backend, installedLater }, use, testInfo) => {
       const bin = binaries();
       // Which backend this test ran, beside its screenshots: scripts/live-shots.mjs publishes screenshots only from a
       // test whose record says `stand-in` (the file name is its BACKEND_RECORD). Written first, so no screenshot is
@@ -145,8 +154,11 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
       let browser: Browser | undefined;
       const unanswered: string[] = [];
       let launches = 0;
-      // The Shell's process, once launched.
+      // The Shell's process, once launched, and the environment it was launched with.
       let shell: ChildProcess | undefined;
+      let shellEnv: NodeJS.ProcessEnv = {};
+      // Where Core looks for the stand-in when it is installed later: nothing is there until `installBackend()`.
+      const later = path.join(dir, "later", path.basename(bin.standIn));
       // Runs a PowerShell expression about the Shell's process and returns what it printed.
       const aboutShell = async (expression: string) => {
         const { stdout } = await promisify(execFile)(
@@ -166,7 +178,7 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
         const log = (name: string) => testInfo.outputPath(nth === 1 ? `${name}.log` : `${name}-${nth}.log`);
         const coreEnv: NodeJS.ProcessEnv = { ...process.env };
         if (backend === "stand-in") {
-          coreEnv.ERSA_CLAUDE = bin.standIn;
+          coreEnv.ERSA_CLAUDE = installedLater ? later : bin.standIn;
           coreEnv.ERSA_STAND_IN_ANSWER = "1";
           // Session records go to the test's own folder, never the owner's: the stand-in writes one with a session's
           // first message, as the CLI does, and Core reads them from there.
@@ -179,21 +191,17 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
         await waitFor(() => corePipe(label) !== undefined, "Core to serve its endpoint", running, deadline);
 
         const port = await freePort();
-        shell = start(
-          bin.shell,
-          [],
-          {
-            ...process.env,
-            ERSA_ATTACH: label,
-            // The window opens without taking focus: Playwright drives it over CDP, which needs none.
-            ERSA_BACKGROUND: "1",
-            // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
-            // so it never shares the browser process of the owner's Ersa or of another run.
-            WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
-            WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
-          },
-          log("shell"),
-        );
+        shellEnv = {
+          ...process.env,
+          ERSA_ATTACH: label,
+          // The window opens without taking focus: Playwright drives it over CDP, which needs none.
+          ERSA_BACKGROUND: "1",
+          // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
+          // so it never shares the browser process of the owner's Ersa or of another run.
+          WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+          WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
+        };
+        shell = start(bin.shell, [], shellEnv, log("shell"));
         running.push(shell);
         await waitFor(() => debuggerUp(port), "the window's debugging port", running, deadline);
         browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: remaining(deadline) });
@@ -231,6 +239,14 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
             await aboutShell("[void]$p.CloseMainWindow()");
           },
           windowShown: async () => (await aboutShell(WINDOW_SHOWN)) === "True",
+          async openWindow() {
+            // The second launch asks the first to show its window, then exits on its own.
+            await promisify(execFile)(bin.shell, [], { env: shellEnv, windowsHide: true, timeout: 30_000 });
+          },
+          installBackend() {
+            mkdirSync(path.dirname(later), { recursive: true });
+            copyFileSync(bin.standIn, later);
+          },
           running: () => running.length > 0 && running.every((child) => !ended(child)),
           async restart() {
             await quit();

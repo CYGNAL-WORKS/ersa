@@ -188,6 +188,7 @@ describe("the developer pane in the window", () => {
 describe("Open diagnostic log in the window", () => {
   const shellWith = (openDiagnosticLog: () => Promise<void>) =>
     ({
+      onWindowBack: () => () => {},
       onQuitRequested: () => () => {},
       quitHeard: async () => {},
       show: async () => false,

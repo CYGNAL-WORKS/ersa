@@ -1613,8 +1613,8 @@ const entries: Entry[] = [
             value="claude-code"
             options={[
               { id: "claude-code", label: "Claude Code", status: "2.1.302" },
-              { id: "copilot", label: "GitHub Copilot", status: "Not installed", unavailable: true },
-              { id: "codex", label: "codex", status: "Detection failed", failed: true, unavailable: true },
+              { id: "copilot", label: "GitHub Copilot", status: t("sessionControls.notFoundStatus"), unavailable: true },
+              { id: "codex", label: "codex", status: t("sessionControls.detectionFailedStatus"), failed: true, unavailable: true },
             ]}
             onChoose={() => {}}
             initialOpen
@@ -1629,7 +1629,7 @@ const entries: Entry[] = [
             value="claude-code"
             options={[
               { id: "claude-code", label: "Claude Code", status: "2.1.302" },
-              { id: "copilot", label: "GitHub Copilot", status: "Not installed", unavailable: true },
+              { id: "copilot", label: "GitHub Copilot", status: t("sessionControls.notFoundStatus"), unavailable: true },
             ]}
             onChoose={() => {}}
             initialOpen
@@ -1811,7 +1811,9 @@ const entries: Entry[] = [
       ],
       ["Can't reach the sessions", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="unreachable" />)],
       ["Detecting backends", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="detecting" />)],
-      ["No backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="no-backend" />)],
+      // Every backend missing (FLOW-NEW-SESSION-R52): a host listing one names it; one listing several doesn't.
+      ["Can't find Claude Code", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ cantFind: "Claude Code" }} />)],
+      ["Can't find a backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ cantFind: undefined }} />)],
       ["A backend not working", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ failedBackend: "Claude Code" }} />)],
       [
         "Backends can't be listed",

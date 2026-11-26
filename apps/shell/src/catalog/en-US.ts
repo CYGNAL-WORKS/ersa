@@ -407,9 +407,12 @@ export const enUS = {
       countNote: { one: "{count} message waiting", other: "{count} messages waiting" },
     },
     detectingProgress: "Detecting the backends on this host…",
-    // The host has no backend to run: none installed, on the status line and as why a start is refused; or one
-    // that failed detection, by the label backend.list gives it.
-    noBackendError: "No backend is available on this host. Install a backend on it to start a session.",
+    // Every backend on the host is missing (FLOW-NEW-SESSION-R52): Ersa knows only where it looked, so it says it can't
+    // find the backend, never that none is installed, by its label when the host lists one alone; and that it looks
+    // again when the person comes back to the window (R50). The second is also why a start is refused with none.
+    cantFindOneError: "Ersa can't find {label} on this host. Install it, and Ersa looks again when you come back to this window.",
+    cantFindAnyError: "Ersa can't find a backend on this host. Install one, and Ersa looks again when you come back to this window.",
+    // A backend that failed detection, by the label backend.list gives it.
     backendFailedError: "{label} isn't working on this host. Check that it's installed and signed in, then open New session again.",
     // The host could not list its backends at all: that detection failed, before the reason (FLOW-NEW-SESSION-R11).
     detectionFailedError: "Ersa couldn't detect the backends on this host.",
@@ -488,8 +491,11 @@ export const enUS = {
       effortError: "Ersa can't change the effort.",
       permissionModeError: "Ersa can't change the permission mode.",
     },
-    // The backend chip when the host could not list its backends (FLOW-NEW-SESSION-R11); the status line gives why.
+    // The backend chip when the host could not list its backends (FLOW-NEW-SESSION-R11), the status line giving why;
+    // and, in the chip's list, a backend in `error`.
     detectionFailedStatus: "Detection failed",
+    // A `missing` backend in the chip's list (FLOW-NEW-SESSION-R52): Ersa didn't find it where it looked.
+    notFoundStatus: "Not found",
     // A backend in the backend chip's list that is installed and reports that it isn't signed in; it can't be
     // chosen (FLOW-SIGN-IN-R02).
     signedOutStatus: "Signed out",

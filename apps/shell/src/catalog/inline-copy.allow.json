@@ -29,11 +29,9 @@
   ],
   "components/SessionControls.tsx": [
     "Backend",
-    "Detection failed",
     "Effort",
     "Host",
     "Model",
-    "Not installed",
     "Permission mode",
     "Project",
     "Session controls"
