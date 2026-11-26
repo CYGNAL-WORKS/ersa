@@ -4,10 +4,14 @@
 //! checked out stored so the folder can come back as it was.
 //!
 //! The sweep puts a workspace away once it has checked that the workspace
-//! holds no unsaved work (FLOW-CLEAN-UP-R22), and `cleanup.remove` will.
+//! holds no unsaved work (FLOW-CLEAN-UP-R22), and `cleanup.remove` once the
+//! user approved it (FLOW-CLEAN-UP-R13).
 
 use std::sync::Arc;
 
+use ersa_protocol::core_api::{Workspace, WorkspaceState};
+
+use super::cleanup_remove::Approval;
 use super::{ApiError, handlers};
 use crate::admission::{Command, Report, end_held};
 use crate::state::Core;
@@ -43,17 +47,35 @@ use crate::workspace;
 /// (FLOW-CLEAN-UP-R11, R13), so whoever calls it decides which sessions may
 /// be there. The sweep calls [`put_away_for_sweep`], never this.
 pub async fn put_away_workspace(core: &Core, id: &str) -> Result<(), ApiError> {
-    put_away(core, id, false).await
+    put_away(core, id, false, None).await
 }
 
 /// [`put_away_workspace`] for the sweep: refused also unless a session uses
 /// the workspace and every one there is archived, which admission decides
 /// as it admits the put-away (FLOW-CLEAN-UP-R22).
 pub(super) async fn put_away_for_sweep(core: &Core, id: &str) -> Result<(), ApiError> {
-    put_away(core, id, true).await
+    put_away(core, id, true, None).await
 }
 
-async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiError> {
+/// [`put_away_workspace`] for `cleanup.remove` of a `workspace` item
+/// (FLOW-CLEAN-UP-R13): checked again in the project's turn against what
+/// the user was shown, before anything is stored. With `discard` it is
+/// forced, so uncommitted files go with the folder, and a folder that holds
+/// a repository of its own goes too (FLOW-CLEAN-UP-R27, PROTO-CORE-API-R147).
+pub(super) async fn put_away_approved(
+    core: &Core,
+    id: &str,
+    approval: &Approval,
+) -> Result<(), ApiError> {
+    put_away(core, id, false, Some(approval)).await
+}
+
+async fn put_away(
+    core: &Core,
+    id: &str,
+    archived_only: bool,
+    approval: Option<&Approval>,
+) -> Result<(), ApiError> {
     let workspace = core
         .store
         .workspace(id.to_string())
@@ -74,7 +96,10 @@ async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiE
             archived_only,
         })
         .await
-        .map_err(|refusal| handlers::refused(refusal, id))?;
+        .map_err(|refusal| match approval {
+            Some(approval) => approval.refused(refusal, id),
+            None => handlers::refused(refusal, id),
+        })?;
     let refused = || Report::PutAwayRefused {
         workspace: id.to_string(),
     };
@@ -94,6 +119,19 @@ async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiE
             return Err(e.into());
         }
     };
+    // (2b) What the user approved is what is there now: judged from the
+    // workspace as it was before this put-away held it, `ready`.
+    let as_it_was = Workspace {
+        state: WorkspaceState::Ready,
+        ..workspace.clone()
+    };
+    if let Some(approval) = approval
+        && let Err(e) = approval.check(core, &as_it_was).await
+    {
+        putting_away.end(refused());
+        return Err(e);
+    }
+    let discard = approval.is_some_and(|approval| approval.discard);
     // (3) A read, done in the turn.
     let checkout = match workspace::git_checkout(transport.as_ref(), &workspace.path).await {
         Ok(checkout) => checkout,
@@ -107,9 +145,13 @@ async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiE
     // was stored `put_away`, leaving the whole folder for a put-back to
     // remove unchecked. Looked at in the turn, after any wait for it, so
     // nothing checked out meanwhile is missed; a check that fails keeps the
-    // folder too.
-    match workspace::git_holds_repository(transport.as_ref(), &project.path, &workspace.path).await
-    {
+    // folder too. Only a `cleanup.remove` with `discard` takes it.
+    let holds = if discard {
+        Ok(false)
+    } else {
+        workspace::git_holds_repository(transport.as_ref(), &project.path, &workspace.path).await
+    };
+    match holds {
         Ok(false) => {}
         Ok(true) => {
             putting_away.end(refused());
@@ -133,7 +175,8 @@ async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiE
     // (6) The folder and git's record; no branch is deleted, since the
     // branch is how the folder comes back. Not forced: whoever puts away has
     // checked that nothing in the folder is unsaved, and a change since then
-    // refuses the removal rather than lose it.
+    // refuses the removal rather than lose it; unless the user approved
+    // discarding what it holds.
     let putting_away = Arc::new(putting_away);
     let turns = workspace::HeldFirst::new(turn, turns);
     let removed = workspace::git_worktree_delete(
@@ -142,8 +185,9 @@ async fn put_away(core: &Core, id: &str, archived_only: bool) -> Result<(), ApiE
         &workspace.path,
         "",
         workspace::RemovalChecks {
-            force: false,
+            force: discard,
             after_failed_add: false,
+            discard_branch: false,
         },
         workspace::FolderTries::from_config(&core.config, Arc::clone(&putting_away) as _),
         &turns,

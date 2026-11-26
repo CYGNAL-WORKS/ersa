@@ -242,6 +242,21 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::CleanupInspect, to_value(&cleanup_inspections()[1])),
         (Method::CleanupInspect, to_value(&cleanup_inspections()[2])),
         (Method::CleanupInspect, to_value(&cleanup_inspections()[3])),
+        // A put-away workspace keeps its branch; a branch deleted keeps none.
+        (
+            Method::CleanupRemove,
+            to_value(&CleanupRemoveResult {
+                id: "w:w-1".into(),
+                branch_kept: Some("ersa/w-1".into()),
+            }),
+        ),
+        (
+            Method::CleanupRemove,
+            to_value(&CleanupRemoveResult {
+                id: "b:p-1:ersa/stray".into(),
+                branch_kept: None,
+            }),
+        ),
         (
             Method::SessionDelete,
             to_value(&SessionDeleteResult {
@@ -636,6 +651,22 @@ fn params_examples() -> Vec<(Method, Value)> {
         (
             Method::CleanupInspect,
             to_value(&IdParams { id: "w:w-1".into() }),
+        ),
+        (
+            Method::CleanupRemove,
+            to_value(&CleanupRemoveParams {
+                id: "w:w-1".into(),
+                token: "9f2c".into(),
+                discard: None,
+            }),
+        ),
+        (
+            Method::CleanupRemove,
+            to_value(&CleanupRemoveParams {
+                id: "f:p-1:stray".into(),
+                token: "9f2c".into(),
+                discard: Some(true),
+            }),
         ),
         (
             Method::SessionDelete,

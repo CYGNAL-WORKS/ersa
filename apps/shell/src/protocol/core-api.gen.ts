@@ -286,6 +286,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "cleanup.remove";
+      params: CleanupRemoveParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "backend.list";
       params: BackendListParams;
     }
@@ -793,6 +799,23 @@ export interface CleanupInspectParams {
    * A cleanup.list item's id.
    */
   id: string;
+}
+/**
+ * Removes one Clean up item (FLOW-CLEAN-UP-R13): puts a workspace away; removes a leftover's folder, git's record, branch and workspace; deletes a branch; deletes a folder.
+ */
+export interface CleanupRemoveParams {
+  /**
+   * A cleanup.list item's id.
+   */
+  id: string;
+  /**
+   * The token cleanup.inspect gave for the item. A token that is not the item's now is refused, removing nothing.
+   */
+  token: string;
+  /**
+   * True when the user approved losing what the item holds: uncommitted files, commits that exist nowhere else and a repository of its own in the folder. Without it, an item that would lose any of that, and every folder item, is refused.
+   */
+  discard?: boolean;
 }
 export interface BackendListParams {
   host_id: Id;
@@ -2497,6 +2520,16 @@ export interface CleanupInspectResult1 {
    */
   token: string;
 }
+export interface CleanupRemoveResult {
+  /**
+   * The item's id.
+   */
+  id: string;
+  /**
+   * The name of a branch the item named that stays: a put-away workspace's, or a leftover's that another worktree has checked out or that holds commits only it holds and was not discarded. Absent when no branch the item named stays.
+   */
+  branch_kept?: string;
+}
 /**
  * The sign-in has started (PROTO-CORE-API-R155).
  */
@@ -2635,6 +2668,7 @@ export interface CoreApiMethods {
   "section.remove": { params: SectionRemoveParams; result: SectionRemoveResult };
   "cleanup.list": { params: CleanupListParams; result: CleanupListResult };
   "cleanup.inspect": { params: CleanupInspectParams; result: CleanupInspectResult };
+  "cleanup.remove": { params: CleanupRemoveParams; result: CleanupRemoveResult };
   "backend.list": { params: BackendListParams; result: BackendListResult };
   "backend.sign_in": { params: BackendSignInParams; result: BackendSignInResult };
   "backend.cancel_sign_in": { params: BackendCancelSignInParams; result: BackendCancelSignInResult };
