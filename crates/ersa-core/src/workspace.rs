@@ -1535,6 +1535,7 @@ async fn git_worktree_remove(
     let RemovalChecks {
         force,
         after_failed_add,
+        discard_branch: _,
     } = checks;
     let listed = git_worktree_list(transport, repo).await?;
     let Some(entry) = find(&listed, path).await else {
@@ -1661,12 +1662,17 @@ pub struct RemovalChecks {
     /// The workspace never finished being made (`error`): a lock its killed
     /// add left behind is discarded rather than refused.
     pub after_failed_add: bool,
+    /// Deletes the branch even when it holds commits no other branch holds:
+    /// the user approved losing them (`cleanup.remove` with `discard`,
+    /// PROTO-CORE-API-R122). Without it such a branch is kept.
+    pub discard_branch: bool,
 }
 
 impl RemovalChecks {
     pub const FORCED: RemovalChecks = RemovalChecks {
         force: true,
         after_failed_add: false,
+        discard_branch: false,
     };
 }
 
@@ -1674,9 +1680,9 @@ impl RemovalChecks {
 /// caller (PROTO-CORE-API-R122): `session.delete`'s step 5, the cleanup of a
 /// fork that failed to start, and `workspace.remove`. The git worktree at
 /// `path` of the repository at `repo` goes, as `checks` allow, and then its
-/// branch `branch` unless another worktree has it checked out or it holds
-/// commits no other local or remote-tracking branch holds. Returns whether
-/// the branch was kept.
+/// branch `branch` unless another worktree has it checked out or, unless
+/// `checks.discard_branch`, it holds commits no other local or
+/// remote-tracking branch holds. Returns whether the branch was kept.
 ///
 /// A folder git no longer lists (on Windows a failed removal can delete
 /// git's record and leave files behind) is deleted as a folder when
@@ -1751,18 +1757,9 @@ pub async fn git_worktree_delete(
     }
     let deadline = deadline();
     let reference = format!("refs/heads/{branch}");
-    let exists = ["rev-parse", "--verify", "--quiet", reference.as_str()];
-    let output = query(transport, repo, &exists, deadline).await?;
-    match output.exit.code {
-        Some(0) => {}
-        // Gone already: deleted by an earlier try, or by the user.
-        Some(1) => return Ok(false),
-        _ => {
-            return Err(VcsError::Failed {
-                message: "git could not look up the workspace's branch".into(),
-                stderr: output.stderr_text(),
-            });
-        }
+    // Gone already: deleted by an earlier try, or by the user.
+    if !git_branch_exists(transport, repo, branch).await? {
+        return Ok(false);
     }
     // Checked out in another worktree: git would refuse to delete it, and
     // the other worktree is using it.
@@ -1782,14 +1779,43 @@ pub async fn git_worktree_delete(
         deadline,
     )
     .await?;
-    if !unshared.is_empty() {
+    if !unshared.is_empty() && !checks.discard_branch {
         return Ok(true);
     }
-    // `-D`: every commit on it is held elsewhere, which `-d` would check
-    // only against the checked-out branch.
-    let deleted = git(transport, repo, &["branch", "-D", branch]).await?;
-    check(deleted, "git could not delete the workspace's branch")?;
+    git_delete_branch(transport, repo, branch).await?;
     Ok(false)
+}
+
+/// Whether the local branch `branch` exists in the repository at `repo`.
+pub async fn git_branch_exists(
+    transport: &dyn Transport,
+    repo: &str,
+    branch: &str,
+) -> Result<bool, VcsError> {
+    let reference = format!("refs/heads/{branch}");
+    let exists = ["rev-parse", "--verify", "--quiet", reference.as_str()];
+    let output = query(transport, repo, &exists, deadline()).await?;
+    match output.exit.code {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(VcsError::Failed {
+            message: format!("git could not look up the branch {branch}"),
+            stderr: output.stderr_text(),
+        }),
+    }
+}
+
+/// Deletes the local branch `branch` in the repository at `repo`, whatever
+/// it holds: whoever calls this has decided that what only it holds may go.
+/// `-D`, since `-d` would check its commits only against the checked-out
+/// branch.
+pub async fn git_delete_branch(
+    transport: &dyn Transport,
+    repo: &str,
+    branch: &str,
+) -> Result<(), VcsError> {
+    let deleted = git(transport, repo, &["branch", "-D", branch]).await?;
+    check(deleted, "git could not delete the branch")
 }
 
 /// Whether the git worktree at `path` of the repository at `repo` is gone:
@@ -1906,7 +1932,7 @@ impl FolderTries {
 /// ever, and keeps `tries.held` until its thread returns. Once Core gives
 /// up on a try, at its deadline or because the request was dropped, the try
 /// begins no further deletion (PROTO-CORE-API-R91): it asks before each one.
-async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> {
+pub async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> {
     let call_off = CallOff::default();
     let _called_off_on_return = CallOffOnDrop(call_off.clone());
     let call_off = &call_off;
@@ -1934,7 +1960,7 @@ async fn remove_folder(path: &str, tries: &FolderTries) -> Result<(), VcsError> 
         .await
     };
     let failed = |stderr| VcsError::Failed {
-        message: format!("the workspace's folder {path} could not be deleted"),
+        message: format!("the folder {path} could not be deleted"),
         stderr,
     };
     retried_within(tries.window, once, failed).await
@@ -2283,6 +2309,17 @@ async fn merges_to_nothing(
 pub async fn real_folders_in(path: &std::path::Path) -> Result<Vec<String>, VcsError> {
     let path = path.to_path_buf();
     blocking(deadline(), "listing the worktrees folder", move |_| {
+        // Nor is `path` itself followed when it is a link (a junction on
+        // Windows): what it holds is somewhere else, outside the worktrees
+        // root, and Ersa makes nothing there (FLOW-CLEAN-UP-R14).
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e.into()),
+            Ok(meta) if !meta.is_dir() || meta.file_type().is_symlink() => {
+                return Ok(Vec::new());
+            }
+            Ok(_) => {}
+        }
         let entries = match std::fs::read_dir(&path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             other => other?,

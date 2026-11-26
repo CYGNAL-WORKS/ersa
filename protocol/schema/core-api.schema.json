@@ -1140,6 +1140,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "cleanup.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/cleanup.remove.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "backend.list"
             },
             "params": {
@@ -3846,6 +3870,50 @@
         }
       ],
       "description": "The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R12, R26)."
+    },
+    "cleanup.remove.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "token"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A cleanup.list item's id."
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The token cleanup.inspect gave for the item. A token that is not the item's now is refused, removing nothing."
+        },
+        "discard": {
+          "type": "boolean",
+          "description": "True when the user approved losing what the item holds: uncommitted files, commits that exist nowhere else and a repository of its own in the folder. Without it, an item that would lose any of that, and every folder item, is refused."
+        }
+      },
+      "description": "Removes one Clean up item (FLOW-CLEAN-UP-R13): puts a workspace away; removes a leftover's folder, git's record, branch and workspace; deletes a branch; deletes a folder."
+    },
+    "cleanup.remove.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The item's id."
+        },
+        "branch_kept": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The name of a branch the item named that stays: a put-away workspace's, or a leftover's that another worktree has checked out or that holds commits only it holds and was not discarded. Absent when no branch the item named stays."
+        }
+      }
     },
     "backend.list.params": {
       "type": "object",

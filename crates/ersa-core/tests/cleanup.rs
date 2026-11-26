@@ -11,38 +11,10 @@ use std::time::Duration;
 
 use ersa_core::{Adapter, CoreConfig, SweepClock, Sweeps};
 use serde_json::{Value, json};
+use support::clean_up::*;
 use support::fake::{self, FakeAdapter};
 use support::put_away::*;
-use support::{assert_valid, git, kind, start_with_adapters, tempdir};
-
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
-const HOUR: Duration = Duration::from_secs(60 * 60);
-
-/// A Core with the fake backend and a git project, whose sweep runs only
-/// at start and after an archive, by the returned clock.
-async fn listing_with(more: impl FnOnce(&mut CoreConfig)) -> (Setup, Arc<SweepClock>) {
-    listing_over(FakeAdapter::new(1), more).await
-}
-
-async fn listing() -> (Setup, Arc<SweepClock>) {
-    listing_with(|_| {}).await
-}
-
-async fn passes(clock: &SweepClock, count: u64) {
-    tokio::time::timeout(Duration::from_secs(120), clock.until_ended(count))
-        .await
-        .expect("the sweep ended in time");
-}
-
-/// `cleanup.list` with `inactive_days`, checked against the schema.
-async fn list(s: &mut Setup, days: u32) -> Value {
-    let response = s
-        .client
-        .call("cleanup.list", json!({ "inactive_days": days }))
-        .await;
-    assert_valid("cleanup.list", &response);
-    response["result"].clone()
-}
+use support::{git, kind, start_with_adapters};
 
 /// The ids of the items of `kind` in `listed`.
 fn ids(listed: &Value, kind: &str) -> Vec<String> {
@@ -65,18 +37,6 @@ fn item<'a>(listed: &'a Value, id: &str) -> Option<&'a Value> {
         .find(|i| i["id"] == id)
 }
 
-/// `cleanup.inspect` of `id`, checked against the schema.
-async fn inspect(s: &mut Setup, id: &str) -> Value {
-    let response = s.client.call("cleanup.inspect", json!({ "id": id })).await;
-    assert_valid("cleanup.inspect", &response);
-    assert!(response.get("result").is_some(), "{response}");
-    response["result"].clone()
-}
-
-fn ws_id(workspace: &Value) -> String {
-    format!("w:{}", id(workspace))
-}
-
 /// A session of the fake backend made in `workspace`, with a turn behind
 /// it, live and idle.
 async fn live_in(s: &mut Setup, workspace: &Value) -> String {
@@ -92,31 +52,6 @@ async fn live_in(s: &mut Setup, workspace: &Value) -> String {
     s.client.result("session.send", send).await;
     support::wait_for_state(&mut s.client, &session, "idle").await;
     session
-}
-
-/// A session of the fake backend in `workspace`, with a turn behind it,
-/// then stopped.
-async fn session_in(s: &mut Setup, workspace: &Value) -> String {
-    let session = s.stopped_session(workspace).await;
-    // Subscribed to, it would not count as unused.
-    s.client
-        .result("session.unsubscribe", json!({ "id": session }))
-        .await;
-    session
-}
-
-/// Archives `session`, then waits for the pass the archive asks for.
-async fn archive(s: &mut Setup, clock: &SweepClock, session: &str) {
-    let before = clock.ended();
-    let params = json!({ "id": session, "archived": true });
-    s.client.result("session.set_archived", params).await;
-    passes(clock, before + 1).await;
-}
-
-fn worktrees(s: &Setup) -> std::path::PathBuf {
-    let root = s.core.dir.path().join("worktrees");
-    let name = s.project["name"].as_str().unwrap();
-    root.join(name)
 }
 
 // -- Workspaces (FLOW-CLEAN-UP-R11) ---------------------------------------
@@ -685,25 +620,6 @@ async fn a_session_marked_deleting_or_dormant_keeps_its_workspace_off_the_list()
         stats,
     };
     assert!(ids(&list(&mut s, 30).await, "workspace").is_empty());
-}
-
-/// [`listing_with`], over `fake`.
-async fn listing_over(
-    fake: FakeAdapter,
-    more: impl FnOnce(&mut CoreConfig),
-) -> (Setup, Arc<SweepClock>) {
-    let clock = Arc::new(SweepClock::default());
-    let stats = Arc::clone(&fake.stats);
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
-    let sweeps = Sweeps::Driven(Arc::clone(&clock));
-    let configure = move |config: &mut CoreConfig| {
-        config.sweeps = sweeps;
-        more(config);
-    };
-    let core = start_with_adapters(tempdir(), configure, adapters).await;
-    let s = Setup::over(core, stats).await;
-    passes(&clock, 1).await;
-    (s, clock)
 }
 
 /// A workspace git has lost its record of is still checked for a

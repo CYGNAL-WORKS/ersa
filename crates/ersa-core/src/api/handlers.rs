@@ -851,8 +851,8 @@ pub(super) async fn workspace_remove(
 
 /// Who removes a workspace, which decides what the removal checks before
 /// git changes anything.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Remover {
+#[derive(Clone, Copy)]
+pub(super) enum Remover<'a> {
     /// `workspace.remove`: local changes, and a folder git does not list,
     /// are refused unless `force`.
     Request { force: bool },
@@ -860,18 +860,32 @@ pub(super) enum Remover {
     /// while no session is there, never forced, and judged again in the
     /// project's turn, just before git removes anything.
     Sweep,
+    /// `cleanup.remove` of a `leftover` item (FLOW-CLEAN-UP-R13): admitted
+    /// as the sweep's removal is, and checked again in the project's turn
+    /// against what the user was shown; forced, and its branch deleted
+    /// whatever it holds, only when they approved discarding it.
+    Cleanup(&'a super::cleanup_remove::Approval),
+}
+
+impl Remover<'_> {
+    /// Admitted only while no session is in the workspace.
+    fn leftover_only(self) -> bool {
+        match self {
+            Remover::Request { .. } => false,
+            Remover::Sweep | Remover::Cleanup(_) => true,
+        }
+    }
 }
 
 /// Removes isolated workspace `workspace` as every removal does
 /// (PROTO-CORE-API-R122): its folder, git's record of the worktree and its
 /// branch, unless the branch holds work of its own or another worktree has
-/// it checked out, then the workspace. Whether the branch was kept is not
-/// reported.
+/// it checked out, then the workspace. Answers whether the branch was kept.
 pub(super) async fn remove_workspace(
     core: &Core,
     workspace: &Workspace,
-    by: Remover,
-) -> Result<(), ApiError> {
+    by: Remover<'_>,
+) -> Result<bool, ApiError> {
     // The root workspace is the project's own folder: it goes only with the
     // project, and nothing of it is ever deleted.
     if workspace.kind == WorkspaceKind::Root {
@@ -900,10 +914,13 @@ pub(super) async fn remove_workspace(
         .admission
         .command(Command::RemoveWorkspace {
             workspace: id.clone(),
-            leftover_only: by == Remover::Sweep,
+            leftover_only: by.leftover_only(),
         })
         .await
-        .map_err(|refusal| refused(refusal, &id))?;
+        .map_err(|refusal| match by {
+            Remover::Cleanup(approval) => approval.refused(refusal, &id),
+            Remover::Request { .. } | Remover::Sweep => refused(refusal, &id),
+        })?;
     let not_removed = Report::WorkspaceRemovalRefused {
         workspace: id.clone(),
     };
@@ -930,12 +947,21 @@ pub(super) async fn remove_workspace(
             // An `error` workspace may be an add that was killed mid-way;
             // its leftover `initializing` lock must not block removal.
             after_failed_add: replaced == WorkspaceState::Error,
+            discard_branch: false,
         },
         // Nothing of the user's is ever lost to the sweep: what git would
         // refuse, it refuses, a lock of any kind included (FLOW-CLEAN-UP-R08).
         Remover::Sweep => workspace::RemovalChecks {
             force: false,
             after_failed_add: false,
+            discard_branch: false,
+        },
+        // What the user approved losing goes; without their approval, what
+        // git would refuse is refused, as for the sweep.
+        Remover::Cleanup(approval) => workspace::RemovalChecks {
+            force: approval.discard,
+            after_failed_add: approval.discard && replaced == WorkspaceState::Error,
+            discard_branch: approval.discard,
         },
     };
     let turns = RepositoryTurns {
@@ -953,13 +979,25 @@ pub(super) async fn remove_workspace(
             return Err(e.into());
         }
     };
-    if by == Remover::Sweep
-        && let Some(keep) = super::leftover::keeps(core, workspace).await
-    {
+    let judged = match by {
+        Remover::Request { .. } => None,
+        Remover::Sweep => super::leftover::keeps(core, workspace)
+            .await
+            .map(|keep| ApiError::invalid_state(keep.why())),
+        // Judged from the workspace as it was before this removal held it.
+        Remover::Cleanup(approval) => {
+            let as_it_was = Workspace {
+                state: replaced,
+                ..workspace.clone()
+            };
+            approval.check(core, &as_it_was).await.err()
+        }
+    };
+    if let Some(refusal) = judged {
         drop(turn);
         core.store.set_workspace_state(id, replaced).await?;
         removing.end(not_removed);
-        return Err(ApiError::invalid_state(keep.why()));
+        return Err(refusal);
     }
     // Shared with each try at the folder, which keeps it until its thread
     // returns: a try given up on that is still stuck holds the removal, so
@@ -977,31 +1015,34 @@ pub(super) async fn remove_workspace(
         &workspace::HeldFirst::new(turn, turns),
     )
     .await;
-    if let Err(e) = removed {
-        // A refusal (locked, local changes or a folder git does not list
-        // without `force`, or no turn at the worktrees in time) leaves the
-        // worktree as it was, so it goes back to the state it had; any other
-        // failure leaves it in an unknown state.
-        // Stored, then said: with the report the hold goes, and the found
-        // sessions are theirs again.
-        if e.is_refusal() {
-            core.store.set_workspace_state(id, replaced).await?;
-            end_held(removing, not_removed);
-        } else if replaced == WorkspaceState::PutAway {
-            // It had no folder to lose: its sessions can still be resumed
-            // (PROTO-CORE-API-R133).
-            core.store
-                .set_workspace_state(id.clone(), WorkspaceState::PutAway)
-                .await?;
-            end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
-        } else {
-            core.store
-                .set_workspace_state(id.clone(), WorkspaceState::Error)
-                .await?;
-            end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
+    let branch_kept = match removed {
+        Ok(kept) => kept,
+        Err(e) => {
+            // A refusal (locked, local changes or a folder git does not list
+            // without `force`, or no turn at the worktrees in time) leaves the
+            // worktree as it was, so it goes back to the state it had; any other
+            // failure leaves it in an unknown state.
+            // Stored, then said: with the report the hold goes, and the found
+            // sessions are theirs again.
+            if e.is_refusal() {
+                core.store.set_workspace_state(id, replaced).await?;
+                end_held(removing, not_removed);
+            } else if replaced == WorkspaceState::PutAway {
+                // It had no folder to lose: its sessions can still be resumed
+                // (PROTO-CORE-API-R133).
+                core.store
+                    .set_workspace_state(id.clone(), WorkspaceState::PutAway)
+                    .await?;
+                end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
+            } else {
+                core.store
+                    .set_workspace_state(id.clone(), WorkspaceState::Error)
+                    .await?;
+                end_held(removing, Report::WorkspaceRemovalFailed { workspace: id });
+            }
+            return Err(e.into());
         }
-        return Err(e.into());
-    }
+    };
     // The rows of the sessions found in its folder go with it, their
     // records left. A failure leaves the row `removing` for the next start
     // to mark `error`, which is how admission then holds it.
@@ -1016,7 +1057,7 @@ pub(super) async fn remove_workspace(
         },
     );
     core.sessions.forget_found(quiet).await;
-    Ok(())
+    Ok(branch_kept)
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by

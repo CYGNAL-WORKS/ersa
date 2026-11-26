@@ -1,6 +1,7 @@
 //! The Clean up list (FLOW-CLEAN-UP, The list): what Core can remove, and
 //! what removing each item would lose. Both methods only read; removing is
-//! `cleanup.remove`'s.
+//! `cleanup.remove`'s (`cleanup_remove`), which judges each item again as
+//! inspect does here.
 //!
 //! An item is one of four kinds (FLOW-CLEAN-UP-R11): the folder of a
 //! workspace whose sessions are all archived or all inactive, a leftover
@@ -44,9 +45,9 @@ const INACTIVE_DAYS: [u32; 3] = [30, 60, 90];
 const COUNTS_LIMIT: Duration = Duration::from_secs(60);
 
 /// The start of an item's id, for each kind of thing it names.
-const WORKSPACE_ID: &str = "w:";
-const BRANCH_ID: &str = "b:";
-const FOLDER_ID: &str = "f:";
+pub(super) const WORKSPACE_ID: &str = "w:";
+pub(super) const BRANCH_ID: &str = "b:";
+pub(super) const FOLDER_ID: &str = "f:";
 
 /// `cleanup.list` (FLOW-CLEAN-UP-R11).
 pub(super) async fn list(
@@ -59,7 +60,7 @@ pub(super) async fn list(
             params.inactive_days
         )));
     }
-    let world = World::read(core).await?;
+    let world = World::read(core, true).await?;
     let mut items = Vec::new();
     let mut unread = Vec::new();
 
@@ -105,9 +106,10 @@ pub(super) async fn inspect(core: &Core, params: IdParams) -> Result<CleanupInsp
     workspace::in_one_place(inspect_held(core, &params.id)).await?
 }
 
-async fn inspect_held(core: &Core, id: &str) -> Result<CleanupInspection, ApiError> {
+/// [`inspect`] while one of the places R116 counts is held.
+pub(super) async fn inspect_held(core: &Core, id: &str) -> Result<CleanupInspection, ApiError> {
     let gone = || ApiError::not_found(format!("no Clean up item {id}"));
-    let world = World::read(core).await?;
+    let world = World::read(core, true).await?;
     if let Some(workspace_id) = id.strip_prefix(WORKSPACE_ID) {
         let Some(workspace) = world.workspaces.iter().find(|w| w.id == workspace_id) else {
             return Err(gone());
@@ -121,7 +123,7 @@ async fn inspect_held(core: &Core, id: &str) -> Result<CleanupInspection, ApiErr
         };
         let judged = judge_workspace(core, &world, workspace, None, survey.as_ref()).await?;
         let item = judged.ok_or_else(gone)?;
-        return inspect_workspace(core, workspace, item).await;
+        return inspect_workspace(core, workspace, item, true).await;
     }
     if let Some(rest) = id.strip_prefix(BRANCH_ID) {
         let (project_id, branch) = rest.split_once(':').ok_or_else(gone)?;
@@ -188,13 +190,37 @@ async fn inspect_held(core: &Core, id: &str) -> Result<CleanupInspection, ApiErr
     Err(gone())
 }
 
+/// `workspace` as a `workspace` or `leftover` item, with what removing it
+/// would lose and its token, as [`inspect`] gives it but for its size; or
+/// `None` when it is no item now. For `cleanup.remove`, which holds the
+/// workspace and the project's turn: `workspace` is as it was before that
+/// hold, and the sessions found in the backend's own tools are the ones
+/// found before it, since none can join a held workspace.
+pub(super) async fn judge_held(
+    core: &Core,
+    workspace: &Workspace,
+) -> Result<Option<CleanupInspection>, ApiError> {
+    let world = World::read(core, false).await?;
+    let project = find_project(core, &workspace.project_id).await?;
+    let survey = if workspace.state == WorkspaceState::PutAway {
+        Some(survey(core, &project).await?)
+    } else {
+        None
+    };
+    let Some(item) = judge_workspace(core, &world, workspace, None, survey.as_ref()).await? else {
+        return Ok(None);
+    };
+    Ok(Some(inspect_workspace(core, workspace, item, false).await?))
+}
+
 /// What removing a `workspace` or `leftover` item would lose: what
 /// `workspace.changes` counts, whether its folder holds a repository of its
-/// own, and what the folder takes.
+/// own, and, when `measured`, what the folder takes.
 async fn inspect_workspace(
     core: &Core,
     workspace: &Workspace,
     item: CleanupItem,
+    measured: bool,
 ) -> Result<CleanupInspection, ApiError> {
     let put_away = workspace.state == WorkspaceState::PutAway;
     let counted = tokio::time::timeout(COUNTS_LIMIT, async {
@@ -216,7 +242,7 @@ async fn inspect_workspace(
         }
     };
     // A put-away one has no folder to measure.
-    let size_bytes = if put_away {
+    let size_bytes = if put_away || !measured {
         None
     } else {
         measure(core, &workspace.path).await?.size_bytes
@@ -287,12 +313,14 @@ struct World {
 }
 
 impl World {
-    async fn read(core: &Core) -> Result<World, ApiError> {
+    /// With `find`, the sessions started in the backend's own tools are
+    /// found first.
+    async fn read(core: &Core, find: bool) -> Result<World, ApiError> {
         // A session started in the backend's own tools counts as any other
         // (FLOW-CLEAN-UP, Variations): found first, as the sweep finds them.
-        core.sessions
-            .find_elsewhere(|host| core.session_transport_for(host))
-            .await?;
+        if find {
+            find_elsewhere(core).await?;
+        }
         let projects = core.store.projects().await?;
         let mut workspaces = Vec::new();
         for project in &projects {
@@ -338,6 +366,15 @@ impl World {
         let paths: Vec<String> = self.workspaces.iter().map(|w| w.path.clone()).collect();
         Ok(workspace::location_keys(paths).await?.into_iter().collect())
     }
+}
+
+/// Finds the sessions started in the backend's own tools, so they count as
+/// any other session does.
+pub(super) async fn find_elsewhere(core: &Core) -> Result<(), ApiError> {
+    core.sessions
+        .find_elsewhere(|host| core.session_transport_for(host))
+        .await?;
+    Ok(())
 }
 
 /// `workspace` as a `workspace` or `leftover` item, if it is one now.
@@ -640,19 +677,19 @@ async fn unidentified(
 
 /// The worktrees root, as `workspace.create` makes workspaces under it;
 /// `None` when it does not exist, so nothing is in it.
-async fn worktrees_root(core: &Core) -> Result<Option<PathBuf>, ApiError> {
+pub(super) async fn worktrees_root(core: &Core) -> Result<Option<PathBuf>, ApiError> {
     let root = settings::workspaces_root(&core.store.settings().await?, &core.config.data_dir);
     Ok(workspace::canonical_folder(root).await?)
 }
 
 /// What the list reads of `project`'s repository, its git calls given 10
 /// seconds together.
-async fn survey(core: &Core, project: &Project) -> Result<Survey, ApiError> {
+pub(super) async fn survey(core: &Core, project: &Project) -> Result<Survey, ApiError> {
     let transport = transport(core, project)?;
     Ok(workspace::git_cleanup_survey(transport.as_ref(), &project.path).await?)
 }
 
-fn transport(
+pub(super) fn transport(
     core: &Core,
     project: &Project,
 ) -> Result<std::sync::Arc<dyn ersa_adapter::Transport>, ApiError> {

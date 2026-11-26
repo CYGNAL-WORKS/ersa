@@ -4889,6 +4889,88 @@ fn a_put_away_holds_its_workspace_against_every_other_removal() {
     assert_eq!(phase(&refused, W), Some(WorkspacePhase::Ready));
 }
 
+/// `cleanup.remove` puts a `workspace` item away (`PutAway`, any session
+/// there) and removes a `leftover` item as the sweep does (`RemoveWorkspace`,
+/// no session there). Beside a resume's put-back, a delete or the sweep's
+/// put-away or removal of the same workspace, in either order, one of the
+/// two is refused or waits, and none runs beside the other.
+// verifies: PROTO-CORE-API-R131
+#[test]
+fn a_clean_up_removal_never_runs_beside_a_resume_a_delete_or_the_sweep() {
+    let admitted = |state: &mut State, asked: Command| {
+        let outcome = command(state, asked.clone());
+        assert!(
+            matches!(outcome, Outcome::Admitted(_)),
+            "{asked:?}: {outcome:?}"
+        );
+    };
+    let put_away_done = |state: &mut State| {
+        let workspace = W.to_string();
+        report(state, Report::WorkspacePutAway { workspace });
+    };
+
+    // A put-away by cleanup.remove first.
+    let mut first = with_a_stopped_session();
+    admitted(&mut first, put_away(W));
+    for (asked, answer) in [
+        (
+            delete_session("s1"),
+            Outcome::Refused(Refusal::WorkspaceHeld),
+        ),
+        (
+            put_away_archived(W),
+            Outcome::Refused(Refusal::WorkspaceBusy),
+        ),
+        (remove_leftover(W), Outcome::Refused(Refusal::WorkspaceBusy)),
+        // A resume's put-back waits for it to end (PROTO-CORE-API-R132).
+        (put_back(W), Outcome::Held),
+    ] {
+        let mut now = first.clone();
+        assert_eq!(command(&mut now, asked.clone()), answer, "{asked:?}");
+    }
+
+    // A resume's put-back, a delete or the sweep's put-away first.
+    let mut putting_back = with_a_stopped_session();
+    admitted(&mut putting_back, put_away(W));
+    put_away_done(&mut putting_back);
+    admitted(&mut putting_back, put_back(W));
+    let mut deleting = with_a_stopped_session();
+    admitted(&mut deleting, delete_session("s1"));
+    let mut sweeping = {
+        let mut archived = row("s1", W, false);
+        archived.archived = true;
+        let mut existing = existing();
+        existing.sessions.push(archived);
+        State::restored(existing)
+    };
+    admitted(&mut sweeping, put_away_archived(W));
+    for (mut state, answer) in [
+        (putting_back, Refusal::WorkspaceBusy),
+        (deleting, Refusal::WorkspaceHeld),
+        (sweeping, Refusal::WorkspaceBusy),
+    ] {
+        assert_eq!(command(&mut state, put_away(W)), Outcome::Refused(answer));
+    }
+
+    // A leftover's removal by cleanup.remove beside the sweep's removal of
+    // it, either first; and a session arriving while it is removed.
+    let mut removing = world();
+    admitted(&mut removing, remove_leftover(W));
+    for asked in [remove_leftover(W), put_away(W)] {
+        let mut now = removing.clone();
+        assert_eq!(
+            command(&mut now, asked.clone()),
+            Outcome::Refused(Refusal::WorkspaceBusy),
+            "{asked:?}"
+        );
+    }
+    let mut now = removing;
+    assert_eq!(
+        command(&mut now, create_session(W, "s2")),
+        Outcome::Refused(Refusal::WorkspaceNotReady)
+    );
+}
+
 /// A put-away for the sweep is admitted only while a session uses the
 /// workspace and every one there is archived, as admission has their rows
 /// now: an unarchive stored after the sweep looked refuses it, and so does a
