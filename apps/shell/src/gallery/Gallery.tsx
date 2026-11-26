@@ -20,6 +20,8 @@ import type { Attached } from "../session/attachments";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
+import { SignInNote } from "../components/SignInNote";
+import { type NoteState, type SignInLocal, type SignIns, signInKey } from "../session/signIn";
 import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
@@ -792,6 +794,16 @@ const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   permission_modes: [],
 });
 
+/** The local host listing Claude Code signed out, with a sign-in under way when `waiting`. */
+const signedOut = (waiting = false): Record<string, BackendInfo[]> => ({
+  local: [{ ...claudeCode, status: "signed_out", ...(waiting ? { signing_in: {} } : {}) }],
+});
+/** What this window knows of Claude Code's sign-in on the local host. */
+const signInSaid = (local: SignInLocal): SignIns => ({ [signInKey("local", "claude-code")]: local });
+const signInNote = (state: NoteState, more: { focal?: boolean; force?: "hover" | "focus" | "pressed" } = {}) => (
+  <SignInNote label="Claude Code" state={state} onSignIn={() => {}} onCancel={() => {}} {...more} />
+);
+
 const newSession = {
   hosts: [hello.host],
   localHostId: hello.host.id,
@@ -1508,12 +1520,25 @@ const entries: Entry[] = [
       ["Project without version control", <NewSessionScreen {...newSession} backends={oneBackend} projectId="p3" />],
       ["Backend missing, beside one available", room(<NewSessionScreen {...newSession} open="backend" />)],
       // FLOW-SIGN-IN-R02: a signed-out backend reads Signed out, shown and not choosable; alone, the chip reads No
-      // backend and the status line leaves it to the sign-in note, which a later change adds.
+      // backend and the status line leaves it to the sign-in note above it.
       [
         "Backend signed out, beside one available",
         room(<NewSessionScreen {...newSession} backends={{ local: [claudeCode, { ...copilot("signed_out"), version: "1.0.0" }] }} open="backend" />),
       ],
       ["Backend signed out, the only one", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "signed_out" }] }} />],
+      // FLOW-SIGN-IN: the sign-in note above the composer, in each of its states (docs/design/COMPOSER.md).
+      ["Signed out, Sign in with keyboard focus", <NewSessionScreen {...newSession} backends={signedOut()} forceSignIn="focus" />],
+      ["Signing in, starting", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ phase: "starting" })} />],
+      ["Signing in, starting, keyboard focus", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ phase: "starting" })} forceSignIn="focus" />],
+      ["Signing in, waiting in the browser", <NewSessionScreen {...newSession} backends={signedOut(true)} />],
+      ["Signing in, waiting, Cancel with keyboard focus", <NewSessionScreen {...newSession} backends={signedOut(true)} forceSignIn="focus" />],
+      ["Sign-in couldn't be started", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ said: { kind: "refused", reason: "Ersa can't start a sign-in to Claude Code." } })} />],
+      ["Sign-in page couldn't be opened", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ said: { kind: "unopened" } })} />],
+      ["Sign-in didn't finish", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ said: { kind: "failed", reason: "The account has no plan that includes Claude Code." } })} />],
+      ["Sign-in took too long", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ said: { kind: "timedOut" } })} />],
+      ["Signed in, still signed out", <NewSessionScreen {...newSession} backends={signedOut()} signIns={signInSaid({ said: { kind: "stillSignedOut" } })} />],
+      ["Signed out, beside a backend that isn't working", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "signed_out" }, { ...copilot("error"), version: "1.0.0" }] }} />],
+      ["Signed out, asking to trust a folder", <NewSessionScreen {...newSession} backends={signedOut()} initialAsking="D:\Clones\stranger" />],
       ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
       ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
       // FLOW-NEW-SESSION-R11: the listing failed, which is not a host without backends.
@@ -1721,6 +1746,30 @@ const entries: Entry[] = [
       ["Reading", rawLog({ view: rawLogView({ lines: [], read: false }) })],
       ["No lines yet", rawLog({ view: rawLogView({ lines: [] }) })],
       ["No lines yet, and a read failed", rawLog({ view: rawLogView({ lines: [], failure: "Core isn't running." }) })],
+    ],
+  },
+  {
+    // Above the composer while a backend isn't signed in (FLOW-SIGN-IN; docs/design/COMPOSER.md, The sign-in note).
+    name: "SignInNote",
+    wide: true,
+    states: [
+      ["Signed out", signInNote({ kind: "signedOut" })],
+      ["Signed out, holding the focal glow", signInNote({ kind: "signedOut" }, { focal: true })],
+      ["Sign in under the pointer", signInNote({ kind: "signedOut" }, { force: "hover" })],
+      ["Sign in pressed", signInNote({ kind: "signedOut" }, { force: "pressed" })],
+      ["Sign in, keyboard focus", signInNote({ kind: "signedOut" }, { force: "focus" })],
+      ["Starting", signInNote({ kind: "starting" })],
+      ["Starting, keyboard focus", signInNote({ kind: "starting" }, { force: "focus" })],
+      ["Waiting in the browser", signInNote({ kind: "waiting" })],
+      ["Cancel under the pointer", signInNote({ kind: "waiting" }, { force: "hover" })],
+      ["Cancel, keyboard focus", signInNote({ kind: "waiting" }, { force: "focus" })],
+      ["Canceling, Sign in held", signInNote({ kind: "canceling" })],
+      ["Couldn't be started", signInNote({ kind: "signedOut", said: { kind: "refused", reason: "Ersa can't start a sign-in to Claude Code." } })],
+      ["Page couldn't be opened", signInNote({ kind: "signedOut", said: { kind: "unopened" } })],
+      ["Didn't finish, with the backend's reason", signInNote({ kind: "signedOut", said: { kind: "failed", reason: "The account has no plan that includes Claude Code. Ask your organization's admin, or choose another account on the sign-in page." } })],
+      ["Didn't finish, no reason", signInNote({ kind: "signedOut", said: { kind: "failed" } })],
+      ["Took too long", signInNote({ kind: "signedOut", said: { kind: "timedOut" } })],
+      ["Still signed out", signInNote({ kind: "signedOut", said: { kind: "stillSignedOut" } })],
     ],
   },
   {

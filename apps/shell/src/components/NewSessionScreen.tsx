@@ -13,10 +13,13 @@ import type { ShellControl } from "../core/shell";
 import { type Attached, pathName } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import type { AttachWhat } from "./AttachMenu";
-import { Composer, type Unavailable } from "./Composer";
+import { type SignIns, noteBackend, noteState, signInKey } from "../session/signIn";
+import { Composer, StatusLine, type Unavailable } from "./Composer";
 import { ContextRing } from "./ContextRing";
 import { type ControlKey, DEFAULT_EFFORT, type Host, SessionControls } from "./SessionControls";
+import { SignInNote } from "./SignInNote";
 import { TrustQuestion } from "./TrustQuestion";
+import { HeightEase } from "../theme/motion";
 import "./NewSessionScreen.css";
 
 /**
@@ -50,6 +53,12 @@ interface NewSessionScreenProps {
    * listing held stays.
    */
   onReadBackends?: (hostId: string) => void;
+  /** What this window knows of each backend's sign-in, by `signInKey` (FLOW-SIGN-IN). */
+  signIns?: SignIns;
+  /** Sign in on the sign-in note: starts the backend's sign-in on the host (FLOW-SIGN-IN-R03). */
+  onSignIn?: (hostId: string, name: string) => void;
+  /** Cancel on the sign-in note, and a sign-in left under way for a backend that can run (FLOW-SIGN-IN-R07, R10). */
+  onCancelSignIn?: (hostId: string, name: string) => void;
   /** Hears the window shown or taking the focus; returns a way to stop. Absent without the Shell. */
   onWindowBack?: (handler: () => void) => () => void;
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
@@ -93,6 +102,8 @@ interface NewSessionScreenProps {
   /** For the gallery: the trust question already asked about this folder, with Cancel shown focused or not. */
   initialAsking?: string;
   forceCancelFocus?: boolean;
+  /** For the gallery: a pointer or keyboard state on the sign-in note's button. */
+  forceSignIn?: "hover" | "focus" | "pressed";
 }
 
 /**
@@ -177,6 +188,10 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       const style = getComputedStyle(section);
       const top = parseFloat(style.paddingTop) || 0;
       const room = zone.getBoundingClientRect().top - section.getBoundingClientRect().top - top;
+      // With the sign-in note, the room above the box is already in the column, the note at its top: the question
+      // takes its place in the column beneath the note, capped to what the note leaves (docs/design/COMPOSER.md).
+      const signInNote = zone.querySelector<HTMLElement>(".sign-in-note");
+      const noteRoom = signInNote ? signInNote.offsetHeight + (parseFloat(getComputedStyle(zone).rowGap) || 0) : 0;
       const path = card.querySelector<HTMLElement>(".trust-question-path");
       // Uncapped, at the width the card has now. What must show over the room above the box: the title, the folder,
       // the answers and the explanation's first paragraph. In the column, where the cap is the screen's height, a long
@@ -201,7 +216,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         if (path) path.style.minHeight = `${Math.max(0, Math.min(sizes.pathHeight, to - sizes.rest - sizes.firstHeight))}px`;
       };
       const loose = measure();
-      if (room >= loose.whole) {
+      if (!signInNote && room >= loose.whole) {
         cap(room, loose);
       } else {
         // In the column, capped to the screen's own height, so the title, folder and answers show together at its top.
@@ -211,7 +226,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         // Measured before the scroll is restored, so from the column's top; and from the room the card stands in, not
         // the card, which its entrance still moves.
         const below = zone.getBoundingClientRect().top - section.getBoundingClientRect().top;
-        cap(Math.max(tight.least, section.clientHeight - below - (parseFloat(style.paddingBottom) || 0)), tight);
+        cap(Math.max(tight.least, section.clientHeight - below - noteRoom - (parseFloat(style.paddingBottom) || 0)), tight);
         section.scrollTop = scrolled;
       }
     };
@@ -361,13 +376,65 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
               ? "signed-out"
               : { cantFind: hostBackends.length === 1 ? hostBackends[0]?.label : undefined });
 
+  // The sign-in note, while no backend on the host can run and one is signed out (FLOW-SIGN-IN-R01), following the
+  // host's listing and what this window knows of the sign-in.
+  const noteFor = noteBackend(hostBackends);
+  const note = noteFor && noteState(noteFor, props.signIns?.[signInKey(hostId, noteFor.name)]);
+  // The note went because a backend can run: a sign-in the listing still reports under way for the backend it was
+  // for, as when the person signed in elsewhere, is stopped (R10), and the words take the focus (R11).
+  const wasFor = useRef<{ hostId: string; name: string }>(undefined);
+  const cancelSignIn = useRef(props.onCancelSignIn);
+  cancelSignIn.current = props.onCancelSignIn;
+  useEffect(() => {
+    if (noteFor) {
+      wasFor.current = { hostId, name: noteFor.name };
+      return;
+    }
+    const was = wasFor.current;
+    if (!was || was.hostId !== hostId) return;
+    const now = hostBackends?.find((b) => b.name === was.name);
+    if (!hostBackends || available(hostBackends).length === 0) return;
+    wasFor.current = undefined;
+    if (now?.status === "available" && now.signing_in) cancelSignIn.current?.(hostId, now.name);
+    if (shown) backToWords();
+  }, [noteFor, hostId, hostBackends, shown]);
+
+  // The note keeps its own place in the column, so it covers neither the wordmark above nor anything beneath it; the
+  // room it takes eases open and closed over motion-settle, as the column centres again (docs/design/DESIGN.md,
+  // Motion).
+  const zoneEase = useRef(new HeightEase()).current;
+  const noted = note !== undefined;
+  const wasNoted = useRef(noted);
+  useLayoutEffect(() => {
+    const zone = above.current;
+    if (!zone) return;
+    if (wasNoted.current !== noted) zoneEase.change(zone);
+    else zoneEase.hold(zone);
+    wasNoted.current = noted;
+  });
+
+  // While the note shows, the status line stands beneath it in the room above the box, so the note covers nothing it
+  // says (docs/design/COMPOSER.md, The sign-in note).
+  const aboveTaken = asking !== undefined || addFailed !== undefined || folderWait !== undefined;
+
   return (
-    <section ref={screen} className="new-session" aria-label="New session">
+    <section ref={screen} className="new-session" aria-label="New session" data-noted={note ? "" : undefined}>
       <Wordmark />
       <div className="new-session-start">
         {/* In the status line's place above the box (docs/design/COMPOSER.md, The trust question), opening upward:
             the box and the session controls stay where they are. */}
         <div ref={above} className="new-session-above">
+          {noteFor && note && (
+            <SignInNote
+              label={noteFor.label}
+              state={note}
+              onSignIn={() => props.onSignIn?.(hostId, noteFor.name)}
+              onCancel={() => props.onCancelSignIn?.(hostId, noteFor.name)}
+              // Nothing else on the screen can be acted on, unless the trust question is open, which holds the glow.
+              focal={asking === undefined}
+              force={props.forceSignIn}
+            />
+          )}
           {asking !== undefined && (
             <TrustQuestion
               name={pathName(asking)}
@@ -390,12 +457,13 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
               {addFailed.message}
             </p>
           )}
+          {note && !aboveTaken && <StatusLine unavailable={unavailable} sending={starting} dialogFailed={false} marked={false} />}
         </div>
         <Composer
           inputRef={words}
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
           // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
-          statusTaken={asking !== undefined || addFailed !== undefined || folderWait !== undefined}
+          statusTaken={aboveTaken || note !== undefined}
           // Nothing is sent while a picked folder is found, asked about or added, so no session starts in the project
           // chosen before it (FLOW-NEW-SESSION-R42); the words stay the user's to edit. A failed add frees send again.
           held={asking !== undefined || folderBusy}

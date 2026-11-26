@@ -47,6 +47,8 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  /* The sign-in note above whatever stands beneath it, space-xs apart (docs/design/COMPOSER.md, The sign-in note). */
+  gap: var(--space-xs);
   height: 0;
 }
 
@@ -56,7 +58,10 @@
   overflow-y: auto;
 }
 
-.new-session[data-tight] .new-session-above {
+/* Too little room, or the sign-in note showing: what opens above the box takes its place in the column, the note at
+   its top, so it covers neither the wordmark nor what stands beneath it (docs/design/COMPOSER.md, The sign-in note). */
+.new-session[data-tight] .new-session-above,
+.new-session[data-noted] .new-session-above {
   height: auto;
 }
 
