@@ -208,12 +208,28 @@ async fn a_sign_in_asked_for_while_one_is_ending_starts_afresh_once_it_has_ended
     );
     assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 2);
     assert_eq!(ended(&mut other).await["outcome"], json!("canceled"));
+
+    // And one that ended by itself, while Core still lets go of it.
+    let stopping = fake.sign_ins.stop_gate.lock().await;
     fake.sign_ins
         .end(SignInEnd::Failed("stopped by the test".into()));
-    let ending = other
-        .notification_where(|n| n["method"] == "backend.sign_in_ended")
-        .await;
-    assert_eq!(ending["params"]["outcome"], json!("failed"));
+    while fake.sign_ins.stops.load(Ordering::SeqCst) < 2 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    *fake.sign_ins.mode.lock().unwrap() = SignInMode::Starts(Some(PAGE.into()));
+    let asked = client.request("backend.sign_in", the_fake()).await;
+    client.result("core.status", json!({})).await;
+    assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 2, "it waits");
+    drop(stopping);
+    assert_eq!(
+        client.response(asked).await["result"],
+        json!({ "url": PAGE })
+    );
+    assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 3);
+    assert_eq!(ended(&mut other).await["outcome"], json!("failed"));
+    fake.sign_ins
+        .end(SignInEnd::Failed("stopped by the test".into()));
+    ended(&mut other).await;
 }
 
 /// `backend_missing` for a backend Core has no adapter for, and
