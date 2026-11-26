@@ -2624,7 +2624,8 @@ impl Admission {
     }
 
     /// Asks to begin a sign-in for `of` ([`Command::SignIn`]), waiting
-    /// while one is ending. Admitted, what `attach` makes is attached to
+    /// while one is ending, until `deadline`: then it gives up
+    /// ([`Report::GaveUp`]) and is refused so. Admitted, what `attach` makes is attached to
     /// the sign-in in the step that admits it, and goes in the step that
     /// ends it. Refused because one is under way, the refusal comes with
     /// what is attached to that one, read in the same step, so a second
@@ -2632,6 +2633,7 @@ impl Admission {
     pub async fn begin_sign_in(
         self: &Arc<Self>,
         of: &SignInOf,
+        deadline: tokio::time::Instant,
         attach: impl Fn() -> Attached,
     ) -> Result<UnderWay, (Refusal, Option<Attached>)> {
         loop {
@@ -2652,11 +2654,8 @@ impl Admission {
                     }
                     Outcome::Refused(_) | Outcome::Done | Outcome::Noted | Outcome::Stale => {}
                 });
-            let outcome = match waiter {
-                // Waited for outside the lock; the sender lives in `self`.
-                Some((_, waiter)) => waiter.await.expect("a held command is always answered"),
-                None => outcome,
-            };
+            let limit = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let outcome = self.answer_within(limit, outcome, waiter).await;
             match outcome {
                 Outcome::Refused(Refusal::SigningIn) => {
                     // Released as refused: another request held beside this

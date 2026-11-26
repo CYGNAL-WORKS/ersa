@@ -110,6 +110,9 @@ pub fn signing_in(core: &Core, of: &SignInOf) -> Option<SigningIn> {
 /// for it was answered (PROTO-CORE-API-R155, R156). While one is ending it
 /// waits, and then starts afresh.
 pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) -> Started {
+    // R157's 20 seconds count from the request, a wait for a sign-in that
+    // is ending included.
+    let deadline = tokio::time::Instant::now() + core.config.sign_in_start_limit;
     let (started_tx, started) = watch::channel(None);
     let (stopped_tx, stopped) = watch::channel(false);
     let (cancel, canceled) = watch::channel(false);
@@ -119,12 +122,13 @@ pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) ->
         cancel,
     });
     let attach = || Arc::clone(&handle) as Attached;
-    match core.admission.begin_sign_in(&of, attach).await {
+    match core.admission.begin_sign_in(&of, deadline, attach).await {
         Ok(under_way) => {
             let task = Task {
                 core: Arc::clone(core),
                 of,
                 adapter,
+                deadline,
                 under_way,
                 started: started_tx,
                 stopped: stopped_tx,
@@ -140,6 +144,8 @@ pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) ->
         Err((Refusal::Closing, _)) => Err(ApiError::invalid_state(
             "Core is shutting down; no sign-in can start",
         )),
+        // The one before it took the whole limit to end.
+        Err((Refusal::GaveUp, _)) => Err(too_slow(core, adapter.as_ref())),
         Err((refusal, _)) => Err(ApiError::internal(format!(
             "admission refused a sign-in: {refusal:?}"
         ))),
@@ -179,6 +185,8 @@ struct Task {
     core: Arc<Core>,
     of: SignInOf,
     adapter: Arc<dyn Adapter>,
+    /// When the start's time is up, counted from the request.
+    deadline: tokio::time::Instant,
     /// The sign-in as admission has it: dropped once Core has let go of
     /// everything it started, which takes `signing_in` out of
     /// `backend.list`.
@@ -211,6 +219,7 @@ impl Task {
             core,
             of,
             adapter,
+            deadline,
             under_way,
             started,
             stopped,
@@ -225,8 +234,7 @@ impl Task {
             started.send_replace(Some(Err(ApiError::internal("no transport for the host"))));
             return;
         };
-        let limit = core.config.sign_in_start_limit;
-        let start = tokio::time::timeout(limit, adapter.start_sign_in(transport));
+        let start = tokio::time::timeout_at(deadline, adapter.start_sign_in(transport));
         // A start that is dropped, whichever way, drops what it started,
         // which the transport ends, tree and all (R157, R162).
         let start = tokio::select! {
@@ -243,12 +251,7 @@ impl Task {
                 return;
             }
             Err(_) => {
-                let message = format!(
-                    "The sign-in to {} didn't start within {} seconds.",
-                    adapter.label(),
-                    limit.as_secs()
-                );
-                started.send_replace(Some(Err(ApiError::invalid_state(message))));
+                started.send_replace(Some(Err(too_slow(&core, adapter.as_ref()))));
                 return;
             }
         };
@@ -329,6 +332,15 @@ async fn finish(
     };
     core.sessions
         .notify_all(notification::BACKEND_SIGN_IN_ENDED, &params);
+}
+
+/// The answer for a sign-in that has not started within its limit (R157).
+fn too_slow(core: &Core, adapter: &dyn Adapter) -> ApiError {
+    ApiError::invalid_state(format!(
+        "The sign-in to {} didn't start within {} seconds.",
+        adapter.label(),
+        core.config.sign_in_start_limit.as_secs()
+    ))
 }
 
 /// The answer for a sign-in whose adapter did not start it (R157): the

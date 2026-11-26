@@ -232,6 +232,52 @@ async fn a_sign_in_asked_for_while_one_is_ending_starts_afresh_once_it_has_ended
     ended(&mut other).await;
 }
 
+/// Core's own limits: 20 seconds for a sign-in to start, 10 minutes for
+/// it to end, unless a test sets its own.
+// verifies: PROTO-CORE-API-R157
+// verifies: PROTO-CORE-API-R161
+#[test]
+fn a_sign_in_has_20_seconds_to_start_and_10_minutes_to_end() {
+    let dir = tempdir();
+    let config = CoreConfig::new(dir.path().to_path_buf()).expect("a configuration");
+    assert_eq!(config.sign_in_start_limit, Duration::from_secs(20));
+    assert_eq!(config.sign_in_limit, Duration::from_secs(10 * 60));
+}
+
+/// The 20 seconds count from the request: one held behind a sign-in that
+/// is ending, which takes longer to end than the limit, is answered
+/// `invalid_state` when its time is up, still waiting, and starts nothing.
+// verifies: PROTO-CORE-API-R157
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_held_behind_one_that_is_ending_answers_within_its_limit() {
+    let limit = |config: &mut CoreConfig| config.sign_in_start_limit = Duration::from_secs(2);
+    let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), limit).await;
+    let mut other = core.client().await;
+    client.result("backend.sign_in", the_fake()).await;
+
+    let stopping = fake.sign_ins.stop_gate.lock().await;
+    let canceling = other.request("backend.cancel_sign_in", the_fake()).await;
+    while fake.sign_ins.stops.load(Ordering::SeqCst) < 1 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Answered while the one before it still has not ended.
+    let error = client.error("backend.sign_in", the_fake()).await;
+    assert_eq!(kind(&error), "invalid_state");
+    assert_eq!(
+        error["message"],
+        json!("The sign-in to fake didn't start within 2 seconds.")
+    );
+    drop(stopping);
+    assert_eq!(other.response(canceling).await["result"], json!({}));
+    assert_eq!(ended(&mut other).await["outcome"], json!("canceled"));
+    assert_eq!(
+        fake.sign_ins.starts.load(Ordering::SeqCst),
+        1,
+        "it started nothing"
+    );
+    assert_eq!(listed(&mut other).await.get("signing_in"), None);
+}
+
 /// `backend_missing` for a backend Core has no adapter for, and
 /// `invalid_state` when its command is not found, when its adapter has no
 /// sign-in, when the backend refuses, with its own reason, and when the
