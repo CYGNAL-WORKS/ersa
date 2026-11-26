@@ -438,18 +438,26 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const shownSeq = useRef<{ id: string; lastSeq: number }>(undefined);
   onListed.current = (hostId, listing) => signIns.listed(hostId, listing, sessionNoteKey.current);
   signInEnded.current = (ending) => {
-    // Signed in: every session of that backend on that host loses its note, until a failure after this one (R17). The
-    // shown one at once; the others through their latest event as Core lists it now, since the window's list only
-    // learns a session's latest event when it is read, and one out of view may have failed since.
-    if (ending.outcome === "signed_in") {
-      const shownThen = shownSeq.current;
-      noteClears.clear(signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownThen, false));
-      void client.call("session.list").then(
-        (listing) => noteClears.clear(signedInClears(ending.host_id, ending.name, listing, shownThen, true)),
-        () => {},
-      );
-    }
-    return signIns.ended(ending);
+    // Signed in: every session of that backend on that host loses its note, until a failure after this one (R17), once
+    // the host's backends read on this end no longer report it signed out; until that reading answers, every note stays
+    // as it was, and while it says signed out the notes stay, the shown one saying so (R12). A reading that fails clears
+    // as one that says it can run. The marks are taken as the sign-in ends: the shown session through what it held then;
+    // the others through their latest event as Core lists it now, since the window's list only learns a session's
+    // latest event when it is read, and one out of view may have failed since.
+    const reading = signIns.ended(ending);
+    if (ending.outcome !== "signed_in") return reading.then(() => {});
+    const shownThen = shownSeq.current;
+    const atEnd = signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownThen, false);
+    const listedAfter = client.call("session.list").then(
+      (listing) => signedInClears(ending.host_id, ending.name, listing, shownThen, true),
+      () => undefined,
+    );
+    return reading.then(async (listing) => {
+      if (listing?.find((b) => b.name === ending.name)?.status === "signed_out") return;
+      noteClears.clear(atEnd);
+      const after = await listedAfter;
+      if (after) noteClears.clear(after);
+    });
   };
   // Only this connection's failures count. A connection lost fails every reading still out on it, and the Shell
   // reports that failure and the loss by separate paths, in either order, so the failure may land before the window

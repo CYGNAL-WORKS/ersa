@@ -63,13 +63,14 @@ function fakeCore({ listed = [session()], backends = [backend("claude-code", "Cl
   const calls: { method: Method; params: unknown }[] = [];
   let onEvent: (event: CoreEvent) => void = () => {};
   // `listing`, when set, is what the next `session.list` waits on before it answers.
-  const core = { listed, backends, send: (() => ({ turn: 2 })) as Answer, listing: undefined as Promise<void> | undefined };
+  const core = { listed, backends, send: (() => ({ turn: 2 })) as Answer, listing: undefined as Promise<void> | undefined, reading: undefined as Promise<void> | undefined };
+  // `reading`, when set, is what the next `backend.list` waits on before it answers; one that rejects fails the reading.
   const answers: Partial<Record<Method, Answer>> = {
     "core.status": () => ({ sessions_running: 1, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => [{ id: "alpha", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "none", trusted: true }],
     "session.list": () => (core.listing ? core.listing.then(() => core.listed) : core.listed),
     "workspace.list": () => [{ id: "w1", project_id: "alpha", kind: "root", path: "D:/code/alpha", state: "ready" }],
-    "backend.list": () => core.backends,
+    "backend.list": () => (core.reading ? core.reading.then(() => core.backends) : core.backends),
     "backend.sign_in": () => ({ url: PAGE }),
     "backend.cancel_sign_in": () => ({}),
     "session.subscribe": () => ({ last_seq: -1 }),
@@ -274,6 +275,50 @@ describe("the sign-in note under a session", () => {
     await core.on(2, failure);
     await settled();
     expect(note()).not.toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  // verifies: FLOW-SIGN-IN-R12
+  it("stays, saying so, when the host's backends read after a sign-in that ended signed in still report it signed out", async () => {
+    const core = fakeCore();
+    await open(core);
+    await failedTurn(core);
+    core.backends = [backend("claude-code", "Claude Code (work)", { status: "signed_out" })];
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    expect(note()?.textContent).toContain("The sign-in finished, but Claude Code (work) still reports that it isn't signed in.");
+    within(note()!).getByRole("button", { name: "Sign in" });
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  // verifies: FLOW-SIGN-IN-R12
+  it("stays as it was after a sign-in ended signed in until the host's backends have been read again", async () => {
+    const core = fakeCore();
+    await open(core);
+    await failedTurn(core);
+    let answer!: () => void;
+    core.reading = new Promise((resolve) => (answer = resolve));
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    // The reading is still out: the note says what it said.
+    expect(note()?.textContent).toContain("Claude Code (work) isn't signed in on this host. Sign in, then send your message again.");
+    // It answers that the backend can run: the note goes.
+    await act(async () => answer());
+    await settled();
+    expect(note()).toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
+  it("goes after a sign-in ended signed in when the host's backends can't be read again", async () => {
+    const core = fakeCore();
+    await open(core);
+    await failedTurn(core);
+    expect(note()).not.toBeNull();
+    core.reading = Promise.reject({ kind: "unavailable", message: "The host didn't answer." });
+    core.reading.catch(() => {});
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    expect(note()).toBeNull();
   });
 
   // verifies: FLOW-SIGN-IN-R17

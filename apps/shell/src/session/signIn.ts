@@ -207,8 +207,9 @@ export function useSignIns(client: Pick<CoreClient, "call">, openLink: ShellCont
   };
 
   // A sign-in under way ended, in this window's or another's (PROTO-CORE-API-R159): the backends are read again (R09),
-  // and the note says how it ended, except for a cancel, which adds nothing (R14).
-  const ended = async (ending: BackendSignInEndedNotification) => {
+  // and the note says how it ended, except for a cancel, which adds nothing (R14). Resolves with that reading, none
+  // when it failed or was dropped, so a session's note can follow it (R17).
+  const ended = async (ending: BackendSignInEndedNotification): Promise<readonly BackendInfo[] | undefined> => {
     const key = signInKey(ending.host_id, ending.name);
     if (ending.outcome === "failed") update(key, (was) => ({ ...was, said: { kind: "failed", reason: ending.message } }));
     if (ending.outcome === "timed_out") update(key, (was) => ({ ...was, said: { kind: "timedOut" } }));
@@ -217,6 +218,7 @@ export function useSignIns(client: Pick<CoreClient, "call">, openLink: ShellCont
     if (ending.outcome === "signed_in" && listing?.find((b) => b.name === ending.name)?.status === "signed_out") {
       update(key, (was) => ({ ...was, said: { kind: "stillSignedOut" } }));
     }
+    return listing;
   };
 
   // The new-session screen's note went for this host's listing: what a failure said about any backend no note is for
