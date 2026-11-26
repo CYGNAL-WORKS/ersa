@@ -1,0 +1,408 @@
+//! Archive inactive sessions (FLOW-CLEAN-UP Step 4, FLOW-CLEAN-UP-R10):
+//! with `sessions.archive_inactive_days` set, the sweep archives each
+//! stopped session with no activity for that many days, stopping none, and
+//! the same pass puts its folder away. Against a real git
+//! repository and the fake backend, with the sweep's clock in the test's
+//! hands: days pass when the test says so.
+
+mod support;
+
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
+
+use ersa_adapter::OpenElsewhere;
+use ersa_core::persistence::rfc3339;
+use serde_json::{Value, json};
+use support::fake::{self, FakeAdapter, Records};
+use support::put_away::*;
+use support::sweep::*;
+
+const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Ten minutes: more than the test itself takes, so a session is still
+/// short of its days by this much however slow the machine.
+const MARGIN: Duration = Duration::from_secs(10 * 60);
+
+/// Sets Archive inactive sessions to `days`; null is Never.
+async fn archive_after(s: &mut Setup, days: Value) {
+    let patch = json!({ "patch": { "sessions": { "archive_inactive_days": days } } });
+    s.client.result("settings.set", patch).await;
+}
+
+/// A session in a workspace of its own that started, went idle and was
+/// stopped, which no connection is subscribed to, and its backend's id.
+/// Its record holds nothing yet: it has no last activity, and it was made
+/// when Core first started it, just now.
+async fn left_alone(s: &mut Setup) -> (Value, String, String) {
+    let workspace = s.workspace().await;
+    let params = json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND });
+    let session = s.client.result("session.create", params).await;
+    let session = session["id"].as_str().unwrap().to_string();
+    let subscribe = json!({ "id": session, "from_seq": 0 });
+    s.client.result("session.subscribe", subscribe).await;
+    let started = s.client.events_until("session.started").await;
+    let backend_id = started.last().unwrap()["event"]["backend_session_id"]
+        .as_str()
+        .expect("the fake names its session")
+        .to_string();
+    s.client
+        .result("session.stop", json!({ "id": session }))
+        .await;
+    s.client.events_until("session.ended").await;
+    unsubscribe(s, &session).await;
+    (workspace, session, backend_id)
+}
+
+async fn unsubscribe(s: &mut Setup, session: &str) {
+    s.client
+        .result("session.unsubscribe", json!({ "id": session }))
+        .await;
+}
+
+/// The session as `session.list` lists it now.
+async fn row(s: &mut Setup, session: &str) -> Value {
+    support::listed(&mut s.client, session)
+        .await
+        .expect("the session is listed")
+}
+
+async fn archived(s: &mut Setup, session: &str) -> bool {
+    row(s, session).await["archived"] == json!(true)
+}
+
+/// `workspace` was put away: its folder gone, its branch kept.
+async fn put_away(s: &mut Setup, workspace: &Value) {
+    assert_eq!(s.listed(workspace).await["state"], "put_away");
+    assert!(!folder(workspace).exists(), "the folder is gone");
+    assert!(has_branch(&s.repo, branch(workspace)), "the branch stays");
+}
+
+/// Gives `backend_id`'s record a conversation begun at `made` whose last
+/// entry is at `last`, as the backend would have written it.
+fn recorded(
+    records: &Records,
+    backend_id: &str,
+    made: time::OffsetDateTime,
+    last: time::OffsetDateTime,
+) {
+    let mut first = fake::recorded_user("u-1", "hello");
+    first.ts = Some(rfc3339(made));
+    let mut reply = fake::recorded_reply("r-1", "echo: hello");
+    reply.ts = Some(rfc3339(last));
+    records
+        .lock()
+        .unwrap()
+        .insert(backend_id.to_string(), vec![first, reply]);
+}
+
+/// Unset, the sweep archives nothing, however long a session has been
+/// left; set and cleared again, it is unset. Set once more, the same
+/// session is archived, so it was one the setting would archive.
+// verifies: FLOW-CLEAN-UP-R10
+// verifies: PROTO-CORE-API-R126
+#[tokio::test(flavor = "multi_thread")]
+async fn with_the_setting_unset_no_session_is_archived() {
+    let (mut s, clock) = swept().await;
+    let (workspace, session, _) = left_alone(&mut s).await;
+
+    later(&clock, 31 * DAY).await;
+    assert!(!archived(&mut s, &session).await);
+
+    archive_after(&mut s, json!(1)).await;
+    archive_after(&mut s, Value::Null).await;
+    later(&clock, DAY).await;
+    assert!(!archived(&mut s, &session).await);
+    assert_eq!(s.listed(&workspace).await["state"], "ready");
+
+    archive_after(&mut s, json!(30)).await;
+    later(&clock, Duration::ZERO).await;
+    assert!(archived(&mut s, &session).await);
+}
+
+/// A session whose record was last written at T, and begun a month before
+/// that, is left until T plus the days chosen, and archived from then on
+/// by the next pass, which puts its folder away too. Its creation would
+/// have archived it at once.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_is_archived_once_its_last_activity_is_that_many_days_ago() {
+    let records = Records::default();
+    let (mut s, clock) = swept_with(FakeAdapter::with_records(Arc::clone(&records)), |_| {}).await;
+    let (workspace, session, backend_id) = left_alone(&mut s).await;
+    let now = time::OffsetDateTime::now_utc();
+    recorded(&records, &backend_id, now - 30 * DAY, now);
+    archive_after(&mut s, json!(7)).await;
+
+    later(&clock, Duration::ZERO).await;
+    assert_eq!(
+        row(&mut s, &session).await["last_activity_at"],
+        json!(rfc3339(now))
+    );
+    assert!(
+        !archived(&mut s, &session).await,
+        "its creation is not its last activity"
+    );
+
+    later(&clock, 7 * DAY - MARGIN).await;
+    assert!(!archived(&mut s, &session).await, "archived early");
+
+    later(&clock, 2 * MARGIN).await;
+    assert!(archived(&mut s, &session).await);
+    put_away(&mut s, &workspace).await;
+}
+
+/// A turn taken in the backend's own tools since Core last read the
+/// record counts: the pass reads the record again before it judges, as
+/// `session.list` does, rather than going by what Core read before.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_taken_outside_ersa_counts_as_activity() {
+    let records = Records::default();
+    let (mut s, clock) = swept_with(FakeAdapter::with_records(Arc::clone(&records)), |_| {}).await;
+    let (_, session, backend_id) = left_alone(&mut s).await;
+    let now = time::OffsetDateTime::now_utc();
+    let month_ago = now - 30 * DAY;
+    recorded(&records, &backend_id, month_ago, month_ago);
+    // Core reads the record: last active a month ago.
+    let read = row(&mut s, &session).await["last_activity_at"].clone();
+    assert_eq!(read, json!(rfc3339(month_ago)));
+
+    // Then a turn in the terminal, and no list since.
+    let mut reply = fake::recorded_reply("r-2", "echo: again");
+    reply.ts = Some(rfc3339(now));
+    records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(reply);
+    archive_after(&mut s, json!(7)).await;
+    later(&clock, Duration::ZERO).await;
+
+    assert!(
+        !archived(&mut s, &session).await,
+        "the turn outside Ersa was missed"
+    );
+}
+
+/// The archive judges the session again once it holds the session's turn:
+/// one pinned since the sweep listed it is refused and left.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_pinned_after_the_sweep_listed_it_is_left() {
+    let (mut s, _clock) = swept().await;
+    let (_, session, _) = left_alone(&mut s).await;
+    let core = s.core.core();
+    let cutoff = time::OffsetDateTime::now_utc() + 31 * DAY;
+    assert_eq!(core.sessions.inactive_since(cutoff), vec![session.clone()]);
+
+    let arrange = json!({ "id": session, "pinned": true });
+    s.client.result("session.arrange", arrange).await;
+    let refused = core.sessions.archive_inactive(&session, cutoff).await;
+
+    assert!(refused.is_err(), "archived: {refused:?}");
+    assert!(!archived(&mut s, &session).await);
+}
+
+/// A session with no last activity is archived by when it was made.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_with_no_activity_is_archived_by_its_creation() {
+    let (mut s, clock) = swept().await;
+    let (workspace, session, _) = left_alone(&mut s).await;
+    assert_eq!(row(&mut s, &session).await.get("last_activity_at"), None);
+    archive_after(&mut s, json!(2)).await;
+
+    later(&clock, 2 * DAY - MARGIN).await;
+    assert!(!archived(&mut s, &session).await, "archived early");
+
+    later(&clock, 2 * MARGIN).await;
+    assert!(archived(&mut s, &session).await);
+    put_away(&mut s, &workspace).await;
+}
+
+/// Pinned, unseen, subscribed to, marked deleting or live in a turn, a session
+/// stays however long it was left; one beside them with none of those is
+/// archived by the same pass.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn attention_and_work_keep_a_session_unarchived() {
+    let fake = FakeAdapter::new(1);
+    let refusal = Arc::clone(&fake.delete_refusal);
+    let (mut s, clock) = swept_with(fake, |_| {}).await;
+
+    let (_, pinned, _) = left_alone(&mut s).await;
+    let arrange = json!({ "id": pinned, "pinned": true });
+    s.client.result("session.arrange", arrange).await;
+
+    let (_, unseen, _) = left_alone(&mut s).await;
+    let arrange = json!({ "id": unseen, "unseen": true });
+    s.client.result("session.arrange", arrange).await;
+
+    let (_, watched, _) = left_alone(&mut s).await;
+    let mut window = s.core.client().await;
+    let subscribe = json!({ "id": watched, "from_seq": 0 });
+    window.result("session.subscribe", subscribe).await;
+
+    // Its record's deletion is refused: marked deleting, `failed`. A
+    // second session keeps the folder, so the delete takes no files.
+    let (workspace, deleting, _) = left_alone(&mut s).await;
+    s.stopped_session(&workspace).await;
+    *refusal.lock().unwrap() = Some(OpenElsewhere::Yes { pids: vec![4242] });
+    let changes = json!({ "id": workspace["id"] });
+    let token = s.client.result("workspace.changes", changes).await["token"].clone();
+    let delete = json!({ "id": deleting, "token": token });
+    s.client.error("session.delete", delete).await;
+    assert_eq!(row(&mut s, &deleting).await["deleting"], "failed");
+
+    // A turn that keeps working, nobody watching it.
+    let busy_workspace = s.workspace().await;
+    let params = json!({ "workspace_id": busy_workspace["id"], "backend": fake::BACKEND });
+    let busy = s.client.result("session.create", params).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let subscribe = json!({ "id": busy, "from_seq": 0 });
+    s.client.result("session.subscribe", subscribe).await;
+    s.client.events_until("session.started").await;
+    let send = json!({ "id": busy, "text": "work" });
+    s.client.result("session.send", send).await;
+    s.client.events_until("turn.started").await;
+    unsubscribe(&mut s, &busy).await;
+
+    let (_, alone, _) = left_alone(&mut s).await;
+    archive_after(&mut s, json!(1)).await;
+    later(&clock, 31 * DAY).await;
+
+    assert!(
+        archived(&mut s, &alone).await,
+        "the one left alone is archived"
+    );
+    for kept in [&pinned, &unseen, &watched, &deleting, &busy] {
+        assert!(!archived(&mut s, kept).await, "{kept} was archived");
+    }
+    assert_eq!(
+        row(&mut s, &busy).await["state"],
+        "running",
+        "its turn runs on"
+    );
+
+    // Once the window lets it go, the next pass archives it.
+    window
+        .result("session.unsubscribe", json!({ "id": watched }))
+        .await;
+    later(&clock, Duration::ZERO).await;
+    assert!(archived(&mut s, &watched).await);
+}
+
+/// A session another process has open stays, and so does one whose
+/// backend can't say; once no other process has it, it is archived.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_another_process_has_open_stays() {
+    let fake = FakeAdapter::new(1);
+    let open = Arc::clone(&fake.open_elsewhere);
+    let (mut s, clock) = swept_with(fake, |_| {}).await;
+    let (_, session, _) = left_alone(&mut s).await;
+    archive_after(&mut s, json!(1)).await;
+
+    *open.lock().unwrap() = OpenElsewhere::Yes { pids: vec![4242] };
+    later(&clock, 31 * DAY).await;
+    assert!(!archived(&mut s, &session).await);
+
+    *open.lock().unwrap() = OpenElsewhere::Unknown;
+    later(&clock, Duration::ZERO).await;
+    assert!(!archived(&mut s, &session).await);
+
+    *open.lock().unwrap() = OpenElsewhere::No;
+    later(&clock, Duration::ZERO).await;
+    assert!(archived(&mut s, &session).await);
+}
+
+/// A live session nobody is subscribed to is left, however long it has sat
+/// idle, and not stopped: the sweep stops no session. Once the user stops
+/// it, the next pass archives it and puts its folder away.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_live_session_is_left_running_and_archived_once_it_has_stopped() {
+    let (mut s, clock) = swept().await;
+    let workspace = s.workspace().await;
+    let params = json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND });
+    let session = s.client.result("session.create", params).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let subscribe = json!({ "id": session, "from_seq": 0 });
+    s.client.result("session.subscribe", subscribe).await;
+    s.client.events_until("session.started").await;
+    // The fake backend finishes a turn whose message is `idle`.
+    let send = json!({ "id": session, "text": "idle" });
+    s.client.result("session.send", send).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(&mut s, &session).await["state"] != "idle" {
+        assert!(tokio::time::Instant::now() < deadline, "never idle");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    unsubscribe(&mut s, &session).await;
+    let stops = s.stats.stops.load(Ordering::SeqCst);
+    archive_after(&mut s, json!(14)).await;
+
+    later(&clock, 30 * DAY).await;
+
+    let after = row(&mut s, &session).await;
+    assert_eq!(after["archived"], false, "{after}");
+    assert_eq!(after["state"], "idle", "the sweep stopped it: {after}");
+    assert_eq!(
+        s.stats.stops.load(Ordering::SeqCst),
+        stops,
+        "a stop was sent"
+    );
+    assert_eq!(s.listed(&workspace).await["state"], "ready");
+
+    s.client
+        .result("session.stop", json!({ "id": session }))
+        .await;
+    later(&clock, Duration::ZERO).await;
+    assert!(archived(&mut s, &session).await);
+    put_away(&mut s, &workspace).await;
+}
+
+/// A session nothing dates is left: no last activity, and no record or
+/// lifecycle fact that says when it was made, so it lists as made at the
+/// start of 1970 and would read as decades inactive.
+// verifies: FLOW-CLEAN-UP-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_nothing_dates_is_left() {
+    let (mut s, _) = swept().await;
+    let (_, undated, _) = left_alone(&mut s).await;
+    // The lifecycle facts that dated it are gone, as for a session from
+    // before the app log; its backend never wrote a record. The next Core
+    // sweeps by a clock of its own, whose first pass is its pass at start.
+    let clock = Arc::new(ersa_core::SweepClock::default());
+    let fake: Vec<Arc<dyn ersa_core::Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let mut s = restarted_after(s, fake, &clock, |data| {
+        for name in [
+            ersa_core::app_log::FILE_NAME,
+            ersa_core::app_log::PREVIOUS_FILE_NAME,
+        ] {
+            let _ = std::fs::remove_file(data.join(name));
+        }
+    })
+    .await;
+    passes(&clock, 1).await;
+    let listed = row(&mut s, &undated).await;
+    assert_eq!(listed["created_at"], "1970-01-01T00:00:00.000Z", "{listed}");
+    assert_eq!(listed.get("last_activity_at"), None);
+
+    // A session beside it that Core dates is archived by the same pass.
+    let (_, dated, _) = left_alone(&mut s).await;
+    archive_after(&mut s, json!(1)).await;
+    later(&clock, 2 * DAY).await;
+
+    assert!(archived(&mut s, &dated).await, "the dated one is archived");
+    assert!(
+        !archived(&mut s, &undated).await,
+        "the undated one was archived"
+    );
+}

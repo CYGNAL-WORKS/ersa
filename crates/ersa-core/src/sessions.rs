@@ -67,6 +67,7 @@ use crate::raw_log::RawLog;
 
 mod fork;
 mod found;
+mod inactive;
 mod put_back;
 mod resume;
 mod send;
@@ -1784,6 +1785,20 @@ impl SessionManager {
     /// that fails leaves the session as it was. Unarchiving leaves the
     /// session stopped; nothing restarts it.
     pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session, SessionError> {
+        self.set_archived_unless(id, archived, |_| None).await
+    }
+
+    /// [`SessionManager::set_archived`], except that an archive is refused
+    /// with `invalid_state` when `keep` gives a reason to keep the session,
+    /// asked once the archive holds the session's turn and before the stop:
+    /// so the sweep's archive judges the session as it is then, not as it
+    /// was when the sweep listed it (FLOW-CLEAN-UP-R10).
+    async fn set_archived_unless(
+        &self,
+        id: &str,
+        archived: bool,
+        keep: impl FnOnce(&Handle) -> Option<String>,
+    ) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
         // The session's exclusive operation, held from here to the mark:
@@ -1806,6 +1821,9 @@ impl SessionManager {
                 .command(command)
                 .await
                 .map_err(|refusal| refused_session(refusal, &handle.workspace_id, id))?;
+            if let Some(why) = keep(&handle) {
+                return Err(SessionError::InvalidState(why));
+            }
             // Refused before the stop, so a busy session is left exactly as
             // it was (PROTO-CORE-API-R77).
             if in_turn(&handle) {

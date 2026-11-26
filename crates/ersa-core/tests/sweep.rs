@@ -10,45 +10,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
-use ersa_core::{Adapter, CoreConfig, Gate, SweepClock, Sweeps};
+use ersa_core::{Adapter, Gate, SweepClock, Sweeps};
 use serde_json::{Value, json};
 use support::fake::FakeAdapter;
 use support::put_away::*;
-use support::{Client, git, shut_down, start_with_adapters, tempdir};
-
-/// How long a test waits for a pass to end before it fails.
-const PASS: Duration = Duration::from_secs(120);
-
-/// A Core with the fake backend `fake` and a git project, sweeping by the
-/// returned clock, its pass at start ended.
-async fn swept_with(
-    fake: FakeAdapter,
-    more: impl FnOnce(&mut CoreConfig),
-) -> (Setup, Arc<SweepClock>) {
-    let clock = Arc::new(SweepClock::default());
-    let stats = Arc::clone(&fake.stats);
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
-    let sweeps = Sweeps::Driven(Arc::clone(&clock));
-    let configure = move |config: &mut CoreConfig| {
-        config.sweeps = sweeps;
-        more(config);
-    };
-    let core = start_with_adapters(tempdir(), configure, adapters).await;
-    let s = Setup::over(core, stats).await;
-    passes(&clock, 1).await;
-    (s, clock)
-}
-
-async fn swept() -> (Setup, Arc<SweepClock>) {
-    swept_with(FakeAdapter::new(1), |_| {}).await
-}
-
-/// Waits until `count` passes have ended.
-async fn passes(clock: &SweepClock, count: u64) {
-    tokio::time::timeout(PASS, clock.until_ended(count))
-        .await
-        .expect("the sweep ended in time");
-}
+use support::sweep::*;
+use support::{Client, git};
 
 /// Archives `session`, then waits for the pass the archive asked for.
 async fn archive(s: &mut Setup, clock: &SweepClock, session: &str) {
@@ -307,29 +274,6 @@ async fn a_root_workspace_is_never_put_away() {
 
 // -- At start and every hour (FLOW-CLEAN-UP-R06) ---------------------------
 
-/// Core restarted over `s`'s data, with `adapters` and the sweep on `clock`.
-async fn restarted(s: Setup, adapters: Vec<Arc<dyn Adapter>>, clock: &Arc<SweepClock>) -> Setup {
-    let Setup {
-        core,
-        client,
-        repo,
-        project,
-        stats,
-    } = s;
-    drop(client);
-    let dir = shut_down(core).await;
-    let sweeps = Sweeps::Driven(Arc::clone(clock));
-    let core = start_with_adapters(dir, move |config| config.sweeps = sweeps, adapters).await;
-    let client = core.client().await;
-    Setup {
-        core,
-        client,
-        repo,
-        project,
-        stats,
-    }
-}
-
 /// An archived session's folder the last Core kept, for a file since
 /// deleted: the next Core's pass at start puts it away, except while the
 /// session is dormant, its backend having no adapter in that build.
@@ -521,14 +465,6 @@ async fn a_put_away_that_failed_part_way_is_never_tried_again() {
 }
 
 // -- Leftovers (FLOW-CLEAN-UP-R23, R08, R25) --------------------------------
-
-/// Moves the sweep's clock on by `by`, then waits for a pass.
-async fn later(clock: &SweepClock, by: Duration) {
-    let before = clock.ended();
-    clock.time_passed(by);
-    clock.sweep_again();
-    passes(clock, before + 1).await;
-}
 
 /// Just short of an hour: a workspace made at the start of a test is still
 /// younger than an hour once this has passed, however slow the test.
