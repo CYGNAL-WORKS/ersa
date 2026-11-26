@@ -252,6 +252,7 @@ async fn make_again(
         let checks = RemovalChecks {
             force: true,
             after_failed_add: true,
+            discard_branch: false,
         };
         workspace::git_worktree_delete(transport, repo, path, "", checks, tries, turns).await?;
     }
