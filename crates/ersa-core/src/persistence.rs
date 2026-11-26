@@ -691,19 +691,25 @@ fn from_sql_enum<T: DeserializeOwned>(row: &Row, index: usize) -> rusqlite::Resu
 /// The current time as RFC 3339 UTC with millisecond precision, the format of
 /// every timestamp Core stores or sends.
 pub fn now_rfc3339() -> String {
-    let now = time::OffsetDateTime::now_utc();
+    rfc3339(time::OffsetDateTime::now_utc())
+}
+
+/// `at` in the format of every timestamp Core stores or sends: RFC 3339
+/// UTC with millisecond precision.
+pub fn rfc3339(at: time::OffsetDateTime) -> String {
+    let at = at.to_offset(time::UtcOffset::UTC);
     // Written out field by field: `time`'s RFC 3339 formatter drops trailing
     // zeros from the fraction (`.240` becomes `.24`), and a fixed width keeps
     // timestamps sortable as text. Milliseconds are enough to order lines.
     format!(
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        now.year(),
-        u8::from(now.month()),
-        now.day(),
-        now.hour(),
-        now.minute(),
-        now.second(),
-        now.millisecond()
+        at.year(),
+        u8::from(at.month()),
+        at.day(),
+        at.hour(),
+        at.minute(),
+        at.second(),
+        at.millisecond()
     )
 }
 

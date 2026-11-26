@@ -17,6 +17,7 @@ pub mod put_away;
 pub mod schedule;
 pub mod sealed;
 pub mod suite;
+pub mod sweep;
 
 use std::collections::VecDeque;
 use std::io;
