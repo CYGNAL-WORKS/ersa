@@ -1141,6 +1141,16 @@ mod tests {
         assert!(partial.is_empty());
     }
 
+    /// What session `job`'s send does to Core's ignore file at `ignore`,
+    /// staging under that session's own name, as `scratch_folder` does.
+    fn make_again(ignore: &Path, job: &str) -> Result<(), String> {
+        let staging = ignore.with_file_name(format!(".gitignore.{job}"));
+        ignore_everything(ignore, Some(&staging)).map_err(|fail| match fail {
+            Fail::Reason(reason) => reason,
+            Fail::Stopped => "stopped".into(),
+        })
+    }
+
     /// Jobs of different sessions in one workspace, nothing ordering them,
     /// all find a shipped `.ersa/attachments/.gitignore` that ignores less
     /// and make it again at once: none of them is refused for it, and it ends
@@ -1149,24 +1159,26 @@ mod tests {
     #[test]
     fn sessions_making_cores_ignore_file_again_at_once_all_succeed() {
         const JOBS: usize = 8;
+        // The race this checks (#606: one job's open finding the file
+        // another job's rename just replaced) is a window inside the file
+        // system, so it shows only over many rounds. At 100 rounds it failed
+        // about 6 runs in 100 on CI's Windows runner; 1,000 rounds give each
+        // run ten times the chances, about 45 runs in 100 without the fix,
+        // for about 5 seconds. More jobs a round does not raise the rate.
+        const ROUNDS: usize = 1_000;
         let dir = tempfile::tempdir().unwrap();
         let attachments = dir.path().join(ATTACHMENTS);
         fs::create_dir_all(&attachments).unwrap();
         let ignore = attachments.join(".gitignore");
-        for round in 0..100 {
+        for round in 0..ROUNDS {
             fs::write(&ignore, b"").unwrap();
             let start = std::sync::Arc::new(std::sync::Barrier::new(JOBS));
             let jobs: Vec<_> = (0..JOBS)
                 .map(|job| {
-                    let (start, attachments, ignore) =
-                        (start.clone(), attachments.clone(), ignore.clone());
+                    let (start, ignore) = (start.clone(), ignore.clone());
                     std::thread::spawn(move || {
-                        let staging = attachments.join(format!(".gitignore.s-{job}"));
                         start.wait();
-                        ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
-                            Fail::Reason(reason) => reason,
-                            Fail::Stopped => "stopped".into(),
-                        })
+                        make_again(&ignore, &format!("s-{job}"))
                     })
                 })
                 .collect();
@@ -1198,22 +1210,15 @@ mod tests {
         let attachments = dir.path().join(ATTACHMENTS);
         fs::create_dir_all(&attachments).unwrap();
         let ignore = attachments.join(".gitignore");
-        let make_again = |job: &str| {
-            let staging = attachments.join(format!(".gitignore.{job}"));
-            ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
-                Fail::Reason(reason) => reason,
-                Fail::Stopped => "stopped".into(),
-            })
-        };
         fs::write(&ignore, b"").unwrap();
         // Opened as a job's check opens it.
         let mut reader = open_file(&ignore).unwrap();
-        assert_eq!(make_again("s-1"), Ok(()));
+        assert_eq!(make_again(&ignore, "s-1"), Ok(()));
         assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
         // The file written in place holds something else again, while the
         // replaced one is still open under the reader.
         fs::write(&ignore, b"!keep\n").unwrap();
-        assert_eq!(make_again("s-2"), Ok(()));
+        assert_eq!(make_again(&ignore, "s-2"), Ok(()));
         assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
         let mut held = Vec::new();
         reader.read_to_end(&mut held).unwrap();
