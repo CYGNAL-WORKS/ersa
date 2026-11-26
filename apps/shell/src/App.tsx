@@ -382,6 +382,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     },
     [client, link],
   );
+  // A connection lost fails every reading still out on it ("connection closed"); forgetting them here drops those
+  // answers, so the next connection shows nothing of them. A new connection's first reading starts afresh above,
+  // since the screen's own effects can ask before this one runs.
+  useEffect(() => {
+    if (link === undefined) readings.current = { link: undefined, hosts: new Set() };
+  }, [link]);
   const hostId = view.phase === "connected" ? view.hello.host.id : undefined;
   useEffect(() => {
     if (hostId !== undefined) readHostBackends(hostId);

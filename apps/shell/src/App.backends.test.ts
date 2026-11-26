@@ -3,13 +3,13 @@
 // time the screen is shown and each time the window is shown or takes the focus, with nothing said while it reads, a
 // backend found then chosen as on a screen just opened, and the words for a backend Ersa can't find.
 
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "./App";
-import type { Attachment, CoreClient, Method } from "./core/client";
+import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
 import type { ShellControl } from "./core/shell";
-import type { BackendInfo, CoreHelloResult, Session } from "./protocol/core-api.gen";
+import type { BackendInfo, CoreHelloResult } from "./protocol/core-api.gen";
 
 afterEach(cleanup);
 
@@ -43,36 +43,20 @@ const claudeCode = (status: BackendInfo["status"] = "available"): BackendInfo =>
 });
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({ ...claudeCode(status), name: "copilot", label: "GitHub Copilot" });
 
-const session: Session = {
-  id: "s1",
-  title: "Fix the build",
-  workspace_id: "w1",
-  host_id: "local",
-  backend: "claude-code",
-  model: "default",
-  effort: "low",
-  permission_mode: "default",
-  state: "idle",
-  created_at: "2026-11-01T09:00:00Z",
-  archived: false,
-  pinned: false,
-  unseen: false,
-  tile: { state: "idle", pending: [] },
-};
-
 type Answers = Partial<Record<Method, (params: never) => unknown>>;
 
 /** What `backend.list` answers: a listing, or a function called for each reading, to hold or refuse it. */
 type Listing = BackendInfo[] | (() => Promise<BackendInfo[]>);
 
 /** A fake Core whose `backend.list` answers with `listing` until the test sets `core.listing` to another. */
-function fakeCore(listing: Listing, sessions: Session[] = []) {
+function fakeCore(listing: Listing) {
   const calls: Method[] = [];
-  const core = { listing };
+  const core = { listing, attached: 0 };
+  let onEvent: (event: CoreEvent) => void = () => {};
   const answers: Answers = {
     "core.status": () => ({ sessions_running: 0, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => [{ id: "alpha", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "none", trusted: true }],
-    "session.list": () => sessions,
+    "session.list": () => [],
     "workspace.list": () => [{ id: "w1", project_id: "alpha", kind: "root", path: "D:/code/alpha", state: "ready" }],
     "backend.list": () => (typeof core.listing === "function" ? core.listing() : core.listing),
     "settings.get": () => ({}),
@@ -80,7 +64,12 @@ function fakeCore(listing: Listing, sessions: Session[] = []) {
     "session.unsubscribe": () => ({}),
   };
   const client: CoreClient = {
-    attach: () => Promise.resolve<Attachment>({ how: "attached", hello }),
+    // Each attach answers at once: after a loss the window attaches again by itself.
+    attach: (listener) => {
+      onEvent = listener;
+      core.attached += 1;
+      return Promise.resolve<Attachment>({ how: "attached", hello });
+    },
     call: (method, params) => {
       calls.push(method);
       const answer = answers[method];
@@ -88,7 +77,9 @@ function fakeCore(listing: Listing, sessions: Session[] = []) {
       return new Promise((resolve) => resolve(answer(params as never))) as never;
     },
   };
-  return Object.assign(core, { client, readings: () => calls.filter((m) => m === "backend.list").length });
+  // Ersa loses Core, as when its connection drops.
+  const drop = () => act(() => onEvent({ kind: "lost", reason: "gone" }));
+  return Object.assign(core, { client, drop, readings: () => calls.filter((m) => m === "backend.list").length });
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -160,14 +151,24 @@ describe("the new-session screen reading the host's backends again", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R50
-  it("reads them again only while the new-session screen is showing", async () => {
-    const core = fakeCore([claudeCode()], [session]);
+  it("drops a reading out when the connection is lost, so the next connection shows nothing of it", async () => {
+    const core = fakeCore([claudeCode()]);
     await start(core);
-    // The newest session shows, not the screen.
-    expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
-    const before = core.readings();
+    const out = deferred<BackendInfo[]>();
+    core.listing = () => out.promise;
     await windowBack();
-    expect(core.readings()).toBe(before);
+    // The connection drops with the reading out, and the reading fails as a lost connection fails what waits on it.
+    await core.drop();
+    const next = deferred<BackendInfo[]>();
+    core.listing = () => next.promise;
+    await act(async () => out.reject({ kind: "transport", message: "connection closed" }));
+    // Attached again, and reading: the listing held from before shows, with nothing of the lost reading.
+    await waitFor(() => expect(core.attached).toBe(2), { timeout: 5_000 });
+    await waitFor(() => expect(screen.queryByText(/reach the sessions|Reconnecting|trying again/i)).toBeNull(), { timeout: 5_000 });
+    await settle();
+    expect(document.body.textContent).not.toContain("couldn't detect the backends");
+    expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
+    expect(words().disabled).toBe(false);
   });
 
   // verifies: FLOW-NEW-SESSION-R50
