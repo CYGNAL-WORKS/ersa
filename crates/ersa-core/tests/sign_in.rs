@@ -248,6 +248,7 @@ fn a_sign_in_has_20_seconds_to_start_and_10_minutes_to_end() {
 /// while behind a sign-in that is ending, then let through to a start that
 /// never answers, is answered when the limit from the request is up, not a
 /// whole limit after the hold, and leaves nothing running.
+// verifies: PROTO-CORE-API-R156
 // verifies: PROTO-CORE-API-R157
 #[tokio::test(flavor = "multi_thread")]
 async fn a_start_after_a_hold_has_what_is_left_of_the_limit_from_the_request() {
@@ -291,6 +292,7 @@ async fn a_start_after_a_hold_has_what_is_left_of_the_limit_from_the_request() {
 /// The 20 seconds count from the request: one held behind a sign-in that
 /// is ending, which takes longer to end than the limit, is answered
 /// `invalid_state` when its time is up, still waiting, and starts nothing.
+// verifies: PROTO-CORE-API-R156
 // verifies: PROTO-CORE-API-R157
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sign_in_held_behind_one_that_is_ending_answers_within_its_limit() {
@@ -583,6 +585,27 @@ async fn shutdown_ends_a_sign_in_under_way_and_leaves_nothing_running() {
     shut_down(core).await;
     eventually_gone(process).await;
     assert_eq!(fake.sign_ins.stops.load(Ordering::SeqCst), 1);
+}
+
+/// `core.shutdown` ends a sign-in that is still starting too: what its
+/// start ran is gone once Core has shut down, and it never starts.
+// verifies: PROTO-CORE-API-R162
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_ends_a_sign_in_still_starting_and_leaves_nothing_running() {
+    let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), |_| {}).await;
+    let starting = fake.sign_ins.start_gate.lock().await;
+    let _asked = client.request("backend.sign_in", the_fake()).await;
+    let process = fake.sign_ins.latest_process().await;
+
+    shut_down(core).await;
+    // Gone while its start is still held where it was.
+    eventually_gone(process).await;
+    drop(starting);
+    assert_eq!(
+        fake.sign_ins.stops.load(Ordering::SeqCst),
+        0,
+        "it never started"
+    );
 }
 
 /// However a sign-in ends, nothing it started is left: after a failure, a
