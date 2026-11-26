@@ -66,6 +66,12 @@ fn host() -> Host {
                 version: None,
                 status: BackendState::Missing,
             },
+            // Installed and answering, and signed out: its version still read.
+            BackendStatus {
+                name: "codex".into(),
+                version: Some("1.0.0".into()),
+                status: BackendState::SignedOut,
+            },
         ],
     }
 }

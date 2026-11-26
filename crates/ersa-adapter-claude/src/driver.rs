@@ -272,6 +272,21 @@ pub fn read_models(response: &Value) -> Result<Vec<ModelChoice>, AdapterError> {
         .collect()
 }
 
+/// Whether the CLI's `initialize` response (its `response` object) says it
+/// is signed out (PROTO-CLAUDE-CODE-STREAM-R83). Only the shape a signed-out
+/// CLI was recorded giving counts: an `account` with `tokenSource` `none`,
+/// `apiProvider` `firstParty`, and no `apiKeySource`. A CLI given a key by
+/// its environment carries `tokenSource` `none` too, beside `apiKeySource`
+/// (fixture 2.1.330/01-probe-key-in-environment), so `tokenSource` alone
+/// would tell a person with a working key to sign in. Any other `account`,
+/// or none, is not read as signed out.
+fn read_signed_out(response: &Value) -> bool {
+    let account = &response["account"];
+    account["tokenSource"] == "none"
+        && account["apiProvider"] == "firstParty"
+        && account.get("apiKeySource").is_none()
+}
+
 /// The default effort in the CLI's answer to `get_settings` (its `response`
 /// object): `applied.effort`, the effort a session given none runs with
 /// (`applied-settings-2026-11-24.txt`), when it is a level the adapter
@@ -561,8 +576,9 @@ impl Adapter for ClaudeAdapter {
     }
 
     /// Starts the CLI on the host as a new session of no project, sends
-    /// `initialize` and no message, reads the models from the answer, and
-    /// closes stdin (PROTO-CLAUDE-CODE-STREAM-R39). It starts under an id of
+    /// `initialize` and no message, reads the models, and whether the CLI is
+    /// signed out, from the answer, and closes stdin
+    /// (PROTO-CLAUDE-CODE-STREAM-R39, R83). It starts under an id of
     /// its own, as every new session does: a CLI started that way and given
     /// no message writes no session record (`initialize-only-2026-11-09.txt`).
     ///
@@ -606,6 +622,9 @@ impl Adapter for ClaudeAdapter {
         Ok(ModelReport {
             models: models?,
             default_effort,
+            // The same answer says whether the CLI is signed in; a signed-out
+            // one still lists its models (PROTO-CLAUDE-CODE-STREAM-R83).
+            signed_out: read_signed_out(&answer["response"]),
         })
     }
 

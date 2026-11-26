@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 7;
+pub const API_VERSION: u32 = 8;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -165,7 +165,6 @@ pub enum ErrorKind {
     NotFound,
     InvalidState,
     BackendMissing,
-    BackendNotLoggedIn,
     VcsError,
     TransportError,
     Permission,
@@ -326,8 +325,13 @@ pub enum BackendState {
     Available,
     /// Not found on the host.
     Missing,
-    /// Found, but asking its version failed.
+    /// Found, but asking its version or its models failed.
     Error,
+    /// Installed and answering, and it reports that it is signed out. Its
+    /// models are listed as an available one's are, and Core keeps no copy of
+    /// this state: it asks the backend again at every reading
+    /// (PROTO-CORE-API-R152, R153).
+    SignedOut,
 }
 
 /// `backend.list` params.

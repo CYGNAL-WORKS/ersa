@@ -365,10 +365,14 @@ pub enum OpenElsewhere {
 /// models, in its order, and the effort a session given none runs with,
 /// which Core marks as the default effort in `backend.list`
 /// (PROTO-CORE-API, `backend.list`). `None` when the backend did not say.
+/// And whether the backend, installed and answering, reports that it is
+/// signed out, which lists it as `signed_out` with these models
+/// (PROTO-CORE-API-R152). Core keeps no copy of that report.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModelReport {
     pub models: Vec<ModelChoice>,
     pub default_effort: Option<String>,
+    pub signed_out: bool,
 }
 
 /// The efforts and permission modes a session of a backend can start with.

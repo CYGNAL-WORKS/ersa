@@ -1063,6 +1063,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               renameDisabled={view.phase !== "connected"}
               onOpenLink={shell?.openLink}
               workspace={listedWorkspace?.path}
+              // By its label, as its tile names it: the line for a message that failed as not signed in names it (FLOW-SIGN-IN-R16).
+              backend={listed && backendLabel(listed, backends)}
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>

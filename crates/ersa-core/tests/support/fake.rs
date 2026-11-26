@@ -275,6 +275,8 @@ pub fn recorded_reply(id: &str, text: &str) -> RecordEvent {
 #[derive(Debug, Clone)]
 pub enum ModelsAnswer {
     Listed(Vec<ModelChoice>),
+    /// It lists these and says it is signed out.
+    SignedOut(Vec<ModelChoice>),
     /// It is no longer on the host.
     Missing,
     /// It is there but cannot report them.
@@ -594,6 +596,12 @@ impl Adapter for FakeAdapter {
             ModelsAnswer::Listed(models) => Ok(ModelReport {
                 models: models.clone(),
                 default_effort: Some("high".into()),
+                signed_out: false,
+            }),
+            ModelsAnswer::SignedOut(models) => Ok(ModelReport {
+                models: models.clone(),
+                default_effort: Some("high".into()),
+                signed_out: true,
             }),
             ModelsAnswer::Missing => Err(AdapterError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,

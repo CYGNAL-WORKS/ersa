@@ -15,13 +15,16 @@ import "./Composer.css";
  * Why the box is unavailable (docs/design/COMPOSER.md, The status line): Ersa can't reach the sessions and is trying
  * again, or has stopped trying (FLOW-SEND-MESSAGE-R06); the host's backends are being detected
  * (FLOW-NEW-SESSION-R23); the host could not list its backends, with the reason (FLOW-NEW-SESSION-R11); or the host
- * has no backend to run, none installed or, by its label, one that failed detection (FLOW-NEW-SESSION-R07).
+ * has no backend to run, none installed or, by its label, one that failed detection (FLOW-NEW-SESSION-R07); or none
+ * can run and one is signed out, which the line leaves to the backend chip and the sign-in note (docs/design/COMPOSER.md,
+ * The status line).
  */
 export type Unavailable =
   | "reconnecting"
   | "unreachable"
   | "detecting"
   | "no-backend"
+  | "signed-out"
   | { failedBackend: string }
   | { detectionFailed: string };
 
@@ -445,6 +448,8 @@ function StatusLine({ unavailable, sending, refusedChange, dialogFailed, marked,
   }
   if (unavailable === "detecting") return <p className="composer-status-line">{t("composer.detectingProgress")}</p>;
   if (unavailable === "no-backend") return <p className="composer-status-line">{t("composer.noBackendError")}</p>;
+  // A signed-out backend is said by the backend chip and the sign-in note, not here (docs/design/COMPOSER.md).
+  if (unavailable === "signed-out") return null;
   if (typeof unavailable === "object" && "detectionFailed" in unavailable) {
     return <p className="composer-status-line">{t("composer.detectionFailedError")} {unavailable.detectionFailed}</p>;
   }

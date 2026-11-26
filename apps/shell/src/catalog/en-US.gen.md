@@ -726,6 +726,10 @@ Loading…
 
 Nothing yet. Write to the agent below.
 
+### `transcript.notSignedInError`
+
+{backend} wasn't signed in.
+
 ### `transcript.thinkingProgress`
 
 Thinking…
@@ -1193,6 +1197,10 @@ Ersa can't change the permission mode.
 ### `sessionControls.detectionFailedStatus`
 
 Detection failed
+
+### `sessionControls.signedOutStatus`
+
+Signed out
 
 ### `sessionControls.noBackendStatus`
 

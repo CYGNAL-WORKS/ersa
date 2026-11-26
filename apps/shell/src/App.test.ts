@@ -1870,6 +1870,22 @@ describe("sending while the agent works under a session App draws", () => {
     return core;
   };
 
+  // verifies: FLOW-SIGN-IN-R16
+  it("says by the backend's label that it wasn't signed in, in place of the backend's message, for an error that asks to log in", async () => {
+    // The host lists the session's backend signed out, by a label of its own, so the line can only have it from there.
+    const signedOut: BackendInfo = { ...claude, label: "Claude Code (work)", status: "signed_out" };
+    const core = await open({ "backend.list": () => [signedOut] });
+    const login = "Not logged in · Please run /login";
+    await core.emit(on(0, { type: "error", code: "authentication_failed", message: login, recoverable: true, action: "log_in" }));
+    const transcript = screen.getByRole("region", { name: "Transcript" });
+    const line = within(transcript).getByRole("alert");
+    expect(line.textContent).toBe("Claude Code (work) wasn't signed in.");
+    expect(transcript.textContent).not.toContain(login);
+    // Any other error shows the backend's own message, as before.
+    await core.emit(on(1, { type: "error", code: "backend_error", message: "Overloaded", recoverable: true }));
+    expect(within(transcript).getAllByRole("alert").map((a) => a.textContent)).toEqual(["Claude Code (work) wasn't signed in.", "Overloaded"]);
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R03
   // verifies: FLOW-SEND-MESSAGE-R18
   it("keeps stop shown when Core answers the send before the turn shows, and Enter sends the next message", async () => {

@@ -293,6 +293,9 @@ export const enUS = {
     reconnectingProgress: "Reconnecting to Core…",
     loadingProgress: "Loading…",
     nothingYetEmpty: "Nothing yet. Write to the agent below.",
+    // In place of the backend's own message when a message failed because the backend isn't signed in: the
+    // backend's message names a command nobody using Ersa can run (FLOW-SIGN-IN-R16). {backend} is its label.
+    notSignedInError: "{backend} wasn't signed in.",
     // The agent's thinking row: while it thinks, and once it has thought (its summary opens beneath).
     thinkingProgress: "Thinking…",
     thoughtLabel: "Thought",
@@ -487,6 +490,9 @@ export const enUS = {
     },
     // The backend chip when the host could not list its backends (FLOW-NEW-SESSION-R11); the status line gives why.
     detectionFailedStatus: "Detection failed",
+    // A backend in the backend chip's list that is installed and reports that it isn't signed in; it can't be
+    // chosen (FLOW-SIGN-IN-R02).
+    signedOutStatus: "Signed out",
     // The backend chip when the host lists none that can run, and while its backends are detected (R07, R23).
     noBackendStatus: "No backend",
     detectingBackendsProgress: "Detecting backends…",
