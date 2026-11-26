@@ -155,3 +155,65 @@ fn pipes_and_devices_are_told_by_their_names() {
         assert!(!names_device(Path::new(file)), "{file}");
     }
 }
+
+/// The stored search path is read from the registry as written: the
+/// system's Path is there on every Windows, and names `%SystemRoot%` (or
+/// the folder it stands for) unexpanded or not, but always System32. A
+/// value that does not exist is none, not a failure.
+// verifies: PROTO-CORE-API-R148
+#[test]
+fn the_stored_path_is_read_from_the_registry() {
+    let paths = ersa_core::platform::stored_paths().expect("read");
+    assert!(!paths.is_empty());
+    assert!(
+        paths[0].to_lowercase().contains("system32"),
+        "the system's Path first: {}",
+        paths[0]
+    );
+    assert!(ersa_core::platform::stored_variable("ersa-no-such-variable-xyz").is_none());
+    // `windir` is stored as `%SystemRoot%`, and returned as written.
+    assert_eq!(
+        ersa_core::platform::stored_variable("windir").as_deref(),
+        Some("%SystemRoot%")
+    );
+}
+
+/// A stored folder that differs from one already on the path only in
+/// letter case or a trailing separator is that folder, as Windows' file
+/// system has it, and is not added again; a quoted stored entry is the
+/// folder inside its quotes.
+// verifies: PROTO-CORE-API-R148
+#[test]
+fn a_stored_folder_differing_only_in_letter_case_is_not_added_again() {
+    let composed = ersa_core::search_path::compose(
+        Some(r"C:\Tools"),
+        &[r#"c:\tools\;"C:\Other;Dir";C:\Third"#.to_string()],
+        &|_| None,
+        &|_| None,
+    );
+    assert_eq!(
+        composed.as_deref(),
+        Some(r#"C:\Tools;"C:\Other;Dir";C:\Third"#)
+    );
+}
+
+/// A full path without an extension starts what Windows would start: the
+/// `.cmd` an npm install puts beside a shell script of the same name.
+// verifies: PROTO-CORE-API-R148
+#[test]
+fn a_full_path_without_an_extension_finds_the_program_windows_would_start() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("tool"), "#!/bin/sh\n").unwrap();
+    std::fs::write(dir.path().join("tool.cmd"), "@echo tool\r\n").unwrap();
+    let named = dir.path().join("tool").display().to_string();
+    let found = ersa_core::search_path::find_program(&named, None).expect("found");
+    assert!(
+        found
+            .display()
+            .to_string()
+            .to_lowercase()
+            .ends_with("tool.cmd"),
+        "{}",
+        found.display()
+    );
+}

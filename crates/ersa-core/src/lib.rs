@@ -29,6 +29,7 @@ pub mod platform;
 pub mod projection;
 pub mod raw_log;
 pub mod replay;
+pub mod search_path;
 pub mod sessions;
 pub mod settings;
 pub mod state;
@@ -38,4 +39,6 @@ pub mod workspace;
 pub use api::server::{ServeError, Server, connect};
 // What a binary needs to register adapters with `Server::bind_with`.
 pub use ersa_adapter::Adapter;
-pub use state::{CommandTransport, Core, CoreConfig, Gate, SweepClock, Sweeps};
+pub use state::{
+    CommandTransport, Core, CoreConfig, Gate, StoredEnvironmentSource, SweepClock, Sweeps,
+};

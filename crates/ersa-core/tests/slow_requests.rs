@@ -74,6 +74,9 @@ async fn start(
     let core = start_with_adapters(
         tempdir(),
         move |config| {
+            // Detected by its own version command, which the stall holds: a
+            // command found nowhere is never started (PROTO-CORE-API-R150).
+            support::detecting(config);
             config.command_transport = Some(CommandTransport(transport));
             config.folder_gate = Some(gate);
             configure(config);

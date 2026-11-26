@@ -19,8 +19,10 @@
 //!   without waiting on a FIFO that took its place.
 //! - [`ProcessTree`]: a child process and everything it starts, killed as one
 //!   unit (a job object on Windows, a process group elsewhere) and started
-//!   without a console window; [`resolve_program`] finds the file to start,
-//!   Windows `.cmd` shims included.
+//!   without a console window.
+//! - [`stored_paths`] and [`stored_variable`]: the search path as the system
+//!   holds it now (the registry on Windows, nothing elsewhere), where Core
+//!   looks for a backend's command (`crate::search_path`).
 //!
 //! Both are tested in CI: Linux on every push, Windows on changes to Rust.
 //! `tests/platform_windows.rs` and `tests/platform_unix.rs` hold the tests
@@ -38,12 +40,14 @@ mod windows;
 #[cfg(unix)]
 pub use self::unix::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
-    labelled_endpoint, names_device, open_without_waiting, path_key, resolve_program,
+    is_program, labelled_endpoint, names_device, open_without_waiting, path_key, program_names,
+    stored_paths, stored_variable,
 };
 #[cfg(windows)]
 pub use self::windows::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
-    labelled_endpoint, names_device, open_without_waiting, path_key, resolve_program,
+    is_program, labelled_endpoint, names_device, open_without_waiting, path_key, program_names,
+    stored_paths, stored_variable,
 };
 
 /// The key a project's folder is stored and compared under: its canonical
