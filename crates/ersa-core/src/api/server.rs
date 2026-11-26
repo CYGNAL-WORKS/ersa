@@ -148,6 +148,8 @@ impl Server {
     /// fresh: the replay adds a project and a session to it each time.
     pub async fn bind_replay(mut config: CoreConfig, replay: Replay) -> Result<Server, ServeError> {
         config.replay = true;
+        // It refuses every change, the sweep's included.
+        config.sweeps = crate::state::Sweeps::Never;
         // The recorded backend's adapter is registered too, so anything that
         // looks a session's backend up by name finds its projector, but
         // without its session records: a replay reads no file of the user's.
@@ -169,6 +171,11 @@ impl Server {
     pub async fn run(self) -> io::Result<()> {
         let Server { core, mut listener } = self;
         tracing::info!(endpoint = %core.config.endpoint, "serving");
+        // Sweeps now, then hourly and after each archive (FLOW-CLEAN-UP-R06),
+        // beside the requests, none of which waits for it. Ended with the
+        // server, should it still be waiting on a folder that stopped
+        // answering.
+        let _sweeping = AbortOnDrop(tokio::spawn(super::sweep::run(Arc::clone(&core))));
         let mut connections = JoinSet::new();
         loop {
             tokio::select! {

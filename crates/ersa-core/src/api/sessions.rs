@@ -583,10 +583,16 @@ pub(super) async fn set_archived(
     core: &Core,
     params: SetArchivedParams,
 ) -> Result<Session, ApiError> {
-    Ok(core
+    let session = core
         .sessions
         .set_archived(&params.id, params.archived)
-        .await?)
+        .await?;
+    // Its workspace may hold nothing an archived session needs now
+    // (FLOW-CLEAN-UP-R06, R22).
+    if params.archived {
+        core.ask_for_sweep();
+    }
+    Ok(session)
 }
 
 /// `session.arrange`: changes the arrangement fields given and leaves the

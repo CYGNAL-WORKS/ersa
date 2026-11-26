@@ -66,6 +66,10 @@ pub fn test_config(data_dir: &Path, endpoint: &str) -> CoreConfig {
     let mut config = CoreConfig::new(data_dir.to_path_buf()).expect("config");
     config.endpoint = endpoint.to_string();
     config.backend_program_override = Some(NO_SUCH_BACKEND.to_string());
+    // A sweep would put away the workspaces of sessions a test archives for
+    // other reasons, beside whatever it does next. A test of the sweep sets
+    // its own (tests/sweep.rs).
+    config.sweeps = ersa_core::Sweeps::Never;
     config
 }
 

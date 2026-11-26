@@ -84,6 +84,79 @@ pub struct CoreConfig {
     /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
     /// that need every detection after a failed one to run again.
     pub failed_detection_ttl: Duration,
+    /// When Core sweeps (FLOW-CLEAN-UP-R06). [`Sweeps::Hourly`], except in
+    /// tests.
+    pub sweeps: Sweeps,
+}
+
+/// When Core sweeps ([`CoreConfig::sweeps`]).
+#[derive(Debug, Clone)]
+pub enum Sweeps {
+    /// When Core starts, every [`SWEEP_INTERVAL`] after that, and after a
+    /// session is archived (FLOW-CLEAN-UP-R06).
+    Hourly,
+    /// As [`Sweeps::Hourly`], except that the test says when an hour has
+    /// passed, and can wait for each sweep to end.
+    Driven(Arc<SweepClock>),
+    /// Never: for tests that do not look at the sweep, so that archiving a
+    /// session changes nothing else under them.
+    Never,
+}
+
+/// How often Core sweeps after it starts: at least once an hour
+/// (FLOW-CLEAN-UP-R06).
+pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+/// The sweep's clock in a test ([`Sweeps::Driven`]): the test says when an
+/// hour has passed, and learns when each sweep has ended.
+#[derive(Debug)]
+pub struct SweepClock {
+    /// One permit for each hour the test said has passed and the sweep has
+    /// not taken yet.
+    hours: tokio::sync::Semaphore,
+    /// How many sweeps have ended.
+    ended: watch::Sender<u64>,
+}
+
+impl Default for SweepClock {
+    fn default() -> Self {
+        SweepClock {
+            hours: tokio::sync::Semaphore::new(0),
+            ended: watch::Sender::new(0),
+        }
+    }
+}
+
+impl SweepClock {
+    /// Says that an hour has passed: the sweep runs again.
+    pub fn hour_passed(&self) {
+        self.hours.add_permits(1);
+    }
+
+    /// How many sweeps have ended so far.
+    pub fn ended(&self) -> u64 {
+        *self.ended.borrow()
+    }
+
+    /// Waits until `count` sweeps have ended.
+    pub async fn until_ended(&self, count: u64) {
+        let mut ended = self.ended.subscribe();
+        // The sender lives in `self`, so the wait cannot fail.
+        let _ = ended.wait_for(|ended| *ended >= count).await;
+    }
+
+    /// Waits until the test says an hour has passed.
+    pub(crate) async fn hour(&self) {
+        // The semaphore is never closed, so acquiring cannot fail.
+        if let Ok(permit) = self.hours.acquire().await {
+            permit.forget();
+        }
+    }
+
+    /// Counts a sweep that ended.
+    pub(crate) fn sweep_ended(&self) {
+        self.ended.send_modify(|ended| *ended += 1);
+    }
 }
 
 /// A transport for [`CoreConfig::command_transport`]. Its own type only so
@@ -186,6 +259,7 @@ impl CoreConfig {
             worktree_turn_wait: crate::workspace::WORKTREE_TURN_WAIT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
+            sweeps: Sweeps::Hourly,
         })
     }
 
@@ -243,6 +317,10 @@ pub struct Core {
     /// For a replay server: rises once a client first subscribes, which is
     /// when the replay starts playing (see `replay`).
     replay_audience: watch::Sender<bool>,
+    /// Asks the sweep for one more pass, after a session is archived
+    /// (FLOW-CLEAN-UP-R06). Asked while a pass runs, the next pass follows
+    /// it; asked many times meanwhile, one does.
+    sweep_asked: tokio::sync::Notify,
 }
 
 impl Core {
@@ -278,7 +356,20 @@ impl Core {
             finding: Arc::default(),
             shutdown: watch::Sender::new(false),
             replay_audience: watch::Sender::new(false),
+            sweep_asked: tokio::sync::Notify::new(),
         }
+    }
+
+    /// Asks for a sweep once the one under way, if any, has ended.
+    pub(crate) fn ask_for_sweep(&self) {
+        // `notify_one` keeps one permit when nobody waits yet, so a sweep
+        // asked for during a pass runs after it, and only once.
+        self.sweep_asked.notify_one();
+    }
+
+    /// Waits until a sweep is asked for.
+    pub(crate) async fn sweep_asked(&self) {
+        self.sweep_asked.notified().await;
     }
 
     /// The local host's name.
@@ -348,6 +439,11 @@ impl Core {
     /// Asks the server to stop.
     pub fn request_shutdown(&self) {
         self.shutdown.send_replace(true);
+    }
+
+    /// Whether shutdown has been requested.
+    pub(crate) fn shutting_down(&self) -> bool {
+        *self.shutdown.borrow()
     }
 
     /// Completes once shutdown has been requested, even if that was earlier.

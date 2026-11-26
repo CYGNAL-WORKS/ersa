@@ -411,6 +411,18 @@ impl State {
         })
     }
 
+    /// Whether at least one session is in `workspace` and every one there
+    /// is archived, as its row was last stored.
+    fn all_archived(&self, workspace: &str) -> bool {
+        let mut there = self
+            .sessions
+            .values()
+            .filter(|session| session.workspace == workspace)
+            .peekable();
+        there.peek().is_some()
+            && there.all(|session| session.row.as_ref().is_some_and(|row| row.archived))
+    }
+
     /// Whether a session was admitted into `workspace` and its row is not
     /// stored yet. A removal or a delete waits for it: which rows there are
     /// to take, or to count, is not known until that reports.
@@ -518,6 +530,11 @@ pub enum Command {
     /// the workspace or a session there.
     PutAway {
         workspace: Id,
+        /// Refused too unless a session uses the workspace and every one
+        /// there is archived, as the sweep puts one away
+        /// (FLOW-CLEAN-UP-R22): decided here, so an unarchive that lands
+        /// after the sweep looked is seen.
+        archived_only: bool,
     },
     /// Putting a put-away workspace back, for a resume or a send
     /// (FLOW-CLEAN-UP-R03): admitted when it is put away; held while a
@@ -862,6 +879,9 @@ pub enum Refusal {
     /// Something is under way on a session in the workspace, or may begin
     /// there.
     SessionInUse,
+    /// A put-away for the sweep found no session in the workspace, or one
+    /// that is not archived (FLOW-CLEAN-UP-R22).
+    NotAllArchived,
     /// The id is taken.
     SessionExists,
     NoSession,
@@ -1146,11 +1166,14 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             }
             Outcome::Admitted(Operation::RemoveWorkspace(workspace.clone()))
         }
-        Command::PutAway { workspace } => {
+        Command::PutAway {
+            workspace,
+            archived_only,
+        } => {
             let Some(entry) = state.workspaces.get(workspace) else {
                 return Outcome::Refused(Refusal::NoWorkspace);
             };
-            // The user's own folder is never put away (FLOW-CLEAN-UP-R01).
+            // The user's own folder is never put away (FLOW-CLEAN-UP-R22).
             if entry.root {
                 return Outcome::Refused(Refusal::RootWorkspace);
             }
@@ -1172,6 +1195,9 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
             }
             if state.has_session_in_use(workspace) {
                 return Outcome::Refused(Refusal::SessionInUse);
+            }
+            if *archived_only && !state.all_archived(workspace) {
+                return Outcome::Refused(Refusal::NotAllArchived);
             }
             if let Some(entry) = state.workspaces.get_mut(workspace) {
                 entry.phase = WorkspacePhase::PuttingAway;
