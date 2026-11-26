@@ -114,7 +114,11 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionUnsubscribe
         | Method::SessionRawLog
         | Method::AttachmentInspect
-        | Method::SectionList => return None,
+        | Method::SectionList
+        // Run as Core: the replay's project is no git project, so there
+        // is nothing to list.
+        | Method::CleanupList
+        | Method::CleanupInspect => return None,
         Method::SessionCreate
         | Method::SessionStart
         | Method::SessionStop

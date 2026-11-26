@@ -1092,6 +1092,54 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "cleanup.list"
+            },
+            "params": {
+              "$ref": "#/$defs/cleanup.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "cleanup.inspect"
+            },
+            "params": {
+              "$ref": "#/$defs/cleanup.inspect.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "backend.list"
             },
             "params": {
@@ -3370,6 +3418,434 @@
     "section.remove.result": {
       "$ref": "#/$defs/section",
       "description": "The section as it was."
+    },
+    "cleanup_kind": {
+      "enum": [
+        "workspace",
+        "leftover",
+        "branch",
+        "folder"
+      ],
+      "description": "workspace: the folder of an isolated workspace whose sessions are all archived, or all inactive; leftover: an isolated workspace no session refers to; branch: a local ersa/ branch no workspace names and no worktree has checked out; folder: a folder in a project's folder under the worktrees root that no workspace and no git worktree record names (FLOW-CLEAN-UP-R11)."
+    },
+    "cleanup_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "project_id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque; the same for the same thing from one list to the next. cleanup.inspect takes it."
+        },
+        "kind": {
+          "$ref": "#/$defs/cleanup_kind"
+        },
+        "project_id": {
+          "$ref": "#/$defs/id"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/id",
+          "description": "For a workspace and a leftover."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The folder. Absent for a branch."
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The branch, without refs/heads/. Absent for a folder, and for a workspace on no branch."
+        },
+        "session_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "For a workspace: the sessions that use it."
+        },
+        "last_activity_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "For a workspace: the latest last_activity_at of its sessions; absent when none is known."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "workspace"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "workspace_id",
+              "path",
+              "session_ids"
+            ],
+            "properties": {}
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "leftover"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "workspace_id",
+              "path"
+            ],
+            "properties": {
+              "session_ids": false,
+              "last_activity_at": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "branch"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "branch"
+            ],
+            "properties": {
+              "workspace_id": false,
+              "path": false,
+              "session_ids": false,
+              "last_activity_at": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "folder"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "workspace_id": false,
+              "branch": false,
+              "session_ids": false,
+              "last_activity_at": false
+            }
+          }
+        }
+      ]
+    },
+    "cleanup.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inactive_days"
+      ],
+      "properties": {
+        "inactive_days": {
+          "enum": [
+            30,
+            60,
+            90
+          ],
+          "description": "How many days without activity make a session inactive."
+        }
+      }
+    },
+    "cleanup.list.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "unread"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/cleanup_item"
+          }
+        },
+        "unread": {
+          "type": "array",
+          "description": "Projects whose git calls failed or ran past 10 seconds: they contribute no branch or folder item.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "project_id",
+              "message"
+            ],
+            "properties": {
+              "project_id": {
+                "$ref": "#/$defs/id"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Why."
+              }
+            }
+          }
+        }
+      }
+    },
+    "cleanup.inspect.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A cleanup.list item's id."
+        }
+      }
+    },
+    "cleanup.inspect.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "project_id",
+        "token"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque; the same for the same thing from one list to the next. cleanup.inspect takes it."
+        },
+        "kind": {
+          "$ref": "#/$defs/cleanup_kind"
+        },
+        "project_id": {
+          "$ref": "#/$defs/id"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/id",
+          "description": "For a workspace and a leftover."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The folder. Absent for a branch."
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The branch, without refs/heads/. Absent for a folder, and for a workspace on no branch."
+        },
+        "session_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "For a workspace: the sessions that use it."
+        },
+        "last_activity_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "For a workspace: the latest last_activity_at of its sessions; absent when none is known."
+        },
+        "uncommitted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For a workspace and a leftover: as workspace.changes counts it."
+        },
+        "ignored": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For a workspace and a leftover: as workspace.changes counts it."
+        },
+        "unshared": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For a workspace and a leftover, as workspace.changes counts it; for a branch, the commits it holds that no other local branch and no remote-tracking branch holds."
+        },
+        "stranded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For a workspace and a leftover: as workspace.changes counts it."
+        },
+        "unrecorded": {
+          "type": "boolean",
+          "description": "For a workspace and a leftover: as workspace.changes says it."
+        },
+        "holds_repository": {
+          "type": "boolean",
+          "description": "For a workspace and a leftover: whether its folder holds a repository of its own (a submodule checked out, a submodule's repository git keeps with its record of the folder, or a nested repository the ignore rules do not ignore), which goes with the folder."
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For a workspace, a leftover and a folder: what the folder's files take. Absent when measuring took more than 30 seconds, and for a leftover with no folder."
+        },
+        "merged": {
+          "type": "boolean",
+          "description": "For a branch: whether merging it into the project's base branch would change nothing."
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque; changes whenever what removing the item would lose changes. cleanup.remove carries it."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "workspace"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "workspace_id",
+              "path",
+              "session_ids",
+              "uncommitted",
+              "ignored",
+              "unshared",
+              "stranded",
+              "unrecorded",
+              "holds_repository"
+            ],
+            "properties": {
+              "merged": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "leftover"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "workspace_id",
+              "path",
+              "uncommitted",
+              "ignored",
+              "unshared",
+              "stranded",
+              "unrecorded",
+              "holds_repository"
+            ],
+            "properties": {
+              "session_ids": false,
+              "last_activity_at": false,
+              "merged": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "branch"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "branch",
+              "unshared",
+              "merged"
+            ],
+            "properties": {
+              "workspace_id": false,
+              "path": false,
+              "session_ids": false,
+              "last_activity_at": false,
+              "uncommitted": false,
+              "ignored": false,
+              "stranded": false,
+              "unrecorded": false,
+              "holds_repository": false,
+              "size_bytes": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "folder"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "workspace_id": false,
+              "branch": false,
+              "session_ids": false,
+              "last_activity_at": false,
+              "uncommitted": false,
+              "ignored": false,
+              "unshared": false,
+              "stranded": false,
+              "unrecorded": false,
+              "holds_repository": false,
+              "merged": false
+            }
+          }
+        }
+      ],
+      "description": "The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R12, R26)."
     },
     "backend.list.params": {
       "type": "object",

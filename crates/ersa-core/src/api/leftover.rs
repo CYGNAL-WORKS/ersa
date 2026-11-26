@@ -18,7 +18,7 @@ use crate::workspace::{self, Worktrees as _};
 /// How long ago a workspace must have been made to be a leftover: long
 /// enough to outlast the moment between making a workspace and starting a
 /// session there (FLOW-CLEAN-UP-R23).
-const LEFTOVER_AGE: time::Duration = time::Duration::hours(1);
+pub(super) const LEFTOVER_AGE: time::Duration = time::Duration::hours(1);
 
 /// Why the sweep leaves a workspace no session refers to.
 pub(super) enum Keep {
