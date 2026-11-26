@@ -1,0 +1,83 @@
+{
+  "recorded_at": "2026-11-25T23:26:01.785Z",
+  "claude_code_version": "2.1.330",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": true,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": null,
+  "session_record": null,
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "attachment/queued_command",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 1658,
+  "stderr": "",
+  "stdout_lines": 2,
+  "stdout_timing_ms": [
+    936,
+    949
+  ],
+  "sent": [
+    {
+      "t": 7,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 936,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_settings-1\",\"request\":{\"subtype\":\"get_settings\"}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "control": "get_settings",
+      "got_response": true,
+      "subtype": "success"
+    }
+  ],
+  "notes": "Recorded with ANTHROPIC_API_KEY set in the CLI's environment to a placeholder that is not a key, which the recorder does not write down, and a new scratch configuration folder signed in nowhere. Nobody signed in and no sign-in was started. It shows what the initialize answer's account reads for a CLI given a key by its environment: tokenSource none, as a signed-out CLI's, with apiKeySource naming the variable. No message was sent, so it shows nothing of whether such a session runs."
+}
