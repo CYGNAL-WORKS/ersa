@@ -309,9 +309,6 @@ pub fn names_device(_path: &Path) -> bool {
     false
 }
 
-/// The separator between folders in a search path.
-pub const PATH_SEPARATOR: char = ':';
-
 /// The file names a bare `program` may have: only its own.
 pub fn program_names(program: &str) -> Vec<String> {
     vec![program.to_string()]

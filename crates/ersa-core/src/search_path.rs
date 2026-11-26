@@ -11,8 +11,6 @@
 
 use std::path::{Path, PathBuf};
 
-/// The separator between folders in a search path.
-pub use crate::platform::PATH_SEPARATOR as SEPARATOR;
 use crate::platform::{is_program, path_key, program_names};
 
 /// How deep a stored variable's value may name further variables before
@@ -36,55 +34,61 @@ pub trait StoredEnvironment: Send + Sync {
     fn variable(&self, name: &str) -> Option<String>;
 }
 
+/// A variable's value by name, or `None`.
+pub type Lookup<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 /// The search path to look along and to give the started process: the path
 /// Core was started with (`inherited`) first, so nothing found before is
-/// found somewhere else, then each folder of `stored` with its variables
-/// filled in, leaving out a folder already on the path. `None` when there
-/// is no path at all.
+/// found somewhere else, then each folder of `stored_paths` with its
+/// variables filled in, leaving out a folder already on the path. `None`
+/// when there is no path at all. With nothing to add, `inherited` comes
+/// back exactly as given.
 ///
-/// A variable is filled from its stored value, as the system holds it now,
-/// else from Core's own environment (`own`), which holds the ones Windows
-/// never stores; one neither holds is left as written, as Windows leaves it.
+/// A variable is filled from its stored value (`stored`), as the system
+/// holds it now, else from Core's own environment (`own`), which holds the
+/// ones Windows never stores; one neither holds is left as written, as
+/// Windows leaves it. Folders are split and joined as the host does
+/// ([`std::env::split_paths`]), so a quoted Windows entry is the folder
+/// inside its quotes.
 pub fn compose(
     inherited: Option<&str>,
-    stored: &dyn StoredEnvironment,
     stored_paths: &[String],
-    own: &dyn Fn(&str) -> Option<String>,
+    stored: Lookup,
+    own: Lookup,
 ) -> Option<String> {
-    let mut path = inherited.map(str::to_string);
-    // The folders already on the path, compared as `same_folder` does.
-    let mut seen: Vec<String> = inherited
-        .into_iter()
-        .flat_map(|p| p.split(SEPARATOR))
-        .map(folder_key)
-        .collect();
+    let mut folders: Vec<PathBuf> = inherited
+        .map(|p| std::env::split_paths(p).collect())
+        .unwrap_or_default();
+    let mut seen: Vec<String> = folders.iter().map(|f| folder_key(f)).collect();
+    let mut added = false;
     for value in stored_paths {
         let filled = fill(value, stored, own, 0);
-        for folder in filled.split(SEPARATOR).filter(|f| !f.trim().is_empty()) {
-            let key = folder_key(folder);
-            if seen.contains(&key) {
+        for folder in std::env::split_paths(&filled) {
+            let key = folder_key(&folder);
+            // An empty entry, a repeat, or a folder the host could not
+            // write in a path (a stray quote) is left out.
+            if key.is_empty() || seen.contains(&key) || std::env::join_paths([&folder]).is_err() {
                 continue;
             }
             seen.push(key);
-            let path = path.get_or_insert_with(String::new);
-            if !path.is_empty() && !path.ends_with(SEPARATOR) {
-                path.push(SEPARATOR);
-            }
-            path.push_str(folder);
+            folders.push(folder);
+            added = true;
         }
     }
-    path
+    if !added {
+        return inherited.map(str::to_string);
+    }
+    match std::env::join_paths(&folders) {
+        Ok(path) => Some(path.to_string_lossy().into_owned()),
+        // Only an inherited entry can fail here; give that path as it was.
+        Err(_) => inherited.map(str::to_string),
+    }
 }
 
 /// `value` with each `%NAME%` replaced by the variable's value, as Windows
 /// expands a stored Path. A `%` with no closing one, and a name with no
 /// value, stay as written.
-fn fill(
-    value: &str,
-    stored: &dyn StoredEnvironment,
-    own: &dyn Fn(&str) -> Option<String>,
-    depth: usize,
-) -> String {
+fn fill(value: &str, stored: Lookup, own: Lookup, depth: usize) -> String {
     let mut out = String::with_capacity(value.len());
     let mut rest = value;
     while let Some(start) = rest.find('%') {
@@ -103,7 +107,7 @@ fn fill(
                 // the same way, to a limit. Core's own environment holds the
                 // ones Windows never stores, such as `USERPROFILE`.
                 (depth < MAX_VARIABLE_DEPTH)
-                    .then(|| stored.variable(name))
+                    .then(|| stored(name))
                     .flatten()
                     .map(|v| fill(&v, stored, own, depth + 1))
                     .or_else(|| own(name))
@@ -129,29 +133,39 @@ fn fill(
 /// A folder as compared for repeats: as [`path_key`] compares two spellings
 /// of one folder (on Windows without regard to letter case, which its file
 /// system ignores), without surrounding blanks.
-fn folder_key(folder: &str) -> String {
-    path_key(folder.trim())
+fn folder_key(folder: &Path) -> String {
+    path_key(folder.to_string_lossy().trim())
 }
 
 /// The file the host would start for `program` along `path`, as the command
-/// prompt or a shell finds it; `None` when no folder holds it.
+/// prompt or a shell finds it; `None` when nothing is there.
 ///
-/// A program with a folder in its name is taken as named, if it is a file.
-/// On Windows a bare name is tried as given when it has an extension, then
-/// with each extension in `PATHEXT`, since many command-line tools, Claude
-/// Code's npm install among them, are `.cmd` scripts rather than `.exe`
-/// files. On other systems the file must be executable.
+/// A program with a folder in its name is started as named: whatever is
+/// there is taken, even something that cannot start, which then fails to
+/// start rather than reads as missing. On Windows a name without an
+/// extension is tried with each extension in `PATHEXT` first, as Windows
+/// would start it, and only then as written: an npm install puts a shell
+/// script `claude` beside the `claude.cmd` Windows runs.
+///
+/// A bare name is looked for in each folder of `path` in turn, as the
+/// platform names it ([`program_names`]): on Windows as given when it has
+/// an extension, then with each extension in `PATHEXT`, since many
+/// command-line tools, Claude Code's npm install among them, are `.cmd`
+/// scripts rather than `.exe` files; on other systems a file with an
+/// execute bit.
 pub fn find_program(program: &str, path: Option<&str>) -> Option<PathBuf> {
     let as_given = Path::new(program);
     if as_given.components().count() != 1 {
-        return is_program(as_given).then(|| as_given.to_path_buf());
+        return program_names(program)
+            .into_iter()
+            .map(PathBuf::from)
+            .chain(std::iter::once(as_given.to_path_buf()))
+            .find(|candidate| candidate.exists());
     }
     let names = program_names(program);
-    path?
-        .split(SEPARATOR)
-        .map(str::trim)
-        .filter(|folder| !folder.is_empty())
-        .flat_map(|folder| names.iter().map(move |name| Path::new(folder).join(name)))
+    std::env::split_paths(path?)
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .flat_map(|folder| names.iter().map(move |name| folder.join(name)))
         .find(|candidate| is_program(candidate))
 }
 
@@ -173,25 +187,16 @@ impl StoredEnvironment for SystemStoredEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-
-    /// Stored values of the test's own.
-    #[derive(Default)]
-    struct Stored {
-        variables: HashMap<String, String>,
-    }
-
-    impl StoredEnvironment for Stored {
-        fn paths(&self) -> std::io::Result<Vec<String>> {
-            Ok(Vec::new())
-        }
-        fn variable(&self, name: &str) -> Option<String> {
-            self.variables.get(name).cloned()
-        }
-    }
 
     fn joined(folders: &[&str]) -> String {
-        folders.join(&SEPARATOR.to_string())
+        std::env::join_paths(folders)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn nothing_stored(_: &str) -> Option<String> {
+        None
     }
 
     fn own(name: &str) -> Option<String> {
@@ -207,8 +212,8 @@ mod tests {
     fn the_path_core_was_started_with_comes_first_then_the_system_then_the_user() {
         let composed = compose(
             Some(&joined(&["/a", "/b"])),
-            &Stored::default(),
             &[joined(&["/sys1", "/sys2"]), joined(&["/user1"])],
+            &nothing_stored,
             &own,
         );
         assert_eq!(
@@ -222,8 +227,8 @@ mod tests {
     fn a_folder_already_on_the_path_is_not_added_again() {
         let composed = compose(
             Some(&joined(&["/a", "/b/"])),
-            &Stored::default(),
             &[joined(&["/b", "/c", "", "/a"]), joined(&["/c/", "/d"])],
+            &nothing_stored,
             &own,
         );
         assert_eq!(
@@ -232,19 +237,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn with_nothing_to_add_the_path_core_was_started_with_comes_back_as_given() {
+        let inherited = joined(&["/a", "", "/b"]);
+        let composed = compose(Some(&inherited), &[joined(&["/a"])], &nothing_stored, &own);
+        assert_eq!(composed.as_deref(), Some(inherited.as_str()));
+    }
+
     // verifies: PROTO-CORE-API-R148
     #[test]
     fn variables_are_filled_from_the_stored_values_then_cores_own_environment() {
-        let stored = Stored {
-            variables: HashMap::from([
-                ("TOOLS".to_string(), "%HOME_DIR%/tools".to_string()),
-                // The stored value wins over Core's own, which is older.
-                ("HOME_DIR".to_string(), "/stored/home".to_string()),
-            ]),
+        let stored = |name: &str| match name {
+            "TOOLS" => Some("%HOME_DIR%/tools".to_string()),
+            // The stored value wins over Core's own, which is older.
+            "HOME_DIR" => Some("/stored/home".to_string()),
+            _ => None,
         };
         let composed = compose(
             None,
-            &stored,
             &[joined(&[
                 "%HOME_DIR%/bin",
                 "%TOOLS%/x",
@@ -252,6 +262,7 @@ mod tests {
                 "%NOPE%/y",
                 "50%off",
             ])],
+            &stored,
             &own,
         );
         assert_eq!(
@@ -271,15 +282,25 @@ mod tests {
 
     #[test]
     fn a_variable_that_names_itself_stops_at_the_limit() {
-        let stored = Stored {
-            variables: HashMap::from([("LOOP".to_string(), "%LOOP%x".to_string())]),
-        };
-        let composed = compose(None, &stored, &["%LOOP%".to_string()], &own).unwrap();
+        let stored = |name: &str| (name == "LOOP").then(|| "%LOOP%x".to_string());
+        let composed = compose(None, &["%LOOP%".to_string()], &stored, &own).unwrap();
         assert!(composed.starts_with("%LOOP%"), "{composed}");
     }
 
     #[test]
     fn no_path_at_all_is_none() {
-        assert_eq!(compose(None, &Stored::default(), &[], &own), None);
+        assert_eq!(compose(None, &[], &nothing_stored, &own), None);
+    }
+
+    /// A full path is started as named: whatever is there is taken, even a
+    /// folder, which cannot start; a full path to nothing is not found.
+    // verifies: PROTO-CORE-API-R148
+    #[test]
+    fn a_full_path_is_taken_as_named_when_anything_is_there() {
+        let folder = std::env::temp_dir();
+        let named = folder.display().to_string();
+        assert_eq!(find_program(&named, None), Some(folder.clone()));
+        let nothing = folder.join("ersa-no-such-program-xyz");
+        assert_eq!(find_program(&nothing.display().to_string(), None), None);
     }
 }

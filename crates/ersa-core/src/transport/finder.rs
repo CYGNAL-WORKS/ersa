@@ -85,10 +85,11 @@ impl Finder {
                     tracing::warn!(error = %e, "could not read the stored search path");
                     Vec::new()
                 });
+                let stored_variable = |name: &str| stored.variable(name);
                 let path = search_path::compose(
                     inherited.as_deref(),
-                    stored.as_ref(),
                     &stored_paths,
+                    &stored_variable,
                     &own_variable,
                 );
                 let found = search_path::find_program(&program, path.as_deref());

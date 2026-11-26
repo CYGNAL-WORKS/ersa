@@ -39,15 +39,15 @@ mod windows;
 
 #[cfg(unix)]
 pub use self::unix::{
-    Listener, PATH_SEPARATOR, ProcessTree, canonicalize, connect, default_data_dir,
-    default_endpoint, host_name, is_program, labelled_endpoint, names_device, open_without_waiting,
-    path_key, program_names, stored_paths, stored_variable,
+    Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
+    is_program, labelled_endpoint, names_device, open_without_waiting, path_key, program_names,
+    stored_paths, stored_variable,
 };
 #[cfg(windows)]
 pub use self::windows::{
-    Listener, PATH_SEPARATOR, ProcessTree, canonicalize, connect, default_data_dir,
-    default_endpoint, host_name, is_program, labelled_endpoint, names_device, open_without_waiting,
-    path_key, program_names, stored_paths, stored_variable,
+    Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
+    is_program, labelled_endpoint, names_device, open_without_waiting, path_key, program_names,
+    stored_paths, stored_variable,
 };
 
 /// The key a project's folder is stored and compared under: its canonical

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ersa_core::search_path::{SEPARATOR, StoredEnvironment};
+use ersa_core::search_path::StoredEnvironment;
 use ersa_core::{CoreConfig, StoredEnvironmentSource};
 use serde_json::{Value, json};
 use support::fake::{BACKEND, FakeAdapter, Printed};
@@ -34,10 +34,14 @@ impl Stored {
     /// Puts `folder` on the user's stored Path, as an installer does.
     fn add(&self, folder: &Path) {
         let mut path = self.user_path.lock().unwrap();
-        if !path.is_empty() {
-            path.push(SEPARATOR);
-        }
-        path.push_str(&folder.display().to_string());
+        let mut folders: Vec<PathBuf> = std::env::split_paths(&*path)
+            .filter(|f| !f.as_os_str().is_empty())
+            .collect();
+        folders.push(folder.to_path_buf());
+        *path = std::env::join_paths(folders)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
     }
 }
 
@@ -140,10 +144,10 @@ fn printed_for(printed: &Printed, why: &str) -> Vec<String> {
 /// the started process was given it.
 fn assert_composed(path: &str, folder: &Path) {
     let own = std::env::var("PATH").unwrap_or_default();
-    assert!(path.starts_with(&own), "Core's own path first: {path}");
-    let rest = &path[own.len()..];
-    let folders: Vec<&str> = rest.split(SEPARATOR).filter(|f| !f.is_empty()).collect();
-    assert_eq!(folders, [folder.display().to_string()], "{path}");
+    let mut expected: Vec<PathBuf> = std::env::split_paths(&own).collect();
+    expected.push(folder.to_path_buf());
+    let given: Vec<PathBuf> = std::env::split_paths(path).collect();
+    assert_eq!(given, expected, "Core's own path, then the folder: {path}");
 }
 
 /// A backend installed into a folder that is on the stored user Path and
@@ -328,4 +332,38 @@ async fn a_look_that_does_not_end_in_time_leaves_the_backend_in_error() {
         asked.elapsed()
     );
     let _ = let_go.send(());
+}
+
+/// A command named by its full path is started as named: one that is there
+/// and cannot start (here a folder) lists as `error`, and one that is not
+/// there as `missing`.
+// verifies: PROTO-CORE-API-R148
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_named_by_its_full_path_is_started_as_named() {
+    let folder = tempdir();
+    let stored = Arc::new(Stored::default());
+    let cannot_start = standin("cannot-start", &folder.path().display().to_string());
+    let absent = standin(
+        "absent",
+        &folder
+            .path()
+            .join("ersa-no-such-program")
+            .display()
+            .to_string(),
+    );
+    let core = start_with_adapters(
+        tempdir(),
+        along(&stored),
+        vec![Arc::new(cannot_start), Arc::new(absent)],
+    )
+    .await;
+    let mut client = core.client().await;
+    assert_eq!(
+        status_in_backend_list(&mut client, "cannot-start").await,
+        json!("error")
+    );
+    assert_eq!(
+        status_in_backend_list(&mut client, "absent").await,
+        json!("missing")
+    );
 }

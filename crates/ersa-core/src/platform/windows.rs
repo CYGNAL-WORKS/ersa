@@ -624,9 +624,6 @@ fn resume_process(pid: u32) -> io::Result<()> {
 
 // -- The stored search path ---------------------------------------------------
 
-/// The separator between folders in a search path.
-pub const PATH_SEPARATOR: char = ';';
-
 /// The file names a bare `program` may have, as the command prompt tries
 /// them: as given when it has an extension, then with each extension in
 /// `PATHEXT`, since many command-line tools, Claude Code's npm install

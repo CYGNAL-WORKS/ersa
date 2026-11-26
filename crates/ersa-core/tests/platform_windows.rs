@@ -178,29 +178,42 @@ fn the_stored_path_is_read_from_the_registry() {
     );
 }
 
-/// No stored values: the test's own stored path is given directly.
-struct NothingStored;
-
-impl ersa_core::search_path::StoredEnvironment for NothingStored {
-    fn paths(&self) -> std::io::Result<Vec<String>> {
-        Ok(Vec::new())
-    }
-    fn variable(&self, _name: &str) -> Option<String> {
-        None
-    }
-}
-
 /// A stored folder that differs from one already on the path only in
 /// letter case or a trailing separator is that folder, as Windows' file
-/// system has it, and is not added again.
+/// system has it, and is not added again; a quoted stored entry is the
+/// folder inside its quotes.
 // verifies: PROTO-CORE-API-R148
 #[test]
 fn a_stored_folder_differing_only_in_letter_case_is_not_added_again() {
     let composed = ersa_core::search_path::compose(
         Some(r"C:\Tools"),
-        &NothingStored,
-        &[r"c:\tools\;C:\Other".to_string()],
+        &[r#"c:\tools\;"C:\Other;Dir";C:\Third"#.to_string()],
+        &|_| None,
         &|_| None,
     );
-    assert_eq!(composed.as_deref(), Some(r"C:\Tools;C:\Other"));
+    assert_eq!(
+        composed.as_deref(),
+        Some(r#"C:\Tools;"C:\Other;Dir";C:\Third"#)
+    );
+}
+
+/// A full path without an extension starts what Windows would start: the
+/// `.cmd` an npm install puts beside a shell script of the same name.
+// verifies: PROTO-CORE-API-R148
+#[test]
+fn a_full_path_without_an_extension_finds_the_program_windows_would_start() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("tool"), "#!/bin/sh\n").unwrap();
+    std::fs::write(dir.path().join("tool.cmd"), "@echo tool\r\n").unwrap();
+    let named = dir.path().join("tool").display().to_string();
+    let found = ersa_core::search_path::find_program(&named, None).expect("found");
+    assert!(
+        found
+            .display()
+            .to_string()
+            .to_lowercase()
+            .ends_with("tool.cmd"),
+        "{}",
+        found.display()
+    );
 }
