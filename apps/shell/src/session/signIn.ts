@@ -110,21 +110,25 @@ export function useNoteClears() {
 
 /**
  * The marks a sign-in that ended `signed_in` for `name` on `hostId` sets (R17): every session of that backend on that
- * host is cleared through the latest event the window knew of it when the sign-in ended: for the session shown, its
- * transcript's, which follows each event as it arrives; for the others, their `last_event_seq` in `sessions`, a listing
- * read as the sign-in ended. So only a failure that arrives after the sign-in shows the note again. Core's answer to
- * that reading may already count a later failure of the session shown, which must not be cleared.
+ * host is cleared through the latest event known of it when the sign-in ended, its `last_event_seq` in `sessions` or,
+ * for the session shown, the later of that and its transcript's, which may still be replaying its history. So only a
+ * failure that arrives after the sign-in shows the note again. `readAfter` says the listing was read after the end:
+ * its word on the session shown may then already count a failure that arrived since, which must not be cleared, so
+ * for that session only its transcript counts.
  */
 export function signedInClears(
   hostId: string,
   name: string,
   sessions: readonly Pick<Session, "id" | "host_id" | "backend" | "last_event_seq">[],
-  shown?: { id: string; lastSeq: number },
+  shown: { id: string; lastSeq: number } | undefined,
+  readAfter: boolean,
 ): Record<string, number> {
   const marks: Record<string, number> = {};
   for (const s of sessions) {
     if (s.host_id !== hostId || s.backend !== name) continue;
-    marks[s.id] = shown?.id === s.id ? shown.lastSeq : (s.last_event_seq ?? -1);
+    const listed = s.last_event_seq ?? -1;
+    if (shown?.id !== s.id) marks[s.id] = listed;
+    else marks[s.id] = readAfter ? shown.lastSeq : Math.max(listed, shown.lastSeq);
   }
   return marks;
 }

@@ -443,9 +443,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     // learns a session's latest event when it is read, and one out of view may have failed since.
     if (ending.outcome === "signed_in") {
       const shownThen = shownSeq.current;
-      noteClears.clear(signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownThen));
+      noteClears.clear(signedInClears(ending.host_id, ending.name, knownSessions.current ?? [], shownThen, false));
       void client.call("session.list").then(
-        (listing) => noteClears.clear(signedInClears(ending.host_id, ending.name, listing, shownThen)),
+        (listing) => noteClears.clear(signedInClears(ending.host_id, ending.name, listing, shownThen, true)),
         () => {},
       );
     }

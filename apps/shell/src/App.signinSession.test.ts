@@ -261,6 +261,22 @@ describe("the sign-in note under a session", () => {
   });
 
   // verifies: FLOW-SIGN-IN-R17
+  it("stays gone for a failure from before the sign-in that the shown session's history replays after it ended", async () => {
+    // Core lists the session's latest event, its failure; the window has subscribed and its history has not arrived.
+    const core = fakeCore({ listed: [session({ last_event_seq: 1 })] });
+    await open(core);
+    await core.ended({ outcome: "signed_in" });
+    await settled();
+    // The history arrives: the failure came before the sign-in ended, so no note.
+    await failedTurn(core);
+    expect(screen.getByRole("region", { name: "Transcript" }).textContent).toContain("wasn't signed in");
+    expect(note()).toBeNull();
+    await core.on(2, failure);
+    await settled();
+    expect(note()).not.toBeNull();
+  });
+
+  // verifies: FLOW-SIGN-IN-R17
   it("says nothing of an earlier sign-in when it shows again for a later failure", async () => {
     const core = fakeCore();
     await open(core);
