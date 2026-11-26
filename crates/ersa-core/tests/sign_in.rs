@@ -592,7 +592,9 @@ async fn shutdown_ends_a_sign_in_under_way_and_leaves_nothing_running() {
 // verifies: PROTO-CORE-API-R162
 #[tokio::test(flavor = "multi_thread")]
 async fn shutdown_ends_a_sign_in_still_starting_and_leaves_nothing_running() {
-    let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), |_| {}).await;
+    // Longer than the test waits, so only the shutdown can end the start.
+    let limit = |config: &mut CoreConfig| config.sign_in_start_limit = Duration::from_secs(600);
+    let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), limit).await;
     let starting = fake.sign_ins.start_gate.lock().await;
     let _asked = client.request("backend.sign_in", the_fake()).await;
     let process = fake.sign_ins.latest_process().await;
