@@ -43,6 +43,13 @@ interface NewSessionScreenProps {
   backendFailures?: Readonly<Record<string, string>>;
   /** The values the user last started a session with, by project id. */
   lastUsed?: Readonly<Record<string, SessionValues>>;
+  /** Whether the screen is showing, rather than held behind another page; true when absent. */
+  shown?: boolean;
+  /**
+   * Reads a host's backends again (FLOW-NEW-SESSION-R50); the answer arrives in `backends`, and until it does the
+   * listing held stays.
+   */
+  onReadBackends?: (hostId: string) => void;
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
@@ -109,6 +116,26 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const project = projects.find((p) => p.id === wanted.project_id) ?? first;
   const hostId = project?.host_id ?? localHostId;
   const busy = starting?.state === "sending";
+
+  // The chosen host's backends, read again each time the screen is shown, and each time the window is shown or takes
+  // the focus while it is (FLOW-NEW-SESSION-R50): a person who installed a backend comes back to the window, and it
+  // is offered with nothing to restart. The window coming back from the tray takes the focus; a window shown without
+  // it becomes visible.
+  const shown = props.shown ?? true;
+  const readAgain = useRef(props.onReadBackends);
+  readAgain.current = props.onReadBackends;
+  useEffect(() => {
+    if (!shown) return;
+    const read = () => readAgain.current?.(hostId);
+    read();
+    const onVisible = () => document.visibilityState === "visible" && read();
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [shown, hostId]);
 
   // The folder the trust question asks about, while it is open.
   const [asking, setAsking] = useState(props.initialAsking);
@@ -319,7 +346,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   // The box is unavailable while Ersa can't reach the sessions, while the host's backends are being detected
   // (FLOW-NEW-SESSION-R23), and while the host has no backend to run.
   // With none to run, the line says why the host could not list them (R11), else names a backend that failed
-  // detection, else says none is installed (R07).
+  // detection (R07), else says Ersa can't find one, by its label when the host lists one alone (R52).
   const failed = hostBackends?.find((b) => b.status === "error");
   const listingFailed = backendFailures[hostId];
   const unavailable: Unavailable | undefined =
@@ -332,7 +359,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           ? { detectionFailed: listingFailed }
           : failed
             ? { failedBackend: failed.label }
-            : "no-backend");
+            : { cantFind: hostBackends.length === 1 ? hostBackends[0]?.label : undefined });
 
   return (
     <section ref={screen} className="new-session" aria-label="New session">

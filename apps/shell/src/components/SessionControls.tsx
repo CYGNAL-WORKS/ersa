@@ -73,7 +73,8 @@ interface SessionControlsProps {
 const backendOption = (b: BackendInfo): ChipOption => ({
   id: b.name,
   label: b.label,
-  status: b.status === "missing" ? "Not installed" : b.status === "error" ? "Detection failed" : b.version,
+  // A missing backend is one Ersa didn't find where it looked, never one said to be uninstalled (FLOW-NEW-SESSION-R52).
+  status: b.status === "missing" ? t("sessionControls.notFoundStatus") : b.status === "error" ? t("sessionControls.detectionFailedStatus") : b.version,
   failed: b.status === "error",
   unavailable: b.status !== "available",
 });

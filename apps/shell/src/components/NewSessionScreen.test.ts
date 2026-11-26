@@ -166,7 +166,7 @@ describe("the new-session screen", () => {
   it("lists a missing or failed backend with its status rather than hiding it", () => {
     const html = render({ backends: { local: [claude(), copilot("missing")] }, open: "backend" });
     expect(chips(html)).toContain("Backend: Claude Code");
-    expect(html).toMatch(/aria-disabled="true"[^>]*>.*GitHub Copilot.*Not installed/);
+    expect(html).toMatch(/aria-disabled="true"[^>]*>.*GitHub Copilot.*Not found/);
     const failed = render({ backends: { local: [claude(), copilot("error")] }, open: "backend" });
     expect(failed).toContain("Detection failed");
   });
@@ -192,8 +192,10 @@ describe("the new-session screen", () => {
   it("shows a host's lone backend that is missing, and does not let a message start", () => {
     const html = render({ backends: { local: [claude("missing")] }, open: "backend" });
     expect(chips(html)).toContain("Backend: No backend");
-    expect(html).toContain("Not installed");
-    expect(html).toContain("No backend is available on this host. Install a backend on it to start a session.");
+    expect(html).toContain("Not found");
+    expect(html).toContain(
+      "Ersa can&#x27;t find Claude Code on this host. Install it, and Ersa looks again when you come back to this window.",
+    );
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 

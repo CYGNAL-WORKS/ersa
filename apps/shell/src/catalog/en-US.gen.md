@@ -1002,9 +1002,13 @@ Waiting: {name}
 
 Detecting the backends on this host…
 
-### `composer.noBackendError`
+### `composer.cantFindOneError`
 
-No backend is available on this host. Install a backend on it to start a session.
+Ersa can't find {label} on this host. Install it, and Ersa looks again when you come back to this window.
+
+### `composer.cantFindAnyError`
+
+Ersa can't find a backend on this host. Install one, and Ersa looks again when you come back to this window.
 
 ### `composer.backendFailedError`
 
@@ -1193,6 +1197,10 @@ Ersa can't change the permission mode.
 ### `sessionControls.detectionFailedStatus`
 
 Detection failed
+
+### `sessionControls.notFoundStatus`
+
+Not found
 
 ### `sessionControls.noBackendStatus`
 

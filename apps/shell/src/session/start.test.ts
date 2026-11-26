@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import type { SessionValues } from "./controls";
-import { StartStop, lastUsedFrom, readChoices, rememberPatch, startSession } from "./start";
+import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } from "./start";
 
 /** A client that records each call and answers from `answers`; a method without an answer fails the test. */
 function fakeClient(answers: Partial<Record<Method, (params: never) => unknown>> = {}) {
@@ -324,20 +324,18 @@ describe("stop while a new session starts", () => {
 
 describe("opening the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R03
-  it("only reads: the host's backends and the remembered values", async () => {
-    const { client, methods } = fakeClient({ "backend.list": () => [], "settings.get": () => rememberPatch(values("root")) });
-    // The window reads the settings once and shares them with the rail.
-    const choices = await readChoices(client, "local", client.call("settings.get"));
-    expect(methods().sort()).toEqual(["backend.list", "settings.get"]);
-    expect(choices).toEqual({ backends: [], lastUsed: { p1: values("root") } });
+  it("only reads the host's backends", async () => {
+    const { client, methods } = fakeClient({ "backend.list": () => [] });
+    expect(await readBackends(client, "local")).toEqual({ backends: [] });
+    expect(methods()).toEqual(["backend.list"]);
   });
 
   // verifies: FLOW-NEW-SESSION-R11
-  it("keeps why the backends could not be read, and starts at the defaults without remembered values", async () => {
+  it("keeps why the backends could not be read", async () => {
     const { client } = fakeClient({ "backend.list": () => {
       throw refusal("backend.list: the host did not answer", "unavailable");
     } });
-    expect(await readChoices(client, "local", client.call("settings.get"))).toEqual({ backends: [], failed: "the host did not answer", lastUsed: {} });
+    expect(await readBackends(client, "local")).toEqual({ backends: [], failed: "the host did not answer" });
   });
 });
 
