@@ -25,6 +25,7 @@ const components = [
   "ContextRing",
   "Workbench",
   "DeveloperPane",
+  "SignInNote",
   "ArchivedNote",
   "Composer",
   "Icon",
