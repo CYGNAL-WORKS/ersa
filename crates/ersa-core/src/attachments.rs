@@ -550,7 +550,8 @@ const IGNORE_ALL: &[u8] = b"*\n";
 /// jobs, so Core's file is never removed or made in place: it is written
 /// whole at `staging`, a name only this session's job uses, and renamed
 /// over `path`. A rename replaces what is there (a link as the link itself,
-/// never followed) or makes it, so two jobs at once both succeed.
+/// never followed) or makes it, so two jobs at once both succeed; one that
+/// is refused is answered by what is there then ([`put_in_place`]).
 fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
     match fs::symlink_metadata(path) {
         Ok(meta) if !meta.file_type().is_file() => {
@@ -563,14 +564,20 @@ fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
             let Some(_) = staging else {
                 return Ok(());
             };
-            // Read through `open_file`, so a FIFO swapped in meanwhile never
-            // holds the job.
-            let mut held = Vec::new();
-            open_file(path)?
-                .take(IGNORE_ALL.len() as u64 + 1)
-                .read_to_end(&mut held)?;
-            if held == IGNORE_ALL {
-                return Ok(());
+            match holds_ignore_all(path) {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                // Another session's job may have replaced the file since it
+                // was checked: Windows then refuses the open as "Access is
+                // denied", the file the name led to being deleted on the way
+                // (#606). A file that can't be read can't be shown to hold
+                // `*`, so it is made again below, as one holding anything
+                // else is. This arm is reached on every run, on Windows and
+                // Unix, by `cores_ignore_file_that_cannot_be_read_is_made_again`
+                // in `crates/ersa-core/tests/attachments.rs`, which fails with
+                // "Access is denied" without it.
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
+                Err(e) => return Err(e.into()),
             }
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -598,19 +605,51 @@ fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
         .create_new(true)
         .open(staging)?
         .write_all(IGNORE_ALL)?;
-    fs::rename(staging, path).map_err(|e| {
-        let _ = remove_entry(staging);
-        Fail::from(e)
-    })
+    put_in_place(staging, path)
 }
+
+/// Renames `staging`, holding `*`, over Core's ignore file at `path`.
+///
+/// The rename can be refused while another job has the file open to read,
+/// on a disk without POSIX renames (#651), or while a program holds it open
+/// without delete sharing. Every job writes the same bytes, so when the file
+/// there then is a plain file holding `*`, another job has done this job's
+/// work and it succeeds. When it holds anything else, is something else (a
+/// link put there meanwhile, which can be why the rename was refused), can't
+/// be read or is gone, the rename's refusal stands. It is looked at once,
+/// never waited on or tried again.
+fn put_in_place(staging: &Path, path: &Path) -> Result<(), Fail> {
+    let Err(refused) = fs::rename(staging, path) else {
+        return Ok(());
+    };
+    let _ = remove_entry(staging);
+    let plain_file = fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file());
+    if plain_file && matches!(holds_ignore_all(path), Ok(true)) {
+        return Ok(());
+    }
+    Err(refused.into())
+}
+
+/// Whether the file at `path` holds exactly what Core's ignore file holds.
+/// Read through `open_file`, so a FIFO swapped in meanwhile never holds the
+/// job.
+fn holds_ignore_all(path: &Path) -> io::Result<bool> {
+    let mut held = Vec::new();
+    open_file(path)?
+        .take(IGNORE_ALL.len() as u64 + 1)
+        .read_to_end(&mut held)?;
+    Ok(held == IGNORE_ALL)
+}
+
 /// Opens the file at `path` to read, checked again by what was opened: it
 /// may have been swapped for something else (a FIFO, a folder) since it was
 /// checked, and a FIFO opened the usual way waits for a writer that may
-/// never come, holding the session's scratch folder all the while.
-fn open_file(path: &Path) -> Result<fs::File, Fail> {
+/// never come, holding the session's scratch folder all the while. Its error
+/// keeps the kind the system gave, for a caller that tells them apart.
+fn open_file(path: &Path) -> io::Result<fs::File> {
     let file = crate::platform::open_without_waiting(path)?;
     if !file.metadata()?.is_file() {
-        return Err(Fail::Reason(format!(
+        return Err(io::Error::other(format!(
             "{} changed after it was checked and is no longer a file",
             path.display()
         )));
@@ -1129,6 +1168,85 @@ mod tests {
         assert!(partial.is_empty());
     }
 
+    /// What session `job`'s send does to Core's ignore file at `ignore`,
+    /// staging under that session's own name, as `scratch_folder` does.
+    fn make_again(ignore: &Path, job: &str) -> Result<(), String> {
+        let staging = ignore.with_file_name(format!(".gitignore.{job}"));
+        ignore_everything(ignore, Some(&staging)).map_err(reason)
+    }
+
+    /// A failure as the reason a refused attachment would give.
+    fn reason(fail: Fail) -> String {
+        match fail {
+            Fail::Reason(reason) => reason,
+            Fail::Stopped => "stopped".into(),
+        }
+    }
+
+    /// A rename onto Core's ignore file can be refused: on a disk without
+    /// POSIX renames while another job has it open to read (#651), or while
+    /// a program holds it open without delete sharing. Every job writes the
+    /// same bytes, so when the file there already holds `*` the job had
+    /// nothing left to do, and it succeeds.
+    // verifies: PROTO-CORE-API-R110
+    #[test]
+    fn a_refused_rename_onto_cores_ignore_file_that_holds_it_already_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let ignore = dir.path().join(".gitignore");
+        let staging = dir.path().join(".gitignore.s-1");
+        fs::write(&ignore, IGNORE_ALL).unwrap();
+        fs::write(&staging, IGNORE_ALL).unwrap();
+        let Some(held) = crate::platform::refuse_renames_onto(&ignore) else {
+            return;
+        };
+        assert_eq!(put_in_place(&staging, &ignore).map_err(reason), Ok(()));
+        drop(held);
+        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
+    }
+
+    /// When the file there holds anything else, the refused rename left it
+    /// not ignoring the copies, so the job is refused with the rename's
+    /// reason.
+    // verifies: PROTO-CORE-API-R110
+    #[test]
+    fn a_refused_rename_onto_cores_ignore_file_that_holds_anything_else_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ignore = dir.path().join(".gitignore");
+        let staging = dir.path().join(".gitignore.s-1");
+        fs::write(&ignore, b"!keep\n").unwrap();
+        fs::write(&staging, IGNORE_ALL).unwrap();
+        let Some(held) = crate::platform::refuse_renames_onto(&ignore) else {
+            return;
+        };
+        assert!(put_in_place(&staging, &ignore).is_err());
+        drop(held);
+        assert_eq!(fs::read(&ignore).unwrap(), b"!keep\n");
+    }
+
+    /// A link put in place of Core's ignore file is refused even when what
+    /// it leads to holds `*`, as the check refuses one (R110's brief: Core
+    /// refuses the message when that file is a link).
+    // verifies: PROTO-CORE-API-R110
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_rename_onto_a_link_to_a_file_holding_it_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ignore = dir.path().join(".gitignore");
+        let staging = dir.path().join(".gitignore.s-1");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let target = elsewhere.path().join("ignore");
+        fs::write(&target, IGNORE_ALL).unwrap();
+        std::os::unix::fs::symlink(&target, &ignore).unwrap();
+        fs::write(&staging, IGNORE_ALL).unwrap();
+        let Some(held) = crate::platform::refuse_renames_onto(&ignore) else {
+            return;
+        };
+        assert!(put_in_place(&staging, &ignore).is_err());
+        drop(held);
+        let meta = fs::symlink_metadata(&ignore).unwrap();
+        assert!(meta.file_type().is_symlink());
+    }
+
     /// Jobs of different sessions in one workspace, nothing ordering them,
     /// all find a shipped `.ersa/attachments/.gitignore` that ignores less
     /// and make it again at once: none of them is refused for it, and it ends
@@ -1137,24 +1255,31 @@ mod tests {
     #[test]
     fn sessions_making_cores_ignore_file_again_at_once_all_succeed() {
         const JOBS: usize = 8;
+        // The race this checks (#606: one job's open finding the file
+        // another job's rename just replaced) is a window inside the file
+        // system, so it shows only over many rounds. At 100 rounds it failed
+        // about 6 runs in 100 on CI's Windows runner. 500 rounds give each run
+        // five times the chances, about 26 runs in 100 without the fix, and
+        // take about as long there (some 17 seconds) as the rest of this
+        // crate's tests beside them. More jobs a round does not raise the
+        // rate. This is the by-rate check of the real race; the every-run
+        // check of the arm that makes a refused open's file again is
+        // `cores_ignore_file_that_cannot_be_read_is_made_again` in
+        // `crates/ersa-core/tests/attachments.rs`.
+        const ROUNDS: usize = 500;
         let dir = tempfile::tempdir().unwrap();
         let attachments = dir.path().join(ATTACHMENTS);
         fs::create_dir_all(&attachments).unwrap();
         let ignore = attachments.join(".gitignore");
-        for round in 0..100 {
+        for round in 0..ROUNDS {
             fs::write(&ignore, b"").unwrap();
             let start = std::sync::Arc::new(std::sync::Barrier::new(JOBS));
             let jobs: Vec<_> = (0..JOBS)
                 .map(|job| {
-                    let (start, attachments, ignore) =
-                        (start.clone(), attachments.clone(), ignore.clone());
+                    let (start, ignore) = (start.clone(), ignore.clone());
                     std::thread::spawn(move || {
-                        let staging = attachments.join(format!(".gitignore.s-{job}"));
                         start.wait();
-                        ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
-                            Fail::Reason(reason) => reason,
-                            Fail::Stopped => "stopped".into(),
-                        })
+                        make_again(&ignore, &format!("s-{job}"))
                     })
                 })
                 .collect();
@@ -1170,6 +1295,35 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(left, vec![std::ffi::OsString::from(".gitignore")]);
+    }
+
+    /// The other half of what the test above races, held still: a job's
+    /// rename replaces Core's ignore file while another job has it open to
+    /// read, and leaves no name behind that is still being deleted, so a
+    /// further job's rename replaces it again. The replaced file lives on,
+    /// deleted, only under the reader's handle: the state in which another
+    /// job's open by name is refused on Windows (#606), and why the job
+    /// makes the file again rather than refusing when its open is refused.
+    // verifies: PROTO-CORE-API-R110
+    #[test]
+    fn a_job_replaces_cores_ignore_file_while_another_job_reads_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let attachments = dir.path().join(ATTACHMENTS);
+        fs::create_dir_all(&attachments).unwrap();
+        let ignore = attachments.join(".gitignore");
+        fs::write(&ignore, b"").unwrap();
+        // Opened as a job's check opens it.
+        let mut reader = open_file(&ignore).unwrap();
+        assert_eq!(make_again(&ignore, "s-1"), Ok(()));
+        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
+        // The file written in place holds something else again, while the
+        // replaced one is still open under the reader.
+        fs::write(&ignore, b"!keep\n").unwrap();
+        assert_eq!(make_again(&ignore, "s-2"), Ok(()));
+        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
+        let mut held = Vec::new();
+        reader.read_to_end(&mut held).unwrap();
+        assert_eq!(held, b"", "the reader still reads the file it opened");
     }
 
     #[test]

@@ -343,3 +343,28 @@ pub fn open_without_waiting(path: &Path) -> io::Result<std::fs::File> {
         .custom_flags(libc::O_NONBLOCK)
         .open(path)
 }
+
+/// For tests: makes the folder holding `path` read-only, so a rename onto
+/// `path` is refused while it can still be read (removing or creating a file
+/// beside it is refused too). Its mode comes back once the returned value is
+/// dropped. `None` when the process writes into the folder anyway (root).
+#[cfg(test)]
+pub fn refuse_renames_onto(path: &Path) -> Option<Box<dyn std::any::Any>> {
+    /// Puts the folder's mode back when dropped.
+    struct Restore(PathBuf, u32);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(self.1));
+        }
+    }
+    let folder = path.parent()?;
+    let mode = std::fs::metadata(folder).ok()?.permissions().mode();
+    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o555)).ok()?;
+    let restore = Restore(folder.to_path_buf(), mode);
+    let probe = folder.join(".refuse-renames-probe");
+    if std::fs::write(&probe, b"").is_ok() {
+        let _ = std::fs::remove_file(&probe);
+        return None;
+    }
+    Some(Box::new(restore))
+}

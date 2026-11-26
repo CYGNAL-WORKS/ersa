@@ -16,7 +16,8 @@
 //! - [`names_device`]: whether a path names a pipe or a device by its
 //!   name alone (only Windows has such names), for refusing one before
 //!   anything opens it; [`open_without_waiting`] opens a file to read
-//!   without waiting on a FIFO that took its place.
+//!   without waiting on a FIFO that took its place; for tests,
+//!   `refuse_renames_onto` makes a rename onto a file be refused.
 //! - [`ProcessTree`]: a child process and everything it starts, killed as one
 //!   unit (a job object on Windows, a process group elsewhere) and started
 //!   without a console window.
@@ -37,12 +38,16 @@ mod unix;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(all(unix, test))]
+pub use self::unix::refuse_renames_onto;
 #[cfg(unix)]
 pub use self::unix::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
     is_program, labelled_endpoint, names_device, open_without_waiting, path_key, program_names,
     stored_paths, stored_variable,
 };
+#[cfg(all(windows, test))]
+pub use self::windows::refuse_renames_onto;
 #[cfg(windows)]
 pub use self::windows::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,

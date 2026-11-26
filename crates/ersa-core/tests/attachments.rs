@@ -1179,3 +1179,52 @@ async fn cores_ignore_file_that_is_not_a_plain_file_refuses_the_copy() {
     assert!(s.messages().is_empty());
     assert!(copies(&s.scratch(&id)).is_empty());
 }
+
+/// Another session's send may replace Core's `.ersa/attachments/.gitignore`
+/// between this send's check of it and its open to read it: Windows then
+/// refuses the open as "Access is denied", the file the name led to being
+/// deleted on the way (#606). The send makes the file again, as it does one
+/// holding anything else, and goes ahead. The race can't be timed from here,
+/// so a file the send can't read stands in for it: its open is refused the
+/// same way, and a rename still replaces it.
+// verifies: PROTO-CORE-API-R110
+#[tokio::test]
+async fn cores_ignore_file_that_cannot_be_read_is_made_again() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let id = s.session().await;
+    let notes = path(&file(&s.outside, "notes.md", b"x"));
+    let ignore = file(&s.workspace, ".ersa/attachments/.gitignore", b"!keep\n");
+    if !read_denied(&ignore) {
+        return;
+    }
+    let response = s
+        .send(&id, "", json!([{ "kind": "file", "path": notes }]))
+        .await;
+    assert!(response.get("result").is_some(), "{response:#}");
+    assert_eq!(s.messages().len(), 1);
+    assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
+    assert_eq!(std::fs::read(&ignore).unwrap(), b"*\n");
+}
+
+/// Takes away the right to read `file`'s contents, leaving it listed as a
+/// file that its folder lets be replaced. False when this process reads it
+/// anyway (root on Unix). Unlike [`unreadable`], whose Windows hold also
+/// stops a rename over the file, nothing is held open here.
+fn read_denied(file: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        // A deny entry for Everyone (S-1-1-0) on reading the data alone.
+        let denied = std::process::Command::new("icacls")
+            .arg(file)
+            .args(["/deny", "*S-1-1-0:(RD)"])
+            .output()
+            .unwrap();
+        assert!(denied.status.success(), "{denied:?}");
+        std::fs::File::open(file).is_err()
+    }
+    #[cfg(not(windows))]
+    {
+        // Mode 000 holds nothing open, so `unreadable` does just this.
+        unreadable(file).is_some()
+    }
+}
