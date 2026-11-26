@@ -449,7 +449,9 @@ impl Core {
     /// missing one never has it started again (PROTO-CORE-API-R96, R149);
     /// a `missing` one not at all, since looking for its command starts
     /// nothing (R150); one in `error` for
-    /// [`CoreConfig::failed_detection_ttl`].
+    /// [`CoreConfig::failed_detection_ttl`]; a `signed_out` one not at all,
+    /// so the backend is asked again at every reading (R153), which starts
+    /// its command each time while it stays signed out.
     pub async fn local_backends(&self) -> Vec<Detected> {
         let mut kept = self.local_backends.lock().await;
         let adapters = self.sessions.adapters();
@@ -462,6 +464,9 @@ impl Core {
                     BackendState::Available => false,
                     BackendState::Missing => true,
                     BackendState::Error => at.elapsed() >= ttl,
+                    // Whether a backend is signed out is the backend's to say
+                    // each time: Core keeps no copy (PROTO-CORE-API-R153).
+                    BackendState::SignedOut => true,
                 },
             })
             .collect();

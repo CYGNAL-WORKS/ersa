@@ -34,7 +34,7 @@ pub struct Detected {
     /// from its adapter, the effort it reported as its default marked.
     pub choices: BackendChoices,
     /// Its models, as the backend reported them on the host; none unless
-    /// it is available (PROTO-CORE-API-R72).
+    /// it is available or signed out (PROTO-CORE-API-R72, R152).
     pub models: Vec<ModelChoice>,
     /// Its display name, from its adapter.
     pub label: String,
@@ -77,7 +77,8 @@ impl Detected {
 /// sessions start through, since the backend may start processes of its
 /// own that must end with it. One that cannot report them is `error`, and
 /// one the probe cannot find `missing`, either with no models
-/// (PROTO-CORE-API-R72).
+/// (PROTO-CORE-API-R72); one that says it is signed out is `signed_out`,
+/// with the models it reported (R152).
 pub async fn detect(
     transport: &dyn Transport,
     probe: Arc<dyn Transport>,
@@ -113,6 +114,9 @@ pub async fn detect(
         };
         let (state, report) = if state == BackendState::Available {
             match adapter.models(Arc::clone(&probe)).await {
+                // Installed and answering, and it says it is signed out: listed
+                // so, with the models it reported (PROTO-CORE-API-R152).
+                Ok(report) if report.signed_out => (BackendState::SignedOut, report),
                 Ok(report) => (state, report),
                 Err(AdapterError::Io(e)) if e.kind() == io::ErrorKind::NotFound => {
                     (BackendState::Missing, ModelReport::default())
