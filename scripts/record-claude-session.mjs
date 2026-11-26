@@ -94,7 +94,7 @@ import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkWritten, nextFixtureNumber, redact } from "./redact.mjs";
+import { checkWritten, nextFixtureNumber, redact, scrubUserName } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -160,12 +160,7 @@ const VERBATIM = (entry) =>
   );
 
 const USER_NAME = userInfo().username;
-function scrub(text) {
-  const redacted = redact(text);
-  if (USER_NAME.length < 3) return redacted;
-  const escaped = USER_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return redacted.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "user");
-}
+const scrub = (text) => scrubUserName(redact(text), USER_NAME);
 
 // Every line of the record that is not an entry the adapter reads becomes a
 // marker; nothing else passes through, not even a line that does not parse.
