@@ -524,6 +524,11 @@ pub enum Command {
     },
     RemoveWorkspace {
         workspace: Id,
+        /// The sweep removing a leftover (FLOW-CLEAN-UP-R23): refused, never
+        /// held, while any session is there, stored or arriving, found or
+        /// started, or a delete holds the workspace. Decided here, so a
+        /// session made after the sweep read the rows keeps the workspace.
+        leftover_only: bool,
     },
     /// Putting an isolated workspace away (FLOW-CLEAN-UP-R02): never held,
     /// since nothing waits for it; refused while anything is under way on
@@ -1125,7 +1130,10 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 }
             }
         }
-        Command::RemoveWorkspace { workspace } => {
+        Command::RemoveWorkspace {
+            workspace,
+            leftover_only,
+        } => {
             let Some(entry) = state.workspaces.get(workspace) else {
                 return Outcome::Refused(Refusal::NoWorkspace);
             };
@@ -1143,6 +1151,16 @@ fn decide(state: &mut State, command: &Command) -> Outcome {
                 WorkspacePhase::Error => Replaced::Error,
                 WorkspacePhase::PutAway => Replaced::PutAway,
             };
+            // A leftover is a workspace no session refers to: any session
+            // there, whatever it is doing, keeps it from the sweep.
+            if *leftover_only {
+                if entry.deleting.is_some() {
+                    return Outcome::Refused(Refusal::WorkspaceHeld);
+                }
+                if state.sessions.values().any(|s| s.workspace == *workspace) {
+                    return Outcome::Refused(Refusal::WorkspaceHasSessions);
+                }
+            }
             if state.has_started_session(workspace) {
                 return Outcome::Refused(Refusal::WorkspaceHasSessions);
             }

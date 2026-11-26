@@ -333,6 +333,25 @@ impl Store {
         .await
     }
 
+    /// When the workspace was made: when its row was first stored, as
+    /// `workspace.create` or a fork began making it. `None` when there is no
+    /// such workspace or its time can't be read, which whoever asks counts
+    /// as not known.
+    pub async fn workspace_made_at(&self, id: String) -> Result<Option<time::OffsetDateTime>> {
+        self.call(move |conn| {
+            let made: Option<String> = conn
+                .query_row(
+                    "SELECT created_at FROM workspaces WHERE id = ?1",
+                    [id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let rfc3339 = time::format_description::well_known::Rfc3339;
+            Ok(made.and_then(|made| time::OffsetDateTime::parse(&made, &rfc3339).ok()))
+        })
+        .await
+    }
+
     /// Records a workspace. Fails with [`Error::Conflict`] when its project
     /// was removed meanwhile.
     pub async fn insert_workspace(&self, workspace: Workspace) -> Result<()> {
