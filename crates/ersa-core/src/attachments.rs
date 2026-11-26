@@ -565,12 +565,27 @@ fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
             };
             // Read through `open_file`, so a FIFO swapped in meanwhile never
             // holds the job.
-            let mut held = Vec::new();
-            open_file(path)?
-                .take(IGNORE_ALL.len() as u64 + 1)
-                .read_to_end(&mut held)?;
-            if held == IGNORE_ALL {
-                return Ok(());
+            match open_file(path) {
+                Ok(file) => {
+                    let mut held = Vec::new();
+                    file.take(IGNORE_ALL.len() as u64 + 1)
+                        .read_to_end(&mut held)?;
+                    if held == IGNORE_ALL {
+                        return Ok(());
+                    }
+                }
+                // Another session's job may have replaced the file since it
+                // was checked: Windows then refuses the open as "Access is
+                // denied", the file the name led to being deleted on the way
+                // (#606). A file that can't be read, or is gone, can't be
+                // shown to hold `*`, so it is made again below, as one
+                // holding anything else is.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound
+                    ) => {}
+                Err(e) => return Err(e.into()),
             }
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -606,11 +621,12 @@ fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
 /// Opens the file at `path` to read, checked again by what was opened: it
 /// may have been swapped for something else (a FIFO, a folder) since it was
 /// checked, and a FIFO opened the usual way waits for a writer that may
-/// never come, holding the session's scratch folder all the while.
-fn open_file(path: &Path) -> Result<fs::File, Fail> {
+/// never come, holding the session's scratch folder all the while. Its error
+/// keeps the kind the system gave, for a caller that tells them apart.
+fn open_file(path: &Path) -> io::Result<fs::File> {
     let file = crate::platform::open_without_waiting(path)?;
     if !file.metadata()?.is_file() {
-        return Err(Fail::Reason(format!(
+        return Err(io::Error::other(format!(
             "{} changed after it was checked and is no longer a file",
             path.display()
         )));
@@ -1170,6 +1186,57 @@ mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(left, vec![std::ffi::OsString::from(".gitignore")]);
+    }
+
+    /// Another session's job may replace Core's ignore file between this
+    /// job's check and its open: Windows then refuses the open with "Access
+    /// is denied", since the file the name led to was deleted on the way
+    /// (#606). The job makes the file again, as it does one holding anything
+    /// else, rather than refusing the message. The race can't be timed from
+    /// here, so a file the job can't read stands in for it: its open is
+    /// refused the same way, and a rename still replaces it.
+    // verifies: PROTO-CORE-API-R110
+    #[test]
+    fn cores_ignore_file_that_cannot_be_read_is_made_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let attachments = dir.path().join(ATTACHMENTS);
+        fs::create_dir_all(&attachments).unwrap();
+        let ignore = attachments.join(".gitignore");
+        fs::write(&ignore, b"!keep\n").unwrap();
+        if !unreadable(&ignore) {
+            return;
+        }
+        let staging = attachments.join(".gitignore.s-1");
+        let answer = ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
+            Fail::Reason(reason) => reason,
+            Fail::Stopped => "stopped".into(),
+        });
+        assert_eq!(answer, Ok(()));
+        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
+        assert!(!staging.exists(), "the staging file is left behind");
+    }
+
+    /// Takes away the right to read `file`'s contents, keeping the right to
+    /// replace it. False when this process reads it anyway (root on Unix).
+    fn unreadable(file: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            // A deny entry for Everyone (S-1-1-0) on reading the data alone:
+            // the file still lists as a file, and its folder still lets it be
+            // replaced.
+            let denied = std::process::Command::new("icacls")
+                .arg(file)
+                .args(["/deny", "*S-1-1-0:(RD)"])
+                .output()
+                .unwrap();
+            assert!(denied.status.success(), "{denied:?}");
+        }
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(file, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        fs::File::open(file).is_err()
     }
 
     #[test]
