@@ -8,6 +8,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, Method } from "./core/client";
+import type { ShellControl } from "./core/shell";
 import type { BackendInfo, CoreHelloResult, Session } from "./protocol/core-api.gen";
 
 afterEach(cleanup);
@@ -92,8 +93,22 @@ function fakeCore(listing: Listing, sessions: Session[] = []) {
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 
+// The Shell's controls the screen uses: the window coming back, which the test raises (`windowBack`).
+let back = new Set<() => void>();
+const shell = {
+  onWindowBack: (handler: () => void) => {
+    back.add(handler);
+    return () => back.delete(handler);
+  },
+  onQuitRequested: () => () => {},
+  onDragDrop: () => () => {},
+} as unknown as ShellControl;
+afterEach(() => {
+  back = new Set();
+});
+
 async function start(core: ReturnType<typeof fakeCore>) {
-  render(createElement(App, { client: core.client }));
+  render(createElement(App, { client: core.client, shell }));
   for (let i = 0; i < 4; i += 1) await settle();
 }
 
@@ -117,17 +132,10 @@ const statusLine = () => document.querySelector(".composer-status-line");
 const words = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
 const newSession = () => fireEvent.click(within(rail()).getByRole("button", { name: "New session" }));
 
-/** The window taking the focus, as it does when the tray shows it again. */
-const windowFocused = async () => {
+/** The Shell saying the window came back: shown from the tray, or taking the focus. */
+const windowBack = async () => {
   await act(async () => {
-    window.dispatchEvent(new Event("focus"));
-  });
-  await settle();
-};
-/** The window shown again after it was hidden to the tray. */
-const windowShown = async () => {
-  await act(async () => {
-    document.dispatchEvent(new Event("visibilitychange"));
+    for (const handler of [...back]) handler();
   });
   await settle();
 };
@@ -144,11 +152,10 @@ describe("the new-session screen reading the host's backends again", () => {
     newSession();
     await settle();
     expect(core.readings()).toBe(first + 1);
-    // The window takes the focus.
-    await windowFocused();
+    // The window shown again or taking the focus.
+    await windowBack();
     expect(core.readings()).toBe(first + 2);
-    // The window shown again.
-    await windowShown();
+    await windowBack();
     expect(core.readings()).toBe(first + 3);
   });
 
@@ -159,8 +166,7 @@ describe("the new-session screen reading the host's backends again", () => {
     // The newest session shows, not the screen.
     expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
     const before = core.readings();
-    await windowFocused();
-    await windowShown();
+    await windowBack();
     expect(core.readings()).toBe(before);
   });
 
@@ -173,8 +179,7 @@ describe("the new-session screen reading the host's backends again", () => {
     await settle();
     expect(screen.getByRole("heading", { name: "Sessions" })).toBeTruthy();
     const before = core.readings();
-    await windowFocused();
-    await windowShown();
+    await windowBack();
     expect(core.readings()).toBe(before);
     newSession();
     await settle();
@@ -190,7 +195,7 @@ describe("the new-session screen reading the host's backends again", () => {
     const later = deferred<BackendInfo[]>();
     core.listing = () => later.promise;
     const before = core.readings();
-    await windowFocused();
+    await windowBack();
     expect(core.readings()).toBe(before + 1);
     // Reading: nothing of it shows.
     expect(statusLine()).toBeNull();
@@ -205,7 +210,7 @@ describe("the new-session screen reading the host's backends again", () => {
     // Reading again with no backend that can run: the line it holds stays, the composer as unavailable as it was.
     const held = deferred<BackendInfo[]>();
     core.listing = () => held.promise;
-    await windowFocused();
+    await windowBack();
     expect(core.readings()).toBe(before + 2);
     expect(statusLine()?.textContent).toBe(missingLine);
     expect(document.body.textContent).not.toContain("Detecting");
@@ -220,7 +225,7 @@ describe("the new-session screen reading the host's backends again", () => {
     await start(core);
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
     core.listing = () => Promise.reject(refusal("backend.list: the host did not answer"));
-    await windowFocused();
+    await windowBack();
     expect(statusLine()?.textContent).toBe("Ersa couldn't detect the backends on this host. the host did not answer");
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Detection failed");
     expect(words().disabled).toBe(true);
@@ -234,7 +239,7 @@ describe("the new-session screen reading the host's backends again", () => {
     // The words can't be typed while the box is unavailable, so they are set as the composer would hold them.
     fireEvent.change(words(), { target: { value: "Fix the build" } });
     core.listing = [claudeCode()];
-    await windowFocused();
+    await windowBack();
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Claude Code");
     // As R02 starts a screen just opened: the backend's default model, effort and permission mode.
     expect(chip("Model").getAttribute("aria-label")).toBe("Model: Opus 5.5");

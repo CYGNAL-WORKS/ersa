@@ -25,6 +25,12 @@
 //!   [`QUIT_HEARD_LIMIT`], quits at once. `shell_show` shows the window for
 //!   the confirmation and returns whether it was hidden; `shell_hide` puts it
 //!   back when the user cancels.
+//! - Coming back (FLOW-NEW-SESSION-R50): each time the Shell shows the
+//!   window, and each time the window takes the focus, it emits
+//!   `window-back` to the window, whose Interface reads the host's backends
+//!   again while the new-session screen shows. The Shell says so itself: a
+//!   hidden window's page never learns it was hidden, and a window shown
+//!   without the foreground never takes the focus.
 //! - `shell_open_link { url }` opens a link from the agent's words in the
 //!   system's default handler, only when its scheme is `http`, `https` or
 //!   `mailto` (FLOW-READ-TRANSCRIPT-R03).
@@ -239,11 +245,17 @@ async fn shell_quit(app: AppHandle) -> Result<(), ()> {
 /// The window's name, as built in [`run`].
 pub const WINDOW: &str = "main";
 
+/// What the window hears each time it is shown or takes the focus.
+pub const WINDOW_BACK: &str = "window-back";
+
 fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        // Said even when Windows refuses the focus, as it may to a process
+        // that is not in the foreground.
+        let _ = app.emit_to(WINDOW, WINDOW_BACK, ());
     }
 }
 
@@ -393,13 +405,12 @@ fn opens_unfocused(label: Option<&str>, background: Option<&str>) -> bool {
 /// runtime, which cannot say whether a window is visible, and watches the
 /// hide it is given.
 pub fn run_app<R: Runtime>(app: tauri::App<R>, hide: impl Fn(&WebviewWindow<R>) + 'static) -> i32 {
-    app.run_return(move |app, event| {
-        if let RunEvent::WindowEvent {
+    app.run_return(move |app, event| match &event {
+        RunEvent::WindowEvent {
             label,
             event: WindowEvent::CloseRequested { api, .. },
             ..
-        } = &event
-        {
+        } => {
             // Without this the window closes, and closing the last window
             // exits.
             api.prevent_close();
@@ -407,6 +418,15 @@ pub fn run_app<R: Runtime>(app: tauri::App<R>, hide: impl Fn(&WebviewWindow<R>) 
                 hide(&window);
             }
         }
+        // The window taking the focus is the person coming back to it.
+        RunEvent::WindowEvent {
+            label,
+            event: WindowEvent::Focused(true),
+            ..
+        } => {
+            let _ = app.emit_to(label.as_str(), WINDOW_BACK, ());
+        }
+        _ => {}
     })
 }
 

@@ -50,6 +50,8 @@ interface NewSessionScreenProps {
    * listing held stays.
    */
   onReadBackends?: (hostId: string) => void;
+  /** Hears the window shown or taking the focus; returns a way to stop. Absent without the Shell. */
+  onWindowBack?: (handler: () => void) => () => void;
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
@@ -119,23 +121,17 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   // The chosen host's backends, read again each time the screen is shown, and each time the window is shown or takes
   // the focus while it is (FLOW-NEW-SESSION-R50): a person who installed a backend comes back to the window, and it
-  // is offered with nothing to restart. The window coming back from the tray takes the focus; a window shown without
-  // it becomes visible.
+  // is offered with nothing to restart.
   const shown = props.shown ?? true;
   const readAgain = useRef(props.onReadBackends);
   readAgain.current = props.onReadBackends;
+  const onWindowBack = props.onWindowBack;
   useEffect(() => {
     if (!shown) return;
     const read = () => readAgain.current?.(hostId);
     read();
-    const onVisible = () => document.visibilityState === "visible" && read();
-    window.addEventListener("focus", read);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", read);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [shown, hostId]);
+    return onWindowBack?.(read);
+  }, [shown, hostId, onWindowBack]);
 
   // The folder the trust question asks about, while it is open.
   const [asking, setAsking] = useState(props.initialAsking);

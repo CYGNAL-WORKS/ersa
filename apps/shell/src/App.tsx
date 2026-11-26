@@ -1162,6 +1162,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // Behind the sessions page the screen is not showing: coming back from it shows it again (R50).
               shown={!sessionsPage}
               onReadBackends={readHostBackends}
+              onWindowBack={shell?.onWindowBack}
               lastUsed={lastUsed}
               projectId={composing?.projectId}
               onStart={start}

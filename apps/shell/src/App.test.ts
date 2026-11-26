@@ -144,6 +144,7 @@ const claude: BackendInfo = {
 /** A Shell whose folder dialog answers each pick with the next of `picks`, then with a cancel. */
 function fakeShell(...picks: (string | null)[]) {
   return {
+    onWindowBack: () => () => {},
     onQuitRequested: () => () => {},
     quitHeard: async () => {},
     show: async () => false,

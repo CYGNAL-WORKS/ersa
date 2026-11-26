@@ -357,6 +357,7 @@ describe("the new-session screen behind the delete question", () => {
   it("takes no Ctrl+O while the delete question stands over it", async () => {
     const pickFolder = vi.fn(async () => "D:/clones/stranger");
     const shell: ShellControl = {
+      onWindowBack: () => () => {},
       onQuitRequested: () => () => {},
       quitHeard: async () => {},
       show: async () => false,
