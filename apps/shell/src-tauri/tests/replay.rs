@@ -222,7 +222,7 @@ async fn received(name: &str, program: &Path) -> Value {
 }
 
 /// Replaces what differs from run to run (identifiers Core issues, times it
-/// records, its temporary data directory) with fixed stand-ins, so a
+/// records, the folder the fixture was recorded in) with fixed stand-ins, so a
 /// capture changes only when the stream does.
 fn normalise(mut value: Value, session_id: &str) -> Value {
     fn walk(value: &mut Value, session_id: &str) {
