@@ -365,7 +365,19 @@ pub struct FakeAdapter {
     /// The images the backend takes: PNG and GIF of at most [`IMAGE_MAX`]
     /// bytes, unless a test says otherwise.
     pub image_limits: ImageLimits,
+    /// A command of the test's own that the backend is, as Claude Code is
+    /// `claude`: its version command names it, and the probe for models and
+    /// each start run it through the transport Core gives, keeping each
+    /// line it printed after the first (see [`FakeAdapter::printed`]).
+    /// `None`: the version command is the shell's `echo`, and nothing is run.
+    pub command: Option<String>,
+    /// What the command printed after its version, each time it ran, in
+    /// order: `(why, line)`, `why` being `version`, `probe` or `start`.
+    pub printed: Printed,
 }
+
+/// What a fake's [`FakeAdapter::command`] printed, shared with the test.
+pub type Printed = Arc<Mutex<Vec<(String, String)>>>;
 
 /// Where the fake files its records, shared like [`Records`].
 pub type Filed = Arc<Mutex<HashMap<String, FiledRecord>>>;
@@ -418,6 +430,8 @@ impl FakeAdapter {
                 media_types: &["image/png", "image/gif"],
                 max_bytes: IMAGE_MAX,
             },
+            command: None,
+            printed: Arc::default(),
         }
     }
 
@@ -496,6 +510,36 @@ impl FakeAdapter {
     }
 }
 
+impl FakeAdapter {
+    /// Runs [`FakeAdapter::command`], when the fake has one, through
+    /// `transport`, as Claude Code's adapter runs `claude`, and keeps what
+    /// it printed after its version as `why`. A command the transport
+    /// cannot start fails as the adapter's would.
+    async fn run_command(&self, why: &str, transport: &dyn Transport) -> Result<(), AdapterError> {
+        let Some(command) = &self.command else {
+            return Ok(());
+        };
+        let spec = ProcessSpec {
+            program: command.clone(),
+            args: vec![why.to_string()],
+            ..ProcessSpec::default()
+        };
+        let output = ersa_core::transport::run(transport, spec, std::time::Duration::from_secs(60))
+            .await
+            .map_err(|e| match e {
+                ersa_core::transport::RunError::Spawn(e) => AdapterError::Io(e),
+                other => AdapterError::Protocol(other.to_string()),
+            })?;
+        self.keep_printed(why, output.stdout.get(1..).unwrap_or_default());
+        Ok(())
+    }
+
+    fn keep_printed(&self, why: &str, lines: &[String]) {
+        let mut printed = self.printed.lock().unwrap();
+        printed.extend(lines.iter().map(|line| (why.to_string(), line.clone())));
+    }
+}
+
 #[async_trait]
 impl Adapter for FakeAdapter {
     fn backend(&self) -> &str {
@@ -510,6 +554,13 @@ impl Adapter for FakeAdapter {
     /// Core that detects with no program override finds the fake available
     /// ([`super::detecting`]). With the override, the program does not exist.
     fn version_command(&self) -> ProcessSpec {
+        if let Some(command) = &self.command {
+            return ProcessSpec {
+                program: command.clone(),
+                args: vec!["version".to_string()],
+                ..ProcessSpec::default()
+            };
+        }
         let (program, args) = if cfg!(windows) {
             ("cmd", vec!["/C".to_string(), "echo 1.0.0".to_string()])
         } else {
@@ -522,9 +573,20 @@ impl Adapter for FakeAdapter {
         }
     }
 
+    /// The first line, which is the version; the lines after
+    /// it are kept in [`FakeAdapter::printed`].
+    fn read_version(&self, stdout: &[String]) -> Option<String> {
+        self.keep_printed("version", stdout.get(1..).unwrap_or_default());
+        stdout
+            .first()
+            .map(|line| line.trim().to_string())
+            .filter(|version| !version.is_empty())
+    }
+
     /// The listed models, with `high` reported as the default effort.
-    async fn models(&self, _transport: Arc<dyn Transport>) -> Result<ModelReport, AdapterError> {
+    async fn models(&self, transport: Arc<dyn Transport>) -> Result<ModelReport, AdapterError> {
         self.stats.model_probes.fetch_add(1, Ordering::SeqCst);
+        self.run_command("probe", transport.as_ref()).await?;
         match &*self.models.lock().unwrap() {
             ModelsAnswer::Listed(models) => Ok(ModelReport {
                 models: models.clone(),
@@ -563,12 +625,13 @@ impl Adapter for FakeAdapter {
 
     async fn start(
         &self,
-        _transport: Arc<dyn Transport>,
+        transport: Arc<dyn Transport>,
         config: SessionConfig,
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
         self.stats.starts.fetch_add(1, Ordering::SeqCst);
         self.stats.configs.lock().unwrap().push(config.clone());
+        self.run_command("start", transport.as_ref()).await?;
         sink.record(
             Direction::Host,
             json!({ "t": "hello", "cwd": config.cwd }).to_string(),

@@ -309,9 +309,30 @@ pub fn names_device(_path: &Path) -> bool {
     false
 }
 
-/// The file to start for `program`: Unix needs no help finding it.
-pub fn resolve_program(program: &str, _path: Option<&str>) -> String {
-    program.to_string()
+/// The separator between folders in a search path.
+pub const PATH_SEPARATOR: char = ':';
+
+/// The file names a bare `program` may have: only its own.
+pub fn program_names(program: &str) -> Vec<String> {
+    vec![program.to_string()]
+}
+
+/// Whether `candidate` is a file Unix can start: one with an execute bit.
+pub fn is_program(candidate: &Path) -> bool {
+    std::fs::metadata(candidate)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+/// Nothing: on Unix Core looks for a backend's command along the path it was
+/// started with only (PROTO-CORE-API, Open questions).
+pub fn stored_paths() -> io::Result<Vec<String>> {
+    Ok(Vec::new())
+}
+
+/// Nothing, as [`stored_paths`].
+pub fn stored_variable(_name: &str) -> Option<String> {
+    None
 }
 
 /// Opens a file to read without waiting: a FIFO that took a checked file's

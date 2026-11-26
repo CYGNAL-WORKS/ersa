@@ -62,10 +62,24 @@ pub fn unique_endpoint() -> String {
     .expect("endpoint")
 }
 
+/// No stored search path: a test looks for a backend's command along the
+/// path it was started with only, whatever the machine's own Path holds.
+pub struct NothingStored;
+
+impl ersa_core::search_path::StoredEnvironment for NothingStored {
+    fn paths(&self) -> io::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn variable(&self, _name: &str) -> Option<String> {
+        None
+    }
+}
+
 pub fn test_config(data_dir: &Path, endpoint: &str) -> CoreConfig {
     let mut config = CoreConfig::new(data_dir.to_path_buf()).expect("config");
     config.endpoint = endpoint.to_string();
     config.backend_program_override = Some(NO_SUCH_BACKEND.to_string());
+    config.stored_environment = ersa_core::StoredEnvironmentSource(Arc::new(NothingStored));
     config
 }
 

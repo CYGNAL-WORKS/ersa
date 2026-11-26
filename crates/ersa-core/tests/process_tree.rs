@@ -125,7 +125,10 @@ async fn a_cmd_shim_on_the_path_is_found() {
     )
     .unwrap();
     let path = dir.path().display().to_string();
-    let found = ersa_core::platform::resolve_program("ersa-shim-test", Some(&path));
+    let found = ersa_core::search_path::find_program("ersa-shim-test", Some(&path))
+        .expect("found")
+        .display()
+        .to_string();
     assert!(
         found.to_lowercase().ends_with("ersa-shim-test.cmd"),
         "{found}"

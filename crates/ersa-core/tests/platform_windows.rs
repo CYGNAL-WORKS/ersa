@@ -155,3 +155,52 @@ fn pipes_and_devices_are_told_by_their_names() {
         assert!(!names_device(Path::new(file)), "{file}");
     }
 }
+
+/// The stored search path is read from the registry as written: the
+/// system's Path is there on every Windows, and names `%SystemRoot%` (or
+/// the folder it stands for) unexpanded or not, but always System32. A
+/// value that does not exist is none, not a failure.
+// verifies: PROTO-CORE-API-R148
+#[test]
+fn the_stored_path_is_read_from_the_registry() {
+    let paths = ersa_core::platform::stored_paths().expect("read");
+    assert!(!paths.is_empty());
+    assert!(
+        paths[0].to_lowercase().contains("system32"),
+        "the system's Path first: {}",
+        paths[0]
+    );
+    assert!(ersa_core::platform::stored_variable("ersa-no-such-variable-xyz").is_none());
+    // `windir` is stored as `%SystemRoot%`, and returned as written.
+    assert_eq!(
+        ersa_core::platform::stored_variable("windir").as_deref(),
+        Some("%SystemRoot%")
+    );
+}
+
+/// No stored values: the test's own stored path is given directly.
+struct NothingStored;
+
+impl ersa_core::search_path::StoredEnvironment for NothingStored {
+    fn paths(&self) -> std::io::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn variable(&self, _name: &str) -> Option<String> {
+        None
+    }
+}
+
+/// A stored folder that differs from one already on the path only in
+/// letter case or a trailing separator is that folder, as Windows' file
+/// system has it, and is not added again.
+// verifies: PROTO-CORE-API-R148
+#[test]
+fn a_stored_folder_differing_only_in_letter_case_is_not_added_again() {
+    let composed = ersa_core::search_path::compose(
+        Some(r"C:\Tools"),
+        &NothingStored,
+        &[r"c:\tools\;C:\Other".to_string()],
+        &|_| None,
+    );
+    assert_eq!(composed.as_deref(), Some(r"C:\Tools;C:\Other"));
+}

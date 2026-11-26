@@ -15,8 +15,9 @@ use crate::admission::Admission;
 use crate::app_log::AppLog;
 use crate::persistence::{LOCAL_HOST_ID, Store};
 use crate::platform;
+use crate::search_path::{StoredEnvironment, SystemStoredEnvironment};
 use crate::sessions::SessionManager;
-use crate::transport::LocalTreeTransport;
+use crate::transport::{Finder, LOOK_LIMIT, LOOKS, LocalTreeTransport};
 
 /// How a Core process is set up. Built by the `ersa-core` binary from its
 /// command line, and by tests with a temporary data directory and a unique
@@ -80,10 +81,31 @@ pub struct CoreConfig {
     /// local host. `None` is the local machine's; tests put one in front
     /// of it that holds a command, as a slow repository or backend would.
     pub command_transport: Option<CommandTransport>,
-    /// How long a backend detection that found anything other than
-    /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
-    /// that need every detection after a failed one to run again.
+    /// How long a backend detection that found the backend in `error` is
+    /// reused. [`FAILED_DETECTION_TTL`], except in tests that need every
+    /// detection after a failed one to run again. An `available` backend is
+    /// kept for the life of the process and a `missing` one not at all
+    /// (PROTO-CORE-API-R96, R149, R150).
     pub failed_detection_ttl: Duration,
+    /// Where Core reads the search path as the system holds it now, to look
+    /// for a backend's command (PROTO-CORE-API-R148): the registry on
+    /// Windows, nothing elsewhere. Tests give their own.
+    pub stored_environment: StoredEnvironmentSource,
+    /// How long a look for a backend's command may take before the backend
+    /// is `error` (PROTO-CORE-API-R151). [`LOOK_LIMIT`], except in tests
+    /// that let it run out.
+    pub backend_look_limit: Duration,
+}
+
+/// A source for [`CoreConfig::stored_environment`]. Its own type only so
+/// that `CoreConfig` can derive `Debug`.
+#[derive(Clone)]
+pub struct StoredEnvironmentSource(pub Arc<dyn StoredEnvironment>);
+
+impl std::fmt::Debug for StoredEnvironmentSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StoredEnvironmentSource")
+    }
 }
 
 /// A transport for [`CoreConfig::command_transport`]. Its own type only so
@@ -147,8 +169,8 @@ pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 /// The default for [`CoreConfig::handshake_timeout`].
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// How long a backend detection that found anything other than `available`
-/// is reused, so a backend installed while Core runs shows up soon after.
+/// How long a backend detection that found the backend in `error` is
+/// reused before the next request that needs it detects it again.
 pub const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
 
 /// How many folder inspections may be under way at once, the ones left
@@ -186,6 +208,8 @@ impl CoreConfig {
             worktree_turn_wait: crate::workspace::WORKTREE_TURN_WAIT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
+            stored_environment: StoredEnvironmentSource(Arc::new(SystemStoredEnvironment)),
+            backend_look_limit: LOOK_LIMIT,
         })
     }
 
@@ -219,15 +243,20 @@ pub struct Core {
     /// Every session, and the adapters that start them.
     pub sessions: SessionManager,
     local_transport: Arc<dyn Transport>,
-    /// The local transport for backends, whose leftovers die with them.
+    /// The local transport backends' version commands run through: the
+    /// command transport, behind a [`Finder`] that looks for the command
+    /// along the search path as it is now (PROTO-CORE-API-R148).
+    local_command_transport: Arc<dyn Transport>,
+    /// The local transport for backends, whose leftovers die with them,
+    /// behind a [`Finder`] as well.
     local_session_transport: Arc<dyn Transport>,
     host_name: String,
     started: Instant,
-    /// The last backend detection for the local host and when it ran. Kept
-    /// for the life of the process when every backend was available, and for
-    /// [`FAILED_DETECTION_TTL`] otherwise. An async mutex, held while
-    /// detecting, so concurrent requests run one detection between them.
-    local_backends: Mutex<Option<(Instant, Vec<Detected>)>>,
+    /// The last detection of each backend on the local host and when it
+    /// ran, by the adapter's place in registration order (see
+    /// [`Core::local_backends`]). An async mutex, held while detecting, so
+    /// concurrent requests run one detection between them.
+    local_backends: Mutex<Vec<Option<(Instant, Detected)>>>,
     /// The places for folder inspections (`project.add`, `project.find`).
     /// Each holds one on its thread until its file system call returns,
     /// past its time limit too, so folders that never answer take at most
@@ -259,6 +288,19 @@ impl Core {
             .as_ref()
             .map(|CommandTransport(transport)| Arc::clone(transport))
             .unwrap_or_else(|| Arc::new(LocalTreeTransport::for_commands()));
+        // Both backend transports share one set of places for looks, so a
+        // share that stopped answering holds at most `LOOKS` threads.
+        let looks = Arc::new(Semaphore::new(LOOKS));
+        let finder = |inner: Arc<dyn Transport>| -> Arc<dyn Transport> {
+            Arc::new(Finder::new(
+                inner,
+                Arc::clone(&config.stored_environment.0),
+                config.backend_look_limit,
+                Arc::clone(&looks),
+            ))
+        };
+        let local_command_transport = finder(Arc::clone(&local_transport));
+        let local_session_transport = finder(Arc::new(LocalTreeTransport::new()));
         let admission = Arc::new(Admission::default());
         let sessions =
             SessionManager::new(store.clone(), adapters, app_log, Arc::clone(&admission))
@@ -270,10 +312,11 @@ impl Core {
             sessions,
             store,
             local_transport,
-            local_session_transport: Arc::new(LocalTreeTransport::new()),
+            local_command_transport,
+            local_session_transport,
             host_name: platform::host_name(),
             started: Instant::now(),
-            local_backends: Mutex::new(None),
+            local_backends: Mutex::new(Vec::new()),
             folder_inspections: Arc::new(Semaphore::new(FOLDER_INSPECTIONS)),
             finding: Arc::default(),
             shutdown: watch::Sender::new(false),
@@ -309,25 +352,44 @@ impl Core {
         (host_id == LOCAL_HOST_ID).then(|| Arc::clone(&self.local_session_transport))
     }
 
-    /// The backends detected on the local host, detecting again when the
-    /// last result has expired.
+    /// The backends detected on the local host, in the order the adapters
+    /// were registered. Each backend's detection is kept apart from the
+    /// others': an `available` one for the life of the process, so a
+    /// missing one never has it started again (PROTO-CORE-API-R96, R149);
+    /// a `missing` one not at all, since looking for its command starts
+    /// nothing (R150); one in `error` for
+    /// [`CoreConfig::failed_detection_ttl`].
     pub async fn local_backends(&self) -> Vec<Detected> {
-        let mut cached = self.local_backends.lock().await;
-        if let Some((at, found)) = cached.as_ref() {
-            let all_available = found.iter().all(|d| d.state == BackendState::Available);
-            if all_available || at.elapsed() < self.config.failed_detection_ttl {
-                return found.clone();
+        let mut kept = self.local_backends.lock().await;
+        let adapters = self.sessions.adapters();
+        kept.resize(adapters.len(), None);
+        let ttl = self.config.failed_detection_ttl;
+        let stale: Vec<usize> = (0..adapters.len())
+            .filter(|&i| match &kept[i] {
+                None => true,
+                Some((at, detected)) => match detected.state {
+                    BackendState::Available => false,
+                    BackendState::Missing => true,
+                    BackendState::Error => at.elapsed() >= ttl,
+                },
+            })
+            .collect();
+        if !stale.is_empty() {
+            let to_detect: Vec<Arc<dyn Adapter>> =
+                stale.iter().map(|&i| Arc::clone(&adapters[i])).collect();
+            let found = adapters::detect(
+                self.local_command_transport.as_ref(),
+                Arc::clone(&self.local_session_transport),
+                self.config.backend_program_override.as_deref(),
+                &to_detect,
+            )
+            .await;
+            let now = Instant::now();
+            for (i, detected) in stale.into_iter().zip(found) {
+                kept[i] = Some((now, detected));
             }
         }
-        let found = adapters::detect(
-            self.local_transport.as_ref(),
-            Arc::clone(&self.local_session_transport),
-            self.config.backend_program_override.as_deref(),
-            self.sessions.adapters(),
-        )
-        .await;
-        *cached = Some((Instant::now(), found.clone()));
-        found
+        kept.iter().flatten().map(|(_, d)| d.clone()).collect()
     }
 
     /// Seconds since this Core started.

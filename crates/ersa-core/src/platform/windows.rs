@@ -31,7 +31,8 @@ use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_PIPE_BUSY, HANDLE, LocalFree,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_PIPE_BUSY,
+    ERROR_SUCCESS, HANDLE, LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -42,6 +43,10 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::Storage::FileSystem::SECURITY_IDENTIFICATION;
 use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+use windows_sys::Win32::System::Registry::{
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_NOEXPAND, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+    RegGetValueW,
+};
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -617,36 +622,115 @@ fn resume_process(pid: u32) -> io::Result<()> {
     }
 }
 
-/// The file Windows should start for `program`.
-///
-/// Many command-line tools, Claude Code's npm install among them, are `.cmd`
-/// shims rather than `.exe` files. Rust's process spawning appends only
-/// `.exe` when it searches `PATH`, so `claude` would not be found. This
-/// searches `PATH` the way the command prompt does, trying each extension in
-/// `PATHEXT`, and returns the full path of the first match. A program given
-/// with a directory or an extension, or found nowhere, is returned as is,
-/// and spawning reports whatever is wrong with it.
-///
-/// `path` is the `PATH` the child will get, when the caller overrides it.
-pub fn resolve_program(program: &str, path: Option<&str>) -> String {
-    let as_given = Path::new(program);
-    if as_given.components().count() != 1 || as_given.extension().is_some() {
-        return program.to_string();
-    }
-    let path = match path {
-        Some(path) => path.to_string(),
-        None => std::env::var("PATH").unwrap_or_default(),
-    };
+// -- The stored search path ---------------------------------------------------
+
+/// The separator between folders in a search path.
+pub const PATH_SEPARATOR: char = ';';
+
+/// The file names a bare `program` may have, as the command prompt tries
+/// them: as given when it has an extension, then with each extension in
+/// `PATHEXT`, since many command-line tools, Claude Code's npm install
+/// among them, are `.cmd` scripts rather than `.exe` files.
+pub fn program_names(program: &str) -> Vec<String> {
     let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
-    for dir in path.split(';').filter(|dir| !dir.is_empty()) {
-        for extension in extensions.split(';').filter(|ext| !ext.is_empty()) {
-            let candidate = Path::new(dir).join(format!("{program}{extension}"));
-            if candidate.is_file() {
-                return candidate.display().to_string();
-            }
+    let mut names = Vec::new();
+    if Path::new(program).extension().is_some() {
+        names.push(program.to_string());
+    }
+    names.extend(
+        extensions
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(|ext| format!("{program}{ext}")),
+    );
+    names
+}
+
+/// Whether `candidate` is a file Windows can start.
+pub fn is_program(candidate: &Path) -> bool {
+    candidate.is_file()
+}
+
+/// Where Windows stores the system's environment variables.
+const SYSTEM_ENVIRONMENT: &str = r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
+/// Where Windows stores the user's, under `HKEY_CURRENT_USER`.
+const USER_ENVIRONMENT: &str = "Environment";
+
+/// The system's Path and then the user's, as the registry holds them now,
+/// variables not filled in; one that is not set is left out
+/// (PROTO-CORE-API-R148). A program started earlier keeps the path it was
+/// given, so this is where a folder an installer added since shows up.
+pub fn stored_paths() -> io::Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for (key, subkey) in [
+        (HKEY_LOCAL_MACHINE, SYSTEM_ENVIRONMENT),
+        (HKEY_CURRENT_USER, USER_ENVIRONMENT),
+    ] {
+        if let Some(path) = registry_string(key, subkey, "Path")? {
+            paths.push(path);
         }
     }
-    program.to_string()
+    Ok(paths)
+}
+
+/// A variable's stored value, the user's before the system's, as Windows
+/// lets a user's variable stand over the system's; `None` when neither is
+/// set or it cannot be read.
+pub fn stored_variable(name: &str) -> Option<String> {
+    [
+        (HKEY_CURRENT_USER, USER_ENVIRONMENT),
+        (HKEY_LOCAL_MACHINE, SYSTEM_ENVIRONMENT),
+    ]
+    .into_iter()
+    .find_map(|(key, subkey)| registry_string(key, subkey, name).ok().flatten())
+}
+
+/// A string value of the registry as written (`RRF_NOEXPAND`: a
+/// `REG_EXPAND_SZ` keeps its `%NAME%`s), or `None` when the key or the
+/// value does not exist.
+fn registry_string(key: HKEY, subkey: &str, value: &str) -> io::Result<Option<String>> {
+    let subkey = wide(subkey);
+    let value = wide(value);
+    let flags = RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ | RRF_NOEXPAND;
+    // Ask for the size, then read; the value can grow between the two, so
+    // go round again when it did.
+    let mut buffer: Vec<u16> = Vec::new();
+    loop {
+        let mut bytes = u32::try_from(buffer.len() * 2).unwrap_or(u32::MAX);
+        let data = if buffer.is_empty() {
+            ptr::null_mut()
+        } else {
+            buffer.as_mut_ptr().cast::<c_void>()
+        };
+        // SAFETY: both names are NUL-terminated; `data` is null or points at
+        // `bytes` writable bytes, and `bytes` outlives the call.
+        let status = unsafe {
+            RegGetValueW(
+                key,
+                subkey.as_ptr(),
+                value.as_ptr(),
+                flags,
+                ptr::null_mut(),
+                data,
+                &mut bytes,
+            )
+        };
+        match status {
+            ERROR_SUCCESS if !buffer.is_empty() => {
+                // `bytes` counts the terminating NUL, which is dropped.
+                let len = (bytes as usize / 2).min(buffer.len());
+                let text = &buffer[..len];
+                let text = text.strip_suffix(&[0]).unwrap_or(text);
+                return Ok(Some(String::from_utf16_lossy(text)));
+            }
+            // The size, or a value that grew since: make room, read again.
+            ERROR_SUCCESS | ERROR_MORE_DATA => {
+                buffer = vec![0u16; (bytes as usize).div_ceil(2) + 1];
+            }
+            ERROR_FILE_NOT_FOUND => return Ok(None),
+            error => return Err(io::Error::from_raw_os_error(error as i32)),
+        }
+    }
 }
 
 /// Opens a file to read. Windows never waits opening a file by path: the

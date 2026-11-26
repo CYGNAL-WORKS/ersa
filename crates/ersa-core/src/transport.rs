@@ -8,6 +8,7 @@
 //! to completion and collecting its output, for VCS commands and backend
 //! detection.
 
+mod finder;
 mod local;
 
 use std::io;
@@ -15,6 +16,7 @@ use std::time::Duration;
 
 use ersa_adapter::{LineReader, ProcessExit, ProcessSpec, Transport};
 
+pub use finder::{Finder, LOOK_LIMIT, LOOKS};
 pub use local::{LocalTreeTransport, MAX_PROCESS_LINE_BYTES};
 
 /// What a finished command printed, and how it exited.

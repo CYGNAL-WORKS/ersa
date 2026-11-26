@@ -15,7 +15,8 @@ use ersa_adapter::{LineReader, LineWriter, Process, ProcessExit, ProcessSpec, Tr
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 
-use crate::platform::{self, ProcessTree};
+use crate::platform::ProcessTree;
+use crate::search_path::find_program;
 
 /// The longest line read from a process's stdout or stderr, in bytes: far
 /// above any line a backend writes (a tool result with an image in it is a
@@ -71,8 +72,17 @@ impl Default for LocalTreeTransport {
 #[ersa_adapter::async_trait]
 impl Transport for LocalTreeTransport {
     async fn spawn(&self, spec: ProcessSpec) -> io::Result<Box<dyn Process>> {
-        let program =
-            platform::resolve_program(&spec.program, spec.env.get("PATH").map(String::as_str));
+        // Rust's own search appends only `.exe`, so a `.cmd` script such as
+        // an npm-installed tool would not be found: look as the command
+        // prompt does, along the `PATH` the child will get.
+        let path = spec
+            .env
+            .get("PATH")
+            .cloned()
+            .or_else(|| std::env::var("PATH").ok());
+        let program = find_program(&spec.program, path.as_deref())
+            .map(|found| found.into_os_string())
+            .unwrap_or_else(|| spec.program.clone().into());
         let mut command = Command::new(program);
         // Removals first, so `env` can still set a removed name.
         for name in &spec.env_remove {
