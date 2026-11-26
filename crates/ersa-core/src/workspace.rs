@@ -980,6 +980,17 @@ pub async fn git_holds_repository(
     if kept {
         return Ok(true);
     }
+    // A folder that is gone, its record left, holds nothing checked out
+    // and no nested repository, and git can't read a work tree that is not
+    // there.
+    let folder = path.to_string();
+    let there = blocking(deadline, "looking for the workspace's folder", move |_| {
+        Ok(std::path::Path::new(&folder).try_exists()?)
+    })
+    .await?;
+    if !there {
+        return Ok(false);
+    }
 
     // As `count_files` reads them: git's record and the folder named
     // outright, so no other repository above the folder is found.
@@ -1704,6 +1715,46 @@ pub async fn git_worktree_gone(
     )
     .await?;
     Ok(!exists)
+}
+
+/// Whether `path` is a folder with nothing in it: a real one, not a link to
+/// one. Blocking.
+fn empty_real_folder(path: &std::path::Path) -> std::io::Result<bool> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return Ok(false);
+    }
+    Ok(std::fs::read_dir(path)?.next().is_none())
+}
+
+/// Whether `path` is a real folder with nothing in it, for the sweep to
+/// tidy away (a project's folder under the worktrees root once its last
+/// workspace is gone). Shares `workspace.changes`'s cap on blocking reads.
+pub async fn is_empty_folder(path: &std::path::Path) -> Result<bool, VcsError> {
+    let path = path.to_path_buf();
+    blocking(deadline(), "looking in a folder", move |_| {
+        Ok(empty_real_folder(&path)?)
+    })
+    .await
+}
+
+/// Removes `path` when it is a real folder with nothing in it, and says
+/// whether it did. The file system's own removal of a folder refuses one
+/// that is not empty, so a file written there since the look is never lost.
+pub async fn remove_empty_folder(path: &std::path::Path) -> Result<bool, VcsError> {
+    let path = path.to_path_buf();
+    blocking(deadline(), "removing an empty folder", move |_| {
+        if !empty_real_folder(&path)? {
+            return Ok(false);
+        }
+        std::fs::remove_dir(&path)?;
+        Ok(true)
+    })
+    .await
 }
 
 /// How [`git_worktree_delete`]'s tries at a workspace's folder run.

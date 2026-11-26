@@ -276,15 +276,15 @@ async fn a_session_unarchived_while_the_pass_judges_its_folder_keeps_it() {
     left(&mut s, &workspace, "README.md").await;
 }
 
-/// A workspace no session uses is a leftover, for the Clean up list and the
-/// leftovers' own pass: this pass leaves it.
+/// A workspace no session uses is never put away: it is a leftover's to
+/// judge (R23), which leaves it whole while it is younger than an hour.
 // verifies: FLOW-CLEAN-UP-R22
 #[tokio::test(flavor = "multi_thread")]
-async fn a_workspace_no_session_uses_is_left() {
+async fn a_workspace_no_session_uses_is_never_put_away() {
     let (mut s, clock) = swept().await;
     let workspace = s.workspace().await;
 
-    an_hour_passes(&clock).await;
+    later(&clock, NOT_AN_HOUR).await;
 
     left(&mut s, &workspace, "README.md").await;
 }
@@ -517,6 +517,447 @@ async fn a_put_away_that_failed_part_way_is_never_tried_again() {
     an_hour_passes(&clock).await;
     assert!(folder(&first).join("since.txt").exists());
     assert_eq!(s.listed(&first).await["state"], "put_away");
+    told_nothing(&mut watcher).await;
+}
+
+// -- Leftovers (FLOW-CLEAN-UP-R23, R08, R25) --------------------------------
+
+/// Moves the sweep's clock on by `by`, then waits for a pass.
+async fn later(clock: &SweepClock, by: Duration) {
+    let before = clock.ended();
+    clock.time_passed(by);
+    clock.sweep_again();
+    passes(clock, before + 1).await;
+}
+
+/// Just short of an hour: a workspace made at the start of a test is still
+/// younger than an hour once this has passed, however slow the test.
+const NOT_AN_HOUR: Duration = Duration::from_secs(59 * 60);
+
+/// `workspace` was removed: gone from the list, and its folder, git's
+/// record of it and its branch with it.
+async fn removed(s: &mut Setup, workspace: &Value) {
+    assert_eq!(
+        s.listed(workspace).await,
+        Value::Null,
+        "the workspace is gone"
+    );
+    assert!(!folder(workspace).exists(), "the folder is gone");
+    assert!(!listed_by_git(&s.repo, workspace), "git's record is gone");
+    assert!(
+        !has_branch(&s.repo, branch(workspace)),
+        "the branch is gone"
+    );
+}
+
+/// A workspace whose start was cut off as `workspace.create` answered, the
+/// link that asked for it dropped: the sweep leaves it while it is younger
+/// than an hour, then removes it with its folder, git's record and its
+/// branch, and the project's folder under the worktrees root, now empty.
+// verifies: FLOW-CLEAN-UP-R23
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_that_holds_nothing_goes_once_an_hour_has_passed() {
+    let (mut s, clock) = swept().await;
+    let mut cut_off = s.core.client().await;
+    let params = json!({ "project_id": s.project["id"] });
+    let workspace = cut_off.result("workspace.create", params).await;
+    drop(cut_off);
+    let project_folder = folder(&workspace).parent().unwrap().to_path_buf();
+
+    later(&clock, NOT_AN_HOUR).await;
+    left(&mut s, &workspace, "README.md").await;
+    assert!(has_branch(&s.repo, branch(&workspace)));
+
+    later(&clock, Duration::from_secs(60)).await;
+    removed(&mut s, &workspace).await;
+    assert!(!project_folder.exists(), "the empty project folder is gone");
+}
+
+/// The diagnostic log's line for a leftover kept, as R08 asks.
+const KEPT: &str = "the sweep kept a leftover workspace";
+
+/// `workspace`, a leftover, is kept as it was, `inside` still there, and its
+/// keeping was written to the diagnostic log once, saying `why`.
+async fn kept(s: &mut Setup, log: &support::log::Log, workspace: &Value, inside: &str, why: &str) {
+    left(s, workspace, inside).await;
+    assert!(has_branch(&s.repo, branch(workspace)), "the branch stays");
+    let field = format!("workspace={}", id(workspace));
+    assert_eq!(log.count("INFO", KEPT, &field), 1, "{field}: one line");
+    assert!(log.logged("INFO", why, &field), "{field}: says {why:?}");
+}
+
+/// Leftovers that hold something stay, each written to the diagnostic log
+/// once with why: uncommitted files, ignored files, a commit no other branch
+/// holds, on its branch or on no branch, a repository of its own, and a
+/// folder git has no record of, whose contents can't be checked.
+// verifies: FLOW-CLEAN-UP-R23
+// verifies: FLOW-CLEAN-UP-R08
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_that_holds_anything_stays() {
+    let log = support::log::Log::installed();
+    let (mut s, clock) = swept().await;
+
+    let uncommitted = s.workspace().await;
+    std::fs::write(folder(&uncommitted).join("unsaved.txt"), "unsaved\n").unwrap();
+
+    let ignored = s.workspace().await;
+    let path = folder(&ignored);
+    std::fs::write(path.join(".gitignore"), "*.log\n").unwrap();
+    git(&path, &["add", ".gitignore"]);
+    git(&path, &["commit", "--quiet", "-m", "ignore logs"]);
+    // Shared with main, so only the ignored file is left to keep it.
+    git(
+        &s.repo,
+        &["merge", "--quiet", "--ff-only", branch(&ignored)],
+    );
+    std::fs::write(path.join("build.log"), "ignored\n").unwrap();
+
+    let unshared = s.workspace().await;
+    commit(&folder(&unshared), "only-here.txt");
+
+    let detached = s.workspace().await;
+    git(&folder(&detached), &["switch", "--quiet", "--detach"]);
+    commit(&folder(&detached), "detached.txt");
+
+    let nested = s.workspace().await;
+    // Its commit is held by no remote of its own: one uncommitted entry.
+    nested_repository(&folder(&nested).join("nested"));
+
+    let unrecorded = s.workspace().await;
+    let link = std::fs::read_to_string(folder(&unrecorded).join(".git")).unwrap();
+    let record = link.trim().trim_start_matches("gitdir:").trim().to_string();
+    std::fs::remove_dir_all(record).unwrap();
+
+    an_hour_passes(&clock).await;
+    an_hour_passes(&clock).await;
+
+    kept(
+        &mut s,
+        &log,
+        &uncommitted,
+        "unsaved.txt",
+        "uncommitted files",
+    )
+    .await;
+    kept(&mut s, &log, &ignored, "build.log", "ignored files: 1").await;
+    kept(
+        &mut s,
+        &log,
+        &unshared,
+        "only-here.txt",
+        "commits no other branch holds",
+    )
+    .await;
+    kept(
+        &mut s,
+        &log,
+        &detached,
+        "detached.txt",
+        "commits no other branch holds",
+    )
+    .await;
+    kept(
+        &mut s,
+        &log,
+        &nested,
+        "nested/nested.txt",
+        "uncommitted files",
+    )
+    .await;
+    // git no longer lists it, so `left`'s look at git's list does not hold.
+    assert!(folder(&unrecorded).join("README.md").exists());
+    assert_eq!(s.listed(&unrecorded).await["state"], "ready");
+    let field = format!("workspace={}", id(&unrecorded));
+    assert_eq!(log.count("INFO", KEPT, &field), 1);
+    assert!(log.logged("INFO", "git has no record of it", &field));
+}
+
+/// A leftover whose folder holds a repository of its own and nothing else
+/// stays (PROTO-CORE-API-R147): a submodule checked out.
+// verifies: FLOW-CLEAN-UP-R23
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_that_holds_a_repository_of_its_own_stays() {
+    let log = support::log::Log::installed();
+    let (mut s, clock) = swept().await;
+    s.add_submodule();
+    let workspace = s.workspace().await;
+    check_out_submodules(&folder(&workspace));
+
+    an_hour_passes(&clock).await;
+
+    let why = "its folder holds a repository of its own";
+    kept(&mut s, &log, &workspace, "sub/sub.txt", why).await;
+}
+
+/// A workspace a session refers to is no leftover, whatever the session is
+/// doing: here one stopped, one marked deleting whose delete failed, and
+/// one dormant after a restart, its backend having no adapter in that
+/// build. No workspace and no session goes.
+// verifies: FLOW-CLEAN-UP-R23
+// verifies: FLOW-CLEAN-UP-R08
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_a_session_refers_to_is_no_leftover() {
+    let fake = FakeAdapter::new(1);
+    let refusal = Arc::clone(&fake.delete_refusal);
+    let (mut s, clock) = swept_with(fake, |_| {}).await;
+    let (stopped, session) = used(&mut s).await;
+    let (marked, deleting) = used(&mut s).await;
+    *refusal.lock().unwrap() = Some(OpenElsewhere::Yes { pids: vec![4242] });
+    let token = changes_token(&mut s, &marked).await;
+    let delete = json!({ "id": deleting, "token": token });
+    s.client.error("session.delete", delete).await;
+
+    an_hour_passes(&clock).await;
+
+    left(&mut s, &stopped, "README.md").await;
+    // Its failed delete took its folder and branch: the workspace stays.
+    assert_ne!(s.listed(&marked).await, Value::Null);
+    for session in [&session, &deleting] {
+        let listed = support::listed(&mut s.client, session).await;
+        assert!(listed.is_some(), "{session} is not deleted");
+    }
+
+    let dormant = Arc::new(SweepClock::default());
+    dormant.time_passed(Duration::from_secs(2 * 60 * 60));
+    let mut s = restarted(s, Vec::new(), &dormant).await;
+    passes(&dormant, 1).await;
+    left(&mut s, &stopped, "README.md").await;
+    // Not listed while dormant: its row is what stays.
+    let rows = s.core.core().store.sessions().await.unwrap();
+    assert!(rows.iter().any(|row| row.id == session), "not deleted");
+}
+
+/// A put-away workspace whose last session was removed is a leftover with
+/// no folder: its branch and the workspace go. One with something standing
+/// at its path is what a failed put-away left, no leftover, and stays with
+/// what is there.
+// verifies: FLOW-CLEAN-UP-R23
+#[tokio::test(flavor = "multi_thread")]
+async fn a_put_away_workspace_no_session_uses_goes_unless_something_is_at_its_path() {
+    let (mut s, clock) = swept().await;
+    let (gone, first) = used(&mut s).await;
+    let (remains, second) = used(&mut s).await;
+    for (workspace, session) in [(&gone, &first), (&remains, &second)] {
+        archive(&mut s, &clock, session).await;
+        put_away(&mut s, workspace).await;
+        // Let go of, its workspace left; a delete would take the workspace.
+        s.client
+            .result("session.remove", json!({ "id": session }))
+            .await;
+        assert_eq!(s.listed(workspace).await["state"], "put_away");
+    }
+    std::fs::create_dir_all(folder(&remains)).unwrap();
+    std::fs::write(folder(&remains).join("left.txt"), "left\n").unwrap();
+
+    an_hour_passes(&clock).await;
+
+    assert_eq!(s.listed(&gone).await, Value::Null, "the workspace is gone");
+    assert!(!has_branch(&s.repo, branch(&gone)), "its branch is gone");
+    assert_eq!(s.listed(&remains).await["state"], "put_away");
+    assert!(folder(&remains).join("left.txt").exists());
+    assert!(has_branch(&s.repo, branch(&remains)));
+}
+
+/// A leftover whose folder was deleted by hand, git's record of it left
+/// stale: the sweep removes the record, the branch and the workspace.
+// verifies: FLOW-CLEAN-UP-R23
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_whose_folder_is_gone_takes_git_s_stale_record_with_it() {
+    let (mut s, clock) = swept().await;
+    let workspace = s.workspace().await;
+    std::fs::remove_dir_all(folder(&workspace)).unwrap();
+    assert!(
+        listed_by_git(&s.repo, &workspace),
+        "git still has its record"
+    );
+
+    an_hour_passes(&clock).await;
+
+    removed(&mut s, &workspace).await;
+}
+
+/// Something written into a leftover after the sweep counted it, while its
+/// removal waits for the project's turn: the removal judges it again in the
+/// turn and keeps it.
+// verifies: FLOW-CLEAN-UP-R23
+// verifies: FLOW-CLEAN-UP-R08
+#[tokio::test(flavor = "multi_thread")]
+async fn a_leftover_written_to_while_its_removal_waits_stays() {
+    let (mut s, clock) = swept().await;
+    let workspace = s.workspace().await;
+    let core = s.core.core();
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let turn = ersa_core::workspace::project_turn(&core.admission, &project, PASS)
+        .await
+        .expect("the test has the turn");
+    let before = clock.ended();
+    clock.hour_passed();
+    // Admitted, counted and waiting for the turn the test holds.
+    let removing = || {
+        let state = core.admission.snapshot();
+        let phase = state.workspace(id(&workspace)).map(|w| w.phase);
+        matches!(
+            phase,
+            Some(ersa_core::admission::WorkspacePhase::Removing { .. })
+        )
+    };
+    let deadline = tokio::time::Instant::now() + PASS;
+    while !removing() {
+        assert!(tokio::time::Instant::now() < deadline, "never removing");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    std::fs::write(folder(&workspace).join("since.txt"), "since\n").unwrap();
+    drop(turn);
+    passes(&clock, before + 1).await;
+
+    left(&mut s, &workspace, "since.txt").await;
+}
+
+/// The sweep's removal goes on to the folder when git dropped its record
+/// and failed (PROTO-CORE-API-R112, R122), and deletes the branch.
+// verifies: PROTO-CORE-API-R122
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sweep_removes_a_leftover_as_every_removal_does() {
+    let drops = Arc::new(support::deleting::FailingGit::new(
+        support::deleting::Removal::DropsRecordThenFails,
+        None,
+    ));
+    let (mut s, clock) = swept_with(FakeAdapter::new(1), move |config| {
+        config.command_transport = Some(ersa_core::CommandTransport(drops));
+    })
+    .await;
+    let workspace = s.workspace().await;
+
+    an_hour_passes(&clock).await;
+
+    removed(&mut s, &workspace).await;
+}
+
+/// A removal that had no turn at the project's worktrees in time starts no
+/// git work and leaves the leftover for the next pass.
+// verifies: PROTO-CORE-API-R124
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_with_no_turn_in_time_is_left_for_the_next_pass() {
+    let (mut s, clock) = swept_with(FakeAdapter::new(1), |config| {
+        config.worktree_turn_wait = Duration::from_millis(300);
+    })
+    .await;
+    let workspace = s.workspace().await;
+    let core = s.core.core();
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let wait = Duration::from_secs(30);
+    let turn = ersa_core::workspace::project_turn(&core.admission, &project, wait)
+        .await
+        .expect("the test has the turn");
+
+    an_hour_passes(&clock).await;
+    left(&mut s, &workspace, "README.md").await;
+    assert!(has_branch(&s.repo, branch(&workspace)));
+
+    drop(turn);
+    an_hour_passes(&clock).await;
+    removed(&mut s, &workspace).await;
+}
+
+/// git's `worktree remove` fails while `failing` is set, before it touches
+/// anything; every other command runs as the local transport runs it.
+struct FailingWhile {
+    failing: Arc<std::sync::atomic::AtomicBool>,
+    inner: ersa_core::transport::LocalTreeTransport,
+}
+
+#[ersa_adapter::async_trait]
+impl ersa_adapter::Transport for FailingWhile {
+    async fn spawn(
+        &self,
+        mut spec: ersa_adapter::ProcessSpec,
+    ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+        let removes = spec.args.windows(2).any(|w| w == ["worktree", "remove"]);
+        if removes && self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+            spec.args.push("--no-such-option".into());
+        }
+        self.inner.spawn(spec).await
+    }
+}
+
+/// A removal that fails tells no client, and the next pass judges the
+/// leftover again and removes it.
+// verifies: FLOW-CLEAN-UP-R25
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_that_failed_is_judged_again_by_the_next_pass() {
+    let failing = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let transport = Arc::new(FailingWhile {
+        failing: Arc::clone(&failing),
+        inner: ersa_core::transport::LocalTreeTransport::for_commands(),
+    });
+    let (mut s, clock) = swept_with(FakeAdapter::new(1), move |config| {
+        config.command_transport = Some(ersa_core::CommandTransport(transport));
+    })
+    .await;
+    let mut watcher = s.core.client().await;
+    let workspace = s.workspace().await;
+
+    an_hour_passes(&clock).await;
+    assert_eq!(s.listed(&workspace).await["state"], "error");
+    assert!(folder(&workspace).join("README.md").exists());
+    told_nothing(&mut watcher).await;
+
+    failing.store(false, std::sync::atomic::Ordering::SeqCst);
+    an_hour_passes(&clock).await;
+    removed(&mut s, &workspace).await;
+    told_nothing(&mut watcher).await;
+}
+
+/// A removal whose try at the folder is stuck past its limit: while the try
+/// holds, nothing else removes the workspace or its folder, and the pass
+/// goes no further. Once the try ends, having deleted nothing, git has no
+/// record of the folder, so the next pass can't check it and keeps it.
+// verifies: PROTO-CORE-API-R131
+// verifies: FLOW-CLEAN-UP-R25
+// verifies: FLOW-CLEAN-UP-R08
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_whose_try_is_stuck_holds_the_workspace() {
+    let log = support::log::Log::installed();
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let clock = Arc::new(SweepClock::default());
+    let sweeps = Sweeps::Driven(Arc::clone(&clock));
+    let wait = ersa_core::workspace::WORKTREE_TURN_WAIT;
+    let mut s = stuck_folder_setup_with(&gate, wait, move |config| config.sweeps = sweeps).await;
+    passes(&clock, 1).await;
+    let mut watcher = s.core.client().await;
+    let workspace = s.workspace().await;
+    let before = clock.ended();
+
+    clock.hour_passed();
+    reached(&gate).await;
+    let field = format!("workspace={}", id(&workspace));
+    let deadline = tokio::time::Instant::now() + PASS;
+    while !log.logged("INFO", KEPT, &field) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the removal never failed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let params = json!({ "id": workspace["id"] });
+    let refused = s.client.error("workspace.remove", params).await;
+    assert_eq!(refused["data"]["kind"], "invalid_state", "{refused}");
+    let ended = tokio::time::timeout(Duration::from_secs(5), clock.until_ended(before + 1));
+    assert!(ended.await.is_err(), "the pass went on beside a stuck try");
+
+    gate.go();
+    passes(&clock, before + 1).await;
+    assert!(
+        folder(&workspace).join("README.md").exists(),
+        "the try deleted nothing"
+    );
+
+    an_hour_passes(&clock).await;
+    assert!(folder(&workspace).join("README.md").exists());
+    assert_eq!(s.listed(&workspace).await["state"], "error");
+    // Written the first time it was kept, when its removal failed.
+    assert_eq!(log.count("INFO", KEPT, &field), 1);
     told_nothing(&mut watcher).await;
 }
 
