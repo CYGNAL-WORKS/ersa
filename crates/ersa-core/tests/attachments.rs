@@ -1208,7 +1208,8 @@ async fn cores_ignore_file_that_cannot_be_read_is_made_again() {
 
 /// Takes away the right to read `file`'s contents, leaving it listed as a
 /// file that its folder lets be replaced. False when this process reads it
-/// anyway (root on Unix).
+/// anyway (root on Unix). Unlike [`unreadable`], whose Windows hold also
+/// stops a rename over the file, nothing is held open here.
 fn read_denied(file: &Path) -> bool {
     #[cfg(windows)]
     {
@@ -1219,11 +1220,11 @@ fn read_denied(file: &Path) -> bool {
             .output()
             .unwrap();
         assert!(denied.status.success(), "{denied:?}");
+        std::fs::File::open(file).is_err()
     }
     #[cfg(not(windows))]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Mode 000 holds nothing open, so `unreadable` does just this.
+        unreadable(file).is_some()
     }
-    std::fs::File::open(file).is_err()
 }

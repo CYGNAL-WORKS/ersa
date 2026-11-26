@@ -577,14 +577,10 @@ fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
                 // Another session's job may have replaced the file since it
                 // was checked: Windows then refuses the open as "Access is
                 // denied", the file the name led to being deleted on the way
-                // (#606). A file that can't be read, or is gone, can't be
-                // shown to hold `*`, so it is made again below, as one
-                // holding anything else is.
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound
-                    ) => {}
+                // (#606). A file that can't be read can't be shown to hold
+                // `*`, so it is made again below, as one holding anything
+                // else is.
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
                 Err(e) => return Err(e.into()),
             }
         }
