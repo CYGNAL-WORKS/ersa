@@ -83,7 +83,7 @@ fn capture_path(name: &str) -> PathBuf {
 }
 
 /// Serves `name` and returns what the Interface sees of it: the session
-/// listing on attach, every `session.event` notification as the Interface's
+/// listing once Core has recorded the session's start, every `session.event` notification as the Interface's
 /// channel receives it (`{ kind: "notification", method, params }`) until
 /// the replay goes quiet, and the listing after that. `session.tile`
 /// notifications are left out: Core sends them as the tile changes, and at
@@ -130,10 +130,29 @@ async fn received(name: &str, program: &Path) -> Value {
     .await
     .expect("handshake with the replay server");
 
-    let sessions = link
-        .request("session.list", None)
-        .await
-        .expect("session.list");
+    // The first listing once Core has recorded the session's start, its
+    // first event. Core records that in the background after it begins
+    // serving, so a listing taken straight after attaching may come before
+    // it, without `last_event_seq` (absent before the first event, as
+    // PROTO-CORE-API says): both listings are right, and which one a test
+    // gets is timing. Nothing else is recorded before the subscription
+    // below, since the replay feeds no recorded line until a client
+    // subscribes, so waiting for the start gives the same listing every
+    // run (issue #642).
+    let sessions = tokio::time::timeout(START, async {
+        loop {
+            let sessions = link
+                .request("session.list", None)
+                .await
+                .expect("session.list");
+            if sessions[0].get("last_event_seq").is_some() {
+                return sessions;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("Core never listed the replayed session's start (its first event)");
     let id = sessions[0]["id"]
         .as_str()
         .expect("a session id")
