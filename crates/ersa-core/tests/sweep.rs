@@ -553,10 +553,13 @@ async fn removed(s: &mut Setup, workspace: &Value) {
 /// A workspace whose start was cut off as `workspace.create` answered, the
 /// link that asked for it dropped: the sweep leaves it while it is younger
 /// than an hour, then removes it with its folder, git's record and its
-/// branch, and the project's folder under the worktrees root, now empty.
+/// branch, and the project's folder under the worktrees root, now empty,
+/// and writes the removal to the diagnostic log.
 // verifies: FLOW-CLEAN-UP-R23
+// verifies: FLOW-CLEAN-UP-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_leftover_that_holds_nothing_goes_once_an_hour_has_passed() {
+    let log = support::log::Log::installed();
     let (mut s, clock) = swept().await;
     let mut cut_off = s.core.client().await;
     let params = json!({ "project_id": s.project["id"] });
@@ -571,6 +574,12 @@ async fn a_leftover_that_holds_nothing_goes_once_an_hour_has_passed() {
     later(&clock, Duration::from_secs(60)).await;
     removed(&mut s, &workspace).await;
     assert!(!project_folder.exists(), "the empty project folder is gone");
+    let field = format!("workspace={}", id(&workspace));
+    let removal = "the sweep removed a leftover workspace";
+    assert!(
+        log.logged("INFO", removal, &field),
+        "{field} not in the log"
+    );
 }
 
 /// The diagnostic log's line for a leftover kept, as R08 asks.
@@ -727,25 +736,27 @@ async fn a_workspace_a_session_refers_to_is_no_leftover() {
     assert!(rows.iter().any(|row| row.id == session), "not deleted");
 }
 
-/// A put-away workspace whose last session was removed is a leftover with
-/// no folder: its branch and the workspace go. One with something standing
-/// at its path is what a failed put-away left, no leftover, and stays with
-/// what is there.
+/// A put-away workspace no session uses, here its last session removed (a
+/// delete would take the workspace), and `put_away` still.
+async fn put_away_alone(s: &mut Setup, clock: &SweepClock) -> Value {
+    let (workspace, session) = used(s).await;
+    archive(s, clock, &session).await;
+    put_away(s, &workspace).await;
+    let remove = json!({ "id": session });
+    s.client.result("session.remove", remove).await;
+    assert_eq!(s.listed(&workspace).await["state"], "put_away");
+    workspace
+}
+
+/// A put-away workspace no session uses is a leftover with no folder: its
+/// branch and the workspace go. One with something standing at its path is
+/// what a failed put-away left, no leftover, and stays with what is there.
 // verifies: FLOW-CLEAN-UP-R23
 #[tokio::test(flavor = "multi_thread")]
 async fn a_put_away_workspace_no_session_uses_goes_unless_something_is_at_its_path() {
     let (mut s, clock) = swept().await;
-    let (gone, first) = used(&mut s).await;
-    let (remains, second) = used(&mut s).await;
-    for (workspace, session) in [(&gone, &first), (&remains, &second)] {
-        archive(&mut s, &clock, session).await;
-        put_away(&mut s, workspace).await;
-        // Let go of, its workspace left; a delete would take the workspace.
-        s.client
-            .result("session.remove", json!({ "id": session }))
-            .await;
-        assert_eq!(s.listed(workspace).await["state"], "put_away");
-    }
+    let gone = put_away_alone(&mut s, &clock).await;
+    let remains = put_away_alone(&mut s, &clock).await;
     std::fs::create_dir_all(folder(&remains)).unwrap();
     std::fs::write(folder(&remains).join("left.txt"), "left\n").unwrap();
 
@@ -756,6 +767,27 @@ async fn a_put_away_workspace_no_session_uses_goes_unless_something_is_at_its_pa
     assert_eq!(s.listed(&remains).await["state"], "put_away");
     assert!(folder(&remains).join("left.txt").exists());
     assert!(has_branch(&s.repo, branch(&remains)));
+}
+
+/// A put-away workspace no session uses with git's record of a worktree at
+/// its path, the folder gone, is what a failed put-away left too: no
+/// leftover. Alone in its project here: any removal there prunes git's
+/// stale records, this one with them, after which it is a leftover.
+// verifies: FLOW-CLEAN-UP-R23
+#[tokio::test(flavor = "multi_thread")]
+async fn a_put_away_workspace_with_git_s_record_at_its_path_is_no_leftover() {
+    let (mut s, clock) = swept().await;
+    let recorded = put_away_alone(&mut s, &clock).await;
+    let path = folder(&recorded).display().to_string();
+    let add = ["worktree", "add", "--quiet", &path, branch(&recorded)];
+    git(&s.repo, &add);
+    std::fs::remove_dir_all(folder(&recorded)).unwrap();
+
+    an_hour_passes(&clock).await;
+
+    assert_eq!(s.listed(&recorded).await["state"], "put_away");
+    assert!(listed_by_git(&s.repo, &recorded), "git's record stays");
+    assert!(has_branch(&s.repo, branch(&recorded)));
 }
 
 /// A leftover whose folder was deleted by hand, git's record of it left
@@ -776,15 +808,24 @@ async fn a_leftover_whose_folder_is_gone_takes_git_s_stale_record_with_it() {
     removed(&mut s, &workspace).await;
 }
 
-/// Something written into a leftover after the sweep counted it, while its
-/// removal waits for the project's turn: the removal judges it again in the
-/// turn and keeps it.
+/// An ignored file written into a leftover after the sweep counted it,
+/// while its removal waits for the project's turn: git would remove it
+/// unasked, so the removal judges the leftover again in the turn and keeps
+/// it.
 // verifies: FLOW-CLEAN-UP-R23
 // verifies: FLOW-CLEAN-UP-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_leftover_written_to_while_its_removal_waits_stays() {
     let (mut s, clock) = swept().await;
     let workspace = s.workspace().await;
+    let path = folder(&workspace);
+    std::fs::write(path.join(".gitignore"), "*.log\n").unwrap();
+    git(&path, &["add", ".gitignore"]);
+    git(&path, &["commit", "--quiet", "-m", "ignore logs"]);
+    git(
+        &s.repo,
+        &["merge", "--quiet", "--ff-only", branch(&workspace)],
+    );
     let core = s.core.core();
     let project = s.project["id"].as_str().unwrap().to_string();
     let turn = ersa_core::workspace::project_turn(&core.admission, &project, PASS)
@@ -806,11 +847,11 @@ async fn a_leftover_written_to_while_its_removal_waits_stays() {
         assert!(tokio::time::Instant::now() < deadline, "never removing");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    std::fs::write(folder(&workspace).join("since.txt"), "since\n").unwrap();
+    std::fs::write(path.join("since.log"), "since\n").unwrap();
     drop(turn);
     passes(&clock, before + 1).await;
 
-    left(&mut s, &workspace, "since.txt").await;
+    left(&mut s, &workspace, "since.log").await;
 }
 
 /// The sweep's removal goes on to the folder when git dropped its record
