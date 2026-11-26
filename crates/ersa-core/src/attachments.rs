@@ -572,7 +572,10 @@ fn ignore_everything(path: &Path, staging: Option<&Path>) -> Result<(), Fail> {
                 // denied", the file the name led to being deleted on the way
                 // (#606). A file that can't be read can't be shown to hold
                 // `*`, so it is made again below, as one holding anything
-                // else is.
+                // else is. This arm is reached on every run, on Windows and
+                // Unix, by `cores_ignore_file_that_cannot_be_read_is_made_again`
+                // in `crates/ersa-core/tests/attachments.rs`, which fails with
+                // "Access is denied" without it.
                 Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
                 Err(e) => return Err(e.into()),
             }
@@ -1259,7 +1262,10 @@ mod tests {
         // five times the chances, about 26 runs in 100 without the fix, and
         // take about as long there (some 17 seconds) as the rest of this
         // crate's tests beside them. More jobs a round does not raise the
-        // rate.
+        // rate. This is the by-rate check of the real race; the every-run
+        // check of the arm that makes a refused open's file again is
+        // `cores_ignore_file_that_cannot_be_read_is_made_again` in
+        // `crates/ersa-core/tests/attachments.rs`.
         const ROUNDS: usize = 500;
         let dir = tempfile::tempdir().unwrap();
         let attachments = dir.path().join(ATTACHMENTS);
