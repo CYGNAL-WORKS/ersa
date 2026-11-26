@@ -1105,6 +1105,54 @@
           "required": [
             "jsonrpc",
             "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "backend.sign_in"
+            },
+            "params": {
+              "$ref": "#/$defs/backend.sign_in.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "backend.cancel_sign_in"
+            },
+            "params": {
+              "$ref": "#/$defs/backend.cancel_sign_in.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
             "method"
           ],
           "properties": {
@@ -1491,6 +1539,26 @@
               "const": "2.0"
             },
             "method": {
+              "const": "backend.sign_in_ended"
+            },
+            "params": {
+              "$ref": "#/$defs/backend.sign_in_ended.notification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
               "const": "core.notice"
             },
             "params": {
@@ -1700,6 +1768,17 @@
             "error",
             "signed_out"
           ]
+        },
+        "signing_in": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The address of the vendor's sign-in page that backend.sign_in answered, when it answered one."
+            }
+          },
+          "description": "Present while a sign-in Ersa started is under way for the backend on the host; absent otherwise (PROTO-CORE-API-R158)."
         },
         "tested": {
           "type": "object",
@@ -3310,6 +3389,57 @@
         "$ref": "#/$defs/backend_info"
       }
     },
+    "backend.sign_in.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "name"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "description": "The backend's name, such as claude-code."
+        }
+      }
+    },
+    "backend.sign_in.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "The address of the vendor's sign-in page, for the Interface to open, when the backend's adapter handed one over. Core opens none itself."
+        }
+      },
+      "description": "The sign-in has started (PROTO-CORE-API-R155)."
+    },
+    "backend.cancel_sign_in.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "name"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "description": "The backend's name, such as claude-code."
+        }
+      }
+    },
+    "backend.cancel_sign_in.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
     "mode.list.params": {
       "type": "object",
       "additionalProperties": false,
@@ -3547,6 +3677,36 @@
           "$ref": "#/$defs/host_status"
         }
       }
+    },
+    "backend.sign_in_ended.notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "name",
+        "outcome"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "signed_in",
+            "failed",
+            "canceled",
+            "timed_out"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "description": "With failed, the backend's own reason."
+        }
+      },
+      "description": "A sign-in Ersa started for the backend on the host has ended. Sent once, to every connection past core.hello, and never coalesced with another (PROTO-CORE-API-R159)."
     },
     "core.notice.notification": {
       "type": "object",

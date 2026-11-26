@@ -49,7 +49,7 @@ While a backend is signed out, a note stands at the top of the composer's column
 | When | The glyph | It says | The button |
 |---|---|---|---|
 | The backend is signed out | `caution` | that the backend, by its label, isn't signed in, and what signing in allows: on the new-session screen "Claude Code isn't signed in on this host. Sign in to start a session.", and under a session "Claude Code isn't signed in on this host. Sign in, then send your message again." | Sign in, the primary button |
-| Sign in was chosen and Core has not answered | `caution` | the same words | "Starting…", unavailable, keeping Sign in's width |
+| Sign in was chosen, until Core refuses or the listing read on its answer arrives (FLOW-SIGN-IN-R03, R09) | `caution` | the same words | "Starting…", unavailable, keeping Sign in's width |
 | The sign-in is under way (FLOW-SIGN-IN-R06) | the context ring's track with a quarter arc in `ink-muted`, turning as it does while backends are detected | "Waiting for you to sign in to Claude Code in your browser…" | Cancel, a plain button |
 | The sign-in couldn't be started, didn't finish or took too long (FLOW-SIGN-IN-R03, R13, R14) | `danger` | what happened, then the reason Core or the backend gave, such as "Claude Code's sign-in didn't finish." and "Claude Code's sign-in took too long and was stopped." | Sign in |
 | Ersa couldn't open the sign-in page (FLOW-SIGN-IN-R05) | `danger` | "Ersa couldn't open Claude Code's sign-in page." | Sign in |

@@ -307,6 +307,9 @@ fn result_examples() -> Vec<(Method, Value)> {
                 label: "Claude Code".into(),
                 version: Some("2.1.302".into()),
                 status: BackendState::Available,
+                signing_in: Some(SigningIn {
+                    url: Some("https://sign-in.example/start".into()),
+                }),
                 tested: TestedRange {
                     min: "2.1.302".into(),
                     max: "2.1.316".into(),
@@ -352,6 +355,13 @@ fn result_examples() -> Vec<(Method, Value)> {
                 ],
             }]),
         ),
+        (
+            Method::BackendSignIn,
+            to_value(&SignInResult {
+                url: Some("https://sign-in.example/start".into()),
+            }),
+        ),
+        (Method::BackendCancelSignIn, to_value(&Empty {})),
         (
             Method::ModeList,
             to_value(&vec![ModeInfo {
@@ -633,6 +643,20 @@ fn params_examples() -> Vec<(Method, Value)> {
             }),
         ),
         (
+            Method::BackendSignIn,
+            to_value(&BackendSignInParams {
+                host_id: "local".into(),
+                name: "claude-code".into(),
+            }),
+        ),
+        (
+            Method::BackendCancelSignIn,
+            to_value(&BackendSignInParams {
+                host_id: "local".into(),
+                name: "claude-code".into(),
+            }),
+        ),
+        (
             Method::SettingsSet,
             to_value(&SettingsSetParams {
                 patch: json!({ "workspaces": { "root": null } })
@@ -681,6 +705,16 @@ fn notification_examples() -> Vec<Notification> {
             &HostStatusParams {
                 host_id: "local".into(),
                 status: HostStatus::Connected,
+            },
+        )
+        .expect("serialize"),
+        Notification::new(
+            notification::BACKEND_SIGN_IN_ENDED,
+            &SignInEndedParams {
+                host_id: "local".into(),
+                name: "claude-code".into(),
+                outcome: SignInOutcome::Failed,
+                message: Some("The sign-in was refused.".into()),
             },
         )
         .expect("serialize"),

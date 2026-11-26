@@ -203,6 +203,9 @@ impl Server {
         // closing never stops sessions, but `core.shutdown` does (ADR 0011).
         tracing::info!("shutting down");
         core.sessions.stop_all().await;
+        // Every sign-in under way sees the shutdown too and stops; nothing
+        // it started outlives Core (PROTO-CORE-API-R162).
+        crate::sign_in::stopped_at_shutdown(&core).await;
         // The stopped sessions' last facts are on disk before the process
         // ends, or the next Core would take them for sessions left running.
         core.sessions.flush_app_log().await;
@@ -456,10 +459,13 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 false
             }
         };
-        // Tile notifications begin once the handshake is done.
+        // Tiles, and notifications sent to every connection, begin once the
+        // handshake is done, before the next request is read: a request on this
+        // connection can only see what was so before such a notification it
+        // then gets.
         if conn.api_version.is_some() && conn.tile_task.is_none() {
             conn.tile_task = Some(AbortOnDrop(tokio::spawn(forward_tiles(
-                core.sessions.tile_feed(),
+                core.sessions.tile_feed(Arc::clone(&conn.kick)),
                 conn.outbound.clone(),
             ))));
         }

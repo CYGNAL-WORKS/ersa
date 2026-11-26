@@ -30,6 +30,11 @@ impl Log {
         .clone()
     }
 
+    /// Whether anything written, at any level, holds `text`.
+    pub fn contains(&self, text: &str) -> bool {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).contains(text)
+    }
+
     /// The lines written at warning level.
     pub fn warnings(&self) -> Vec<String> {
         let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();

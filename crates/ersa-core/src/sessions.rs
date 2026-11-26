@@ -306,6 +306,8 @@ fn refused_session(refusal: Refusal, workspace_id: &str, session_id: &str) -> Se
         | Refusal::NotAllArchived
         | Refusal::NoSection
         | Refusal::NoSendToCancel
+        | Refusal::SigningIn
+        | Refusal::NoSignIn
         // A fork's own refusal, worded where the fork asks.
         | Refusal::Forking
         // A send's "not running" is worded where the send is refused, with
@@ -1157,9 +1159,19 @@ impl SessionManager {
     }
 
     /// Receives `session.tile` notifications from now on, the latest per
-    /// session.
-    pub fn tile_feed(&self) -> TileFeed {
-        self.tiles.feed()
+    /// session, and every notification sent to all
+    /// ([`SessionManager::notify_all`]) in order, for the connection `kick`
+    /// closes.
+    pub fn tile_feed(&self, kick: Kick) -> TileFeed {
+        self.tiles.feed(kick)
+    }
+
+    /// Sends notification `method` once to every connection past
+    /// `core.hello`, never coalesced with another, as
+    /// `backend.sign_in_ended` is sent (PROTO-CORE-API-R159). A connection
+    /// that finishes its handshake later does not get it.
+    pub fn notify_all(&self, method: &str, params: &impl serde::Serialize) {
+        self.tiles.send_to_all(notification_line(method, params));
     }
 
     /// Every image type some backend on this host takes, for telling an
@@ -3487,23 +3499,66 @@ fn send_tile(tiles: &TileHub, handle: &Handle, tile: &Tile) {
 /// each: a tile is the whole state,
 /// so a connection busy with a long replay gets the newest one when it is
 /// ready, never a backlog, and is never closed for it.
+///
+/// It also hands every attached connection each notification sent to all,
+/// such as `backend.sign_in_ended`, once and in order, never coalesced. A
+/// connection that has [`TO_ALL_WAITING`] of them not yet taken cannot
+/// keep up, and is closed (PROTO-CORE-API, Transport and framing).
 #[derive(Default)]
 struct TileHub {
     inboxes: Mutex<Vec<Weak<TileInbox>>>,
 }
 
-#[derive(Default)]
+/// How many notifications sent to all may wait for one connection before
+/// Core closes it as one that cannot keep up. They come at the pace of a
+/// person signing in, so a connection this far behind is not reading at all.
+const TO_ALL_WAITING: usize = 64;
+
 struct TileInbox {
     /// The newest line of each kind per session not yet taken.
     latest: Mutex<HashMap<(String, Latest), Arc<String>>>,
+    /// The notifications sent to all not yet taken, in the order sent.
+    to_all: Mutex<VecDeque<Arc<String>>>,
     ready: Notify,
+    /// Closes the connection, when it cannot keep up with them.
+    kick: Kick,
 }
 
 impl TileHub {
-    fn feed(&self) -> TileFeed {
-        let inbox = Arc::new(TileInbox::default());
+    fn feed(&self, kick: Kick) -> TileFeed {
+        let inbox = Arc::new(TileInbox {
+            latest: Mutex::default(),
+            to_all: Mutex::default(),
+            ready: Notify::new(),
+            kick,
+        });
         lock(&self.inboxes).push(Arc::downgrade(&inbox));
         TileFeed { inbox }
+    }
+
+    /// Hands `line` once to every connection attached now, after any
+    /// notification sent to all it has not taken yet. A connection with
+    /// [`TO_ALL_WAITING`] waiting already is closed instead and
+    /// forgotten.
+    fn send_to_all(&self, line: String) {
+        let line = Arc::new(line);
+        lock(&self.inboxes).retain(|inbox| {
+            let Some(inbox) = inbox.upgrade() else {
+                return false;
+            };
+            let mut to_all = lock(&inbox.to_all);
+            if to_all.len() >= TO_ALL_WAITING {
+                drop(to_all);
+                tracing::warn!("closing a connection that is not reading what Core sends it");
+                inbox.kick.send_replace(true);
+                return false;
+            }
+            to_all.push_back(Arc::clone(&line));
+            drop(to_all);
+            // Stores a permit when nobody waits, so a wake is never lost.
+            inbox.ready.notify_one();
+            true
+        });
     }
 
     /// Drops any tile or send progress for `session_id` not yet taken, for a
@@ -3569,7 +3624,7 @@ impl TileFeed {
     /// Waits until at least one line is waiting to be taken.
     pub async fn ready(&self) {
         loop {
-            if !lock(&self.inbox.latest).is_empty() {
+            if !lock(&self.inbox.to_all).is_empty() || !lock(&self.inbox.latest).is_empty() {
                 return;
             }
             // A publish stores a permit when nobody waits, so a line put in
@@ -3579,12 +3634,17 @@ impl TileFeed {
     }
 
     /// Takes one waiting line, if there is one, and hands it to `queue`,
-    /// which must queue it on the connection without waiting. `queue` runs
-    /// under the lock [`TileHub::withdraw`] takes, so a line is either still
-    /// here, where a withdrawal reaches it, or already queued on the
+    /// which must queue it on the connection without waiting: the oldest
+    /// notification sent to all first, else the newest line of some
+    /// session. `queue` runs under the lock [`TileHub::withdraw`] takes, so a line is either
+    /// still here, where a withdrawal reaches it, or already queued on the
     /// connection ahead of anything queued after the withdrawal. Says
     /// whether there was a line.
     pub fn take(&mut self, queue: impl FnOnce(Arc<String>)) -> bool {
+        if let Some(line) = lock(&self.inbox.to_all).pop_front() {
+            queue(line);
+            return true;
+        }
         let mut latest = lock(&self.inbox.latest);
         let Some(key) = latest.keys().next().cloned() else {
             return false;
@@ -3710,7 +3770,7 @@ mod tests {
     #[test]
     fn a_withdrawn_line_goes_only_where_it_was_not_taken_or_replaced() {
         let hub = TileHub::default();
-        let (mut first, mut second) = (hub.feed(), hub.feed());
+        let (mut first, mut second) = (hub.feed(Kick::default()), hub.feed(Kick::default()));
         let report = hub.publish("s1", Latest::SendProgress, "report".into());
         hub.withdraw("s1", Latest::SendProgress, &report);
         assert_eq!(taken(&mut first), None);

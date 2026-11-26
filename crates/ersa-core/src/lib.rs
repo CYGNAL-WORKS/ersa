@@ -32,6 +32,7 @@ pub mod replay;
 pub mod search_path;
 pub mod sessions;
 pub mod settings;
+pub mod sign_in;
 pub mod state;
 pub mod transport;
 pub mod workspace;

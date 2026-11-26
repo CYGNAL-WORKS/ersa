@@ -107,6 +107,8 @@ methods! {
     SectionRename => "section.rename",
     SectionRemove => "section.remove",
     BackendList => "backend.list",
+    BackendSignIn => "backend.sign_in",
+    BackendCancelSignIn => "backend.cancel_sign_in",
     ModeList => "mode.list",
     SettingsGet => "settings.get",
     SettingsSet => "settings.set",
@@ -150,6 +152,7 @@ pub mod notification {
     pub const SESSION_SEND_PROGRESS: &str = "session.send_progress";
     pub const SESSION_TILE: &str = "session.tile";
     pub const HOST_STATUS: &str = "host.status";
+    pub const BACKEND_SIGN_IN_ENDED: &str = "backend.sign_in_ended";
     pub const CORE_NOTICE: &str = "core.notice";
     /// Reserved for milestone M2.
     pub const TERMINAL_OUTPUT: &str = "terminal.output";
@@ -352,10 +355,44 @@ pub struct BackendInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub status: BackendState,
+    /// Present while a sign-in Ersa started is under way for the backend on
+    /// the host, so a window that connects meanwhile shows it; absent
+    /// otherwise (PROTO-CORE-API-R158).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_in: Option<SigningIn>,
     pub tested: TestedRange,
     pub models: Vec<ModelChoice>,
     pub efforts: Vec<Choice>,
     pub permission_modes: Vec<Choice>,
+}
+
+/// A sign-in under way, as `backend.list` carries it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SigningIn {
+    /// The address of the vendor's sign-in page that `backend.sign_in`
+    /// answered, when it answered one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// `backend.sign_in` and `backend.cancel_sign_in` params: the backend, by
+/// name, on the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendSignInParams {
+    pub host_id: String,
+    pub name: String,
+}
+
+/// `backend.sign_in` result: the sign-in has started (PROTO-CORE-API-R155).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignInResult {
+    /// The address of the vendor's sign-in page, for the Interface to open,
+    /// when the backend's adapter handed one over. Core opens none itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// The oldest and newest backend versions an adapter was tested with.
@@ -1137,6 +1174,33 @@ pub struct SessionTileParams {
 pub struct HostStatusParams {
     pub host_id: String,
     pub status: HostStatus,
+}
+
+/// `backend.sign_in_ended` params: a sign-in Ersa started for the backend on
+/// the host has ended (PROTO-CORE-API-R159).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignInEndedParams {
+    pub host_id: String,
+    pub name: String,
+    pub outcome: SignInOutcome,
+    /// With `failed`, the backend's own reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// How a sign-in ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignInOutcome {
+    /// The backend said it is done; Core detected it again first.
+    SignedIn,
+    /// The backend said it failed.
+    Failed,
+    /// `backend.cancel_sign_in` stopped it, or Core shut down.
+    Canceled,
+    /// It had not ended 10 minutes after it started.
+    TimedOut,
 }
 
 /// `core.notice` params.

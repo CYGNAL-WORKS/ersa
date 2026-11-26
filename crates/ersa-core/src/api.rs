@@ -20,6 +20,7 @@ mod put_away;
 mod sections;
 pub mod server;
 mod sessions;
+mod sign_in;
 mod sweep;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
@@ -259,7 +260,7 @@ pub enum After {
 
 /// Answers one request.
 pub async fn handle(
-    core: &Core,
+    core: &Arc<Core>,
     conn: &mut ConnectionState,
     request: Request,
 ) -> (Response, After) {
@@ -272,7 +273,7 @@ pub async fn handle(
 
 type Answer = Result<(Value, After), (ApiError, After)>;
 
-async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> Answer {
+async fn dispatch(core: &Arc<Core>, conn: &mut ConnectionState, request: Request) -> Answer {
     // Before the handshake, every method other than core.hello is refused,
     // known or not (PROTO-CORE-API-R01).
     if conn.api_version.is_none() && request.method != Method::CoreHello.name() {
@@ -315,7 +316,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
 /// line or apart (see [`runs_apart`]). There is one handler per method, so
 /// a method chosen to run apart cannot lack one.
 async fn answer(
-    core: &Core,
+    core: &Arc<Core>,
     peer: &Peer,
     method: Method,
     params: Option<Value>,
@@ -343,6 +344,8 @@ async fn answer(
         Method::CoreStatus => to_json(handlers::core_status(core, parse(params)?).await),
         Method::HostList => to_json(handlers::host_list(core, parse(params)?).await),
         Method::BackendList => to_json(handlers::backend_list(core, parse(params)?).await),
+        Method::BackendSignIn => to_json(sign_in::sign_in(core, parse(params)?).await),
+        Method::BackendCancelSignIn => to_json(sign_in::cancel_sign_in(core, parse(params)?).await),
         Method::ProjectList => to_json(handlers::project_list(core, parse(params)?).await),
         Method::ProjectAdd => to_json(handlers::project_add(core, parse(params)?).await),
         Method::ProjectSetTrust => to_json(handlers::project_set_trust(core, parse(params)?).await),
@@ -462,7 +465,10 @@ fn runs_apart(method: Method) -> bool {
         | Method::WorkspaceChanges
         // Run each backend's version command when detecting.
         | Method::BackendList
-        | Method::HostList => true,
+        | Method::HostList
+        // Wait on a backend's sign-in starting or stopping (R164).
+        | Method::BackendSignIn
+        | Method::BackendCancelSignIn => true,
 
         // Act on the connection itself.
         Method::CoreHello
@@ -529,7 +535,7 @@ pub fn session_lane(conn: &ConnectionState, request: &Request) -> Option<String>
 
 /// Answers a request [`runs_detached`] chose, on behalf of connection
 /// `peer`.
-pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Response {
+pub async fn handle_detached(core: &Arc<Core>, request: Request, peer: &Peer) -> Response {
     let id = request.id.clone();
     let result = match Method::from_name(&request.method) {
         Some(method) => answer(core, peer, method, request.params).await,

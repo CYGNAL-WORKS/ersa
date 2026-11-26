@@ -116,18 +116,31 @@ pub(super) async fn backend_list(
     core: &Core,
     params: BackendListParams,
 ) -> Result<Vec<BackendInfo>, ApiError> {
-    if core.store.host(params.host_id.clone()).await?.is_none() {
-        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
-    }
+    known_host(core, &params.host_id).await?;
     if params.host_id != LOCAL_HOST_ID {
         return Err(unreachable_host(&params.host_id));
     }
-    Ok(core
-        .local_backends()
-        .await
-        .iter()
-        .map(|d| d.info())
-        .collect())
+    // Each with the sign-in under way for it, once it has started
+    // (PROTO-CORE-API-R158).
+    let detected = core.local_backends().await;
+    let infos = detected.iter().map(|d| {
+        let mut info = d.info();
+        let of = crate::admission::SignInOf {
+            host: params.host_id.clone(),
+            backend: d.name.clone(),
+        };
+        info.signing_in = crate::sign_in::signing_in(core, &of);
+        info
+    });
+    Ok(infos.collect())
+}
+
+/// `not_found` for a host Core does not know (PROTO-CORE-API, Errors).
+pub(super) async fn known_host(core: &Core, host_id: &str) -> Result<(), ApiError> {
+    match core.store.host(host_id.to_string()).await? {
+        Some(_) => Ok(()),
+        None => Err(ApiError::not_found(format!("no host {host_id}"))),
+    }
 }
 
 pub(super) fn unreachable_host(host_id: &str) -> ApiError {
@@ -147,9 +160,7 @@ pub(super) async fn project_add(
     core: &Core,
     params: ProjectAddParams,
 ) -> Result<Project, ApiError> {
-    if core.store.host(params.host_id.clone()).await?.is_none() {
-        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
-    }
+    known_host(core, &params.host_id).await?;
     if core.transport_for(&params.host_id).is_none() {
         return Err(unreachable_host(&params.host_id));
     }
@@ -250,6 +261,8 @@ pub(super) fn refused(refusal: Refusal, named: &str) -> ApiError {
         | Refusal::BeingForked
         | Refusal::Forking
         | Refusal::NoSection
+        | Refusal::SigningIn
+        | Refusal::NoSignIn
         | Refusal::GaveUp => ApiError::internal(format!("admission refused {named}: {refusal:?}")),
     }
 }
@@ -265,9 +278,7 @@ pub(super) async fn project_find(
     core: &Core,
     params: ProjectFindParams,
 ) -> Result<Option<Project>, ApiError> {
-    if core.store.host(params.host_id.clone()).await?.is_none() {
-        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
-    }
+    known_host(core, &params.host_id).await?;
     let subject = (params.host_id.clone(), params.path.trim().to_string());
     // Joined, or put in the map for later finds to join. The inspection is
     // started only once the map is unlocked, since its end takes the lock.
