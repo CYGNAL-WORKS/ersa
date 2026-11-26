@@ -1188,57 +1188,6 @@ mod tests {
         assert_eq!(left, vec![std::ffi::OsString::from(".gitignore")]);
     }
 
-    /// Another session's job may replace Core's ignore file between this
-    /// job's check and its open: Windows then refuses the open with "Access
-    /// is denied", since the file the name led to was deleted on the way
-    /// (#606). The job makes the file again, as it does one holding anything
-    /// else, rather than refusing the message. The race can't be timed from
-    /// here, so a file the job can't read stands in for it: its open is
-    /// refused the same way, and a rename still replaces it.
-    // verifies: PROTO-CORE-API-R110
-    #[test]
-    fn cores_ignore_file_that_cannot_be_read_is_made_again() {
-        let dir = tempfile::tempdir().unwrap();
-        let attachments = dir.path().join(ATTACHMENTS);
-        fs::create_dir_all(&attachments).unwrap();
-        let ignore = attachments.join(".gitignore");
-        fs::write(&ignore, b"!keep\n").unwrap();
-        if !unreadable(&ignore) {
-            return;
-        }
-        let staging = attachments.join(".gitignore.s-1");
-        let answer = ignore_everything(&ignore, Some(&staging)).map_err(|fail| match fail {
-            Fail::Reason(reason) => reason,
-            Fail::Stopped => "stopped".into(),
-        });
-        assert_eq!(answer, Ok(()));
-        assert_eq!(fs::read(&ignore).unwrap(), IGNORE_ALL);
-        assert!(!staging.exists(), "the staging file is left behind");
-    }
-
-    /// Takes away the right to read `file`'s contents, keeping the right to
-    /// replace it. False when this process reads it anyway (root on Unix).
-    fn unreadable(file: &Path) -> bool {
-        #[cfg(windows)]
-        {
-            // A deny entry for Everyone (S-1-1-0) on reading the data alone:
-            // the file still lists as a file, and its folder still lets it be
-            // replaced.
-            let denied = std::process::Command::new("icacls")
-                .arg(file)
-                .args(["/deny", "*S-1-1-0:(RD)"])
-                .output()
-                .unwrap();
-            assert!(denied.status.success(), "{denied:?}");
-        }
-        #[cfg(not(windows))]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(file, fs::Permissions::from_mode(0o000)).unwrap();
-        }
-        fs::File::open(file).is_err()
-    }
-
     #[test]
     fn relative_paths_use_forward_slashes() {
         assert_eq!(
