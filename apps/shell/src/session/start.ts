@@ -9,26 +9,24 @@ import type { Attachment, BackendInfo, Session, SessionCreateParams, Workspace }
 import { type Sending, sendFailure } from "./follow";
 import type { SessionValues, WorkspaceKind } from "./controls";
 
-/** What the new-session screen offers on a host: its backends, and the values each project last started with. */
-export interface Choices {
+/** A host's backends as the new-session screen offers them. */
+export interface Backends {
   /** None when `backend.list` failed. */
   backends: BackendInfo[];
   /** Why `backend.list` failed, in the user's terms: the screen says detection failed, not that none is available (FLOW-NEW-SESSION-R11). */
   failed?: string;
-  lastUsed: Record<string, SessionValues>;
 }
 
 /**
- * Reads what the new-session screen offers for `hostId`. Only reads: opening the screen creates nothing
- * (FLOW-NEW-SESSION-R03). Remembered values that cannot be read leave the screen at the defaults.
+ * Reads the backends on `hostId`, as the new-session screen does each time it is shown (FLOW-NEW-SESSION-R50). Only
+ * reads: opening the screen creates nothing (FLOW-NEW-SESSION-R03).
  */
-export async function readChoices(client: Pick<CoreClient, "call">, hostId: string, settings: Promise<unknown>): Promise<Choices> {
-  const [backends, read] = await Promise.allSettled([client.call("backend.list", { host_id: hostId }), settings]);
-  return {
-    backends: backends.status === "fulfilled" ? backends.value : [],
-    ...(backends.status === "rejected" && { failed: describeError(backends.reason) }),
-    lastUsed: read.status === "fulfilled" ? lastUsedFrom(read.value) : {},
-  };
+export async function readBackends(client: Pick<CoreClient, "call">, hostId: string): Promise<Backends> {
+  try {
+    return { backends: await client.call("backend.list", { host_id: hostId }) };
+  } catch (error) {
+    return { backends: [], failed: describeError(error) };
+  }
 }
 
 /** Why the first message did not go through to a session that is still alive; the session stays and opens. */
@@ -89,7 +87,7 @@ export async function startSession(
   onWorkspace?: (workspace: Workspace) => void,
 ): Promise<StartOutcome> {
   const { backend } = values;
-  if (!backend) return { ok: false, message: t("composer.noBackendError") };
+  if (!backend) return { ok: false, message: t("composer.cantFindAnyError") };
 
   let made: Workspace | undefined;
   let session: Session | undefined;

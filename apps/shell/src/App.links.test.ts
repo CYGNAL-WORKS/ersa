@@ -80,6 +80,7 @@ const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 
 function fakeShell() {
   return {
+    onWindowBack: () => () => {},
     onQuitRequested: () => () => {},
     quitHeard: async () => {},
     show: async () => false,
