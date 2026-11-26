@@ -109,6 +109,8 @@ pub fn signing_in(core: &Core, of: &SignInOf) -> Option<SigningIn> {
 /// started for it, and answers once it has started, as the first request
 /// for it was answered (PROTO-CORE-API-R155, R156). While one is ending it
 /// waits, and then starts afresh.
+/// Its whole time, the wait and the start, is the start's limit from the
+/// request: past it, it answers `invalid_state` (R157).
 pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) -> Started {
     // R157's 20 seconds count from the request, a wait for a sign-in that
     // is ending included.

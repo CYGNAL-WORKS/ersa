@@ -244,6 +244,50 @@ fn a_sign_in_has_20_seconds_to_start_and_10_minutes_to_end() {
     assert_eq!(config.sign_in_limit, Duration::from_secs(10 * 60));
 }
 
+/// The 20 seconds count from the request for a start, too: one held a
+/// while behind a sign-in that is ending, then let through to a start that
+/// never answers, is answered when the limit from the request is up, not a
+/// whole limit after the hold, and leaves nothing running.
+// verifies: PROTO-CORE-API-R157
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_after_a_hold_has_what_is_left_of_the_limit_from_the_request() {
+    const LIMIT: Duration = Duration::from_secs(4);
+    // Long enough beside the limit that a limit counted from the end of
+    // the hold answers far later than one counted from the request.
+    const HOLD: Duration = Duration::from_secs(3);
+    let limit = |config: &mut CoreConfig| config.sign_in_start_limit = LIMIT;
+    let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), limit).await;
+    let mut other = core.client().await;
+    client.result("backend.sign_in", the_fake()).await;
+
+    let stopping = fake.sign_ins.stop_gate.lock().await;
+    let canceling = other.request("backend.cancel_sign_in", the_fake()).await;
+    while fake.sign_ins.stops.load(Ordering::SeqCst) < 1 {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let starting = fake.sign_ins.start_gate.lock().await;
+    let asked_at = tokio::time::Instant::now();
+    let asked = client.request("backend.sign_in", the_fake()).await;
+    tokio::time::sleep(HOLD).await;
+    drop(stopping);
+    assert_eq!(other.response(canceling).await["result"], json!({}));
+
+    let answer = client.response(asked).await;
+    let took = asked_at.elapsed();
+    assert_eq!(kind(&answer["error"]), "invalid_state");
+    assert!(
+        took < HOLD + LIMIT - Duration::from_millis(1500),
+        "answered {took:?} after the request, more than its limit"
+    );
+    assert_eq!(
+        fake.sign_ins.starts.load(Ordering::SeqCst),
+        2,
+        "it was let through"
+    );
+    drop(starting);
+    eventually_gone(fake.sign_ins.latest_process().await).await;
+}
+
 /// The 20 seconds count from the request: one held behind a sign-in that
 /// is ending, which takes longer to end than the limit, is answered
 /// `invalid_state` when its time is up, still waiting, and starts nothing.
