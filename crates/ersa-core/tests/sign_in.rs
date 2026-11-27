@@ -397,7 +397,9 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
 /// the sign-in was never under way: the listing never carries it and no
 /// ending is sent (R157's last sentence). Core's own 20 seconds to start,
 /// so the test measures no process's start-up (#664).
-// verifies: PROTO-CORE-API-R166
+// Cites nothing: PROTO-CORE-API-R166 is retired for R169, under which the
+// message is the adapter's sentence alone, so this test cites R169 once
+// it asserts that (#668).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sign_in_its_adapter_could_not_start_is_refused_and_leaves_nothing_running() {
     let words = "the backend's process ended before it handed over a page";

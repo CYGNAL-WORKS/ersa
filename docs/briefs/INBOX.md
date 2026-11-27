@@ -8,4 +8,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-27 FLOW-SIGN-IN: R03 puts "couldn't be started" in front of Core's reason, and PROTO-CORE-API-R166 makes that reason say the sign-in couldn't start too, so a person reads it twice: "Claude Code's sign-in couldn't be started. The sign-in to Claude Code couldn't start: <the adapter's words>." #668 builds R166 as written; a planning pass decides which side drops its words.
+
