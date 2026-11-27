@@ -46,6 +46,8 @@ export const enUS = {
       newSectionButton: "New section",
       resetButton: "Reset to defaults",
       viewAllButton: "View all",
+      // Opens the settings page, until the title bar's menu does (LAY-SHELL, The settings page).
+      settingsButton: "Settings",
       groupByProjectButton: "Project",
       groupBySectionButton: "Section",
       groupByDateButton: "Date",
@@ -540,6 +542,30 @@ export const enUS = {
       resetsInMinutesLabel: "Resets in {minutes} min",
       // Given 1 as `percent`: the figure stays out of the copy so the token check reads no raw percentage here.
       underOneReadout: "<{percent}%",
+    },
+  },
+  // The settings page (LAY-SHELL, The settings page; docs/design/SETTINGS.md).
+  settings: {
+    settingsHeading: "Settings",
+    // The section names, for assistive technology.
+    sectionsLabel: "Settings sections",
+    // Names the page when it fails to draw: "The settings page could not be shown:".
+    boundaryName: "The settings page",
+    // A setting's chip while the settings are being read.
+    loadingProgress: "Loading…",
+    // Beneath a setting whose value can't be read, before the reason.
+    readError: "This setting can't be read.",
+    // Beneath a setting Ersa couldn't change, before the reason; the chip shows the value in force again.
+    changeError: "This setting wasn't changed.",
+    // Storage (FLOW-CLEAN-UP, Storage).
+    storage: {
+      storageHeading: "Storage",
+      // Archive inactive sessions (FLOW-CLEAN-UP, step 4; R15). The words must not promise that every idle session is
+      // archived: a running one never is, nor a pinned or unread one.
+      archiveInactiveLabel: "Archive inactive sessions",
+      archiveInactiveDescription: "Archive a session, as Archive does, once it has had no activity for this long. Running, pinned, and unread sessions are never archived.",
+      archiveNeverLabel: "Never",
+      archiveDaysLabel: { one: "{count} day", other: "{count} days" },
     },
   },
   // The workbench at the window's right (LAY-SHELL, The workbench; docs/design/WORKBENCH.md).

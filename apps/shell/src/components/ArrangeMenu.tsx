@@ -36,6 +36,8 @@ export interface ArrangeActions {
   /** Whether the workbench is open, which marks Developer pane, and what choosing it does (FLOW-READ-RAW-LOG-R01). */
   workbenchOpen: boolean;
   onDeveloperPane: () => void;
+  /** Shows the settings page (LAY-SHELL, The settings page), until the title bar's menu does. */
+  onSettings: () => void;
 }
 
 /** A choice's submenu entry: it names the current choice, and its submenu marks it. */
@@ -51,7 +53,8 @@ function choice<C>(label: string, values: readonly C[], chosen: C, name: (value:
 /**
  * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸, Sort by ▸ and Show ▸, each naming its current
  * choice and its submenu marking it, then New section, Reset to defaults and View all apart, and last, apart from the
- * rest until the title bar is built, Developer pane, checked while the workbench is open (LAY-SHELL, The workbench).
+ * rest until the title bar is built, Developer pane, checked while the workbench is open (LAY-SHELL, The workbench),
+ * and Settings, which opens the settings page (LAY-SHELL, The settings page).
  */
 export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActions): MenuEntry[] {
   return [
@@ -64,6 +67,7 @@ export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActi
     { kind: "item", label: t("rail.arrange.viewAllButton"), onChoose: actions.onAllSessions },
     { kind: "rule" },
     { kind: "item", label: t("workbench.developerPaneButton"), checked: actions.workbenchOpen, onChoose: actions.onDeveloperPane },
+    { kind: "item", label: t("rail.arrange.settingsButton"), onChoose: actions.onSettings },
   ];
 }
 

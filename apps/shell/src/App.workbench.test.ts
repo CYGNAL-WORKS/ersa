@@ -102,10 +102,11 @@ describe("opening and closing the workbench", () => {
     expect(workbench()).toBeNull();
     const item = developerPane();
     expect(item.getAttribute("aria-checked")).toBe("false");
-    // Developer pane is the menu's last item, apart from the rest.
+    // Developer pane and then Settings are the menu's last items, apart from the rest (LAY-SHELL, The workbench).
     const items = screen.getAllByRole("menu")[0]!.querySelectorAll("li");
-    expect(items[items.length - 1]?.textContent).toBe("Developer pane");
-    expect(items[items.length - 2]?.getAttribute("role")).toBe("separator");
+    expect(items[items.length - 2]?.textContent).toBe("Developer pane");
+    expect(items[items.length - 1]?.textContent).toBe("Settings");
+    expect(items[items.length - 3]?.getAttribute("role")).toBe("separator");
     fireEvent.click(item);
     expect(workbench()).not.toBeNull();
     expect(within(workbench()!).getByRole("heading", { name: "Developer" })).toBeTruthy();

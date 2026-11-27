@@ -276,6 +276,7 @@ Component style tokens are added here as component briefs reach `ready`. Each co
 - **The composer and the session controls**: `docs/design/COMPOSER.md`. Read it before changing either.
 - **The transcript's formatted text, tool cards and diff cards**: `docs/design/TRANSCRIPT.md`. Read it before changing any of them.
 - **The workbench and the developer pane**: `docs/design/WORKBENCH.md`. Read it before changing either.
+- **The settings page, its sections and their settings**: `docs/design/SETTINGS.md`. Read it before changing the page or adding a setting.
 
 ## Do's and Don'ts
 

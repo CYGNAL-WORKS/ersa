@@ -1,0 +1,93 @@
+/* The settings page (docs/design/SETTINGS.md). Its frame, heading and the look of a section name are Page.css's. */
+
+.settings-page-column {
+  gap: var(--space-xl);
+}
+
+/* The section names, as wide as the longest of them, and the chosen section beside them. */
+.settings-page-body {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-xxl);
+  align-items: start;
+}
+
+.settings-page-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* A project heading's look (RAIL.md), as tall as a section name so their text lines up. */
+.settings-section-heading {
+  display: flex;
+  align-items: center;
+  height: var(--size-control);
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  font-weight: var(--type-heading-weight);
+  line-height: var(--type-ui-small-leading);
+}
+
+.setting {
+  padding-block: var(--space-md);
+}
+
+.setting + .setting {
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xl);
+}
+
+.setting-words {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.setting-label {
+  color: var(--color-ink);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+.setting-description {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* The chip keeps its own width and its list's anchor at the trailing side. */
+.setting-row > .chip-root {
+  flex: none;
+}
+
+/* Why a setting can't be read or wasn't changed, beneath its row: it fades in. The rail's note starts past a
+   heading's padding; here it starts with the setting's words. */
+.setting-problem {
+  margin-top: var(--space-sm);
+  animation: page-in var(--motion-quick) var(--motion-ease-out);
+}
+
+.setting-problem > .rail-note {
+  padding-inline: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setting-problem {
+    animation: none;
+  }
+}

@@ -27,6 +27,7 @@ import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
 import { SessionsPage } from "../components/SessionsPage";
+import { SettingsPage } from "../components/SettingsPage";
 import { PINNED_KEY, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
@@ -292,7 +293,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {}, workbenchOpen: true, onDeveloperPane: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onNewSection: () => {}, onReset: () => {}, onAllSessions: () => {}, workbenchOpen: true, onDeveloperPane: () => {}, onSettings: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -859,6 +860,8 @@ const oneBackend = { local: [claudeCode] };
 
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
+/** Room beneath for the arrange menu, open. */
+const arrangeRoom = (node: ReactNode) => <div className="gallery-room gallery-room-menu">{node}</div>;
 /** The workbench open at the right of a region standing in for the window beside the rail, in a resize edge's state. */
 const workbench = (force?: "hover" | "pressed" | "focus", body?: ReactNode, tall = false) => (
   <div className={tall ? "gallery-workbench gallery-workbench-tall" : "gallery-workbench"}>
@@ -1153,12 +1156,12 @@ const entries: Entry[] = [
       ["Keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} force="focus" />],
       ["Before Ersa connects", <RailTop onNewSession={() => {}} arrange={arrange} disabled />],
       ["Before Ersa connects, keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} disabled force="focus" />],
-      ["Arrange menu, open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
+      ["Arrange menu, open", arrangeRoom(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
       [
         "Arrange menu, Group by open",
-        room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", sortBy: "created", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
+        arrangeRoom(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", sortBy: "created", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
       ],
-      ["Arrange menu, Sort by open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "project", sortBy: "name", show: "active" }, initialOpen: true, initialSubmenu: 1 }} />)],
+      ["Arrange menu, Sort by open", arrangeRoom(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "project", sortBy: "name", show: "active" }, initialOpen: true, initialSubmenu: 1 }} />)],
     ],
   },
   {
@@ -1371,6 +1374,25 @@ const entries: Entry[] = [
       ["While Ersa can't reach Core", <SessionsPage {...sessionsPage} sessions={{ state: "unavailable" }} offline />],
       ["No active sessions", <SessionsPage {...sessionsPage} sessions={{ state: "ready", sessions: [] }} />],
       ["No archived sessions", <SessionsPage {...sessionsPage} sessions={{ state: "ready", sessions: [] }} initialTab="archived" />],
+    ],
+  },
+  {
+    // The settings page (docs/design/SETTINGS.md): Storage, and Archive inactive sessions in each of its states.
+    name: "SettingsPage",
+    wide: true,
+    states: [
+      ["Never, at rest", <SettingsPage archive={{ state: "ready", value: undefined }} onArchive={() => {}} />],
+      ["After 7 days", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} />],
+      ["Its list open", room(<SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} initialOpen />)],
+      ["The chip, pointer over it", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceChip="hover" />],
+      ["The chip, pressed", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceChip="pressed" />],
+      ["The chip, keyboard focus", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceChip="focus" />],
+      ["The chosen section name, keyboard focus", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceSection="focus" />],
+      ["Loading", <SettingsPage archive={{ state: "loading" }} onArchive={() => {}} />],
+      ["Can't be read", <SettingsPage archive={{ state: "error", message: "The settings file is damaged." }} onArchive={() => {}} />],
+      ["Changing, keyboard focus on it", <SettingsPage archive={{ state: "ready", value: 14 }} changing={{ state: "sending" }} onArchive={() => {}} forceChip="focus" />],
+      ["Change refused", <SettingsPage archive={{ state: "ready", value: 7 }} changing={{ state: "failed", message: "Ersa isn't connected to your sessions." }} onArchive={() => {}} />],
+      ["While Ersa can't reach Core", <SettingsPage archive={{ state: "ready", value: 7 }} offline onArchive={() => {}} />],
     ],
   },
   {

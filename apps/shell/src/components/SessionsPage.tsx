@@ -12,6 +12,7 @@ import { Problem, Refusals } from "./RailTree";
 import { type Backends, type ForcedTile, Mark } from "./SessionTile";
 import { SessionRoot, type TileActions, type TileHandlers, tileActions, useTileMenu } from "./TileMenu";
 import { useFocusRestore } from "./useFocusRestore";
+import "./Page.css";
 import "./SessionsPage.css";
 
 const TABS = [
@@ -115,9 +116,9 @@ export function SessionsPage({
 
   const rows = sessions.state === "ready" ? pageRows(sessions.sessions, tab, search ?? "") : [];
   return (
-    <section ref={page} className="sessions-page" {...leaving.handlers}>
-      <div className="sessions-page-column">
-        <h1 className="sessions-page-heading">{t("rail.sessionsPage.sessionsHeading")}</h1>
+    <section ref={page} className="page sessions-page" {...leaving.handlers}>
+      <div className="page-column">
+        <h1 className="page-heading">{t("rail.sessionsPage.sessionsHeading")}</h1>
         <div className="sessions-page-bar">
           <div className="sessions-page-tabs" role="tablist" aria-label={t("rail.sessionsPage.tabsLabel")} onKeyDown={tabKey}>
             {TABS.map(({ tab: each, name }) => (
@@ -129,7 +130,7 @@ export function SessionsPage({
                 type="button"
                 role="tab"
                 id={`${tabsId}-${each}`}
-                className="sessions-page-tab"
+                className="page-tab"
                 data-force={forceTab?.tab === each ? forceTab.state : undefined}
                 aria-selected={each === tab}
                 aria-controls={`${tabsId}-panel`}

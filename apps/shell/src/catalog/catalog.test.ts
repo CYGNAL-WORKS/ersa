@@ -74,7 +74,7 @@ describe("catalog strings (The string catalog)", () => {
   });
 
   it("have one section per area, so each migration adds to its own", () => {
-    expect(Object.keys(enUS)).toEqual(["rail", "transcript", "composer", "newSession", "sessionControls", "workbench", "developer", "quit", "trust", "errors"]);
+    expect(Object.keys(enUS)).toEqual(["rail", "transcript", "composer", "newSession", "sessionControls", "settings", "workbench", "developer", "quit", "trust", "errors"]);
   });
 });
 

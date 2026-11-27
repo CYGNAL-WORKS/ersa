@@ -96,6 +96,10 @@ Reset to defaults
 
 View all
 
+### `rail.arrange.settingsButton`
+
+Settings
+
 ### `rail.arrange.groupByProjectButton`
 
 Project
@@ -1301,6 +1305,58 @@ Resets in {minutes} min
 ### `sessionControls.contextRing.underOneReadout`
 
 <{percent}%
+
+## `settings`
+
+### `settings.settingsHeading`
+
+Settings
+
+### `settings.sectionsLabel`
+
+Settings sections
+
+### `settings.boundaryName`
+
+The settings page
+
+### `settings.loadingProgress`
+
+Loading…
+
+### `settings.readError`
+
+This setting can't be read.
+
+### `settings.changeError`
+
+This setting wasn't changed.
+
+### `settings.storage.storageHeading`
+
+Storage
+
+### `settings.storage.archiveInactiveLabel`
+
+Archive inactive sessions
+
+### `settings.storage.archiveInactiveDescription`
+
+Archive a session, as Archive does, once it has had no activity for this long. Running, pinned, and unread sessions are never archived.
+
+### `settings.storage.archiveNeverLabel`
+
+Never
+
+### `settings.storage.archiveDaysLabel`
+
+#### `one`
+
+{count} day
+
+#### `other`
+
+{count} days
 
 ## `workbench`
 
