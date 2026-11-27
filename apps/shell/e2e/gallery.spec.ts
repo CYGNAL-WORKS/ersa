@@ -11,6 +11,8 @@ const components = [
   "RailTree",
   "SessionsPage",
   "SettingsPage",
+  "CleanUp",
+  "CleanUpQuestion",
   "QuestionForm",
   "Shelf",
   "AttachmentChip",

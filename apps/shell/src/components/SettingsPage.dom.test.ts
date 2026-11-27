@@ -6,11 +6,20 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ArchiveView } from "../session/archiveInactive";
+import type { CleanUpView } from "../session/cleanupList";
 import { SettingsPage } from "./SettingsPage";
 
 afterEach(cleanup);
 
-const draw = (archive: ArchiveView, offline?: boolean) => render(createElement(SettingsPage, { archive, offline, onArchive: () => {} }));
+// Storage's Clean up list with nothing on it: these tests are about Archive inactive sessions.
+const noop = () => {};
+const cleanUpProps = {
+  cleanUp: { days: 30, list: { state: "ready", items: [], unread: [] }, ticked: new Set<string>() } satisfies CleanUpView,
+  onCleanUp: { choose: noop, tick: noop, ask: noop, cancel: noop, confirm: noop, stop: noop },
+  names: { sessions: [], projects: [] },
+};
+
+const draw = (archive: ArchiveView, offline?: boolean) => render(createElement(SettingsPage, { archive, offline, onArchive: () => {}, ...cleanUpProps }));
 const chip = () => screen.getByRole("button", { name: /^Archive inactive sessions:/ }) as HTMLButtonElement;
 
 describe("Archive inactive sessions' chip", () => {
@@ -25,7 +34,7 @@ describe("Archive inactive sessions' chip", () => {
   // section name takes it, so the next Tab starts from the page.
   it("hands keyboard focus to the chosen section name when it becomes unavailable or goes", () => {
     const ready: ArchiveView = { state: "ready", value: 7 };
-    const props = { onArchive: () => {} };
+    const props = { onArchive: () => {}, ...cleanUpProps };
     const drawn = render(createElement(SettingsPage, { archive: ready, ...props }));
     const storage = screen.getByRole("button", { name: "Storage" });
     chip().focus();
@@ -40,7 +49,7 @@ describe("Archive inactive sessions' chip", () => {
 
   // A page beside a button outside it, and the page drawn again with Ersa unable to reach Core.
   const beside = (offline: boolean, elsewhere = true) =>
-    createElement("div", null, elsewhere && createElement("button", { key: "e" }, "Elsewhere"), createElement(SettingsPage, { key: "p", archive: { state: "ready", value: 7 }, offline, onArchive: () => {} }));
+    createElement("div", null, elsewhere && createElement("button", { key: "e" }, "Elsewhere"), createElement(SettingsPage, { key: "p", archive: { state: "ready", value: 7 }, offline, onArchive: () => {}, ...cleanUpProps }));
 
   it("leaves focus where the user put it after the chip lost it to nothing", () => {
     const drawn = render(beside(false));

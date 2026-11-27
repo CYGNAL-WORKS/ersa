@@ -28,6 +28,10 @@ import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
 import { SessionsPage } from "../components/SessionsPage";
 import { SettingsPage } from "../components/SettingsPage";
+import { CleanUp } from "../components/CleanUp";
+import { CleanUpQuestion } from "../components/CleanUpQuestion";
+import { type ItemView, tickedByDefault } from "../session/cleanup";
+import type { CleanUpActions, CleanUpView } from "../session/cleanupList";
 import { PINNED_KEY, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
@@ -37,7 +41,7 @@ import { ThinkingRow, ToolCard, type ToolContext } from "../components/ToolCard"
 import { Transcript } from "../components/Transcript";
 import type { CoreView, SessionsView } from "../core/connection";
 import type { Envelope, Event, QuestionAsked } from "../protocol/agent-events.gen";
-import type { BackendInfo, Choice, CoreHelloResult, Project, RawLogEntry, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, CleanupInspectResult, CleanupItem, CoreHelloResult, Project, RawLogEntry, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import type { RawLogView } from "../session/rawLog";
 import type { Answer } from "../session/answers";
 import { type DeletePhase, whatGoes } from "../session/deletion";
@@ -246,6 +250,55 @@ const pageSessions: Session[] = [
   { ...session("r4", "Port the runner", "2026-11-01T06:00:00Z", { state: "error", pending: [] }), workspace_id: "w-dev", host_id: "devbox" },
   session("r5", "Write the release notes", "2026-11-01T05:00:00Z", { state: "ended", pending: [] }),
 ].map((s, i) => ({ ...s, last_activity_at: minutesBefore([0, 5, 180, 60 * 24, 60 * 24 * 6][i] ?? 0) }));
+// Storage's Clean up list (docs/design/SETTINGS.md, Clean up): an item of each kind and each thing removing one can
+// lose, on 7 November 2026, as `cleanup.list` and `cleanup.inspect` give them.
+const cleanUpNames = {
+  sessions: [
+    { id: "c1", title: "Fix the flaky reconnect test" },
+    { id: "c2", title: "Port the runner" },
+    { id: "c3", title: "Try the new parser" },
+  ],
+  projects: [{ id: "alpha", name: "alpha" }],
+};
+const listed = (inspected: CleanupInspectResult): CleanupItem => {
+  const { uncommitted: _u, ignored: _i, unshared: _s, stranded: _t, unrecorded: _r, holds_repository: _h, size_bytes: _b, merged: _m, token: _k, ...item } = inspected;
+  return item;
+};
+const WT = "C:/Users/you/AppData/Local/Ersa/worktrees/alpha";
+const cleanUpInspected: CleanupInspectResult[] = [
+  { id: "i1", kind: "workspace", project_id: "alpha", workspace_id: "w1", path: `${WT}/reconnect`, branch: "ersa/fix-reconnect", session_ids: ["c1"], last_activity_at: minutesBefore(60 * 24 * 40), uncommitted: 0, ignored: 3, unshared: 2, stranded: 0, unrecorded: false, holds_repository: false, size_bytes: 214_000_000, token: "a" },
+  { id: "i2", kind: "workspace", project_id: "alpha", workspace_id: "w2", path: `${WT}/runner`, branch: "ersa/port-runner", session_ids: ["c2", "c3"], last_activity_at: minutesBefore(60 * 24 * 3), uncommitted: 4, ignored: 0, unshared: 0, stranded: 1, unrecorded: false, holds_repository: false, size_bytes: 1_350_000_000, token: "b" },
+  { id: "i3", kind: "leftover", project_id: "alpha", workspace_id: "w3", path: `${WT}/vendor-sync`, branch: "ersa/vendor-sync", uncommitted: 0, ignored: 0, unshared: 0, stranded: 0, unrecorded: false, holds_repository: true, size_bytes: 88_000_000, token: "c" },
+  { id: "i4", kind: "branch", project_id: "alpha", branch: "ersa/old-docs", unshared: 0, merged: true, token: "d" },
+  { id: "i5", kind: "branch", project_id: "alpha", branch: "ersa/spike", unshared: 3, merged: false, token: "e" },
+  { id: "i6", kind: "folder", project_id: "alpha", path: `${WT}/scratch`, size_bytes: 12_400_000, token: "f" },
+  { id: "i7", kind: "folder", project_id: "alpha", path: `${WT}/huge-export`, token: "g" },
+];
+const inspectedView = (i: CleanupInspectResult): ItemView => ({ state: "inspected", item: listed(i), inspected: i });
+const cleanUpItems: ItemView[] = cleanUpInspected.map(inspectedView);
+const defaultTicks = new Set(cleanUpItems.filter(tickedByDefault).map((v) => v.item.id));
+const noop = () => {};
+const cleanUpActions: CleanUpActions = { choose: noop, tick: noop, ask: noop, cancel: noop, confirm: noop, stop: noop };
+const cleanUpView = (more: Partial<CleanUpView> = {}): CleanUpView => ({
+  days: 30,
+  list: { state: "ready", items: cleanUpItems, unread: [] },
+  ticked: defaultTicks,
+  ...more,
+});
+const cleanUp = (more: Partial<CleanUpView> = {}, props: Partial<Parameters<typeof CleanUp>[0]> = {}) => (
+  <div className="settings-section">
+    <CleanUp view={cleanUpView(more)} actions={cleanUpActions} names={cleanUpNames} now={galleryNow} {...props} />
+  </div>
+);
+// The archive setting's states, with nothing to clean up beneath it.
+const settingsPage = {
+  onArchive: noop,
+  cleanUp: cleanUpView({ list: { state: "ready", items: [], unread: [] }, ticked: new Set() }),
+  onCleanUp: cleanUpActions,
+  names: cleanUpNames,
+};
+const byId = (...ids: string[]) => cleanUpInspected.filter((i) => ids.includes(i.id));
+
 const sessionsPage: Parameters<typeof SessionsPage>[0] = {
   sessions: { state: "ready", sessions: pageSessions },
   projects: treeProjects,
@@ -1381,19 +1434,85 @@ const entries: Entry[] = [
     name: "SettingsPage",
     wide: true,
     states: [
-      ["Never, at rest", <SettingsPage archive={{ state: "ready", value: undefined }} onArchive={() => {}} />],
-      ["After 7 days", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} />],
-      ["Its list open", room(<SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} initialOpen />)],
-      ["The chip, pointer over it", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceChip="hover" />],
-      ["The chip, pressed", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceChip="pressed" />],
-      ["The chip, keyboard focus", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceChip="focus" />],
-      ["The chosen section name, keyboard focus", <SettingsPage archive={{ state: "ready", value: 7 }} onArchive={() => {}} forceSection="focus" />],
-      ["Loading", <SettingsPage archive={{ state: "loading" }} onArchive={() => {}} />],
-      ["Can't be read", <SettingsPage archive={{ state: "error", message: "The settings file is damaged." }} onArchive={() => {}} />],
-      ["Changing, keyboard focus on it", <SettingsPage archive={{ state: "ready", value: 14 }} changing={{ state: "sending" }} onArchive={() => {}} forceChip="focus" />],
-      ["Change refused", <SettingsPage archive={{ state: "ready", value: 7 }} changing={{ state: "failed", message: "Ersa isn't connected to your sessions." }} onArchive={() => {}} />],
-      ["While Ersa can't reach Core", <SettingsPage archive={{ state: "ready", value: 7 }} offline onArchive={() => {}} />],
+      ["Never, at rest", <SettingsPage archive={{ state: "ready", value: undefined }} {...settingsPage} />],
+      ["With the Clean up list", <SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} cleanUp={cleanUpView()} now={galleryNow} />],
+      ["After 7 days", <SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} />],
+      ["Its list open", room(<SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} initialOpen />)],
+      ["The chip, pointer over it", <SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} forceChip="hover" />],
+      ["The chip, pressed", <SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} forceChip="pressed" />],
+      ["The chip, keyboard focus", <SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} forceChip="focus" />],
+      ["The chosen section name, keyboard focus", <SettingsPage archive={{ state: "ready", value: 7 }} {...settingsPage} forceSection="focus" />],
+      ["Loading", <SettingsPage archive={{ state: "loading" }} {...settingsPage} />],
+      ["Can't be read", <SettingsPage archive={{ state: "error", message: "The settings file is damaged." }} {...settingsPage} />],
+      ["Changing, keyboard focus on it", <SettingsPage archive={{ state: "ready", value: 14 }} changing={{ state: "sending" }} {...settingsPage} forceChip="focus" />],
+      ["Change refused", <SettingsPage archive={{ state: "ready", value: 7 }} changing={{ state: "failed", message: "Ersa isn't connected to your sessions." }} {...settingsPage} />],
+      ["While Ersa can't reach Core", <SettingsPage archive={{ state: "ready", value: 7 }} offline {...settingsPage} />],
     ],
+  },
+  {
+    // The Clean up list under Storage (docs/design/SETTINGS.md, Clean up), drawn alone, in each of its states.
+    name: "CleanUp",
+    wide: true,
+    states: [
+      ["Each kind of item, what removing it loses, the lossless ones ticked", cleanUp()],
+      ["An item, pointer over it", cleanUp({}, { forceItem: "hover" })],
+      ["An item, pressed", cleanUp({}, { forceItem: "pressed" })],
+      ["An item, keyboard focus", cleanUp({}, { forceItem: "focus" })],
+      ["Reading the list", cleanUp({ list: { state: "loading" }, ticked: new Set() })],
+      [
+        "Checking the items",
+        cleanUp({ list: { state: "ready", items: [cleanUpItems[0]!, ...cleanUpItems.slice(1, 4).map((v) => ({ state: "checking" as const, item: v.item }))], unread: [] }, ticked: new Set(["i1"]) }),
+      ],
+      [
+        "An item that couldn't be checked, and a project not looked through",
+        cleanUp({
+          list: {
+            state: "ready",
+            items: [cleanUpItems[0]!, { state: "uninspectable", item: cleanUpItems[1]!.item, message: "Counting the changes took longer than 60 seconds." }],
+            unread: [{ project_id: "alpha", message: "git timed out after 10 seconds." }],
+          },
+          ticked: new Set(["i1"]),
+        }),
+      ],
+      ["Nothing to clean up", cleanUp({ list: { state: "ready", items: [], unread: [] }, ticked: new Set() })],
+      ["The list can't be read", cleanUp({ list: { state: "error", message: "Ersa isn't connected to your sessions." }, ticked: new Set() })],
+      ["Nothing chosen", cleanUp({ ticked: new Set() })],
+      [
+        "After a clean-up that couldn't remove everything",
+        cleanUp({
+          list: { state: "ready", items: cleanUpItems.slice(1, 3), unread: [] },
+          ticked: new Set(),
+          result: {
+            removed: 2,
+            count: 4,
+            stopped: false,
+            failures: [
+              { item: listed(cleanUpInspected[1]!), message: "It changed since it was checked, so nothing of it was removed." },
+              { item: listed(cleanUpInspected[5]!), message: "The folder is in use by another program." },
+            ],
+          },
+        }),
+      ],
+      ["After a clean-up that removed everything", cleanUp({ list: { state: "ready", items: [], unread: [] }, ticked: new Set(), result: { removed: 3, count: 3, stopped: false, failures: [] } })],
+      ["After a clean-up stopped part way", cleanUp({ list: { state: "ready", items: cleanUpItems.slice(4, 5), unread: [] }, ticked: new Set(), result: { removed: 2, count: 4, stopped: true, failures: [] } })],
+      ["While Ersa can't reach Core", cleanUp({}, { offline: true })],
+    ],
+  },
+  {
+    // The clean-up question (docs/design/SETTINGS.md, The clean-up question): what goes, and what is lost for good.
+    name: "CleanUpQuestion",
+    wide: true,
+    states: (
+      [
+        ["Nothing lost", { state: "asking", ticked: byId("i1", "i4") }],
+        ["Changed files and commits lost for good", { state: "asking", ticked: byId("i1", "i2", "i5") }],
+        ["A folder that holds a repository of its own", { state: "asking", ticked: byId("i3", "i4") }],
+        ["Folders Ersa can't identify, one it couldn't finish looking through", { state: "asking", ticked: byId("i6", "i7") }],
+        ["Only branches", { state: "asking", ticked: byId("i4") }],
+        ["Removing, Stop with keyboard focus", { state: "removing", ticked: byId("i1", "i2", "i4"), done: 1, stopping: false }],
+        ["Stopping after the current one", { state: "removing", ticked: byId("i1", "i2", "i4"), done: 2, stopping: true }],
+      ] satisfies [string, CleanUpView["run"] & object][]
+    ).map(([label, run]) => [label, <CleanUpQuestion run={run} onConfirm={noop} onCancel={noop} onStop={noop} inline forceConfirm={run.state === "removing" ? "focus" : undefined} />]),
   },
   {
     // A question's form with choices made, as the shelf and the transcript's question card hold it.

@@ -57,6 +57,7 @@ function fakeCore(kept: unknown = {}, { read, refuse, hold }: { read?: () => Pro
     "session.list": () => listed,
     "workspace.list": () => workspaces,
     "section.list": () => [],
+    "cleanup.list": () => ({ items: [], unread: [] }),
     "backend.list": () => [],
     "settings.get": () => (read ? read() : settings),
     "settings.set": (params: { patch: unknown }) => {
