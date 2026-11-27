@@ -8,6 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-26 PROTO-CORE-API: R103 says Core sends a `session.tile` when a title it reads from the record differs from the last tile's, and R12 says the new title shows after a rename; neither says which wins when a record read begun before a rename lands after it (#616). Built meanwhile: such a read's title is not taken and sends no tile, since the rename's title came last; the read's other fields are still taken.
+- [ ] 2026-11-26 PROTO-CORE-API: R103 says Core sends a `session.tile` when a title it reads from the record differs from the last tile's, and R12 says the new title shows after a rename; neither says which wins when a record read begun before a rename, or before a title the backend announced, lands after it (#616). Built meanwhile: such a read's title is not taken and sends no tile, since the other title came last; the read's other fields are still taken.
 
 

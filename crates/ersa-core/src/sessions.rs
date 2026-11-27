@@ -393,7 +393,8 @@ struct Handle {
     /// thread per session, as each slot here does.
     version_check: ReadSlot<Result<Option<String>, String>>,
     /// The same for reading the record's title and creation time, with how
-    /// many renames Core had made when the read began.
+    /// many titles the session had taken other than its record's when the
+    /// read began.
     summary_read: ReadSlot<(u64, Result<Option<RecordSummary>, String>)>,
     /// The same for looking whether a fork has a record of its own yet,
     /// which each list does for a fork whose record no look has found
@@ -586,16 +587,19 @@ struct Presented {
     /// the backend's to say (ADR 0033); every start looks again
     /// (FLOW-RESUME-SESSION-R18, R19).
     record_found: bool,
-    /// How many renames Core has made, so a read of the record begun before
-    /// one, which holds the title from before it, does not put that back.
-    renames: u64,
+    /// How many titles the session has taken other than its record's: a
+    /// rename Core made, or one the backend announced. A read of the record
+    /// begun before one holds the title from before it, so does not put
+    /// that back.
+    titles_taken: u64,
 }
 
 impl Presented {
-    /// Takes the title a rename Core made gave the session.
-    fn renamed(&mut self, title: &str) {
+    /// Takes a title from a rename Core made, or from the backend's
+    /// announcement on its live stream.
+    fn took_title(&mut self, title: &str) {
         self.title = Some(title.to_string());
-        self.renames += 1;
+        self.titles_taken += 1;
     }
 
     /// Takes what the session's record says, and answers whether the title,
@@ -603,16 +607,17 @@ impl Presented {
     /// them as presented, so the ones presented until now are the ones the
     /// last tile carried, and a change is sent to every window
     /// (PROTO-CORE-API-R59, R103, R106). The record's title is taken only
-    /// when the read began after Core's latest rename (`renames`, the count
-    /// when it began): the title is whichever came last.
+    /// when the read began after the latest title taken otherwise
+    /// (`titles_taken`, the count when it began): the title is whichever
+    /// came last.
     fn take_summary(
         &mut self,
         summary: RecordSummary,
         live: bool,
         session: &str,
-        renames: u64,
+        titles_taken: u64,
     ) -> bool {
-        let title = summary.title.filter(|_| renames == self.renames);
+        let title = summary.title.filter(|_| titles_taken == self.titles_taken);
         let retitled = title.is_some() && title != self.title;
         if title.is_some() {
             self.title = title;
@@ -837,7 +842,7 @@ impl Handle {
                 reported: Default::default(),
                 last_activity_at: None,
                 record_found: false,
-                renames: 0,
+                titles_taken: 0,
             }),
             hub: Mutex::default(),
             raw: Mutex::default(),
@@ -1729,7 +1734,7 @@ impl SessionManager {
             // is seen here, and one projected after it is applied after it.
             let hub = lock(&handle.hub);
             if announced(&hub) == announced_before {
-                lock(&handle.presented).renamed(title);
+                lock(&handle.presented).took_title(title);
             }
             drop(hub);
             return self.retitled(&handle);
@@ -1785,7 +1790,7 @@ impl SessionManager {
                 renamed => renamed?,
             }
         }
-        lock(&handle.presented).renamed(title);
+        lock(&handle.presented).took_title(title);
         self.retitled(&handle)
     }
 
@@ -2500,24 +2505,24 @@ async fn apply_summary(
         }
         return;
     }
-    // The renames made so far are noted as the read begins, under the lock
-    // a rename sets the title under: one made after this is newer than
+    // The titles taken so far are noted as the read begins, under the lock
+    // every other title is taken under: one taken after this is newer than
     // what the read finds.
     let start = || {
-        let renames = lock(&handle.presented).renames;
+        let titles_taken = lock(&handle.presented).titles_taken;
         tokio::spawn(async move {
             let read = adapter.summarize_record(transport, &cwd, &backend_id);
             let summary =
                 read_unless_removed(read, gone, || adapter.forget_record(&cwd, &backend_id))
                     .await
                     .map_err(|e| e.to_string());
-            (renames, summary)
+            (titles_taken, summary)
         })
     };
     // A summary is small and the adapter keeps them by the record's state,
     // so a joiner simply reads again.
     match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
-        Some((renames, Ok(Some(summary)))) => {
+        Some((titles_taken, Ok(Some(summary)))) => {
             // Whether the session is live is asked as the summary is taken,
             // not before the read: a read can outlast its going live and a
             // turn's end, whose time must stand (PROTO-CORE-API-R75). A turn
@@ -2526,7 +2531,7 @@ async fn apply_summary(
             let changed = {
                 let mut presented = lock(&handle.presented);
                 let found = take_record_look(&mut presented, true);
-                presented.take_summary(summary, live, &handle.id, renames) || found
+                presented.take_summary(summary, live, &handle.id, titles_taken) || found
             };
             if changed {
                 send_current_tile(tiles, handle);
@@ -3383,7 +3388,7 @@ async fn run_pipeline(pipeline: Pipeline) {
             // title to one that did, so one it sees is already the title.
             let title_changed = retitled.is_some();
             if let Some(title) = retitled {
-                lock(&handle.presented).title = Some(title);
+                lock(&handle.presented).took_title(&title);
             }
             let (tile, turn) = (view.tile().clone(), view.turn());
             (events, tile, turn, announced, title_changed, reported)
@@ -3855,7 +3860,7 @@ mod tests {
             reported: Default::default(),
             last_activity_at: None,
             record_found: false,
-            renames: 0,
+            titles_taken: 0,
         };
         let summary = || RecordSummary {
             title: Some("Same".into()),
@@ -3882,7 +3887,7 @@ mod tests {
             reported: Default::default(),
             last_activity_at: None,
             record_found: false,
-            renames: 0,
+            titles_taken: 0,
         };
         let summary = |at: Option<&str>| RecordSummary {
             created_at: Some("2026-11-01T00:00:00.000Z".into()),
