@@ -207,7 +207,7 @@ function Item({
           checked={ticked}
           disabled={off}
           aria-labelledby={`${id}-name`}
-          aria-describedby={`${id}-meta ${id}-loss`}
+          aria-describedby={`${id}-meta ${id}-path ${id}-loss`}
           onChange={(event) => onTick(event.target.checked)}
         />
         <span className="clean-up-box" data-checked={ticked || undefined} aria-hidden="true">
@@ -222,9 +222,13 @@ function Item({
             {when && <span>{when}</span>}
             {named === "title" && item.branch && <span className="clean-up-code">{item.branch}</span>}
             {size !== undefined && <span className="clean-up-size">{formatSize(size)}</span>}
-            {/* A folder named by its own name says where it is, on a line of its own. */}
-            {named === "code" && item.path && <span className="clean-up-code clean-up-path">{item.path}</span>}
           </span>
+          {/* A folder named by its own name says where it is, on a line of its own. */}
+          {named === "code" && item.path && (
+            <span id={`${id}-path`} className="clean-up-code clean-up-path">
+              {item.path}
+            </span>
+          )}
           <span id={`${id}-loss`} className="clean-up-loss">
             {view.state === "checking" && <Checking />}
             {view.state === "uninspectable" && <Problem lead={t("settings.storage.cleanUp.inspectError")} reason={view.message} />}
