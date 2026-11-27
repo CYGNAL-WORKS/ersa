@@ -837,46 +837,27 @@ async fn a_trusted_session_without_a_project_root_attests_nothing() {
 /// yet, and Core's log says so.
 #[tokio::test]
 async fn a_trust_the_cli_did_not_record_is_logged_not_a_failed_start() {
-    for (answer, warned) in [
+    let log = common::Log::installed();
+    for (case, (answer, warned)) in [
         (init_answer_with_trust(true), false),
         (init_answer_with_trust(false), true),
         (init_answer(), true),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut config = config();
         config.project_trusted = true;
-        config.project_path = "C:/projects/app".into();
-        let log = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let writer = {
-            let log = log.clone();
-            move || LogWriter(log.clone())
-        };
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(writer)
-            .with_ansi(false)
-            .finish();
-        // The test's runtime has one thread, so the start's handshake logs
-        // through this subscriber.
-        let _guard = tracing::subscriber::set_default(subscriber);
+        // Each case's own, so its lines are told from the binary's others.
+        let project = format!("C:/projects/trust-{case}");
+        config.project_path = project.clone();
         sent_initialize(config, answer).await;
-        let log = String::from_utf8(log.lock().unwrap().clone()).unwrap();
+        let lines = log.lines_with(&project);
         assert_eq!(
-            log.contains("did not record") && log.contains("C:/projects/app"),
+            lines.iter().any(|line| line.contains("did not record")),
             warned,
-            "{log}"
+            "case {case}: {lines:#?}"
         );
-    }
-}
-
-/// Collects what the subscriber writes.
-struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
-
-impl std::io::Write for LogWriter {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
     }
 }
 

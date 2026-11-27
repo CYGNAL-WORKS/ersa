@@ -1,5 +1,6 @@
 //! Helpers shared by this crate's integration tests: the recorded fixtures as
-//! raw logs, and a sink that stamps lines the way Core's raw log does.
+//! raw logs, a sink that stamps lines the way Core's raw log does, and the
+//! log the binary's warnings go to.
 
 // Each test binary compiles this module and uses a different part of it.
 #![allow(dead_code)]
@@ -7,7 +8,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use ersa_adapter::recording::Recording;
@@ -250,5 +251,61 @@ pub fn is_kind(line: &RawLine, kind: &str) -> bool {
         }
         Some((ty, subtype)) => value["type"] == ty && value["subtype"] == subtype,
         None => value["type"] == kind,
+    }
+}
+
+/// What the test binary's subscriber wrote, every test's together: each
+/// test picks its own lines by something only it logs, such as a path.
+#[derive(Clone, Default)]
+pub struct Log(Arc<Mutex<Vec<u8>>>);
+
+impl Log {
+    /// The log, its subscriber installed as the binary's global default on
+    /// first use. Global, not per thread: `tracing` caches whether an event
+    /// is wanted across threads, so a per-thread subscriber misses the event
+    /// when another test's thread, with no subscriber, reached it first.
+    pub fn installed() -> Log {
+        static LOG: OnceLock<Log> = OnceLock::new();
+        LOG.get_or_init(|| {
+            let log = Log::default();
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(log.clone())
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::set_global_default(subscriber).unwrap();
+            log
+        })
+        .clone()
+    }
+
+    /// The lines written that hold `text`.
+    pub fn lines_with(&self, text: &str) -> Vec<String> {
+        String::from_utf8_lossy(&self.0.lock().unwrap())
+            .lines()
+            .filter(|line| line.contains(text))
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether anything written holds `text`.
+    pub fn contains(&self, text: &str) -> bool {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).contains(text)
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Log {
+    type Writer = Log;
+    fn make_writer(&'a self) -> Log {
+        self.clone()
+    }
+}
+
+impl io::Write for Log {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
