@@ -27,6 +27,6 @@ The page follows Claude Desktop's settings: the heading, the names of the sectio
 
 ## Storage
 
-Storage holds Archive inactive sessions, and the Clean up list will follow it (`FLOW-CLEAN-UP`).
+Storage holds Archive inactive sessions, then Clean up (`FLOW-CLEAN-UP`).
 
 - **Archive inactive sessions**: "Archive a session, as Archive does, once it has had no activity for this long. Running, pinned, and unread sessions are never archived." The chip names the setting for assistive technology and offers Never, 1 day, 2 days, 7 days, 14 days and 30 days, Desktop's values. The words say what the setting does without promising that every idle session goes, since the sweep leaves a running session and some others alone (FLOW-CLEAN-UP, step 4), and leave the folder to Archive, which puts it away only when nothing else needs it (step 1).
