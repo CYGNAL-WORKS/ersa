@@ -1290,7 +1290,7 @@ async fn a_rename_sends_every_client_a_tile_carrying_the_title() {
 
 /// The record read at a session's end gives it a title its tiles never
 /// carried (the fake backend announces none), and every window is sent it.
-// verifies: PROTO-CORE-API-R103
+// verifies: PROTO-CORE-API-R167
 #[tokio::test(flavor = "multi_thread")]
 async fn a_title_read_from_the_record_at_the_end_is_sent_as_a_tile() {
     let records = Records::default();
@@ -1605,7 +1605,7 @@ async fn a_rename_after_session_ended_is_a_stopped_sessions_while_the_run_winds_
 /// after it, leaves the rename's title: the title is whichever came last,
 /// and the rename did. As when a session that just ended is renamed while
 /// Core is still reading its record.
-// verifies: PROTO-CORE-API-R12
+// verifies: PROTO-CORE-API-R168
 #[tokio::test(flavor = "multi_thread")]
 async fn a_record_read_from_before_a_rename_leaves_the_new_title() {
     let records = Records::default();
@@ -1676,7 +1676,7 @@ async fn a_record_read_from_before_a_rename_leaves_the_new_title() {
 /// does when it takes a rename before Core has set the rename's title: a
 /// read of the record begun before the announcement, here while the
 /// session was stopped, leaves it once the session runs again.
-// verifies: PROTO-CORE-API-R12
+// verifies: PROTO-CORE-API-R168
 #[tokio::test(flavor = "multi_thread")]
 async fn a_record_read_from_before_an_announced_title_leaves_it() {
     let records = Records::default();

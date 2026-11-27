@@ -606,10 +606,10 @@ impl Presented {
     /// the date created or the last activity changed. Every tile carries
     /// them as presented, so the ones presented until now are the ones the
     /// last tile carried, and a change is sent to every window
-    /// (PROTO-CORE-API-R59, R103, R106). The record's title is taken only
+    /// (PROTO-CORE-API-R59, R167, R106). The record's title is taken only
     /// when the read began after the latest title taken otherwise
     /// (`titles_taken`, the count when it began): the title is whichever
-    /// came last.
+    /// came last (PROTO-CORE-API-R168).
     fn take_summary(
         &mut self,
         summary: RecordSummary,
@@ -3143,7 +3143,7 @@ struct SessionTask {
     pipeline: tokio::task::JoinHandle<()>,
     wind_down_pause: Duration,
     /// Where `session.tile` goes when the record read at the end retitles
-    /// the session (PROTO-CORE-API-R103).
+    /// the session (PROTO-CORE-API-R167).
     tiles: Arc<TileHub>,
     /// The run as admission has it, from the launch until this task lets go
     /// of it, however the task ends.
