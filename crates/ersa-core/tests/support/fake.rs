@@ -30,6 +30,9 @@
 //!   answers it as any other.
 //! - `stopped mid-write`: the line is recorded, then the session is found
 //!   stopped, as a kill landing during the write would leave it.
+//! - `announce <title>`: the backend announces a title for the session on
+//!   the live stream, as Claude Code does as it takes a rename, then says it
+//!   is idle.
 //! - `report <model> <permission mode>`: the backend reports its model and
 //!   permission mode on the live stream, as Claude Code's `init` and
 //!   status lines do, then says it is idle.
@@ -829,6 +832,7 @@ impl Adapter for FakeAdapter {
             permission_mode: None,
             working: false,
             held: Vec::new(),
+            announced: None,
         })
     }
 
@@ -1237,6 +1241,9 @@ impl AdapterSession for FakeSession {
         } else if let Some(name) = text.strip_prefix("name as ") {
             // The backend names the session anew, with nothing else.
             self.backend(json!({ "t": "named", "session_id": name }));
+        } else if let Some(title) = text.strip_prefix("announce ") {
+            self.backend(json!({ "t": "title", "title": title }));
+            self.backend(json!({ "t": "idle" }));
         } else if let Some(report) = text.strip_prefix("report ") {
             let (model, mode) = report.split_once(' ').expect("report <model> <mode>");
             self.backend(json!({ "t": "settings", "model": model, "permission_mode": mode }));
@@ -1369,6 +1376,8 @@ struct FakeProjector {
     working: bool,
     /// The texts of the messages waiting in the backend, in the order sent.
     held: Vec<String>,
+    /// The titles the stream announced: how many, and the latest.
+    announced: Option<(u64, String)>,
 }
 
 impl Projector for FakeProjector {
@@ -1384,6 +1393,12 @@ impl Projector for FakeProjector {
         self.permission_mode.as_deref()
     }
 
+    fn announced_title(&self) -> Option<(u64, &str)> {
+        self.announced
+            .as_ref()
+            .map(|(count, title)| (*count, title.as_str()))
+    }
+
     fn waiting(&self) -> u32 {
         u32::try_from(self.held.len()).unwrap()
     }
@@ -1391,6 +1406,11 @@ impl Projector for FakeProjector {
     fn project(&mut self, line: &RawLine) -> Vec<Projected> {
         let value: Value = serde_json::from_str(&line.line).unwrap_or(Value::Null);
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
+        if (line.dir, value["t"].as_str()) == (Direction::Backend, Some("title")) {
+            let count = self.announced.as_ref().map_or(0, |(count, _)| *count);
+            self.announced = Some((count + 1, text("title")));
+            return Vec::new();
+        }
         if (line.dir, value["t"].as_str()) == (Direction::Backend, Some("settings")) {
             // A report names what changed, and leaves the rest as it was.
             if value.get("model").is_some() {

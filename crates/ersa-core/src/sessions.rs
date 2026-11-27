@@ -392,8 +392,10 @@ struct Handle {
     /// one running, so on a disk that hangs for stats these checks hold one
     /// thread per session, as each slot here does.
     version_check: ReadSlot<Result<Option<String>, String>>,
-    /// The same for reading the record's title and creation time.
-    summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+    /// The same for reading the record's title and creation time, with how
+    /// many titles the session had taken other than its record's when the
+    /// read began.
+    summary_read: ReadSlot<(u64, Result<Option<RecordSummary>, String>)>,
     /// The same for looking whether a fork has a record of its own yet,
     /// which each list does for a fork whose record no look has found
     /// (FLOW-RESUME-SESSION-R19).
@@ -585,18 +587,40 @@ struct Presented {
     /// the backend's to say (ADR 0033); every start looks again
     /// (FLOW-RESUME-SESSION-R18, R19).
     record_found: bool,
+    /// How many titles the session has taken other than its record's: a
+    /// rename Core made, or one the backend announced. A read of the record
+    /// begun before one holds the title from before it, so does not put
+    /// that back.
+    titles_taken: u64,
 }
 
 impl Presented {
+    /// Takes a title from a rename Core made, or from the backend's
+    /// announcement on its live stream.
+    fn took_title(&mut self, title: &str) {
+        self.title = Some(title.to_string());
+        self.titles_taken += 1;
+    }
+
     /// Takes what the session's record says, and answers whether the title,
     /// the date created or the last activity changed. Every tile carries
     /// them as presented, so the ones presented until now are the ones the
     /// last tile carried, and a change is sent to every window
-    /// (PROTO-CORE-API-R59, R103, R106).
-    fn take_summary(&mut self, summary: RecordSummary, live: bool, session: &str) -> bool {
-        let retitled = summary.title.is_some() && summary.title != self.title;
-        if summary.title.is_some() {
-            self.title = summary.title;
+    /// (PROTO-CORE-API-R59, R167, R106). The record's title is taken only
+    /// when the read began after the latest title taken otherwise
+    /// (`titles_taken`, the count when it began): the title is whichever
+    /// came last (PROTO-CORE-API-R168).
+    fn take_summary(
+        &mut self,
+        summary: RecordSummary,
+        live: bool,
+        session: &str,
+        titles_taken: u64,
+    ) -> bool {
+        let title = summary.title.filter(|_| titles_taken == self.titles_taken);
+        let retitled = title.is_some() && title != self.title;
+        if title.is_some() {
+            self.title = title;
         }
         self.recorded = summary.settings;
         // A session not running has no stream: the record holds what it
@@ -818,6 +842,7 @@ impl Handle {
                 reported: Default::default(),
                 last_activity_at: None,
                 record_found: false,
+                titles_taken: 0,
             }),
             hub: Mutex::default(),
             raw: Mutex::default(),
@@ -1709,7 +1734,7 @@ impl SessionManager {
             // is seen here, and one projected after it is applied after it.
             let hub = lock(&handle.hub);
             if announced(&hub) == announced_before {
-                lock(&handle.presented).title = Some(title.to_string());
+                lock(&handle.presented).took_title(title);
             }
             drop(hub);
             return self.retitled(&handle);
@@ -1765,7 +1790,7 @@ impl SessionManager {
                 renamed => renamed?,
             }
         }
-        lock(&handle.presented).title = Some(title.to_string());
+        lock(&handle.presented).took_title(title);
         self.retitled(&handle)
     }
 
@@ -2480,18 +2505,24 @@ async fn apply_summary(
         }
         return;
     }
-    let start = move || {
+    // The titles taken so far are noted as the read begins, under the lock
+    // every other title is taken under: one taken after this is newer than
+    // what the read finds.
+    let start = || {
+        let titles_taken = lock(&handle.presented).titles_taken;
         tokio::spawn(async move {
             let read = adapter.summarize_record(transport, &cwd, &backend_id);
-            read_unless_removed(read, gone, || adapter.forget_record(&cwd, &backend_id))
-                .await
-                .map_err(|e| e.to_string())
+            let summary =
+                read_unless_removed(read, gone, || adapter.forget_record(&cwd, &backend_id))
+                    .await
+                    .map_err(|e| e.to_string());
+            (titles_taken, summary)
         })
     };
     // A summary is small and the adapter keeps them by the record's state,
     // so a joiner simply reads again.
     match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
-        Some(Ok(Some(summary))) => {
+        Some((titles_taken, Ok(Some(summary)))) => {
             // Whether the session is live is asked as the summary is taken,
             // not before the read: a read can outlast its going live and a
             // turn's end, whose time must stand (PROTO-CORE-API-R75). A turn
@@ -2500,7 +2531,7 @@ async fn apply_summary(
             let changed = {
                 let mut presented = lock(&handle.presented);
                 let found = take_record_look(&mut presented, true);
-                presented.take_summary(summary, live, &handle.id) || found
+                presented.take_summary(summary, live, &handle.id, titles_taken) || found
             };
             if changed {
                 send_current_tile(tiles, handle);
@@ -2508,12 +2539,12 @@ async fn apply_summary(
         }
         // No record under the session's own id: the backend's own tools
         // find nothing under it yet, or any more (FLOW-RESUME-SESSION-R18).
-        Some(Ok(None)) => {
+        Some((_, Ok(None))) => {
             if take_record_look(&mut lock(&handle.presented), false) {
                 send_current_tile(tiles, handle);
             }
         }
-        Some(Err(e)) => {
+        Some((_, Err(e))) => {
             tracing::warn!(session = %handle.id, error = %e, "could not read the session record's summary");
         }
         None => {
@@ -3112,7 +3143,7 @@ struct SessionTask {
     pipeline: tokio::task::JoinHandle<()>,
     wind_down_pause: Duration,
     /// Where `session.tile` goes when the record read at the end retitles
-    /// the session (PROTO-CORE-API-R103).
+    /// the session (PROTO-CORE-API-R167).
     tiles: Arc<TileHub>,
     /// The run as admission has it, from the launch until this task lets go
     /// of it, however the task ends.
@@ -3357,7 +3388,7 @@ async fn run_pipeline(pipeline: Pipeline) {
             // title to one that did, so one it sees is already the title.
             let title_changed = retitled.is_some();
             if let Some(title) = retitled {
-                lock(&handle.presented).title = Some(title);
+                lock(&handle.presented).took_title(&title);
             }
             let (tile, turn) = (view.tile().clone(), view.turn());
             (events, tile, turn, announced, title_changed, reported)
@@ -3817,6 +3848,46 @@ mod tests {
         line
     }
 
+    /// A read begun before a title was taken otherwise leaves that title,
+    /// and takes everything else it found: the date created, the last
+    /// activity and the settings, asking for a tile for them.
+    // verifies: PROTO-CORE-API-R168
+    #[test]
+    fn a_read_from_before_a_title_leaves_it_and_takes_the_rest() {
+        let mut presented = Presented {
+            title: None,
+            created_at: "2026-11-15T09:00:00.000Z".into(),
+            recorded: Default::default(),
+            reported: Default::default(),
+            last_activity_at: None,
+            record_found: false,
+            titles_taken: 0,
+        };
+        let begun = presented.titles_taken;
+        presented.took_title("Renamed");
+        let settings = ersa_adapter::RecordedSettings {
+            model: Some(ersa_adapter::Recorded {
+                value: "fake-model".into(),
+                turn_began: None,
+            }),
+            ..Default::default()
+        };
+        let summary = RecordSummary {
+            title: Some("hello".into()),
+            created_at: Some("2026-11-01T00:00:00.000Z".into()),
+            settings: settings.clone(),
+            last_activity_at: Some("2026-11-02T00:00:00.000Z".into()),
+        };
+        assert!(presented.take_summary(summary, false, "s", begun));
+        assert_eq!(presented.title.as_deref(), Some("Renamed"));
+        assert_eq!(presented.created_at, "2026-11-01T00:00:00.000Z");
+        assert_eq!(
+            presented.last_activity_at.as_deref(),
+            Some("2026-11-02T00:00:00.000Z")
+        );
+        assert_eq!(presented.recorded, settings);
+    }
+
     /// A record read that corrects the date created asks for a tile; the
     /// same read again, with nothing changed, asks for none.
     // verifies: PROTO-CORE-API-R106
@@ -3829,6 +3900,7 @@ mod tests {
             reported: Default::default(),
             last_activity_at: None,
             record_found: false,
+            titles_taken: 0,
         };
         let summary = || RecordSummary {
             title: Some("Same".into()),
@@ -3836,9 +3908,9 @@ mod tests {
             settings: Default::default(),
             last_activity_at: None,
         };
-        assert!(presented.take_summary(summary(), false, "s-1"));
+        assert!(presented.take_summary(summary(), false, "s-1", 0));
         assert_eq!(presented.created_at, "2026-11-01T00:00:00.000Z");
-        assert!(!presented.take_summary(summary(), false, "s-1"));
+        assert!(!presented.take_summary(summary(), false, "s-1", 0));
     }
 
     /// A session that is not live takes its record's last activity, a new
@@ -3855,6 +3927,7 @@ mod tests {
             reported: Default::default(),
             last_activity_at: None,
             record_found: false,
+            titles_taken: 0,
         };
         let summary = |at: Option<&str>| RecordSummary {
             created_at: Some("2026-11-01T00:00:00.000Z".into()),
@@ -3862,22 +3935,22 @@ mod tests {
             ..Default::default()
         };
         let at = |p: &Presented| p.last_activity_at.clone();
-        assert!(presented.take_summary(summary(Some("2026-11-02T00:00:00.000Z")), false, "s"));
+        assert!(presented.take_summary(summary(Some("2026-11-02T00:00:00.000Z")), false, "s", 0));
         assert_eq!(at(&presented).as_deref(), Some("2026-11-02T00:00:00.000Z"));
-        assert!(!presented.take_summary(summary(Some("2026-11-02T00:00:00.000Z")), false, "s"));
+        assert!(!presented.take_summary(summary(Some("2026-11-02T00:00:00.000Z")), false, "s", 0));
 
         // Live, it keeps its own: the `ts` of its latest turn's end.
         presented.last_activity_at = Some("2026-11-18T12:00:00.000Z".into());
-        assert!(!presented.take_summary(summary(Some("2026-11-03T00:00:00.000Z")), true, "s"));
+        assert!(!presented.take_summary(summary(Some("2026-11-03T00:00:00.000Z")), true, "s", 0));
         assert_eq!(at(&presented).as_deref(), Some("2026-11-18T12:00:00.000Z"));
 
         // Not live again, the record's, though it is older than the turn's end.
-        assert!(presented.take_summary(summary(Some("2026-11-03T00:00:00.000Z")), false, "s"));
+        assert!(presented.take_summary(summary(Some("2026-11-03T00:00:00.000Z")), false, "s", 0));
         assert_eq!(at(&presented).as_deref(), Some("2026-11-03T00:00:00.000Z"));
-        assert!(presented.take_summary(summary(Some("yesterday")), false, "s"));
+        assert!(presented.take_summary(summary(Some("yesterday")), false, "s", 0));
         assert_eq!(at(&presented), None);
         presented.last_activity_at = Some("2026-11-03T00:00:00.000Z".into());
-        assert!(presented.take_summary(summary(None), false, "s"));
+        assert!(presented.take_summary(summary(None), false, "s", 0));
         assert_eq!(at(&presented), None);
     }
 

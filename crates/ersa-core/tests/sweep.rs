@@ -437,7 +437,7 @@ async fn a_put_away_that_failed_part_way_is_never_tried_again() {
     // git drops its record and fails, and the try at the folder sticks.
     let log = support::log::Log::installed();
     clock.hour_passed();
-    reached(&gate).await;
+    reaches_the_try(&gate, &clock, before).await;
     let failed = format!("workspace={}", id(&first));
     put_away_failed(&log, &failed).await;
     assert_eq!(s.listed(&first).await["state"], "put_away");
@@ -948,7 +948,7 @@ async fn a_removal_whose_try_is_stuck_holds_the_workspace() {
     let before = clock.ended();
 
     clock.hour_passed();
-    reached(&gate).await;
+    reaches_the_try(&gate, &clock, before).await;
     let field = format!("workspace={}", id(&workspace));
     let deadline = tokio::time::Instant::now() + PASS;
     while !log.logged("INFO", KEPT, &field) {

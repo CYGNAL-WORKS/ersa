@@ -1342,7 +1342,7 @@ async fn a_rename_sends_every_client_a_tile_carrying_the_title() {
 
 /// The record read at a session's end gives it a title its tiles never
 /// carried (the fake backend announces none), and every window is sent it.
-// verifies: PROTO-CORE-API-R103
+// verifies: PROTO-CORE-API-R167
 #[tokio::test(flavor = "multi_thread")]
 async fn a_title_read_from_the_record_at_the_end_is_sent_as_a_tile() {
     let records = Records::default();
@@ -1651,6 +1651,155 @@ async fn a_rename_after_session_ended_is_a_stopped_sessions_while_the_run_winds_
         .error("session.set_title", json!({ "id": id, "title": "Renamed" }))
         .await;
     assert_eq!(error["data"]["reason"], "backend_unnamed", "{error:#}");
+}
+
+/// A read of the record that took the old title before a rename, and lands
+/// after it, leaves the rename's title: the title is whichever came last,
+/// and the rename did. As when a session that just ended is renamed while
+/// Core is still reading its record.
+// verifies: PROTO-CORE-API-R168
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_read_from_before_a_rename_leaves_the_new_title() {
+    let records = Records::default();
+    let adapter = FakeAdapter::with_records(Arc::clone(&records));
+    let (gate, stats) = (
+        Arc::clone(&adapter.summary_gate),
+        Arc::clone(&adapter.stats),
+    );
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "exit" }))
+        .await;
+    client.events_until("session.ended").await;
+    // The record's title, once the read at the run's end has landed.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while support::listed(&mut client, &id)
+        .await
+        .map(|s| s["title"].clone())
+        != Some(json!("hello"))
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the record's title is listed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // A list reads the record, slowly: it is held once read.
+    let held = gate.lock().await;
+    let before = stats.summaries.load(Ordering::SeqCst);
+    let mut lister = core.client().await;
+    let listing = lister.request("session.list", json!({})).await;
+    while stats.summaries.load(Ordering::SeqCst) == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the list reads the record"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let renamed = client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(renamed["title"], "Renamed");
+
+    // The read lands: the rename's title stands.
+    drop(held);
+    let listed = lister.response(listing).await;
+    let row = listed["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id.as_str())
+        .cloned()
+        .unwrap();
+    assert_eq!(row["title"], "Renamed", "{row:#}");
+}
+
+/// The same for a title the backend announced on its live stream, as it
+/// does when it takes a rename before Core has set the rename's title: a
+/// read of the record begun before the announcement, here while the
+/// session was stopped, leaves it once the session runs again.
+// verifies: PROTO-CORE-API-R168
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_read_from_before_an_announced_title_leaves_it() {
+    let records = Records::default();
+    let adapter = FakeAdapter::with_records(Arc::clone(&records));
+    let (gate, stats) = (
+        Arc::clone(&adapter.summary_gate),
+        Arc::clone(&adapter.stats),
+    );
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    // The record's title, once a list has read it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while support::listed(&mut client, &id)
+        .await
+        .map(|s| s["title"].clone())
+        != Some(json!("hello"))
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the record's title is listed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // A list reads the record, slowly: it is held once read.
+    let held = gate.lock().await;
+    let before = stats.summaries.load(Ordering::SeqCst);
+    let mut lister = core.client().await;
+    let listing = lister.request("session.list", json!({})).await;
+    while stats.summaries.load(Ordering::SeqCst) == before {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the list reads the record"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    client
+        .result(
+            "session.send",
+            json!({ "id": id, "text": "announce Renamed" }),
+        )
+        .await;
+    client
+        .notification_where(|n| {
+            n["method"] == "session.tile"
+                && n["params"]["session_id"] == id.as_str()
+                && n["params"]["title"] == "Renamed"
+        })
+        .await;
+
+    // The read lands: the announced title stands.
+    drop(held);
+    let listed = lister.response(listing).await;
+    let row = listed["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id.as_str())
+        .cloned()
+        .unwrap();
+    assert_eq!(row["title"], "Renamed", "{row:#}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
