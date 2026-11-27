@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CleanupInspectResult } from "../protocol/core-api.gen";
-import { type ItemView, changedTo, folderName, formatSize, losesWork, questionOf, questionTitle, sendsDiscard, tickedByDefault } from "./cleanup";
+import { type ItemView, changedTo, itemName, losesWork, lostCounts, questionOf, questionTitle, sendsDiscard, tickedByDefault } from "./cleanup";
 
 const base = { project_id: "alpha", token: "t1" };
 const workspace = (more: Partial<CleanupInspectResult> = {}): CleanupInspectResult => ({
@@ -108,20 +108,21 @@ describe("an item that changed since it was checked", () => {
   });
 });
 
-describe("a size", () => {
-  it("reads as File Explorer words it", () => {
-    expect(formatSize(0)).toBe("0 B");
-    expect(formatSize(1023)).toBe("1023 B");
-    expect(formatSize(1536)).toBe("1.5 KB");
-    expect(formatSize(48 * 1024 * 1024)).toBe("48 MB");
-    expect(formatSize(1.25 * 1024 ** 3)).toBe("1.3 GB");
+describe("what removing an item loses", () => {
+  // verifies: FLOW-CLEAN-UP-R17
+  it("counts a leftover's branch commits when it goes with discard, since Core then deletes the branch with them", () => {
+    expect(lostCounts(leftover({ uncommitted: 2, unshared: 5 }))).toEqual({ files: 2, commits: 5 });
+    expect(questionOf([leftover({ uncommitted: 2, unshared: 5, stranded: 1 })])).toMatchObject({ files: 2, commits: 6 });
+    // Without discard the branch is kept with its commits; a session's folder is put away, keeping its branch.
+    expect(lostCounts(leftover({ unshared: 5 }))).toEqual({ files: 0, commits: 0 });
+    expect(lostCounts(workspace({ uncommitted: 2, unshared: 5 }))).toEqual({ files: 2, commits: 0 });
   });
 });
 
-describe("a folder's name", () => {
-  it("is the last part of its path, with either separator", () => {
-    expect(folderName(String.raw`C:\Users\you\worktrees\repo\stray-folder`)).toBe("stray-folder");
-    expect(folderName("D:/wt/alpha/stray/")).toBe("stray");
-    expect(folderName(undefined)).toBeUndefined();
+describe("an item's name", () => {
+  it("is a folder's last part, with either separator", () => {
+    expect(itemName(folder({ path: String.raw`C:\Users\you\worktrees\repo\stray-folder` }), [])).toBe("stray-folder");
+    expect(itemName(leftover({ path: "D:/wt/alpha/stray/" }), [])).toBe("stray");
+    expect(itemName(workspace({ session_ids: ["s1", "s2"] }), [{ id: "s1", title: "One" }])).toBe("One, Untitled session");
   });
 });

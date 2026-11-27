@@ -11,6 +11,12 @@
   animation: page-in var(--motion-quick) var(--motion-ease-out);
 }
 
+/* Focused only after a clean-up, so a screen reader starts from the list and hears what was done. The list is no
+   control, so it draws no edge of its own: the browser's ring is no token. */
+.clean-up-body:focus {
+  outline: none;
+}
+
 .clean-up-body[data-easing] {
   overflow: clip;
 }

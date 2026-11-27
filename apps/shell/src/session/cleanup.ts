@@ -4,6 +4,7 @@
 
 import { t } from "../catalog";
 import type { CleanupInspectResult, CleanupItem, CleanupKind, Session } from "../protocol/core-api.gen";
+import { pathName } from "./attachments";
 import { titleOf } from "./tile";
 
 /** How long without activity makes a session inactive: Claude Desktop's choices (`claude-desktop/cleanup-2026-11-20.txt`). */
@@ -25,8 +26,8 @@ const counted = (n: number | undefined) => (n ?? 0) > 0;
  * Whether `cleanup.remove` must be sent `discard` for the item, as Core judges it (PROTO-CORE-API, Clean up;
  * FLOW-CLEAN-UP-R13, R27): uncommitted files, commits only the folder holds, commits git can't count or a repository
  * of its own for a workspace or a leftover; commits no other branch holds for a branch, merged or not, since they go
- * with it; and every folder. A leftover's branch holding commits of its own is kept without `discard`, so they are
- * not sent as lost and its branch stays. Ignored files are no unsaved work.
+ * with it; and every folder. A leftover's branch holding commits of its own is kept without `discard`, so those alone
+ * send none, though they go with it when something else does (`lostCounts`). Ignored files are no unsaved work.
  */
 export function sendsDiscard(inspected: CleanupInspectResult): boolean {
   switch (inspected.kind) {
@@ -72,20 +73,20 @@ export function itemName(item: CleanupItem, sessions: readonly Pick<Session, "id
     return item.session_ids.map((id) => titleOf(sessions.find((s) => s.id === id) ?? { title: "" })).join(", ");
   }
   if (item.kind === "branch") return item.branch ?? "";
-  return folderName(item.path) ?? item.branch ?? "";
+  return item.path ? pathName(item.path) : (item.branch ?? "");
 }
 
-/** The last part of a folder's path, either separator: "D:/wt/alpha/stray" is "stray". */
-export function folderName(path: string | undefined): string | undefined {
-  if (path === undefined) return undefined;
-  const parts = path.split(/[\\/]/).filter((p) => p !== "");
-  return parts.at(-1) ?? path;
-}
-
-/** What removing the item loses, counted: changed files and commits that exist nowhere else. */
+/**
+ * What removing the item loses, counted: changed files and commits that exist nowhere else. A session's folder is put
+ * away, keeping its branch, so only its stranded commits go. A leftover goes with its branch, which Core keeps when it
+ * holds commits of its own, unless the removal is sent `discard`: then those commits go too (PROTO-CORE-API, Removing
+ * a folder).
+ */
 export function lostCounts(inspected: CleanupInspectResult): { files: number; commits: number } {
-  if (inspected.kind === "workspace" || inspected.kind === "leftover") {
-    return { files: inspected.uncommitted ?? 0, commits: inspected.stranded ?? 0 };
+  if (inspected.kind === "workspace") return { files: inspected.uncommitted ?? 0, commits: inspected.stranded ?? 0 };
+  if (inspected.kind === "leftover") {
+    const branch = sendsDiscard(inspected) ? (inspected.unshared ?? 0) : 0;
+    return { files: inspected.uncommitted ?? 0, commits: (inspected.stranded ?? 0) + branch };
   }
   if (inspected.kind === "branch" && inspected.merged !== true) return { files: 0, commits: inspected.unshared ?? 0 };
   return { files: 0, commits: 0 };
@@ -155,23 +156,6 @@ export function questionTitle(q: Pick<Question, "folders" | "branches">): string
   if (q.folders > 0) parts.push(String(t("settings.storage.cleanUp.foldersPart", { count: q.folders })));
   if (q.branches > 0) parts.push(String(t("settings.storage.cleanUp.branchesPart", { count: q.branches })));
   return String(t("settings.storage.cleanUp.questionTitle", { parts: list.format(parts) }));
-}
-
-const UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
-
-/**
- * A size as File Explorer words it, in units of 1,024 named KB, MB and GB: Ersa is Windows first, and Explorer is
- * where people see how big a folder is. One decimal below 10 and none from 10: "1.2 GB", "48 MB", "0 B".
- */
-export function formatSize(bytes: number): string {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  const shown = unit === 0 || value >= 10 ? Math.round(value).toString() : (Math.round(value * 10) / 10).toString();
-  return `${shown} ${UNITS[unit]}`;
 }
 
 /**

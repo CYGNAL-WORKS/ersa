@@ -1,8 +1,9 @@
 import { Square, SquareCheck } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { t } from "../catalog";
+import { size } from "../session/attachments";
 import type { CleanupInspectResult, Project, Session } from "../protocol/core-api.gen";
-import { CLEAN_UP_DAYS, GROUPS, type ItemView, formatSize, itemName, losesWork, lostCounts, lostParts, unfinished } from "../session/cleanup";
+import { CLEAN_UP_DAYS, GROUPS, type ItemView, itemName, losesWork, lostCounts, lostParts, unfinished } from "../session/cleanup";
 import type { CleanUpActions, CleanUpView } from "../session/cleanupList";
 import { lastActive } from "../session/sessionsPage";
 import { HeightEase } from "../theme/motion";
@@ -106,7 +107,7 @@ export function CleanUp({
             <Problem lead={t("settings.storage.cleanUp.unreadError", { project: projectName(names, u.project_id) })} reason={u.message} />
           </div>
         ))}
-        {ready && ready.items.length === 0 && <p className="clean-up-empty">{t("settings.storage.cleanUp.nothingEmpty")}</p>}
+        {ready && ready.items.length === 0 && ready.unread.length === 0 && <p className="clean-up-empty">{t("settings.storage.cleanUp.nothingEmpty")}</p>}
         {ready &&
           GROUPS.map((kind) => {
             const items = ready.items.filter((v) => v.item.kind === kind);
@@ -196,7 +197,7 @@ function Item({
   // A branch and a folder are named as they are written, in mono; a session's folder by its sessions' titles, its
   // branch beside its project.
   const named = item.kind === "workspace" && (item.session_ids?.length ?? 0) > 0 ? "title" : "code";
-  const size = inspected?.size_bytes;
+  const bytes = inspected?.size_bytes;
   const when = item.kind === "workspace" && item.last_activity_at ? lastActive({ created_at: item.last_activity_at, last_activity_at: item.last_activity_at }, now ?? new Date()) : undefined;
   return (
     <li className="clean-up-item">
@@ -221,7 +222,7 @@ function Item({
             <span>{projectName(names, item.project_id)}</span>
             {when && <span>{when}</span>}
             {named === "title" && item.branch && <span className="clean-up-code">{item.branch}</span>}
-            {size !== undefined && <span className="clean-up-size">{formatSize(size)}</span>}
+            {bytes !== undefined && <span className="clean-up-size">{size(bytes)}</span>}
           </span>
           {/* A folder named by its own name says where it is, on a line of its own. */}
           {named === "code" && item.path && (

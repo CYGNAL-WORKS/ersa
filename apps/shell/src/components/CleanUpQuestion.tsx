@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { t } from "../catalog";
-import { formatSize, lostParts, questionOf, questionTitle } from "../session/cleanup";
+import { size } from "../session/attachments";
+import { lostParts, questionOf, questionTitle } from "../session/cleanup";
 import type { RunView } from "../session/cleanupList";
 import { Button, ButtonLabels } from "./Button";
 import { Dialog, DialogLoss } from "./Dialog";
@@ -57,7 +58,7 @@ export function CleanUpQuestion({
       inline={inline}
       detail={
         <>
-          {q.freesSpace && <p>{t("settings.storage.cleanUp.freesDetail", { size: formatSize(q.bytes) })}</p>}
+          {q.freesSpace && <p>{t("settings.storage.cleanUp.freesDetail", { size: size(q.bytes) })}</p>}
           {q.sessions && <p>{t("settings.storage.cleanUp.keepsDetail")}</p>}
           {removing && (
             <p role="status">{t("settings.storage.cleanUp.removedProgress", { done: run.done, count: run.ticked.length })}</p>

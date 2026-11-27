@@ -72,41 +72,57 @@ export function useCleanUp(client: CoreClient, describe: (error: unknown) => str
   // Each read has a number; an answer to an older read, or an inspect it began, changes nothing.
   const reading = useRef(0);
   const stopping = useRef(false);
+  // The items waiting for an inspect, the read they belong to, and how many inspects are at Core now. One pool for
+  // every read: an inspect already sent can't be called off, so a read made meanwhile waits for its place rather than
+  // adding more, and never more than INSPECT_AT_ONCE are at Core whatever the reads.
+  const waiting = useRef<{ read: number; items: CleanupItem[] }>({ read: 0, items: [] });
+  const atCore = useRef(0);
 
   /** Replaces one item's view, by id, in the list now shown. */
   const setItem = useCallback((view: ItemView) => {
     setList((now) => (now.state === "ready" ? { ...now, items: now.items.map((v) => (v.item.id === view.item.id ? view : v)) } : now));
   }, []);
 
+  /** Sends the next inspects while there is room, each answer counted only for the read it belongs to (R19). */
+  const pump = useCallback(() => {
+    while (atCore.current < INSPECT_AT_ONCE && waiting.current.items.length > 0) {
+      const item = waiting.current.items.shift()!;
+      const mine = waiting.current.read;
+      atCore.current += 1;
+      void client
+        .call("cleanup.inspect", { id: item.id })
+        .then(
+          (inspected): ItemView => ({ state: "inspected", item, inspected }),
+          (error): ItemView => ({ state: "uninspectable", item, message: describe(error) }),
+        )
+        .then((view) => {
+          atCore.current -= 1;
+          if (mine === reading.current) setItem(view);
+          pump();
+        });
+    }
+  }, [client, describe, setItem]);
+
   const read = useCallback(
     (inactive: CleanUpDays) => {
       const mine = ++reading.current;
       setList({ state: "loading" });
       setChoices({});
+      waiting.current = { read: mine, items: [] };
       client.call("cleanup.list", { inactive_days: inactive }).then(
         (answer) => {
           if (mine !== reading.current) return;
           setList({ state: "ready", items: answer.items.map((item) => ({ state: "checking", item })), unread: answer.unread });
-          // A few inspects at a time, each worker taking the next item in list order as it finishes one (R19).
-          const queue = [...answer.items];
-          const work = async () => {
-            for (let item = queue.shift(); item && mine === reading.current; item = queue.shift()) {
-              const { id } = item;
-              const view: ItemView = await client.call("cleanup.inspect", { id }).then(
-                (inspected): ItemView => ({ state: "inspected", item, inspected }),
-                (error): ItemView => ({ state: "uninspectable", item, message: describe(error) }),
-              );
-              if (mine === reading.current) setItem(view);
-            }
-          };
-          for (let i = 0; i < INSPECT_AT_ONCE; i++) void work();
+          // The items are inspected a few at a time, in list order; an older read's waiting items are dropped.
+          waiting.current = { read: mine, items: [...answer.items] };
+          pump();
         },
         (error) => {
           if (mine === reading.current) setList({ state: "error", message: describe(error) });
         },
       );
     },
-    [client, describe, setItem],
+    [client, describe, pump],
   );
 
   const ticked = useMemo(() => {

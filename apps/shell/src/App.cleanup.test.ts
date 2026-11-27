@@ -234,6 +234,17 @@ describe("the question", () => {
     expect(core.callsOf("cleanup.remove")).toEqual([]);
   });
 
+  // verifies: FLOW-CLEAN-UP-R17
+  it("counts a leftover's branch commits among those lost when it goes with what it holds", async () => {
+    const core = fakeCore([{ ...repo, holds_repository: false, uncommitted: 2, unshared: 5 }]);
+    await openStorage(core);
+    expect(said("vendor")).toContain("Removing it loses 2 changed files and 5 commits that exist nowhere else for good.");
+    fireEvent.click(box("vendor"));
+    fireEvent.click(cleanUpButton());
+    await settle();
+    expect(question()!.textContent).toContain("You lose 2 changed files and 5 commits that exist nowhere else for good.");
+  });
+
   // verifies: FLOW-CLEAN-UP-R28
   it("says how many of the folders that go hold a repository of their own", async () => {
     await openStorage(fakeCore([repo, { ...repo, id: "lo-2", path: `${WT}/vendor-2`, token: "t2" }]));
@@ -357,6 +368,29 @@ describe("a slow or failing Core", () => {
   });
 
   // verifies: FLOW-CLEAN-UP-R19
+  it("keeps no more than three inspects at Core when the list is read again while some are still out", async () => {
+    const core = fakeCore([clean, kept, merged, spike, stray], { hold: ["cleanup.inspect"] });
+    await openStorage(core);
+    expect(core.heldOf("cleanup.inspect")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: /^Clean up inactive sessions:/ }));
+    fireEvent.click(screen.getByRole("option", { name: "60 days" }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /^Clean up inactive sessions:/ }));
+    fireEvent.click(screen.getByRole("option", { name: "90 days" }));
+    await settle();
+    // The older reads' inspects still hold their places: the newest read waits for them.
+    expect(core.heldOf("cleanup.inspect")).toHaveLength(3);
+    await core.release("cleanup.inspect");
+    expect(core.heldOf("cleanup.inspect")).toHaveLength(3);
+    // The answer to the older read changes nothing; the newest read's first item is what was sent next.
+    expect(core.callsOf("cleanup.inspect").at(-1)).toEqual({ id: "ws-clean" });
+    expect(said("Fix the build")).toContain("Checking…");
+    while (core.heldOf("cleanup.inspect").length > 0) await core.release("cleanup.inspect");
+    expect(said("Fix the build")).toContain("Nothing is lost.");
+    expect(said("ersa/spike")).toContain("4 commits that exist nowhere else");
+  });
+
+  // verifies: FLOW-CLEAN-UP-R19
   it("says there is nothing to clean up when the list is empty", async () => {
     await openStorage(fakeCore([]));
     expect(within(list()).getByText("Nothing to clean up. Folders and branches Ersa no longer needs appear here.")).toBeTruthy();
@@ -384,5 +418,7 @@ describe("a slow or failing Core", () => {
     await openStorage(core);
     expect(list().textContent).toContain("Ersa couldn't look for branches and folders in alpha.");
     expect(list().textContent).toContain("git timed out after 10 seconds");
+    // Ersa didn't look there, so it doesn't say there is nothing to clean up.
+    expect(list().textContent).not.toContain("Nothing to clean up.");
   });
 });
