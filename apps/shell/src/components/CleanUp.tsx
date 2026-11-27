@@ -63,7 +63,7 @@ export function CleanUp({
   const body = useRef<HTMLDivElement>(null);
   const ease = useRef(new HeightEase()).current;
   useLayoutEffect(() => {
-    if (body.current) ease.change(body.current);
+    if (body.current) ease.change(body.current, true, { clipGrowth: true });
   });
 
   // When the question closes, focus comes back to Clean up…, or, while the list is read again after a clean-up and the
@@ -193,7 +193,8 @@ function Item({
   const { item } = view;
   const inspected = view.state === "inspected" ? view.inspected : undefined;
   const off = disabled || inspected === undefined;
-  // A branch and a folder are named as they are written, in mono; a session's folder by its sessions' titles.
+  // A branch and a folder are named as they are written, in mono; a session's folder by its sessions' titles, its
+  // branch beside its project.
   const named = item.kind === "workspace" && (item.session_ids?.length ?? 0) > 0 ? "title" : "code";
   const size = inspected?.size_bytes;
   const when = item.kind === "workspace" && item.last_activity_at ? lastActive({ created_at: item.last_activity_at, last_activity_at: item.last_activity_at }, now ?? new Date()) : undefined;
@@ -220,8 +221,9 @@ function Item({
             <span>{projectName(names, item.project_id)}</span>
             {when && <span>{when}</span>}
             {named === "title" && item.branch && <span className="clean-up-code">{item.branch}</span>}
-            {named === "title" && item.path && <span className="clean-up-code">{item.path}</span>}
             {size !== undefined && <span className="clean-up-size">{formatSize(size)}</span>}
+            {/* A folder named by its own name says where it is, on a line of its own. */}
+            {named === "code" && item.path && <span className="clean-up-code clean-up-path">{item.path}</span>}
           </span>
           <span id={`${id}-loss`} className="clean-up-loss">
             {view.state === "checking" && <Checking />}

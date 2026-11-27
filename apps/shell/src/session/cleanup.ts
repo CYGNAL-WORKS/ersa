@@ -65,14 +65,21 @@ export const unfinished = (inspected: CleanupInspectResult) => inspected.kind ==
 
 /**
  * What the item is called on the list: its sessions' titles for a workspace, its branch for a branch, else its
- * folder. A session the window doesn't hold reads as untitled.
+ * folder's own name, the list showing where it is beneath. A session the window doesn't hold reads as untitled.
  */
 export function itemName(item: CleanupItem, sessions: readonly Pick<Session, "id" | "title">[]): string {
   if (item.kind === "workspace" && item.session_ids && item.session_ids.length > 0) {
     return item.session_ids.map((id) => titleOf(sessions.find((s) => s.id === id) ?? { title: "" })).join(", ");
   }
   if (item.kind === "branch") return item.branch ?? "";
-  return item.path ?? item.branch ?? "";
+  return folderName(item.path) ?? item.branch ?? "";
+}
+
+/** The last part of a folder's path, either separator: "D:/wt/alpha/stray" is "stray". */
+export function folderName(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  const parts = path.split(/[\/]/).filter((p) => p !== "");
+  return parts.at(-1) ?? path;
 }
 
 /** What removing the item loses, counted: changed files and commits that exist nowhere else. */

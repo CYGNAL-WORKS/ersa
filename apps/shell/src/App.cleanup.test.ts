@@ -166,8 +166,8 @@ describe("the list", () => {
     expect(box("ersa/spike").checked).toBe(false);
     expect(said("ersa/spike")).toContain("4 commits that exist nowhere else");
     // Never a folder.
-    expect(box(`${WT}/stray`).checked).toBe(false);
-    expect(box(`${WT}/stray`).disabled).toBe(false);
+    expect(box("stray").checked).toBe(false);
+    expect(box("stray").disabled).toBe(false);
     expect(within(list()).getByText("2 items chosen")).toBeTruthy();
   });
 
@@ -175,17 +175,17 @@ describe("the list", () => {
   it("says of a folder that holds a repository of its own that it goes with the folder, and leaves it unticked", async () => {
     await openStorage(fakeCore([repo]));
     expect(within(list()).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Leftover workspaces"]);
-    expect(said(`${WT}/vendor`)).toContain("Its folder holds a repository of its own, which goes with the folder and doesn't come back with it.");
-    expect(box(`${WT}/vendor`).checked).toBe(false);
+    expect(said("vendor")).toContain("Its folder holds a repository of its own, which goes with the folder and doesn't come back with it.");
+    expect(box("vendor").checked).toBe(false);
   });
 
   // verifies: FLOW-CLEAN-UP-R29
   it("says of a folder reported without a size that Ersa couldn't finish looking through it, unticked and tickable", async () => {
     await openStorage(fakeCore([huge]));
-    expect(said(`${WT}/huge`)).toContain("Ersa couldn't finish looking through this folder, so it can't say how big it is or whether anything inside it changed.");
-    expect(box(`${WT}/huge`).checked).toBe(false);
-    fireEvent.click(box(`${WT}/huge`));
-    expect(box(`${WT}/huge`).checked).toBe(true);
+    expect(said("huge")).toContain("Ersa couldn't finish looking through this folder, so it can't say how big it is or whether anything inside it changed.");
+    expect(box("huge").checked).toBe(false);
+    fireEvent.click(box("huge"));
+    expect(box("huge").checked).toBe(true);
     expect(cleanUpButton().disabled).toBe(false);
   });
 
@@ -237,8 +237,8 @@ describe("the question", () => {
   // verifies: FLOW-CLEAN-UP-R28
   it("says how many of the folders that go hold a repository of their own", async () => {
     await openStorage(fakeCore([repo, { ...repo, id: "lo-2", path: `${WT}/vendor-2`, token: "t2" }]));
-    fireEvent.click(box(`${WT}/vendor`));
-    fireEvent.click(box(`${WT}/vendor-2`));
+    fireEvent.click(box("vendor"));
+    fireEvent.click(box("vendor-2"));
     fireEvent.click(cleanUpButton());
     await settle();
     expect(question()!.textContent).toContain("2 of the folders hold a repository of their own, which go with them.");
@@ -248,8 +248,8 @@ describe("the question", () => {
   // verifies: FLOW-CLEAN-UP-R29
   it("says how many of the folders that go Ersa couldn't finish looking through, which the space freed leaves out", async () => {
     await openStorage(fakeCore([huge, stray]));
-    fireEvent.click(box(`${WT}/huge`));
-    fireEvent.click(box(`${WT}/stray`));
+    fireEvent.click(box("huge"));
+    fireEvent.click(box("stray"));
     fireEvent.click(cleanUpButton());
     await settle();
     expect(question()!.textContent).toContain("This frees 1 KB.");
@@ -262,7 +262,7 @@ describe("cleaning up", () => {
   it("removes the ticked items one at a time, saying how many are done, then says what it removed and reads the list again", async () => {
     const core = fakeCore([clean, merged, stray], { hold: ["cleanup.remove"] });
     await openStorage(core);
-    fireEvent.click(box(`${WT}/stray`));
+    fireEvent.click(box("stray"));
     fireEvent.click(cleanUpButton());
     await settle();
     fireEvent.click(within(question()!).getByRole("button", { name: "Discard and clean up" }));
