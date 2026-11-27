@@ -860,6 +860,8 @@ const oneBackend = { local: [claudeCode] };
 
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
+/** Room beneath for the arrange menu, open. */
+const arrangeRoom = (node: ReactNode) => <div className="gallery-room gallery-room-menu">{node}</div>;
 /** The workbench open at the right of a region standing in for the window beside the rail, in a resize edge's state. */
 const workbench = (force?: "hover" | "pressed" | "focus", body?: ReactNode, tall = false) => (
   <div className={tall ? "gallery-workbench gallery-workbench-tall" : "gallery-workbench"}>
@@ -1154,12 +1156,12 @@ const entries: Entry[] = [
       ["Keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} force="focus" />],
       ["Before Ersa connects", <RailTop onNewSession={() => {}} arrange={arrange} disabled />],
       ["Before Ersa connects, keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} disabled force="focus" />],
-      ["Arrange menu, open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
+      ["Arrange menu, open", arrangeRoom(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
       [
         "Arrange menu, Group by open",
-        room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", sortBy: "created", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
+        arrangeRoom(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", sortBy: "created", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
       ],
-      ["Arrange menu, Sort by open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "project", sortBy: "name", show: "active" }, initialOpen: true, initialSubmenu: 1 }} />)],
+      ["Arrange menu, Sort by open", arrangeRoom(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "project", sortBy: "name", show: "active" }, initialOpen: true, initialSubmenu: 1 }} />)],
     ],
   },
   {
