@@ -2139,7 +2139,7 @@ fn check(output: Output, message: &str) -> Result<(), VcsError> {
     checked(output, message).map(drop)
 }
 
-// -- What the Clean up list reads (FLOW-CLEAN-UP-R11, R12) -----------------
+// -- What the Clean up list reads (FLOW-CLEAN-UP-R11, R30) -----------------
 
 /// How long `cleanup.inspect` measures a folder before it stops and leaves
 /// its size unsaid (PROTO-CORE-API, Clean up).
@@ -2227,7 +2227,7 @@ pub async fn names_folder(entries: &[WorktreeEntry], path: &str) -> bool {
     find(entries, path).await.is_some()
 }
 
-/// What deleting a local branch would lose (FLOW-CLEAN-UP-R12).
+/// What deleting a local branch would lose (FLOW-CLEAN-UP-R30).
 #[derive(Debug, Clone, Default)]
 pub struct BranchLoss {
     /// The commits it holds that no other local branch and no
@@ -2344,54 +2344,95 @@ pub async fn real_folders_in(path: &std::path::Path) -> Result<Vec<String>, VcsE
 #[derive(Debug, Clone, Default)]
 pub struct Measure {
     /// What its files take; `None` when measuring took longer than its
-    /// limit, or there is no folder.
+    /// limit.
     pub size_bytes: Option<u64>,
     /// One line per entry read (its path, length and modified time): every
-    /// entry when the measuring finished, else the folder's own entries.
+    /// entry when the measuring finished, else the folder's own entries in
+    /// name order (FLOW-CLEAN-UP-R31).
     pub evidence: Vec<String>,
+    /// Whether every entry directly in the folder was read: false only when
+    /// the measuring stopped among them, so `evidence` is not all of them.
+    pub own_entries_read: bool,
+}
+
+/// What a walk has read of the folder's own entries so far. Kept outside
+/// the walk's thread, so that when a read hangs and the thread is given up
+/// on, what was read before it still counts.
+#[derive(Debug, Default)]
+struct OwnEntries {
+    /// Each one's name, with the line it gives.
+    read: Vec<(std::ffi::OsString, String)>,
+    /// Whether all of them were read.
+    all: bool,
+    /// Whether the walk has begun and not yet returned.
+    walking: bool,
+}
+
+/// Marks the walk under way from when it begins until it returns, by an
+/// answer, an error or a panic: a wait that fails while it is under way
+/// gave up on it; one that fails before it began, or after it returned,
+/// fails for its own reason.
+struct Walking(Arc<std::sync::Mutex<OwnEntries>>);
+
+impl Walking {
+    fn begin(own: &Arc<std::sync::Mutex<OwnEntries>>) -> Walking {
+        lock(own).walking = true;
+        Walking(Arc::clone(own))
+    }
+}
+
+impl Drop for Walking {
+    fn drop(&mut self) {
+        lock(&self.0).walking = false;
+    }
 }
 
 /// Measures the folder at `path`: what its files take, links not followed,
-/// for at most `limit` (PROTO-CORE-API, Clean up). `gate` stops the walk
-/// on its thread in tests. A folder that is not there has no size.
+/// for at most `time` (PROTO-CORE-API, Clean up); `None` when there is no
+/// folder there. In tests, `depth` stops it as when its time runs out on
+/// reaching a folder that many levels down, and `gate` stops the walk on
+/// its thread before it reads anything.
 pub async fn measure_folder(
     path: &str,
-    limit: Duration,
+    time: Duration,
+    depth: Option<usize>,
     gate: Option<Arc<Gate>>,
-) -> Result<Measure, VcsError> {
+) -> Result<Option<Measure>, VcsError> {
     let root = std::path::PathBuf::from(path);
     let runtime = tokio::runtime::Handle::current();
     let started = std::time::Instant::now();
-    let deadline = Deadline::after(limit + MEASURE_GRACE);
-    blocking(deadline, "measuring the folder", move |_| {
+    let deadline = Deadline::after(time + MEASURE_GRACE);
+    let own = Arc::new(std::sync::Mutex::new(OwnEntries::default()));
+    let walked = Arc::clone(&own);
+    let measured = blocking(deadline, "measuring the folder", move |_| {
+        let _walking = Walking::begin(&walked);
+        let own = walked;
         // In tests, the folder that does not answer.
         if let Some(gate) = gate {
             runtime.block_on(gate.stop());
         }
-        let stop = started + limit;
+        let stop = started + time;
         let mut evidence = Vec::new();
-        let mut top = Vec::new();
         let mut size = 0u64;
-        // Breadth first, so the folder's own entries are read before any
-        // deeper one: they are the evidence when the measuring stops.
+        // Breadth first, so the folder's own entries are all read before
+        // any deeper one: they are the evidence when the measuring stops.
         let mut folders = std::collections::VecDeque::from([(root.clone(), 0usize)]);
-        while let Some((folder, depth)) = folders.pop_front() {
+        while let Some((folder, level)) = folders.pop_front() {
+            // In tests: here, every entry at the levels above was read.
+            if depth.is_some_and(|depth| level >= depth) {
+                return Ok(Some(stopped(&own)));
+            }
             let entries = match std::fs::read_dir(&folder) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound && depth == 0 => {
-                    return Ok(Measure {
-                        size_bytes: None,
-                        evidence: vec!["no folder".to_string()],
-                    });
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && level == 0 => {
+                    return Ok(None);
                 }
                 other => other?,
             };
             for entry in entries {
+                // Checked before each entry, so stopping among the folder's
+                // own leaves at least one of them unread.
                 if std::time::Instant::now() >= stop {
-                    top.push("not measured to the end".to_string());
-                    return Ok(Measure {
-                        size_bytes: None,
-                        evidence: top,
-                    });
+                    return Ok(Some(stopped(&own)));
                 }
                 let entry = entry?;
                 let meta = std::fs::symlink_metadata(entry.path())?;
@@ -2403,26 +2444,63 @@ pub async fn measure_folder(
                 let full = entry.path();
                 let relative = full.strip_prefix(&root).unwrap_or(&full);
                 let line = format!("{} {} {modified}", relative.display(), meta.len());
-                if depth == 0 {
-                    top.push(line.clone());
+                if level == 0 {
+                    lock(&own).read.push((entry.file_name(), line.clone()));
                 }
                 evidence.push(line);
                 if meta.file_type().is_symlink() {
                     continue;
                 }
                 if meta.is_dir() {
-                    folders.push_back((full, depth + 1));
+                    folders.push_back((full, level + 1));
                 } else {
                     size += meta.len();
                 }
             }
+            if level == 0 {
+                lock(&own).all = true;
+            }
         }
-        Ok(Measure {
+        Ok(Some(Measure {
             size_bytes: Some(size),
             evidence,
-        })
+            own_entries_read: true,
+        }))
     })
-    .await
+    .await;
+    match measured {
+        // Given up on at the deadline while a read did not answer: the
+        // measuring stopped there, with what it had read of the folder's
+        // own entries. A walk that ended in an error, even past the
+        // deadline, fails the inspect, as does one that ended just as the
+        // wait gave up, and one refused before it began.
+        Err(_) if lock(&own).walking => Ok(Some(stopped(&own))),
+        other => other,
+    }
+}
+
+/// `own` locked; a walk that panicked holding it left nothing half written,
+/// since each change is one push or one flag.
+fn lock(own: &std::sync::Mutex<OwnEntries>) -> std::sync::MutexGuard<'_, OwnEntries> {
+    own.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// What a measuring that stopped before the end found: no size, and the
+/// folder's own entries read, in name order whatever order the file system
+/// gave them in, then a line saying it stopped, so no finished measuring
+/// gives the same evidence (FLOW-CLEAN-UP-R31).
+fn stopped(own: &std::sync::Mutex<OwnEntries>) -> Measure {
+    let own = lock(own);
+    let mut read = own.read.clone();
+    read.sort();
+    let mut evidence: Vec<String> = read.into_iter().map(|(_, line)| line).collect();
+    evidence.push("not measured to the end".to_string());
+    Measure {
+        size_bytes: None,
+        evidence,
+        own_entries_read: own.all,
+    }
 }
 
 #[cfg(test)]
@@ -2845,5 +2923,32 @@ mod tests {
         assert_eq!(e.to_string(), "the worktree is locked: in use");
         assert!(e.is_refusal());
         assert!(VcsError::Dirty.is_refusal());
+    }
+
+    /// The order the file system gives a folder's own entries in does not
+    /// reach what a measuring that stopped found (FLOW-CLEAN-UP-R31): the
+    /// socket tests can't vary it, since NTFS always lists by name.
+    #[test]
+    fn a_stopped_measuring_takes_the_folders_own_entries_in_name_order() {
+        let read = |names: [&str; 3]| {
+            let read = names
+                .iter()
+                .map(|name| (name.into(), format!("{name} 1 2")))
+                .collect();
+            let own = OwnEntries {
+                read,
+                all: true,
+                walking: false,
+            };
+            stopped(&std::sync::Mutex::new(own))
+        };
+        let one = read(["b", "a", "c"]);
+        let other = read(["c", "b", "a"]);
+        assert_eq!(one.evidence, other.evidence);
+        assert_eq!(
+            one.evidence,
+            ["a 1 2", "b 1 2", "c 1 2", "not measured to the end"]
+        );
+        assert_eq!(one.size_bytes, None);
     }
 }

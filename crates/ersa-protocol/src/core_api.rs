@@ -1187,7 +1187,7 @@ pub struct CleanupListResult {
 
 /// `cleanup.inspect` result: the item as `cleanup.list` gives it, its
 /// fields repeated here, with what removing it would lose
-/// (FLOW-CLEAN-UP-R12, R26). Each loss field is present only for the kinds
+/// (FLOW-CLEAN-UP-R30, R26). Each loss field is present only for the kinds
 /// it names. Params are [`IdParams`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1231,7 +1231,9 @@ pub struct CleanupInspection {
     /// change nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merged: Option<bool>,
-    /// Opaque; changes whenever what removing the item would lose changes.
+    /// Opaque; changes whenever what removing the item would lose changes,
+    /// but for a folder not measured to the end, whose token follows only
+    /// its own entries (FLOW-CLEAN-UP-R31).
     pub token: String,
 }
 
