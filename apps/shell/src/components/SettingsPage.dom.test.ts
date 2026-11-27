@@ -21,6 +21,32 @@ describe("Archive inactive sessions' chip", () => {
     expect(chip().disabled).toBe(true);
   });
 
+  // A chip that becomes unavailable, or goes, with keyboard focus on it would drop focus to the window: the chosen
+  // section name takes it, so the next Tab starts from the page.
+  it("hands keyboard focus to the chosen section name when it becomes unavailable or goes", () => {
+    const ready: ArchiveView = { state: "ready", value: 7 };
+    const props = { onArchive: () => {} };
+    const drawn = render(createElement(SettingsPage, { archive: ready, ...props }));
+    const storage = screen.getByRole("button", { name: "Storage" });
+    chip().focus();
+    drawn.rerender(createElement(SettingsPage, { archive: ready, offline: true, ...props }));
+    expect(document.activeElement).toBe(storage);
+
+    drawn.rerender(createElement(SettingsPage, { archive: ready, ...props }));
+    chip().focus();
+    drawn.rerender(createElement(SettingsPage, { archive: { state: "error", message: "gone" }, ...props }));
+    expect(document.activeElement).toBe(storage);
+  });
+
+  it("leaves focus the user put elsewhere when the chip becomes unavailable", () => {
+    const ready: ArchiveView = { state: "ready", value: 7 };
+    const drawn = render(createElement("div", null, createElement("button", null, "Elsewhere"), createElement(SettingsPage, { archive: ready, onArchive: () => {} })));
+    chip().focus();
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    drawn.rerender(createElement("div", null, createElement("button", null, "Elsewhere"), createElement(SettingsPage, { archive: ready, offline: true, onArchive: () => {} })));
+    expect(document.activeElement?.textContent).toBe("Elsewhere");
+  });
+
   it("keeps the value last read, unavailable, while Ersa can't reach Core", () => {
     draw({ state: "ready", value: 30 }, true);
     expect(chip().getAttribute("aria-label")).toBe("Archive inactive sessions: 30 days");

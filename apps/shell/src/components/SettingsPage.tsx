@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useLayoutEffect, useRef } from "react";
 import { t } from "../catalog";
 import { ARCHIVE_DAYS, type ArchiveDays, type ArchiveView } from "../session/archiveInactive";
 import type { Sending } from "../session/follow";
@@ -39,14 +39,30 @@ export function SettingsPage({
   offline?: boolean;
   /** Sends a choice to Core: a number of days, or undefined for Never. */
   onArchive: (days: ArchiveDays | undefined) => void;
-  /** For the gallery: the chip's or the section name's pointer or keyboard state, and the chip's list open. */
+  /** For the gallery: the chip's pointer or keyboard state, the section name's keyboard focus, and the chip's list open. */
   forceChip?: "hover" | "focus" | "pressed";
-  forceSection?: "hover" | "focus" | "pressed";
+  forceSection?: "focus";
   initialOpen?: boolean;
 }) {
   const storageId = useId();
   const sending = changing?.state === "sending";
   const ready = archive.state === "ready";
+  const unavailable = !ready || offline === true;
+
+  // The chip turns unavailable when Ersa loses Core, and goes when the setting can't be read. With keyboard focus on it
+  // (or in its list), focus would fall to the window, so the chosen section name takes it, as the sessions page's
+  // chosen tab does. Focus the user has put elsewhere stays there.
+  const row = useRef<HTMLDivElement>(null);
+  const chosenSection = useRef<HTMLButtonElement>(null);
+  const focusInRow = useRef(false);
+  useLayoutEffect(() => {
+    if (!unavailable || !focusInRow.current) return;
+    focusInRow.current = false;
+    const now = document.activeElement;
+    if (now !== null && now !== document.body && !row.current?.contains(now)) return;
+    chosenSection.current?.focus({ preventScroll: true });
+  }, [unavailable]);
+
   return (
     <section className="page settings-page">
       <div className="page-column settings-page-column">
@@ -54,7 +70,7 @@ export function SettingsPage({
         <div className="settings-page-body">
           {/* The section names, Storage first and the one the page opens on. There is one so far. */}
           <nav className="settings-page-sections" aria-label={t("settings.sectionsLabel")}>
-            <button type="button" className="page-tab" aria-current="true" data-force={forceSection}>
+            <button ref={chosenSection} type="button" className="page-tab" aria-current="true" data-force={forceSection}>
               {t("settings.storage.storageHeading")}
             </button>
           </nav>
@@ -63,7 +79,17 @@ export function SettingsPage({
               {t("settings.storage.storageHeading")}
             </h2>
             <div className="setting">
-              <div className="setting-row">
+              <div
+                ref={row}
+                className="setting-row"
+                onFocus={() => {
+                  focusInRow.current = true;
+                }}
+                onBlur={(event) => {
+                  // Focus moved on by the user; one that went to nothing may be the chip turning unavailable.
+                  if (event.relatedTarget !== null && !row.current?.contains(event.relatedTarget)) focusInRow.current = false;
+                }}
+              >
                 <div className="setting-words">
                   <span className="setting-label">{t("settings.storage.archiveInactiveLabel")}</span>
                   <span className="setting-description">{t("settings.storage.archiveInactiveDescription")}</span>

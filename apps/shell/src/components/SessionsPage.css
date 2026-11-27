@@ -135,19 +135,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* With reduced motion on, the page appears at once. */
-@media (prefers-reduced-motion: reduce) {
-  .sessions-page,
-  .sessions-page-search {
-    animation: none;
-  }
-
-  .sessions-page-tab,
-  .sessions-page-search {
-    transition: none;
-  }
-}
-
+/* With reduced motion on, the search field appears at once; the page and its tabs are Page.css's. */
 @media (prefers-reduced-motion: reduce) {
   .sessions-page-search {
     animation: none;

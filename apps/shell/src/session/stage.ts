@@ -44,7 +44,7 @@ export type StageAction =
   | { type: "allSessions" }
   /** Settings, from the arrange menu until the title bar is built (LAY-SHELL, The arrange button). */
   | { type: "settings" }
-  /** The active session was archived or deleted: the new-session screen takes its place, behind the sessions page if it shows. */
+  /** The active session was archived or deleted: the new-session screen takes its place, behind a page if one shows. */
   | { type: "activeLeft" }
   | { type: "select"; id: string }
   /** With no session chosen, the newest: a reopened window shows the session that was running when it closed. */

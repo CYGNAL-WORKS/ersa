@@ -40,8 +40,8 @@ import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangemen
 import { noteState, sessionNoteFailure, signInKey, signedInClears, useNoteClears, useSignIns } from "./session/signIn";
 import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
-import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
-import { type ArchivePatch, useArchiveSetting } from "./session/archiveInactive";
+import { useWorkbench } from "./session/workbench";
+import { useArchiveSetting } from "./session/archiveInactive";
 import { type RawLogReader, type RawLogView, readRawLog } from "./session/rawLog";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
@@ -143,8 +143,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [resuming, setResuming] = useState<Record<string, Sending>>({});
   // Forks on their way from a tile or row, and why the last was refused, by the original's id.
   const [forking, setForking] = useState<Record<string, Sending>>({});
+  // Core's settings, written as a merge patch: the rail's arrangement, the workbench and Storage's settings each send
+  // theirs here.
+  const saveSettings = useCallback((patch: object) => client.call("settings.set", { patch }), [client]);
   // How the rail is arranged (FLOW-ORGANIZE-SESSIONS): kept in Core's settings and read on each connection.
-  const saveArrangement = useCallback((patch: object) => client.call("settings.set", { patch }), [client]);
   const {
     arrangement,
     reading: arranging,
@@ -152,14 +154,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     change: arrange,
     read: readArrangement,
     readFailed: arrangementUnread,
-  } = useRailArrangement(saveArrangement, describeError);
+  } = useRailArrangement(saveSettings, describeError);
   // The workbench, open or closed and its width, kept in Core's settings for the window (FLOW-READ-RAW-LOG-R02).
-  const saveWorkbench = useCallback((patch: WorkbenchPatch) => client.call("settings.set", { patch }), [client]);
-  const workbench = useWorkbench(saveWorkbench);
+  const workbench = useWorkbench(saveSettings);
   const readWorkbench = workbench.read;
   // Storage's Archive inactive sessions (FLOW-CLEAN-UP-R15), read with the rest of the settings and sent as a change.
-  const saveArchive = useCallback((patch: ArchivePatch) => client.call("settings.set", { patch }), [client]);
-  const archiveSetting = useArchiveSetting(saveArchive, describeError);
+  const archiveSetting = useArchiveSetting(saveSettings, describeError);
   const { read: readArchive, unread: archiveUnread } = archiveSetting;
   // Today, moved on at local midnight, so the date groups move with the passing of days alone (R07).
   const today = useLocalDay();
@@ -961,7 +961,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const rawLogBackend = rawLogSession ? backendLabel(rawLogSession, backends) : "";
   const firstSendHere = firstSend && firstSend.id === shown?.id ? firstSend : undefined;
 
-  // A file dropped while the sessions page shows reaches no composer behind it.
+  // A file dropped while the sessions page or the settings page shows reaches no composer behind it.
   const dragDrop = onPage ? undefined : shell?.onDragDrop;
 
   // The projects as last read, so a screen with a message being written stays while Core is away; sending then
@@ -1330,7 +1330,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projects={screenProjects}
               backends={backends}
               backendFailures={backendFailures}
-              // Behind the sessions page the screen is not showing: coming back from it shows it again (R50).
+              // Behind either page the screen is not showing: coming back from it shows it again (R50).
               shown={!onPage}
               onReadBackends={readHostBackends}
               signIns={signIns.signIns}
@@ -1345,7 +1345,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               dragDrop={dragDrop}
               rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
-              // Behind the sessions page, the quit question or the delete question the screen is out of reach, and a
+              // Behind the sessions page or the settings page, the quit question or the delete question the screen is out of reach, and a
               // trust question it opened could not be seen or answered: Add project and Ctrl+O do nothing meanwhile.
               onChooseFolder={onPage || behind || quitAsk ? undefined : chooseFolder}
               onAddProject={addProject}
