@@ -26,6 +26,8 @@
 //!   ends; the fake otherwise reports itself running from its start.
 //! - `broken pipe`: the write fails halfway, so Core can't tell whether the
 //!   backend has the message.
+//! - `slow`: the backend takes [`SLOW_HAND_OVER`] to take the message, then
+//!   answers it as any other.
 //! - `stopped mid-write`: the line is recorded, then the session is found
 //!   stopped, as a kill landing during the write would leave it.
 //! - `report <model> <permission mode>`: the backend reports its model and
@@ -94,6 +96,9 @@ pub const FAKE_ASK_DESCRIPTION: &str = "Ask before every action";
 
 /// The largest image the fake takes.
 pub const IMAGE_MAX: u64 = 1024;
+
+/// How long the backend takes to take a `slow` message.
+pub const SLOW_HAND_OVER: std::time::Duration = std::time::Duration::from_millis(400);
 
 /// What the fake has been asked to do, shared with the test.
 #[derive(Debug, Default)]
@@ -1166,6 +1171,9 @@ impl AdapterSession for FakeSession {
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
+        }
+        if message.text == "slow" {
+            tokio::time::sleep(SLOW_HAND_OVER).await;
         }
         // The backend exited before the write, while Core still holds its run.
         if message.text == "stopped before the write" {
