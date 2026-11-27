@@ -38,13 +38,30 @@ describe("Archive inactive sessions' chip", () => {
     expect(document.activeElement).toBe(storage);
   });
 
-  it("leaves focus the user put elsewhere when the chip becomes unavailable", () => {
-    const ready: ArchiveView = { state: "ready", value: 7 };
-    const drawn = render(createElement("div", null, createElement("button", null, "Elsewhere"), createElement(SettingsPage, { archive: ready, onArchive: () => {} })));
+  // A page beside a button outside it, and the page drawn again with Ersa unable to reach Core.
+  const beside = (offline: boolean, elsewhere = true) =>
+    createElement("div", null, elsewhere && createElement("button", { key: "e" }, "Elsewhere"), createElement(SettingsPage, { key: "p", archive: { state: "ready", value: 7 }, offline, onArchive: () => {} }));
+
+  it("leaves focus where the user put it after the chip lost it to nothing", () => {
+    const drawn = render(beside(false));
+    chip().focus();
+    // A press on something that takes no focus, then focus put outside the page from there: the row sees no blur
+    // toward it, so only a look at where focus is now leaves it alone.
+    chip().blur();
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    drawn.rerender(beside(true));
+    expect(document.activeElement?.textContent).toBe("Elsewhere");
+  });
+
+  it("takes nothing back once the user moved focus on from the chip, even when that focus later goes", () => {
+    const drawn = render(beside(false));
     chip().focus();
     screen.getByRole("button", { name: "Elsewhere" }).focus();
-    drawn.rerender(createElement("div", null, createElement("button", null, "Elsewhere"), createElement(SettingsPage, { archive: ready, offline: true, onArchive: () => {} })));
-    expect(document.activeElement?.textContent).toBe("Elsewhere");
+    // What the user moved focus to leaves, so focus falls to the window by itself, not from the chip.
+    drawn.rerender(beside(false, false));
+    expect(document.activeElement).toBe(document.body);
+    drawn.rerender(beside(true, false));
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("keeps the value last read, unavailable, while Ersa can't reach Core", () => {
