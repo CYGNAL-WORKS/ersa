@@ -47,7 +47,8 @@ pub use adapter::{
     ConversationEnd, ForkOf, ImageLimits, ListedRecord, ModelReport, OpenElsewhere,
     OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected, Projector, QuestionReply,
     RecordDeletion, RecordEvent, RecordSummary, Recorded, RecordedSettings, RelaunchSettings,
-    Requested, SessionConfig, SessionControl, SignIn, SignInEnd, StartedSignIn, TitleRules,
+    Requested, SessionConfig, SessionControl, SignIn, SignInEnd, SignInStartError, StartedSignIn,
+    TitleRules,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};

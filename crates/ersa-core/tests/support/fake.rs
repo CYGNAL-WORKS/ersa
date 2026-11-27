@@ -76,7 +76,7 @@ use ersa_adapter::{
     Direction, ImageLimits, ModelReport, OpenElsewhere, OutgoingMessage, PermissionDecision,
     ProcessExit, ProcessSpec, Projected, Projector, RawLine, RecordDeletion, RecordEvent,
     RecordSummary, RelaunchSettings, Requested, SessionConfig, SessionControl, SignIn, SignInEnd,
-    StartedSignIn, TitleRules, Transport, async_trait,
+    SignInStartError, StartedSignIn, TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -405,6 +405,10 @@ pub enum SignInMode {
     Starts(Option<String>),
     /// It refuses to start, for this reason.
     Refuses(String),
+    /// The adapter tries to start it and cannot, saying so in these words
+    /// of its own, as when the backend's process ends before handing over
+    /// an address.
+    CouldNotStart(String),
     /// It never says it started.
     NeverStarts,
     /// Its command is not on the host.
@@ -938,7 +942,7 @@ impl Adapter for FakeAdapter {
     async fn start_sign_in(
         &self,
         transport: Arc<dyn Transport>,
-    ) -> Result<StartedSignIn, AdapterError> {
+    ) -> Result<StartedSignIn, SignInStartError> {
         let sign_ins = Arc::clone(&self.sign_ins);
         sign_ins.starts.fetch_add(1, Ordering::SeqCst);
         sign_ins.ending.send_replace(None);
@@ -948,9 +952,10 @@ impl Adapter for FakeAdapter {
                 program: "ersa-test-no-such-sign-in".into(),
                 ..ProcessSpec::default()
             },
-            SignInMode::Starts(_) | SignInMode::Refuses(_) | SignInMode::NeverStarts => {
-                super::procs::parent_of_a_grandchild(true)
-            }
+            SignInMode::Starts(_)
+            | SignInMode::Refuses(_)
+            | SignInMode::CouldNotStart(_)
+            | SignInMode::NeverStarts => super::procs::parent_of_a_grandchild(true),
         };
         let mut process = transport.spawn(spec).await?;
         let mut stdout = process.take_stdout().expect("stdout");
@@ -967,7 +972,10 @@ impl Adapter for FakeAdapter {
                     sign_ins: Arc::clone(&sign_ins),
                 }),
             }),
-            SignInMode::Refuses(reason) => Err(AdapterError::Protocol(reason)),
+            SignInMode::Refuses(reason) => Err(SignInStartError::Refused(reason)),
+            // The process is dropped with the start, and the transport ends
+            // it, tree and all, as a real adapter's failed start leaves it.
+            SignInMode::CouldNotStart(words) => Err(SignInStartError::CouldNotStart(words)),
             SignInMode::NeverStarts | SignInMode::NotFound => std::future::pending().await,
         }
     }

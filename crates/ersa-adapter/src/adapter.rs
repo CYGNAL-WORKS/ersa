@@ -297,19 +297,50 @@ pub trait Adapter: Send + Sync {
     /// to open; Core opens none itself (PROTO-CORE-API-R155).
     ///
     /// Everything the sign-in runs is started through `transport`, which
-    /// ends it all when Core lets go of it, so a start Core gives up on
-    /// leaves nothing running. An `Io` error of kind `NotFound` means the
-    /// backend's command is not on the host; a `Protocol` error carries the
-    /// backend's own reason for refusing to start one. The default: the
-    /// adapter has no sign-in to start.
+    /// ends it all when Core lets go of it, so a start Core gives up on, or
+    /// one that fails, leaves nothing running. A start that fails says
+    /// which kind of failure it was ([`SignInStartError`]), since Core
+    /// answers each kind in its own way. The default: the adapter has no
+    /// sign-in to start.
     async fn start_sign_in(
         &self,
         _transport: Arc<dyn Transport>,
-    ) -> Result<StartedSignIn, AdapterError> {
-        Err(AdapterError::Protocol(format!(
-            "Ersa can't start a sign-in to {}",
-            self.label()
-        )))
+    ) -> Result<StartedSignIn, SignInStartError> {
+        Err(SignInStartError::NoSignIn)
+    }
+}
+
+/// Why a sign-in didn't start ([`Adapter::start_sign_in`]). Core answers
+/// every kind `invalid_state` (PROTO-CORE-API-R157, R166); the kinds differ
+/// in whose words the answer carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignInStartError {
+    /// The backend's command is not on the host. Core says so in its own
+    /// words.
+    NotFound,
+    /// The adapter has no sign-in to start. Core says so in its own words.
+    NoSignIn,
+    /// The backend refused to start one, for this reason, in the backend's
+    /// own words, which Core passes on unchanged.
+    Refused(String),
+    /// The adapter tried to start one and could not, as when the backend's
+    /// process ends before it hands over an address. The words are the
+    /// adapter's own, saying what went wrong in the person's terms, as a
+    /// clause with no closing period: Core puts them after its own words
+    /// saying that the sign-in couldn't start.
+    CouldNotStart(String),
+}
+
+/// Lets `?` turn an `io::Error` from a transport call into a failed start:
+/// a command that is not found is [`SignInStartError::NotFound`], and any
+/// other error is a start the adapter tried and could not make.
+impl From<io::Error> for SignInStartError {
+    fn from(e: io::Error) -> Self {
+        if e.kind() == io::ErrorKind::NotFound {
+            SignInStartError::NotFound
+        } else {
+            SignInStartError::CouldNotStart(e.to_string())
+        }
     }
 }
 
@@ -341,8 +372,10 @@ pub trait SignIn: Send {
 pub enum SignInEnd {
     /// It is done.
     SignedIn,
-    /// It failed, for this reason, in the backend's own words.
-    Failed(String),
+    /// It failed: with the reason in the backend's own words when the
+    /// backend gave one, and `None` when it gave none, as when its process
+    /// ends before saying how the sign-in went.
+    Failed(Option<String>),
 }
 
 /// How a session's conversation ends, read from its record.
@@ -996,19 +1029,30 @@ mod tests {
     }
 
     /// An adapter has no sign-in unless it says how to start one, and then
-    /// says so by its backend's label, starting nothing.
+    /// says so, starting nothing.
     // verifies: PROTO-CORE-API-R157
     #[tokio::test]
     async fn an_adapter_has_no_sign_in_by_default() {
         let transport = crate::fake::FakeTransport::new(Vec::<String>::new());
         let started = Bare.start_sign_in(Arc::new(transport.clone())).await;
         match started {
-            Err(AdapterError::Protocol(message)) => {
-                assert_eq!(message, "Ersa can't start a sign-in to Bare Backend");
-            }
-            Err(other) => panic!("{other}"),
+            Err(error) => assert_eq!(error, SignInStartError::NoSignIn),
             Ok(_) => panic!("a sign-in started"),
         }
         assert!(transport.spawned().is_empty(), "nothing started");
+    }
+
+    /// A transport's not-found is the backend's command missing from the
+    /// host; any other transport error is a start the adapter tried and
+    /// could not make, in that error's words.
+    #[test]
+    fn a_transport_error_is_a_missing_command_or_a_start_that_could_not_be_made() {
+        let missing = io::Error::new(io::ErrorKind::NotFound, "no such command");
+        assert_eq!(SignInStartError::from(missing), SignInStartError::NotFound);
+        let closed = io::Error::new(io::ErrorKind::BrokenPipe, "the pipe closed");
+        assert_eq!(
+            SignInStartError::from(closed),
+            SignInStartError::CouldNotStart("the pipe closed".into())
+        );
     }
 }

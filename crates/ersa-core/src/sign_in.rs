@@ -24,7 +24,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Adapter, AdapterError, SignInEnd, StartedSignIn};
+use ersa_adapter::{Adapter, SignInEnd, SignInStartError, StartedSignIn};
 use ersa_protocol::core_api::{SignInEndedParams, SignInOutcome, SigningIn, notification};
 use tokio::sync::watch;
 
@@ -273,7 +273,8 @@ impl Task {
         let outcome = tokio::select! {
             end = sign_in.finished() => match end {
                 SignInEnd::SignedIn => (SignInOutcome::SignedIn, None),
-                SignInEnd::Failed(message) => (SignInOutcome::Failed, Some(message)),
+                // A failure the backend gave no reason for carries none.
+                SignInEnd::Failed(reason) => (SignInOutcome::Failed, reason),
             },
             () = tokio::time::sleep(limit) => (SignInOutcome::TimedOut, None),
             // Shutdown names no outcome of its own: Core stopped it, as a
@@ -345,21 +346,21 @@ fn too_slow(core: &Core, adapter: &dyn Adapter) -> ApiError {
     ))
 }
 
-/// The answer for a sign-in whose adapter did not start it (R157): the
-/// backend's own reason when it refused, else what went wrong, each as
-/// `invalid_state`.
-fn not_started(adapter: &dyn Adapter, error: AdapterError) -> ApiError {
-    match error {
-        AdapterError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            ApiError::invalid_state(format!(
-                "{} isn't installed on this host: its command wasn't found.",
-                adapter.label()
-            ))
+/// The answer for a sign-in whose adapter did not start it, each kind as
+/// `invalid_state`: the backend's own reason, unchanged, when it refused
+/// (R157), and, when the adapter tried and could not, words saying the
+/// sign-in couldn't start followed by the adapter's (R166).
+fn not_started(adapter: &dyn Adapter, error: SignInStartError) -> ApiError {
+    let label = adapter.label();
+    let message = match error {
+        SignInStartError::NotFound => {
+            format!("{label} isn't installed on this host: its command wasn't found.")
         }
-        AdapterError::Protocol(reason) => ApiError::invalid_state(reason),
-        other => ApiError::invalid_state(format!(
-            "The sign-in to {} couldn't start: {other}",
-            adapter.label()
-        )),
-    }
+        SignInStartError::NoSignIn => format!("Ersa can't start a sign-in to {label}"),
+        SignInStartError::Refused(reason) => reason,
+        SignInStartError::CouldNotStart(what) => {
+            format!("The sign-in to {label} couldn't start: {what}.")
+        }
+    };
+    ApiError::invalid_state(message)
 }
