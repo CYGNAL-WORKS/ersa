@@ -3848,6 +3848,46 @@ mod tests {
         line
     }
 
+    /// A read begun before a title was taken otherwise leaves that title,
+    /// and takes everything else it found: the date created, the last
+    /// activity and the settings, asking for a tile for them.
+    // verifies: PROTO-CORE-API-R168
+    #[test]
+    fn a_read_from_before_a_title_leaves_it_and_takes_the_rest() {
+        let mut presented = Presented {
+            title: None,
+            created_at: "2026-11-15T09:00:00.000Z".into(),
+            recorded: Default::default(),
+            reported: Default::default(),
+            last_activity_at: None,
+            record_found: false,
+            titles_taken: 0,
+        };
+        let begun = presented.titles_taken;
+        presented.took_title("Renamed");
+        let settings = ersa_adapter::RecordedSettings {
+            model: Some(ersa_adapter::Recorded {
+                value: "fake-model".into(),
+                turn_began: None,
+            }),
+            ..Default::default()
+        };
+        let summary = RecordSummary {
+            title: Some("hello".into()),
+            created_at: Some("2026-11-01T00:00:00.000Z".into()),
+            settings: settings.clone(),
+            last_activity_at: Some("2026-11-02T00:00:00.000Z".into()),
+        };
+        assert!(presented.take_summary(summary, false, "s", begun));
+        assert_eq!(presented.title.as_deref(), Some("Renamed"));
+        assert_eq!(presented.created_at, "2026-11-01T00:00:00.000Z");
+        assert_eq!(
+            presented.last_activity_at.as_deref(),
+            Some("2026-11-02T00:00:00.000Z")
+        );
+        assert_eq!(presented.recorded, settings);
+    }
+
     /// A record read that corrects the date created asks for a tile; the
     /// same read again, with nothing changed, asks for none.
     // verifies: PROTO-CORE-API-R106
