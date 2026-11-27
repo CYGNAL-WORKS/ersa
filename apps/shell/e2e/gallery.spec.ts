@@ -64,7 +64,9 @@ for (const theme of ["light", "dark"]) {
   }
 }
 
-// The screenshots above depend on this: a section photographed alone cannot be moved by its neighbours.
+// The screenshots above depend on this: a section photographed alone cannot be moved by its neighbours. Every check
+// below opens only the sections it reads, too: the whole gallery, its open shelves and menus each laying out a page
+// tens of thousands of pixels tall as they mount, takes most of a test's 30 seconds to draw on CI (#649).
 test("a filtered gallery shows one component in one theme", async ({ page }) => {
   await page.goto("/gallery.html?component=Chip&theme=dark");
   await expect(page.locator("[data-theme]")).toHaveCount(1);
@@ -82,7 +84,7 @@ test("the gallery shows every component", async ({ page }) => {
 
 // The safety surface: nothing in an open permission request may sit below a scrollbar.
 test("an open permission request shows its fields whole", async ({ page }) => {
-  await page.goto("/gallery.html");
+  await page.goto("/gallery.html?component=Transcript");
   const fields = page.locator('[data-component="Transcript"] .transcript-permission[data-open] .transcript-field dd');
   expect(await fields.count()).toBeGreaterThan(0);
   const clipped = await fields.evaluateAll((els) =>
@@ -100,9 +102,9 @@ test("an open permission request shows its fields whole", async ({ page }) => {
 test("a permission suggestion shows its whole label", async ({ page }) => {
   // The shelf lies beside a rail-wide tile, as in its screenshot.
   await page.setViewportSize({ width: 1600, height: 900 });
-  await page.goto("/gallery.html");
-  for (const theme of ["light", "dark"]) {
-    for (const component of ["Shelf", "Transcript"]) {
+  for (const component of ["Shelf", "Transcript"]) {
+    await page.goto(`/gallery.html?component=${component}`);
+    for (const theme of ["light", "dark"]) {
       const suggestions = page.locator(`[data-theme="${theme}"] [data-component="${component}"] .answers-suggestion`);
       expect(await suggestions.count(), `${component} in ${theme} shows suggestions`).toBeGreaterThan(0);
       const shelfWidth = await page.evaluate(() => {
@@ -135,6 +137,7 @@ test("a permission suggestion shows its whole label", async ({ page }) => {
     }
   }
   // The gallery's longest labels are longer than the shelf, so the check above saw them wrap rather than fit.
+  await page.goto("/gallery.html?component=Shelf");
   const wrapped = await page
     .locator('[data-component="Shelf"] .answers-suggestion')
     .evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().height > 2 * parseFloat(getComputedStyle(el).lineHeight)).length);
@@ -239,32 +242,39 @@ test("a new turn starts space-xxxl below the last", async ({ page }) => {
 });
 
 test("a focused input's edge is the accent, in both themes", async ({ page }) => {
-  await page.goto("/gallery.html");
-  for (const theme of ["light", "dark"]) {
-    const column = page.locator(`[data-theme="${theme}"]`);
-    const accent = await column.evaluate((el) => {
-      const probe = document.createElement("span");
-      probe.style.color = "var(--color-accent)";
-      el.appendChild(probe);
-      const color = getComputedStyle(probe).color;
-      probe.remove();
-      return color;
-    });
-    for (const input of [".composer-box[data-force=focus]", ".session-heading-input[data-force=focus]"]) {
+  // Each component that draws an input focused, opened alone.
+  const focused = [
+    ["NewSessionScreen", ".composer-box[data-force=focus]"],
+    ["Composer", ".composer-box[data-force=focus]"],
+    ["SessionTitle", ".session-heading-input[data-force=focus]"],
+  ] as const;
+  for (const [component, input] of focused) {
+    await page.goto(`/gallery.html?component=${component}`);
+    for (const theme of ["light", "dark"]) {
+      const column = page.locator(`[data-theme="${theme}"]`);
+      const accent = await column.evaluate((el) => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--color-accent)";
+        el.appendChild(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      });
       const edge = await column.locator(input).first().evaluate((el) => getComputedStyle(el).borderTopColor);
-      expect(edge, `${input} in ${theme}`).toBe(accent);
+      expect(edge, `${input} in ${component} in ${theme}`).toBe(accent);
+      if (component === "SessionTitle") continue;
+      // The focused box holds the focal glow, unless a permission request holds it (docs/design/COMPOSER.md, Focus).
+      const glow = (selector: string) => column.locator(selector).first().evaluate((el) => getComputedStyle(el).boxShadow);
+      expect(await glow(".composer-box[data-force=focus]:not([data-quiet-focus])"), `the glow in ${component} in ${theme}`).not.toBe("none");
+      if (component === "Composer") expect(await glow(".composer-box[data-force=focus][data-quiet-focus]"), `no glow in ${theme}`).toBe("none");
     }
-    // The focused box holds the focal glow, unless a permission request holds it (docs/design/COMPOSER.md, Focus).
-    const glow = (selector: string) => column.locator(selector).first().evaluate((el) => getComputedStyle(el).boxShadow);
-    expect(await glow(".composer-box[data-force=focus]:not([data-quiet-focus])"), `the glow in ${theme}`).not.toBe("none");
-    expect(await glow(".composer-box[data-force=focus][data-quiet-focus]"), `no glow in ${theme}`).toBe("none");
   }
 });
 
 // Send keeps its fill under the pointer and pressed, the pointer's material laid over it (docs/design/COMPOSER.md,
 // The composer): a fill the browser drops would read as a missing button, which a screenshot's threshold may pass.
 test("send keeps its primary fill under the pointer and pressed, in both themes", async ({ page }) => {
-  await page.goto("/gallery.html");
+  await page.goto("/gallery.html?component=Composer");
   for (const theme of ["light", "dark"]) {
     for (const state of ["hover", "pressed"]) {
       const send = page.locator(`[data-theme="${theme}"] .composer-send[data-force="${state}"]`).first();
@@ -278,30 +288,35 @@ test("send keeps its primary fill under the pointer and pressed, in both themes"
 // The context ring's arc is a hairline, so a band's colour sits inside the screenshots' per-pixel threshold; it is
 // checked here, on its own and on the shelf's open tile (LAY-SHELL, Context): caution past half, danger past four fifths.
 test("the context ring's arc takes its band's colour, in both themes", async ({ page }) => {
-  await page.goto("/gallery.html");
-  for (const theme of ["light", "dark"]) {
-    const root = page.locator(`[data-theme="${theme}"]`).first();
-    const token = (name: string) => root.evaluate((el, n) => {
-      const probe = document.createElement("span");
-      probe.style.color = `var(${n})`;
-      el.appendChild(probe);
-      const value = getComputedStyle(probe).color;
-      probe.remove();
-      return value;
-    }, name);
-    const stroke = (selector: string) => root.locator(`${selector} .context-ring-used`).first().evaluate((el) => getComputedStyle(el).stroke);
-    const [muted, caution, danger] = [await token("--color-ink-muted"), await token("--color-caution"), await token("--color-danger")];
-    expect(await stroke('[data-component="ContextRing"] .context-ring:not([data-band])'), `quiet in ${theme}`).toBe(muted);
-    expect(await stroke('[data-component="ContextRing"] .context-ring[data-band="caution"]'), `caution in ${theme}`).toBe(caution);
-    expect(await stroke('[data-component="ContextRing"] .context-ring[data-band="danger"]'), `danger in ${theme}`).toBe(danger);
-    expect(await stroke('[data-component="Shelf"] .shelf-readouts .context-ring[data-band="caution"]'), `the shelf's in ${theme}`).toBe(caution);
+  for (const component of ["ContextRing", "Shelf"]) {
+    await page.goto(`/gallery.html?component=${component}`);
+    for (const theme of ["light", "dark"]) {
+      const root = page.locator(`[data-theme="${theme}"]`).first();
+      const token = (name: string) => root.evaluate((el, n) => {
+        const probe = document.createElement("span");
+        probe.style.color = `var(${n})`;
+        el.appendChild(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      }, name);
+      const stroke = (selector: string) => root.locator(`${selector} .context-ring-used`).first().evaluate((el) => getComputedStyle(el).stroke);
+      const [muted, caution, danger] = [await token("--color-ink-muted"), await token("--color-caution"), await token("--color-danger")];
+      if (component === "ContextRing") {
+        expect(await stroke('[data-component="ContextRing"] .context-ring:not([data-band])'), `quiet in ${theme}`).toBe(muted);
+        expect(await stroke('[data-component="ContextRing"] .context-ring[data-band="caution"]'), `caution in ${theme}`).toBe(caution);
+        expect(await stroke('[data-component="ContextRing"] .context-ring[data-band="danger"]'), `danger in ${theme}`).toBe(danger);
+      } else {
+        expect(await stroke('[data-component="Shelf"] .shelf-readouts .context-ring[data-band="caution"]'), `the shelf's in ${theme}`).toBe(caution);
+      }
+    }
   }
 });
 
 // The open list's shadow is soft enough to sit inside the screenshots' per-pixel threshold, so it is checked here.
 // Its options take radius-md, so their corners nest within the list's (DESIGN.md, Shapes).
 test("an open chip list floats: a shadow and the floating radius, its options nested, in both themes", async ({ page }) => {
-  await page.goto("/gallery.html");
+  await page.goto("/gallery.html?component=Chip");
   for (const theme of ["light", "dark"]) {
     const list = page.locator(`[data-theme="${theme}"] [data-component="Chip"] .chip-list`).first();
     const { shadow, radius, floating, options, nested } = await list.evaluate((el) => {
@@ -530,14 +545,14 @@ test("a tile keeps its chevron beside More, and its mark while its title is edit
 // from the composer, each chip opening its choices, Escape closing them with focus back on the chip, a choice taking
 // effect, and Space toggling the checkbox with focus kept on it.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {
-  await page.goto("/gallery.html");
+  await page.goto("/gallery.html?component=NewSessionScreen&theme=light");
   const screen = page
     .locator('[data-theme="light"] [data-component="NewSessionScreen"] figure')
     .filter({ hasText: "Ready, at the defaults" });
   const chips = screen.locator("button.chip");
-  const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
   // Host and project, then backend, model, effort and permission mode: the backend shows with one (FLOW-NEW-SESSION-R48).
-  expect(names.length).toBe(6);
+  await expect(chips).toHaveCount(6);
+  const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
   const worktree = screen.getByRole("checkbox", { name: "Worktree" });
 
   // Tab from the composer reaches send, which keeps focus with nothing to send, then each control in turn: host,
@@ -706,7 +721,7 @@ test("a working glyph breathes, a new chevron breathes once, and both hold still
 // A project heading (docs/design/RAIL.md): the note after a withdrawal of trust starts where the project's name does,
 // and an expanded, trusted heading keeps no empty place toward its trailing edge that would cut its name shorter.
 test("a heading's trust note starts at its name, and an expanded trusted heading has no empty status, in both themes", async ({ page }) => {
-  await page.goto("/gallery.html");
+  await page.goto("/gallery.html?component=RailTree");
   const figure = (theme: string, label: string) =>
     page.locator(`[data-theme="${theme}"] [data-component="RailTree"] figure`).filter({ has: page.locator("figcaption", { hasText: new RegExp(`^${label}$`) }) });
   // The project's own heading, past the Pinned group's, which is drawn closed.
