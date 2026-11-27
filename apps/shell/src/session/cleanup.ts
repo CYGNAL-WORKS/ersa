@@ -78,7 +78,7 @@ export function itemName(item: CleanupItem, sessions: readonly Pick<Session, "id
 /** The last part of a folder's path, either separator: "D:/wt/alpha/stray" is "stray". */
 export function folderName(path: string | undefined): string | undefined {
   if (path === undefined) return undefined;
-  const parts = path.split(/[\/]/).filter((p) => p !== "");
+  const parts = path.split(/[\\/]/).filter((p) => p !== "");
   return parts.at(-1) ?? path;
 }
 

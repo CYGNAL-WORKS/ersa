@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CleanupInspectResult } from "../protocol/core-api.gen";
-import { type ItemView, changedTo, formatSize, losesWork, questionOf, questionTitle, sendsDiscard, tickedByDefault } from "./cleanup";
+import { type ItemView, changedTo, folderName, formatSize, losesWork, questionOf, questionTitle, sendsDiscard, tickedByDefault } from "./cleanup";
 
 const base = { project_id: "alpha", token: "t1" };
 const workspace = (more: Partial<CleanupInspectResult> = {}): CleanupInspectResult => ({
@@ -115,5 +115,13 @@ describe("a size", () => {
     expect(formatSize(1536)).toBe("1.5 KB");
     expect(formatSize(48 * 1024 * 1024)).toBe("48 MB");
     expect(formatSize(1.25 * 1024 ** 3)).toBe("1.3 GB");
+  });
+});
+
+describe("a folder's name", () => {
+  it("is the last part of its path, with either separator", () => {
+    expect(folderName(String.raw`C:\Users\you\worktrees\repo\stray-folder`)).toBe("stray-folder");
+    expect(folderName("D:/wt/alpha/stray/")).toBe("stray");
+    expect(folderName(undefined)).toBeUndefined();
   });
 });
