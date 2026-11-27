@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_core::{Adapter, CoreConfig, SweepClock, Sweeps};
+use ersa_core::{Adapter, CoreConfig, Gate, SweepClock, Sweeps};
 
 use super::fake::FakeAdapter;
 use super::put_away::Setup;
@@ -43,6 +43,18 @@ pub async fn passes(clock: &SweepClock, count: u64) {
     tokio::time::timeout(PASS, clock.until_ended(count))
         .await
         .expect("the sweep ended in time");
+}
+
+/// Waits until the pass after `ended` passes stops at `gate`, at a try at a
+/// folder: one that comes after the pass has judged a workspace and git has
+/// failed to remove it, which is most of a pass, so waited for as long as a
+/// pass is. A pass that ends without stopping there fails at once.
+pub async fn reaches_the_try(gate: &Gate, clock: &SweepClock, ended: u64) {
+    tokio::select! {
+        () = gate.reached() => {}
+        () = clock.until_ended(ended + 1) => panic!("the pass ended without trying the folder"),
+        () = tokio::time::sleep(PASS) => panic!("the pass reached no try at the folder in {PASS:?}"),
+    }
 }
 
 /// Moves the sweep's clock on by `by`, then waits for a pass.
