@@ -1,0 +1,28 @@
+Claude Code 2.1.330 (Windows), six sign-in cases that need no account, recorded 2026-11-27 by an agent with `scripts/record-claude-sign-in.mjs --ending no-account` (#671, ADR 0040). Each case ran against a new scratch configuration folder, deleted afterward. The address was handed to an opener that opens nothing, so no sign-in page was shown to anyone, and nobody signed in. The machine's own CLI read signed out before and after (`claude auth status`), and had no credential file. Times are milliseconds from the start of that case's run, as each `.meta.json` gives them. The earlier endings, and how the files are laid out, are in `notes-2026-11-26.txt`.
+
+Files, by case (each with `-running`, a session started signed out before the sign-in and sent one message after it, and `-probe`, a CLI started afterward):
+- closed-after-cancel: 10 to 12.
+- closed-while-waiting: 13 to 15.
+- second-same-process: 16 to 18.
+- second-other-process: 19 to 22, where 20 (`-second`) is the second CLI's sign-in.
+- console-account: 23 to 25.
+- key-in-environment: 26 to 28.
+
+Every case started the same way as before: `initialize`, then `claude_authenticate`, which answered `success` within about 20 ms with `manualUrl` and `automaticUrl` and nothing else, then `claude_oauth_wait_for_completion`. Nothing was refused, so `auth login` never ran. No line carries a token, a key or a code (the redactor's check), and no process wrote to stderr.
+
+What each case looked like
+- closed-after-cancel (10): `control_cancel_request` for the wait, and stdin closed 1 ms later. The CLI wrote nothing more: no answer to the wait and no acknowledgment of the cancel. It exited 0 within about 0.25 s of stdin closing (step at 1972, cancel at 1718).
+- closed-while-waiting (13): stdin closed with the wait pending and no cancel. The same: nothing more written, and exit 0 within about 0.2 s (close at 1154, exit by 1364). Closing stdin alone ends a sign-in's process, whether or not the wait was withdrawn first.
+- second-same-process (16): a second `claude_authenticate` on the same process, sent once the first was under way, answered `success` 3 ms later with a new pair of addresses. The second `automaticUrl` returns to the same local callback port as the first. The first wait stayed unanswered for the 5 s the recorder watched, and through the cancel that followed. Exit 0 when stdin closed. Whether the second pair's one-time values differ from the first's is not in the recording: both are replaced by `REDACTED`.
+- second-other-process (19, 20): a second CLI in the same scratch folder, started while the first sign-in was under way, was answered `success` with addresses of its own, on another local callback port. Neither wait answered, before or after its own cancel, and both processes exited 0 when stdin closed. Two sign-ins can be under way at once, on two processes, and neither ends the other.
+- console-account (23): `claude_authenticate` with `loginWithClaudeAi: false` answered `success` too. Both addresses go to another sign-in page, the console's (`platform.claude.com/oauth/authorize` where a Claude subscription's go to `claude.com/cai/oauth/authorize`), with the same client id, scopes and return addresses. After the cancel, nothing more, and exit 0.
+- key-in-environment (26): the sign-in's process alone was started with `ANTHROPIC_API_KEY` set to a placeholder shaped like no key. Its `initialize` answered `account` `{tokenSource: "none", apiKeySource: "ANTHROPIC_API_KEY", apiProvider: "firstParty"}`, as fixture `2.1.330/01-probe-key-in-environment` did, and `claude_authenticate` answered as without a key: `success`, the same two addresses. Nothing refused the sign-in because a key was present. The placeholder appears in no line.
+
+Session records
+- No sign-in process left a session record in the scratch folder, in any case (`left_session_record: false` on 10, 13, 16, 19, 20, 23 and 26), as expected of a process sent no message (`initialize-only-2026-11-09.txt`). Neither did any probe. Each running session did, having been sent a message.
+
+The session running all along
+- In every case its one message, sent after the sign-in was stopped, failed as before a sign-in: "Not logged in · Please run /login", `result` with `is_error: true`, exit 1 when stdin closed.
+
+Not recorded here
+- A finished sign-in, and with it the case the sign-in note under a session serves: a session whose message had already failed, sent another after the sign-in. That needs an account and is the owner's run (`--ending finished`).

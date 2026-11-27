@@ -1,0 +1,78 @@
+{
+  "recorded_at": "2026-11-27T22:57:12.631Z",
+  "claude_code_version": "2.1.330",
+  "recorder": "scripts/record-claude-sign-in.mjs",
+  "ending": "second-other-process",
+  "executable": "claude",
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa",
+    "CLAUDE_CONFIG_DIR": "<a new scratch folder, deleted afterward>"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "role": "a second process's sign-in, started while the first was under way",
+  "refused": null,
+  "outcome": "stopped by the host",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "aea6540b-ca12-42f4-85b9-464422b477c8"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "killed": false,
+  "left_session_record": false,
+  "stdout_lines": 2,
+  "stdout_timing_ms": [
+    1377,
+    1388
+  ],
+  "stderr": [],
+  "sent": [
+    {
+      "t": 966,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-initialize-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1377,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_authenticate-2\",\"request\":{\"subtype\":\"claude_authenticate\",\"loginWithClaudeAi\":true}}"
+    },
+    {
+      "t": 1388,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_oauth_wait_for_completion-3\",\"request\":{\"subtype\":\"claude_oauth_wait_for_completion\"}}"
+    },
+    {
+      "t": 11448,
+      "line": "{\"type\":\"control_cancel_request\",\"request_id\":\"ersa-claude_oauth_wait_for_completion-3\"}"
+    }
+  ]
+}
