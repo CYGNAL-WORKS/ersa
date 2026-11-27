@@ -518,7 +518,7 @@ export type CleanupItem = CleanupItem1;
  */
 export type Id4 = string;
 /**
- * The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R12, R26).
+ * The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R30, R26).
  */
 export type CleanupInspectResult = CleanupInspectResult1;
 /**
@@ -2516,7 +2516,7 @@ export interface CleanupInspectResult1 {
    */
   merged?: boolean;
   /**
-   * Opaque; changes whenever what removing the item would lose changes. cleanup.remove carries it.
+   * Opaque; changes whenever what removing the item would lose changes, but for a folder not measured to the end, whose token follows only its own entries (FLOW-CLEAN-UP-R31). cleanup.remove carries it.
    */
   token: string;
 }

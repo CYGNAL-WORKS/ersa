@@ -498,21 +498,128 @@ async fn inspecting_a_folder_measures_it() {
     assert_ne!(grown["token"], first["token"]);
 }
 
-/// Measuring that takes past its limit stops, and the size is left out.
+/// Measuring stops, as when its 30 seconds run out, once the folder's own
+/// entries are all read and before anything deeper.
+fn stop_after_own_entries(config: &mut CoreConfig) {
+    config.measure_depth_limit = Some(1);
+}
+
+/// Measuring stops, as when its 30 seconds run out, before it reads any
+/// entry.
+fn stop_before_any_entry(config: &mut CoreConfig) {
+    config.measure_limit = Duration::ZERO;
+}
+
+/// Sets the time `path` last changed to `seconds` after 1970, leaving its
+/// length and contents as they are.
+fn set_modified(path: &Path, seconds: u64) {
+    let at = std::time::UNIX_EPOCH + Duration::from_secs(seconds);
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    file.set_modified(at).unwrap();
+}
+
+/// A folder not read to the end has no size, and a token that stays the
+/// same while its own entries are unchanged, by name, length and time of
+/// last change, and follows nothing deeper.
+// verifies: FLOW-CLEAN-UP-R31
+// verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
-async fn a_size_not_measured_within_its_limit_is_left_out() {
-    let (mut s, _clock) = listing_with(|config| config.measure_limit = Duration::ZERO).await;
+async fn a_folder_not_read_to_the_end_keeps_its_token_while_its_own_entries_stay() {
+    let (mut s, _clock) = listing_with(stop_after_own_entries).await;
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let stray = worktrees(&s).join("stray");
+    let (deep, deeper) = (stray.join("deep"), stray.join("deep").join("deeper"));
+    std::fs::create_dir_all(&deeper).unwrap();
+    std::fs::write(stray.join("a.bin"), vec![1u8; 300]).unwrap();
+    std::fs::write(deep.join("b.bin"), vec![2u8; 200]).unwrap();
+    std::fs::write(deeper.join("c.bin"), vec![3u8; 100]).unwrap();
+    let id = format!("f:{project}:stray");
+
+    let first = inspect(&mut s, &id).await;
+    assert!(first.get("size_bytes").is_none(), "{first}");
+    assert_eq!(first["kind"], "folder");
+    assert_eq!(first["path"], stray.display().to_string());
+    assert_eq!(inspect(&mut s, &id).await["token"], first["token"]);
+
+    // Deeper inside: a file rewritten at another length, one added and
+    // one deleted a level further down. None of the folder's own entries
+    // changes, so neither does the token.
+    std::fs::write(deep.join("b.bin"), vec![2u8; 250]).unwrap();
+    std::fs::write(deeper.join("d.bin"), vec![4u8; 10]).unwrap();
+    std::fs::remove_file(deeper.join("c.bin")).unwrap();
+    let deeper_changed = inspect(&mut s, &id).await;
+    assert_eq!(deeper_changed["token"], first["token"], "{deeper_changed}");
+
+    // An entry directly inside added, then removed again.
+    std::fs::write(stray.join("new.bin"), vec![5u8; 1]).unwrap();
+    assert_ne!(inspect(&mut s, &id).await["token"], first["token"]);
+    std::fs::remove_file(stray.join("new.bin")).unwrap();
+    assert_eq!(inspect(&mut s, &id).await["token"], first["token"]);
+
+    // One of them changed: by its time of last change alone, by its length,
+    // and by its name.
+    let a = stray.join("a.bin");
+    set_modified(&a, 1_000_000_000);
+    let touched = inspect(&mut s, &id).await;
+    assert_ne!(touched["token"], first["token"]);
+    assert_eq!(inspect(&mut s, &id).await["token"], touched["token"]);
+    std::fs::write(&a, vec![1u8; 301]).unwrap();
+    set_modified(&a, 1_000_000_000);
+    let longer = inspect(&mut s, &id).await;
+    assert_ne!(longer["token"], touched["token"]);
+    std::fs::rename(&a, stray.join("z.bin")).unwrap();
+    let renamed = inspect(&mut s, &id).await;
+    assert_ne!(renamed["token"], longer["token"]);
+    assert!(renamed.get("size_bytes").is_none(), "{renamed}");
+}
+
+/// A folder whose own entries Ersa could not all read in its time can't be
+/// inspected: `vcs_error`.
+// verifies: FLOW-CLEAN-UP-R31
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_whose_own_entries_were_not_all_read_answers_vcs_error() {
+    let (mut s, _clock) = listing_with(stop_before_any_entry).await;
     let project = s.project["id"].as_str().unwrap().to_string();
     let stray = worktrees(&s).join("stray");
     std::fs::create_dir_all(&stray).unwrap();
     std::fs::write(stray.join("a.bin"), vec![1u8; 300]).unwrap();
     let id = format!("f:{project}:stray");
-    let inspected = inspect(&mut s, &id).await;
-    assert!(inspected.get("size_bytes").is_none(), "{inspected}");
-    // Not walked to the end, its token can't follow what is in it: it
-    // never matches, so a removal never goes ahead on what was seen.
-    let again = inspect(&mut s, &id).await;
-    assert_ne!(again["token"], inspected["token"]);
+    let error = s.client.error("cleanup.inspect", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+}
+
+/// A `workspace` or `leftover` item whose folder is not measured to the
+/// end, wherever the measuring stops, only shows no size: what removing it
+/// loses is counted another way, so its inspect still answers.
+// verifies: FLOW-CLEAN-UP-R30
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_or_leftover_not_measured_to_the_end_only_shows_no_size() {
+    for stop in [stop_before_any_entry, stop_after_own_entries] {
+        let (mut s, clock) = listing_with(stop).await;
+        let workspace = s.workspace().await;
+        let session = session_in(&mut s, &workspace).await;
+        // A folder of its own in it, so the measuring has somewhere deeper
+        // to go; and kept by the sweep for the file in it.
+        let dir = folder(&workspace);
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        std::fs::write(dir.join("notes").join("mine.txt"), "mine\n").unwrap();
+        archive(&mut s, &clock, &session).await;
+        let id = ws_id(&workspace);
+
+        let inspected = inspect(&mut s, &id).await;
+        assert_eq!(inspected["kind"], "workspace", "{inspected}");
+        assert_eq!(inspected["uncommitted"], 1, "{inspected}");
+        assert!(inspected.get("size_bytes").is_none(), "{inspected}");
+
+        s.client
+            .result("session.remove", json!({ "id": session }))
+            .await;
+        clock.time_passed(HOUR + Duration::from_secs(60));
+        let inspected = inspect(&mut s, &id).await;
+        assert_eq!(inspected["kind"], "leftover", "{inspected}");
+        assert_eq!(inspected["uncommitted"], 1, "{inspected}");
+        assert!(inspected.get("size_bytes").is_none(), "{inspected}");
+    }
 }
 
 /// An id that names nothing, or a thing that is no longer an item, is
