@@ -430,6 +430,7 @@ test("--cli-version records with that version's package, installed by npm with i
     const npmArgs = JSON.parse(readFileSync(log, "utf8"));
     assert.equal(npmArgs[0], "install");
     assert.ok(npmArgs.includes("--ignore-scripts") && npmArgs.includes("--no-save"));
+    assert.ok(!npmArgs.includes("--offline"));
     const spec = `@anthropic-ai/claude-code-${process.platform}-${process.arch}@9.8.7`;
     assert.equal(npmArgs.at(-1), spec);
     const signIn = metaOf(t, "00-sign-in-stopped.meta.json");
@@ -461,5 +462,24 @@ test("--cli-version records nothing when the installed CLI is another version, o
     } finally {
       t.done();
     }
+  }
+});
+
+test("--offline has npm install from its cache alone, and is refused without --cli-version", async () => {
+  const t = setup();
+  try {
+    const log = join(t.root, "npm-args.json");
+    const env = { ERSA_NPM: FAKE_NPM, FAKE_NPM_LOG: log };
+    const { code } = await run(t, ["--cli-version", "9.8.7", "--offline", "--ending", "stopped", "--route", "control"], { input: "\n", env }).exited;
+    assert.equal(code, 0);
+    assert.ok(JSON.parse(readFileSync(log, "utf8")).includes("--offline"));
+    rmSync(log);
+    const alone = await run(t, ["--offline", "--ending", "stopped"], { input: "\n", env }).exited;
+    assert.equal(alone.code, 1);
+    assert.match(alone.stderr, /^usage:/m);
+    assert.ok(!existsSync(log));
+    assert.deepEqual(scratchLeft(t), []);
+  } finally {
+    t.done();
   }
 });

@@ -7,7 +7,7 @@
 //                                          [--route auto|control|process]
 //                                          [--abandon-after <seconds>] [--wait <seconds>]
 //                                          [--answer-within <seconds>] [--settle <seconds>]
-//                                          [--cli-version <x.y.z>]
+//                                          [--cli-version <x.y.z> [--offline]]
 //                                          [--out <dir>]
 //
 // --answer-within (60 by default) is how long a CLI has to answer each request,
@@ -45,8 +45,9 @@
 // version's package for this platform (@anthropic-ai/claude-code-<platform>-<arch>),
 // with its scripts off, into a scratch folder deleted when the run ends, as
 // fixture 2.1.316/55-probe-get-settings was fetched. It downloads the CLI, so
-// it is run only with the owner's yes. ERSA_NPM names a node script to run in
-// place of npm (the tests' stand-in).
+// it is run only with the owner's yes. With --offline, npm takes the package
+// from its own cache and fails rather than reach the network. ERSA_NPM names a
+// node script to run in place of npm (the tests' stand-in).
 //
 // A run, in order:
 //   1. starts a CLI signed out, `running`, with Ersa's command line, and sends it `initialize`
@@ -149,12 +150,13 @@ const answerWithin = Number(option("--answer-within", "60")) * 1000;
 // second sign-in, before going on.
 const settle = Number(option("--settle", "5")) * 1000;
 const cliVersion = option("--cli-version", null);
+const offline = argv.includes("--offline");
 // `all` is the three a person takes part in; `no-account` the rest.
 const NO_ACCOUNT = Object.keys(ENDING).filter((name) => ENDING[name].controlOnly);
 const ENDINGS = endingArg === "all" ? ["stopped", "abandoned", "finished"] : endingArg === "no-account" ? NO_ACCOUNT : endingArg.split(",");
 // The version reaches a command line, so it is digits and dots and nothing else.
-if (!ENDINGS.every((e) => Object.hasOwn(ENDING, e)) || !["auto", "control", "process"].includes(route) || !(abandonAfter >= 0) || !(waitFor > 0) || !(answerWithin > 0) || !(settle >= 0) || (cliVersion !== null && !/^\d+\.\d+\.\d+$/.test(cliVersion))) {
-  console.error(`usage: node scripts/record-claude-sign-in.mjs [--ending all|<ending>[,<ending>...]] [--route auto|control|process] [--abandon-after <s>] [--wait <s>] [--answer-within <s>] [--settle <s>] [--cli-version <x.y.z>] [--out <dir>]\nendings: ${Object.keys(ENDING).join(", ")}`);
+if (!ENDINGS.every((e) => Object.hasOwn(ENDING, e)) || !["auto", "control", "process"].includes(route) || !(abandonAfter >= 0) || !(waitFor > 0) || !(answerWithin > 0) || !(settle >= 0) || (cliVersion !== null && !/^\d+\.\d+\.\d+$/.test(cliVersion)) || (offline && cliVersion === null)) {
+  console.error(`usage: node scripts/record-claude-sign-in.mjs [--ending all|<ending>[,<ending>...]] [--route auto|control|process] [--abandon-after <s>] [--wait <s>] [--answer-within <s>] [--settle <s>] [--cli-version <x.y.z> [--offline]] [--out <dir>]\nendings: ${Object.keys(ENDING).join(", ")}`);
   process.exit(1);
 }
 
@@ -224,8 +226,8 @@ function installCli(wanted) {
   const name = `@anthropic-ai/claude-code-${process.platform}-${process.arch}`;
   const spec = `${name}@${wanted}`;
   const prefix = join(makeScratch(), "cli");
-  const npmArgs = ["install", "--prefix", prefix, "--no-save", "--no-package-lock", "--ignore-scripts", "--no-audit", "--no-fund", spec];
-  console.log(`Installing ${spec} into a scratch folder, deleted when the run ends.`);
+  const npmArgs = ["install", "--prefix", prefix, "--no-save", "--no-package-lock", "--ignore-scripts", "--no-audit", "--no-fund", ...(offline ? ["--offline"] : []), spec];
+  console.log(`Installing ${spec}${offline ? " from npm's cache" : ""} into a scratch folder, deleted when the run ends.`);
   const result = process.env.ERSA_NPM
     ? spawnSync(process.execPath, [process.env.ERSA_NPM, ...npmArgs], { encoding: "utf8" })
     : // npm is `npm.cmd` on Windows, which runs only through a shell. Every
