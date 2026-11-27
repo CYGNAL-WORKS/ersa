@@ -891,6 +891,58 @@ async fn pipelined_requests_about_one_session_keep_their_order() {
     assert_eq!(removed["result"]["id"], id.as_str(), "{removed:#}");
 }
 
+/// A stop keeps its place behind messages sent before it for as long as
+/// they keep going through, however long that takes all told: each is
+/// answered with its turn, none starts the session again, and the stop then
+/// ends it. Together the messages take longer than the 5 seconds a stop
+/// waits behind requests that do not move. A stop waits for the last
+/// message's slot, not its answer (PROTO-CORE-API, Sending), so the last
+/// one may be cut short, but it never starts the session again either.
+// verifies: PROTO-CORE-API-R117
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stop_waits_behind_messages_that_keep_going_through() {
+    const SLOW: u32 = 20;
+    assert!(fake::SLOW_HAND_OVER * SLOW > Duration::from_secs(7));
+    let adapter = FakeAdapter::new(1);
+    let stats = Arc::clone(&adapter.stats);
+    let (core, _) = start_fake(adapter).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    let mut sends = Vec::new();
+    for _ in 0..SLOW {
+        sends.push(
+            client
+                .request("session.send", json!({ "id": id, "text": "slow" }))
+                .await,
+        );
+    }
+    let last = client
+        .request("session.send", json!({ "id": id, "text": "last" }))
+        .await;
+    let stop = client.request("session.stop", json!({ "id": id })).await;
+
+    let mut turns = Vec::new();
+    for request in sends {
+        let response = client.response(request).await;
+        turns.push(response["result"]["turn"].clone());
+    }
+    assert_eq!(
+        turns,
+        (1..=SLOW).map(|turn| json!(turn)).collect::<Vec<_>>()
+    );
+    let last = client.response(last).await;
+    assert!(
+        [json!(SLOW + 1), Value::Null].contains(&last["result"]["turn"]),
+        "{last:#}"
+    );
+    assert_eq!(client.response(stop).await["result"]["state"], "ended");
+    assert_eq!(
+        stats.starts.load(Ordering::SeqCst),
+        1,
+        "nothing started it again"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stop_overtakes_requests_stuck_on_a_hung_start() {
     let hung = FakeAdapter::slow_start(std::time::Duration::from_secs(600));

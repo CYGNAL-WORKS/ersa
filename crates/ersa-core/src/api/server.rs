@@ -36,8 +36,8 @@ const OUTBOUND_QUEUE: usize = 256;
 /// requests until one finishes: the bound on what one client can queue.
 const QUEUED_PER_CONNECTION: usize = 1024;
 
-/// How long a `session.stop` waits for the requests queued before it on its
-/// session before it starts stopping anyway.
+/// How long a `session.stop` waits with none of the requests queued before
+/// it on its session answered before it starts stopping anyway.
 const STOP_OVERTAKE: Duration = Duration::from_secs(5);
 
 /// After Core decides to close a connection, how long it still tries to
@@ -229,6 +229,9 @@ struct Lane {
     /// Rises when the latest `session.send` is answered. A send also waits
     /// for it, so pipelined messages reach the backend in the order sent.
     send_answered: Option<watch::Receiver<bool>>,
+    /// Counts the lane's requests answered, shared by every request queued
+    /// in it, so a stop can tell a lane that moves from one that is stuck.
+    answers: Arc<watch::Sender<u64>>,
 }
 
 impl Lane {
@@ -364,6 +367,7 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 let released = Arc::new(released);
                 let sends = request.method == Method::SessionSend.name();
                 let (answered, answered_rx) = watch::channel(false);
+                let mut answers = None;
                 let before = super::session_lane(&conn, &request).and_then(|session| {
                     let before = lanes.get(&session).cloned();
                     let sent = if sends {
@@ -371,11 +375,17 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                     } else {
                         before.as_ref().and_then(|lane| lane.send_answered.clone())
                     };
+                    let counted = before.as_ref().map_or_else(
+                        || Arc::new(watch::Sender::new(0)),
+                        |lane| Arc::clone(&lane.answers),
+                    );
+                    answers = Some(Arc::clone(&counted));
                     lanes.insert(
                         session,
                         Lane {
                             released: released_rx,
                             send_answered: sent,
+                            answers: counted,
                         },
                     );
                     before
@@ -400,21 +410,32 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                     if let Some(before) = before {
                         // `Err` from `wait_for` means the earlier task is
                         // gone: done too. A stop keeps its place behind the
-                        // requests sent before it while they move, but not
-                        // behind ones stuck on a start that hangs or a
-                        // backend that stopped reading: after a grace it
-                        // starts stopping, which ends them, and its answer
-                        // still comes after theirs.
+                        // requests sent before it while they move, however
+                        // long they take all told, but not behind ones stuck
+                        // on a start that hangs or a backend that stopped
+                        // reading: once a grace passes with none of them
+                        // answered, it starts stopping, which ends them, and
+                        // its answer still comes after theirs.
+                        let mut moved = before.answers.subscribe();
                         let waited = before.wait(sends);
                         tokio::pin!(waited);
                         let mut finished = false;
                         if let Some(session) = &stops {
                             // A completed future must not be polled again.
-                            finished = tokio::time::timeout(STOP_OVERTAKE, &mut waited)
-                                .await
-                                .is_ok();
-                            if !finished {
-                                core.sessions.request_stop(session);
+                            loop {
+                                tokio::select! {
+                                    () = &mut waited => {
+                                        finished = true;
+                                        break;
+                                    }
+                                    // This task holds a sender, so the
+                                    // count never closes.
+                                    Ok(()) = moved.changed() => {}
+                                    () = tokio::time::sleep(STOP_OVERTAKE) => {
+                                        core.sessions.request_stop(session);
+                                        break;
+                                    }
+                                }
                             }
                         }
                         if !finished {
@@ -433,6 +454,9 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                     peer.after_answer(&method, lane.as_deref());
                     released.send_replace(true);
                     answered.send_replace(true);
+                    if let Some(answers) = &answers {
+                        answers.send_modify(|count| *count += 1);
+                    }
                     drop(in_flight);
                 });
                 continue;
