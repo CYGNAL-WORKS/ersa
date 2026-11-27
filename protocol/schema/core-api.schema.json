@@ -3746,7 +3746,7 @@
         "token": {
           "type": "string",
           "minLength": 1,
-          "description": "Opaque; changes whenever what removing the item would lose changes. cleanup.remove carries it."
+          "description": "Opaque; changes whenever what removing the item would lose changes, but for a folder not measured to the end, whose token follows only its own entries (FLOW-CLEAN-UP-R31). cleanup.remove carries it."
         }
       },
       "allOf": [
@@ -3869,7 +3869,7 @@
           }
         }
       ],
-      "description": "The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R12, R26)."
+      "description": "The item as cleanup.list gives it, with what removing it would lose (FLOW-CLEAN-UP-R30, R26)."
     },
     "cleanup.remove.params": {
       "type": "object",

@@ -1,6 +1,9 @@
-//! `cleanup.inspect` when the cap on folder removals and `workspace.changes`
-//! reads is full. Its own test binary: the cap is Core-wide, so filling it
-//! would refuse other tests' reads running beside it.
+//! `cleanup.inspect` while its measuring is stopped at a gate: when the cap
+//! on folder removals and `workspace.changes` reads is full, and when a
+//! read does not answer. Its own test binary: the cap is Core-wide, and a
+//! stopped measuring holds a place of it, so it would refuse other tests'
+//! reads running beside it. For the same reason its tests run one at a
+//! time.
 
 mod support;
 
@@ -9,11 +12,15 @@ use std::time::Duration;
 
 use ersa_core::Gate;
 use serde_json::json;
-use support::put_away::{LetGo, Setup, setup_with};
+use support::clean_up::{archive, inspect, listing_with, session_in, worktrees, ws_id};
+use support::put_away::{LetGo, Setup, folder, setup_with};
 use support::{git, kind};
 
 /// As many folder removals and reads as Core runs at once.
 const CAP: usize = 8;
+
+/// Held by each test for its whole run.
+static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Eight inspects of folder items, each stopped while it measures, hold
 /// every place, one each: a ninth inspect, even of a branch, which reads
@@ -22,6 +29,7 @@ const CAP: usize = 8;
 // verifies: FLOW-CLEAN-UP-R30
 #[tokio::test(flavor = "multi_thread")]
 async fn an_inspect_holds_one_place_and_with_none_free_answers_at_once() {
+    let _alone = ONE_AT_A_TIME.lock().await;
     let gate = Arc::new(Gate::default());
     let _let_go = LetGo(Arc::clone(&gate));
     let stops = Arc::clone(&gate);
@@ -65,4 +73,65 @@ async fn an_inspect_holds_one_place_and_with_none_free_answers_at_once() {
     }
     let answer = s.client.result("cleanup.inspect", branch).await;
     assert_eq!(answer["merged"], true, "{answer}");
+}
+
+/// A measuring whose read does not answer is given up on 5 seconds past its
+/// limit, and stops there as when its time runs out: a `workspace` item
+/// still answers, with no size, and a `folder` item, none of whose own
+/// entries was read, answers `vcs_error`. Its limit is zero, so each
+/// inspect waits those 5 seconds and no more.
+// verifies: FLOW-CLEAN-UP-R30
+// verifies: FLOW-CLEAN-UP-R31
+#[tokio::test(flavor = "multi_thread")]
+async fn a_measuring_whose_read_does_not_answer_stops_with_what_it_read() {
+    let _alone = ONE_AT_A_TIME.lock().await;
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let stops = Arc::clone(&gate);
+    let (mut s, clock) = listing_with(move |config| {
+        config.measure_limit = Duration::ZERO;
+        config.measure_gate = Some(stops);
+    })
+    .await;
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let workspace = s.workspace().await;
+    let session = session_in(&mut s, &workspace).await;
+    std::fs::write(folder(&workspace).join("notes.txt"), "mine\n").unwrap();
+    archive(&mut s, &clock, &session).await;
+    std::fs::create_dir_all(worktrees(&s).join("stray")).unwrap();
+
+    // Each stops at the gate, which opens only once it has answered.
+    let inspected = inspect(&mut s, &ws_id(&workspace)).await;
+    assert_eq!(inspected["kind"], "workspace", "{inspected}");
+    assert_eq!(inspected["uncommitted"], 1, "{inspected}");
+    assert!(inspected.get("size_bytes").is_none(), "{inspected}");
+    gate.go();
+    let id = format!("f:{project}:stray");
+    let error = s.client.error("cleanup.inspect", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+}
+
+/// A folder item deleted after the inspect found it, before its measuring
+/// reads it, is no item now: `not_found`.
+// verifies: FLOW-CLEAN-UP-R30
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_gone_before_it_is_measured_is_not_found() {
+    let _alone = ONE_AT_A_TIME.lock().await;
+    let gate = Arc::new(Gate::default());
+    let _let_go = LetGo(Arc::clone(&gate));
+    let stops = Arc::clone(&gate);
+    let (s, _clock) = listing_with(move |config| config.measure_gate = Some(stops)).await;
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let stray = worktrees(&s).join("stray");
+    std::fs::create_dir_all(&stray).unwrap();
+    std::fs::write(stray.join("a.bin"), vec![1u8; 300]).unwrap();
+    let id = format!("f:{project}:stray");
+
+    let mut client = s.core.client().await;
+    let asked = client.request("cleanup.inspect", json!({ "id": id })).await;
+    gate.reached().await;
+    std::fs::remove_dir_all(&stray).unwrap();
+    gate.go();
+    let answer = client.response(asked).await;
+    assert_eq!(kind(&answer["error"]), "not_found", "{answer}");
 }
