@@ -77,7 +77,7 @@ stateDiagram-v2
 
 How a backend's sign-in is started and how it reports its end is its adapter's to say, from a recording of the real thing (`docs/briefs/README.md`, Changing a brief). For Claude Code, `PROTO-CLAUDE-CODE-STREAM` (Signing in) says it, from the recordings of 2026-11-26. Until that adapter's part is built, the requirements above and `PROTO-CORE-API`'s run against a stand-in for the backend, and no real backend can be signed in to through Ersa.
 
-One thing a person meets still waits on a recording, which needs someone to sign in with an account and so is the owner's to make: what a session's backend does with a sign-in made after one of its messages failed as not signed in, which is how the note comes to show under a session (R17). The recordings show a session that had sent nothing before the sign-in, and it answered its next message with no restart. Until the other case is recorded, no requirement says that a message sent after signing in is answered, and nothing starts that session's backend again. If the message fails again, the note shows again, and the person may have to stop and resume the session.
+One case a person meets still waits on a recording, which is the owner's to make: sending again in a session whose message had failed as not signed in (R17), after signing in. `PROTO-CLAUDE-CODE-STREAM` (Signing in, Not recorded yet) says what is and isn't recorded. Until it is, the person whose message fails again sees the note again, and may have to stop and resume the session.
 
 ## Verification
 
