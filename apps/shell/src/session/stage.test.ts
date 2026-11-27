@@ -8,7 +8,7 @@ describe("the sessions page on the stage", () => {
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R20
   it("shows over the active session, which stays active", () => {
-    expect(onPage.sessionsPage).toBe(true);
+    expect(onPage.page).toBe("sessions");
     expect(onPage.activeId).toBe("s1");
     expect(onPage.composing).toBeUndefined();
   });
@@ -16,7 +16,7 @@ describe("the sessions page on the stage", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R18
   it("gives way when a session is chosen, which becomes the active one", () => {
     const chosen = stage(onPage, { type: "select", id: "s2" });
-    expect(chosen.sessionsPage).toBe(false);
+    expect(chosen.page).toBeUndefined();
     expect(chosen.activeId).toBe("s2");
   });
 
@@ -36,20 +36,54 @@ describe("the sessions page on the stage", () => {
 
   it("gives way to New session", () => {
     const composing = stage(onPage, { type: "newSession" });
-    expect(composing.sessionsPage).toBe(false);
+    expect(composing.page).toBeUndefined();
     expect(composing.composing).toBeDefined();
   });
 
   it("stays when the active session is archived or deleted from it, with the new-session screen behind it", () => {
     const left = stage(onPage, { type: "activeLeft" });
-    expect(left.sessionsPage).toBe(true);
+    expect(left.page).toBe("sessions");
     expect(left.composing).toBeDefined();
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R16
   it("waits for a start under way, which finishes on the screen it began on", () => {
     const sending = run([{ type: "newSession", projectId: "p1" }, { type: "sending" }]);
-    expect(stage(sending, { type: "allSessions" }).sessionsPage).toBeFalsy();
+    expect(stage(sending, { type: "allSessions" }).page).toBeUndefined();
+  });
+});
+
+// LAY-SHELL, The settings page: it fills the stage as the sessions page does, and a tile, New session or View all
+// leaves it.
+describe("the settings page on the stage", () => {
+  const onSettings = run([{ type: "showNewest", id: "s1" }, { type: "settings" }]);
+
+  it("shows over the active session, which stays active", () => {
+    expect(onSettings.page).toBe("settings");
+    expect(onSettings.activeId).toBe("s1");
+    expect(onSettings.composing).toBeUndefined();
+  });
+
+  it("gives way to a chosen session, to New session and to View all", () => {
+    expect(stage(onSettings, { type: "select", id: "s2" }).page).toBeUndefined();
+    expect(stage(onSettings, { type: "select", id: "s2" }).activeId).toBe("s2");
+    expect(stage(onSettings, { type: "newSession" }).page).toBeUndefined();
+    expect(stage(onSettings, { type: "allSessions" }).page).toBe("sessions");
+  });
+
+  it("takes the sessions page's place when chosen from it", () => {
+    expect(stage(run([{ type: "allSessions" }]), { type: "settings" }).page).toBe("settings");
+  });
+
+  it("stays when the active session is archived or deleted, with the new-session screen behind it", () => {
+    const left = stage(onSettings, { type: "activeLeft" });
+    expect(left.page).toBe("settings");
+    expect(left.composing).toBeDefined();
+  });
+
+  it("waits for a start under way, as the sessions page does", () => {
+    const sending = run([{ type: "newSession", projectId: "p1" }, { type: "sending" }]);
+    expect(stage(sending, { type: "settings" }).page).toBeUndefined();
   });
 });
 

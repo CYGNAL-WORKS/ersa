@@ -1,10 +1,13 @@
 // What the stage shows and how it changes: the active session's transcript, the new-session screen while the user
-// has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION), or the sessions page over either. Kept free of React so the tests drive each
-// transition; the window holds it with `useReducer`.
+// has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION), or a page over either: the sessions page or
+// the settings page. Kept free of React so the tests drive each transition; the window holds it with `useReducer`.
 
 import type { Attached } from "./attachments";
 import type { Sending } from "./follow";
 import type { FirstSendFailure } from "./start";
+
+/** What can stand over the stage, in place of the transcript or the new-session screen. */
+export type StagePage = "sessions" | "settings";
 
 export interface StageState {
   /** The session the stage shows when the new-session screen is not up. */
@@ -29,15 +32,18 @@ export interface StageState {
   /** The last `composing.key` given. */
   keys: number;
   /**
-   * The sessions page shows in place of the transcript or the new-session screen (FLOW-ORGANIZE-SESSIONS, step 9). The
-   * rest of this state stands behind it: the active session stays active (R20).
+   * The page shown in place of the transcript or the new-session screen: the sessions page (FLOW-ORGANIZE-SESSIONS,
+   * step 9) or the settings page (LAY-SHELL, The settings page). The rest of this state stands behind it: the active
+   * session stays active (FLOW-ORGANIZE-SESSIONS-R20).
    */
-  sessionsPage?: boolean;
+  page?: StagePage;
 }
 
 export type StageAction =
   | { type: "newSession"; projectId?: string }
   | { type: "allSessions" }
+  /** Settings, from the arrange menu until the title bar is built (LAY-SHELL, The arrange button). */
+  | { type: "settings" }
   /** The active session was archived or deleted: the new-session screen takes its place, behind the sessions page if it shows. */
   | { type: "activeLeft" }
   | { type: "select"; id: string }
@@ -74,12 +80,15 @@ export function stage(state: StageState, action: StageAction): StageState {
     case "newSession":
       // A start under way finishes on the screen it began on (its failure or its session belongs there).
       if (isStarting(state)) return state;
-      return { ...compose(state, action.projectId), sessionsPage: false };
+      return { ...compose(state, action.projectId), page: undefined };
     case "activeLeft":
       return isStarting(state) ? state : compose(state);
     case "allSessions":
       // Likewise: the screen with a start under way stays until it finishes.
-      return isStarting(state) ? state : { ...state, sessionsPage: true };
+      return isStarting(state) ? state : { ...state, page: "sessions" };
+    case "settings":
+      // As View all; either page takes the other's place.
+      return isStarting(state) ? state : { ...state, page: "settings" };
     case "select":
       // Leaving the screen leaves nothing behind: nothing was created (FLOW-NEW-SESSION-R03).
       if (isStarting(state)) return state;
@@ -89,8 +98,8 @@ export function stage(state: StageState, action: StageAction): StageState {
         activeId: action.id,
         composing: undefined,
         starting: undefined,
-        firstSend: state.sessionsPage && !state.composing && action.id === state.activeId ? state.firstSend : undefined,
-        sessionsPage: false,
+        firstSend: state.page !== undefined && !state.composing && action.id === state.activeId ? state.firstSend : undefined,
+        page: undefined,
       };
     case "showNewest":
       // Not while a start is on its way or has just failed: the newest session may be the one being started, and

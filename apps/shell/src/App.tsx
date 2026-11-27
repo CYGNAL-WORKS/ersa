@@ -13,6 +13,7 @@ import { type Adding, type FolderChoice, NewSessionScreen } from "./components/N
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { SessionsPage } from "./components/SessionsPage";
+import { SettingsPage } from "./components/SettingsPage";
 import { SignInNote } from "./components/SignInNote";
 import { unseenWrites } from "./session/unseen";
 import { RailTop } from "./components/RailTop";
@@ -40,6 +41,7 @@ import { noteState, sessionNoteFailure, signInKey, signedInClears, useNoteClears
 import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type WorkbenchPatch, useWorkbench } from "./session/workbench";
+import { type ArchivePatch, useArchiveSetting } from "./session/archiveInactive";
 import { type RawLogReader, type RawLogView, readRawLog } from "./session/rawLog";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
@@ -111,7 +113,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // What the stage shows: the active session, the new-session screen or the sessions page (session/stage.ts); and what the window
   // knows of the active session.
-  const [{ activeId, composing, starting, firstSend, sessionsPage }, dispatch] = useReducer(stage, initialStage);
+  const [{ activeId, composing, starting, firstSend, page }, dispatch] = useReducer(stage, initialStage);
+  // A page stands over the stage: what is behind it is hidden and out of reach (FLOW-ORGANIZE-SESSIONS-R20; LAY-SHELL, The settings page).
+  const onPage = page !== undefined;
   const [session, setSession] = useState<SessionView>();
   const follower = useRef<Follower | null>(null);
   // What this window sent that still waits in the backend, by session, kept while another session is shown, so the
@@ -153,6 +157,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const saveWorkbench = useCallback((patch: WorkbenchPatch) => client.call("settings.set", { patch }), [client]);
   const workbench = useWorkbench(saveWorkbench);
   const readWorkbench = workbench.read;
+  // Storage's Archive inactive sessions (FLOW-CLEAN-UP-R15), read with the rest of the settings and sent as a change.
+  const saveArchive = useCallback((patch: ArchivePatch) => client.call("settings.set", { patch }), [client]);
+  const archiveSetting = useArchiveSetting(saveArchive, describeError);
+  const { read: readArchive, unread: archiveUnread } = archiveSetting;
   // Today, moved on at local midnight, so the date groups move with the passing of days alone (R07).
   const today = useLocalDay();
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
@@ -492,18 +500,20 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         if (!live) return;
         readArrangement(read);
         readWorkbench(read);
+        readArchive(read);
         setLastUsed(lastUsedFrom(read));
       },
       (error) => {
         if (!live) return;
         arrangementUnread(describeError(error));
+        archiveUnread(error);
         setLastUsed({});
       },
     );
     return () => {
       live = false;
     };
-  }, [client, link, readArrangement, arrangementUnread, readWorkbench]);
+  }, [client, link, readArrangement, arrangementUnread, readWorkbench, readArchive, archiveUnread]);
 
   // Each host's name, by id, read on each new connection: the rail names a project's host when it is not this
   // machine. Best effort: a host not listed, or a read that failed or has not answered, is named by its id.
@@ -952,7 +962,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const firstSendHere = firstSend && firstSend.id === shown?.id ? firstSend : undefined;
 
   // A file dropped while the sessions page shows reaches no composer behind it.
-  const dragDrop = sessionsPage ? undefined : shell?.onDragDrop;
+  const dragDrop = onPage ? undefined : shell?.onDragDrop;
 
   // The projects as last read, so a screen with a message being written stays while Core is away; sending then
   // fails with the reason, and the message stays in the composer.
@@ -1090,6 +1100,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             onAllSessions: () => dispatch({ type: "allSessions" }),
             workbenchOpen: workbench.open,
             onDeveloperPane: () => workbench.setOpen(!workbench.open),
+            onSettings: () => dispatch({ type: "settings" }),
           }}
         />
         <div className="rail-body">
@@ -1162,7 +1173,21 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           (LAY-SHELL, The workbench). The workbench is outside the stage, so the sessions page leaves it in place. */}
       <div className="work">
       <div className="stages">
-      {sessionsPage && (
+      {page === "settings" && (
+        // As the sessions page: the stage behind is hidden and out of reach, its session still active (LAY-SHELL, The
+        // settings page).
+        <main className="stage" inert={behind}>
+          <ErrorBoundary what={t("settings.boundaryName")}>
+            <SettingsPage
+              archive={archiveSetting.view}
+              changing={archiveSetting.changing}
+              offline={view.phase !== "connected"}
+              onArchive={archiveSetting.choose}
+            />
+          </ErrorBoundary>
+        </main>
+      )}
+      {page === "sessions" && (
         // The page stands over the stage: the composer, the session controls and the header are hidden and out of reach,
         // so nothing typed reaches the active session, which stays active (FLOW-ORGANIZE-SESSIONS-R20).
         <main className="stage" inert={behind}>
@@ -1203,7 +1228,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         </main>
       )}
       {shown ? (
-        <main className="stage" hidden={sessionsPage} inert={behind || sessionsPage}>
+        <main className="stage" hidden={onPage} inert={behind || onPage}>
           {/* Tries again on each new event, and keeps the composer out of it. */}
           <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
             <Transcript
@@ -1295,7 +1320,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (
-        <main className="stage" hidden={sessionsPage} inert={behind || sessionsPage}>
+        <main className="stage" hidden={onPage} inert={behind || onPage}>
           <ErrorBoundary what="The new-session screen" resetKey={composing?.projectId ?? ""}>
             <NewSessionScreen
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
@@ -1306,7 +1331,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               backends={backends}
               backendFailures={backendFailures}
               // Behind the sessions page the screen is not showing: coming back from it shows it again (R50).
-              shown={!sessionsPage}
+              shown={!onPage}
               onReadBackends={readHostBackends}
               signIns={signIns.signIns}
               onSignIn={signIns.signIn}
@@ -1322,7 +1347,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               // Behind the sessions page, the quit question or the delete question the screen is out of reach, and a
               // trust question it opened could not be seen or answered: Add project and Ctrl+O do nothing meanwhile.
-              onChooseFolder={sessionsPage || behind || quitAsk ? undefined : chooseFolder}
+              onChooseFolder={onPage || behind || quitAsk ? undefined : chooseFolder}
               onAddProject={addProject}
               away={away}
               onStop={() => startStop.current?.stop()}
@@ -1332,7 +1357,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </main>
       ) : (
-        <main className="stage stage-empty" hidden={sessionsPage} inert={behind || sessionsPage}>No session open. Start one from a project in the rail.</main>
+        <main className="stage stage-empty" hidden={onPage} inert={behind || onPage}>No session open. Start one from a project in the rail.</main>
       )}
       </div>
       <Workbench

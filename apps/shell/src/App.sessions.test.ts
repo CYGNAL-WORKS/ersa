@@ -120,11 +120,12 @@ async function allSessions() {
 
 describe("the sessions page", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R26
-  it("is opened by the arrange menu's View all, its last item", async () => {
+  it("is opened by the arrange menu's View all, the last item before Developer pane and Settings", async () => {
     await start();
     fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
     const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
-    expect(items.at(-1)).toBe("View all");
+    // Developer pane is a checkbox item, so not among these; Settings follows it, apart (LAY-SHELL, The arrange button).
+    expect(items.slice(-2)).toEqual(["View all", "Settings"]);
     expect(items).not.toContain("All sessions");
     fireEvent.click(screen.getByRole("menuitem", { name: "View all" }));
     await settle();
