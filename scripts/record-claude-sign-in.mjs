@@ -3,24 +3,54 @@
 // for the planning pass that writes PROTO-CLAUDE-CODE-STREAM's Signing in
 // (ADR 0040, #633). A person signs in for real while it runs.
 //
-//   node scripts/record-claude-sign-in.mjs [--ending all|stopped|abandoned|finished]
+//   node scripts/record-claude-sign-in.mjs [--ending all|<ending>[,<ending>...]]
 //                                          [--route auto|control|process]
 //                                          [--abandon-after <seconds>] [--wait <seconds>]
-//                                          [--answer-within <seconds>] [--out <dir>]
+//                                          [--answer-within <seconds>] [--settle <seconds>]
+//                                          [--cli-version <x.y.z>]
+//                                          [--out <dir>]
 //
 // --answer-within (60 by default) is how long a CLI has to answer each request,
 // and `auth login` to print its address, timed from that request or start.
+// --settle (5 by default) is how long the host watches for the CLI to say
+// anything after it withdraws a wait or starts a second sign-in.
 //
 // Each ending is one run, against a new scratch configuration folder
-// (CLAUDE_CONFIG_DIR), so the machine's own sign-in is left as it is. The
-// default, `all`, runs the three in turn: `stopped` (the host stops the
-// sign-in as soon as it has an address; nobody signs in), `abandoned` (the
-// person closes the page; the host stops the sign-in after --abandon-after
-// seconds, 120 by default) and `finished` (the person signs in; the recorder
-// waits up to --wait seconds, 600 by default).
+// (CLAUDE_CONFIG_DIR), so the machine's own sign-in is left as it is.
+// --ending names one or more, comma-separated, run in the order given; `all`,
+// the default, runs the three a person takes part in, and `no-account` the six
+// that need none. Three need a person:
+//   stopped               the host stops the sign-in as soon as it has an address; nobody signs in
+//   abandoned             the person closes the page; the host stops the sign-in after
+//                         --abandon-after seconds, 120 by default
+//   finished              the person signs in; the recorder waits up to --wait seconds, 600 by
+//                         default. The session running all along sends one message before the
+//                         sign-in, which fails as not signed in, and one after it.
+// The rest need no account and no person: each opens no page and asks nothing,
+// and each starts the sign-in by the control route alone, since `auth login`
+// may open a browser by itself. Each is stopped as `stopped` is unless it says:
+//   closed-after-cancel   the host withdraws the wait and closes stdin at once
+//   closed-while-waiting  the host closes stdin with the wait pending, withdrawing nothing
+//   second-same-process   a second claude_authenticate on the sign-in's process, while the
+//                         first is under way
+//   second-other-process  a second CLI started the same way, in the same scratch folder, starts
+//                         a sign-in of its own while the first is under way; both are stopped
+//   console-account       claude_authenticate with loginWithClaudeAi: false
+//   key-in-environment    the sign-in's process alone is given ANTHROPIC_API_KEY, a placeholder
+//                         shaped like no key
+// After every ending, each process's meta says whether the scratch folder
+// holds a session record for it (`left_session_record`).
+//
+// --cli-version records with another version of the CLI: npm installs that
+// version's package for this platform (@anthropic-ai/claude-code-<platform>-<arch>),
+// with its scripts off, into a scratch folder deleted when the run ends, as
+// fixture 2.1.316/55-probe-get-settings was fetched. It downloads the CLI, so
+// it is run only with the owner's yes. ERSA_NPM names a node script to run in
+// place of npm (the tests' stand-in).
 //
 // A run, in order:
-//   1. starts a CLI signed out, `running`, with Ersa's command line, and sends it `initialize`;
+//   1. starts a CLI signed out, `running`, with Ersa's command line, and sends it `initialize`
+//      (for `finished`, then one message, whose answer it waits for);
 //   2. starts the sign-in. The control route starts a second CLI the same way and
 //      sends `claude_authenticate` with `loginWithClaudeAi`, then
 //      `claude_oauth_wait_for_completion`. If the CLI refuses (an error answer, no
@@ -28,15 +58,17 @@
 //      process route follows: `claude auth login --claudeai` with a stdin nothing is
 //      ever written to, since Ersa relays no code (ADR 0040). `claude_oauth_callback`
 //      is never sent;
-//   3. asks the person whether a sign-in page opened, and opens the address in
-//      their browser if not (never for `stopped`);
-//   4. waits for the ending, or stops the sign-in as the host would: the control
-//      route withdraws the pending request (`control_cancel_request`), closes stdin,
-//      then kills the process; the process route kills it;
+//   3. for `abandoned` and `finished`, asks the person whether a sign-in page opened, and
+//      opens the address in their browser if not;
+//   4. for the second-sign-in endings, starts the second sign-in; then waits for the
+//      ending, or stops the sign-in as the host would: the control route withdraws the
+//      pending request (`control_cancel_request`) and closes stdin, as the ending says,
+//      then kills the process if it must; the process route kills it;
 //   5. sends `running` one message and records its answer;
 //   6. probes a new CLI (`initialize`, `get_settings`);
 //   7. after a finished sign-in, runs `claude auth logout` against the scratch folder,
-//      so the credential is withdrawn before the folder is deleted.
+//      so the credential is withdrawn before the folder is deleted;
+//   8. notes, before the folder is deleted, which processes left a session record in it.
 //
 // Nothing captured reaches disk until all of it has passed the check below.
 // Every line is redacted (scripts/redact.mjs; the account's own email,
@@ -58,8 +90,9 @@
 // leaves it; the next run of this recorder deletes it first.
 //
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH (a `.mjs` file
-// is run with node, as the tests' stand-in is). ERSA_SIGN_IN_OPENER names a node
-// script to open the address with in place of the system's browser.
+// is run with node, as the tests' stand-in is); --cli-version takes its place.
+// ERSA_SIGN_IN_OPENER names a node script to open the address with in place of
+// the system's browser.
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -73,15 +106,31 @@ import { ENV_REMOVED as ERSA_ENV_REMOVED, ENV_SET, ERSA_ARGS } from "./claude-in
 import { PLACEHOLDER_EMAIL, PLACEHOLDER_ORG, PLACEHOLDER_PLAN, accountDetails, escapeRegExp, nextFixtureNumber, redact, scrubUserName, secretsIn } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const CLAUDE = process.env.ERSA_CLAUDE || "claude";
-// A `.mjs` stand-in is run with this node; the real CLI is run as itself.
-const [EXE, EXE_ARGS] = CLAUDE.endsWith(".mjs") ? [process.execPath, [CLAUDE]] : [CLAUDE, []];
 
 // Ersa's environment changes, and beside them every variable that would sign
 // the CLI in without a sign-in: a key or a token.
 const ENV_REMOVED = [...ERSA_ENV_REMOVED, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"];
 const MESSAGE = "Reply with the single word: ok";
 const SCRATCH_PREFIX = "ersa-rec-sign-in-";
+// The key `key-in-environment` gives the sign-in's process: shaped like no
+// key, so no check mistakes it for one and the vendor's service would refuse it.
+const PLACEHOLDER_KEY = "placeholder-not-a-key";
+
+// Each ending: whether the person is asked about the page (`ask`), how long
+// the sign-in may run before the host stops it (`limit`), how the host stops
+// it (`stop`), and what else it does. `controlOnly` endings never take the
+// process route.
+const ENDING = {
+  stopped: { stop: "cancel" },
+  abandoned: { ask: true, limit: () => abandonAfter, stop: "cancel" },
+  finished: { ask: true, limit: () => waitFor, stop: "cancel", messageBefore: true },
+  "closed-after-cancel": { controlOnly: true, stop: "cancel-then-close" },
+  "closed-while-waiting": { controlOnly: true, stop: "close" },
+  "second-same-process": { controlOnly: true, stop: "cancel", second: "same" },
+  "second-other-process": { controlOnly: true, stop: "cancel", second: "other" },
+  "console-account": { controlOnly: true, stop: "cancel", claudeAi: false },
+  "key-in-environment": { controlOnly: true, stop: "cancel", keyInEnvironment: true },
+};
 
 // ---- Arguments
 
@@ -96,18 +145,18 @@ const abandonAfter = Number(option("--abandon-after", "120")) * 1000;
 const waitFor = Number(option("--wait", "600")) * 1000;
 // How long a CLI has to answer a request or print its sign-in address.
 const answerWithin = Number(option("--answer-within", "60")) * 1000;
-const ENDINGS = endingArg === "all" ? ["stopped", "abandoned", "finished"] : [endingArg];
-if (!ENDINGS.every((e) => ["stopped", "abandoned", "finished"].includes(e)) || !["auto", "control", "process"].includes(route) || !(abandonAfter >= 0) || !(waitFor > 0) || !(answerWithin > 0)) {
-  console.error("usage: node scripts/record-claude-sign-in.mjs [--ending all|stopped|abandoned|finished] [--route auto|control|process] [--abandon-after <s>] [--wait <s>] [--answer-within <s>] [--out <dir>]");
+// How long the host watches for the CLI to say anything after a cancel or a
+// second sign-in, before going on.
+const settle = Number(option("--settle", "5")) * 1000;
+const cliVersion = option("--cli-version", null);
+// `all` is the three a person takes part in; `no-account` the rest.
+const NO_ACCOUNT = Object.keys(ENDING).filter((name) => ENDING[name].controlOnly);
+const ENDINGS = endingArg === "all" ? ["stopped", "abandoned", "finished"] : endingArg === "no-account" ? NO_ACCOUNT : endingArg.split(",");
+// The version reaches a command line, so it is digits and dots and nothing else.
+if (!ENDINGS.every((e) => Object.hasOwn(ENDING, e)) || !["auto", "control", "process"].includes(route) || !(abandonAfter >= 0) || !(waitFor > 0) || !(answerWithin > 0) || !(settle >= 0) || (cliVersion !== null && !/^\d+\.\d+\.\d+$/.test(cliVersion))) {
+  console.error(`usage: node scripts/record-claude-sign-in.mjs [--ending all|<ending>[,<ending>...]] [--route auto|control|process] [--abandon-after <s>] [--wait <s>] [--answer-within <s>] [--settle <s>] [--cli-version <x.y.z>] [--out <dir>]\nendings: ${Object.keys(ENDING).join(", ")}`);
   process.exit(1);
 }
-
-const version = spawnSync(EXE, [...EXE_ARGS, "--version"], { encoding: "utf8" }).stdout?.trim().split(/\s+/)[0];
-if (!version) {
-  console.error(`could not run ${CLAUDE} --version`);
-  process.exit(1);
-}
-const OUT = option("--out", join(ROOT, "docs", "briefs", "protocol", "fixtures", "claude-code", version, "sign-in"));
 
 // ---- Cleanup, on every ending a process can see
 
@@ -165,6 +214,58 @@ function makeScratch() {
   mkdirSync(join(dir, "cwd"));
   return dir;
 }
+
+// ---- The CLI
+
+// Another version's CLI, installed by npm into a scratch folder of its own:
+// the package for this platform, with none of its scripts run. Returns the
+// executable, or exits naming what failed.
+function installCli(wanted) {
+  const name = `@anthropic-ai/claude-code-${process.platform}-${process.arch}`;
+  const spec = `${name}@${wanted}`;
+  const prefix = join(makeScratch(), "cli");
+  const npmArgs = ["install", "--prefix", prefix, "--no-save", "--no-package-lock", "--ignore-scripts", "--no-audit", "--no-fund", spec];
+  console.log(`Installing ${spec} into a scratch folder, deleted when the run ends.`);
+  const result = process.env.ERSA_NPM
+    ? spawnSync(process.execPath, [process.env.ERSA_NPM, ...npmArgs], { encoding: "utf8" })
+    : // npm is `npm.cmd` on Windows, which runs only through a shell. Every
+      // argument is a fixed word, a checked version or a temp path, quoted.
+      spawnSync(["npm", ...npmArgs].map((a) => (a === prefix ? `"${a}"` : a)).join(" "), { encoding: "utf8", shell: true });
+  const dir = join(prefix, "node_modules", ...name.split("/"));
+  if (result.status !== 0 || !existsSync(join(dir, "package.json"))) {
+    console.error(`npm could not install ${spec} (exit ${result.status ?? result.error?.code}):\n${result.stderr ?? ""}`);
+    process.exit(1);
+  }
+  // The package's own `bin` for `claude` where it names one, else the
+  // executable at its root, where 2.1.316's package had it.
+  const { bin } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  const exe = [typeof bin === "string" ? bin : bin?.claude, process.platform === "win32" ? "claude.exe" : "claude"]
+    .filter(Boolean)
+    .map((b) => join(dir, b))
+    .find(existsSync);
+  if (!exe) {
+    console.error(`${spec} holds no claude executable`);
+    process.exit(1);
+  }
+  return { exe, described: `${spec}, installed by npm into a scratch folder, deleted afterward` };
+}
+
+const installed = cliVersion ? installCli(cliVersion) : null;
+const CLAUDE = installed?.exe ?? (process.env.ERSA_CLAUDE || "claude");
+// A script (the tests' `.mjs` stand-in, or a package's `.js` bin) is run with
+// this node; the real CLI is run as itself.
+const [EXE, EXE_ARGS] = /\.[cm]?js$/.test(CLAUDE) ? [process.execPath, [CLAUDE]] : [CLAUDE, []];
+
+const version = spawnSync(EXE, [...EXE_ARGS, "--version"], { encoding: "utf8" }).stdout?.trim().split(/\s+/)[0];
+if (!version) {
+  console.error(`could not run ${installed?.described ?? CLAUDE} --version`);
+  process.exit(1);
+}
+if (cliVersion && version !== cliVersion) {
+  console.error(`the installed CLI says it is ${version}, not ${cliVersion}; nothing recorded`);
+  process.exit(1);
+}
+const OUT = option("--out", join(ROOT, "docs", "briefs", "protocol", "fixtures", "claude-code", version, "sign-in"));
 
 // ---- The person at the terminal
 
@@ -275,6 +376,7 @@ function startCli(args, env, cwd, started) {
 // ---- One ending
 
 async function record(ending, number) {
+  const e = ENDING[ending];
   const started = Date.now();
   const scratch = makeScratch();
   const config = join(scratch, "config");
@@ -282,10 +384,13 @@ async function record(ending, number) {
   const env = { ...process.env };
   for (const key of ENV_REMOVED) delete env[key];
   Object.assign(env, ENV_SET, { CLAUDE_CONFIG_DIR: config });
+  // The sign-in's processes, which `key-in-environment` alone gives a key.
+  const signInEnv = e.keyInEnvironment ? { ...env, ANTHROPIC_API_KEY: PLACEHOLDER_KEY } : env;
   const stream = () => [...ERSA_ARGS, "--session-id", randomUUID()];
   // The probe loads the user's settings alone, as the adapter's does (PROTO-CLAUDE-CODE-STREAM, Invocation).
   const probeArgs = () => stream().map((a) => (a === "user,project,local" ? "user" : a));
   const at = () => Date.now() - started;
+  const endingRoute = e.controlOnly ? "control" : route;
 
   // 1. A session already running, signed out, before the sign-in.
   const running = startCli(stream(), env, cwd, started);
@@ -295,32 +400,41 @@ async function record(ending, number) {
   const account = runningAnswerToInit?.response?.response?.account;
   const startedSignedOut = account?.tokenSource === "none" && account?.apiProvider === "firstParty" && account?.apiKeySource === undefined;
   if (!startedSignedOut) console.error(`${ending}: WARNING: the CLI did not start signed out in the scratch folder, so this is not a recording of a sign-in`);
+  // Its messages, each with whether it was answered and whether as an error.
+  const messages = [];
+  const sendMessage = async (when) => {
+    // A CLI that exits instead of answering ends the wait at once.
+    const answer = Promise.race([running.next((m) => m.type === "result", 120_000), running.exited.then(() => null)]);
+    running.send({ type: "user", message: { role: "user", content: [{ type: "text", text: MESSAGE }] } });
+    const result = await answer;
+    messages.push({ when, got_result: !!result, is_error: result?.is_error ?? null });
+    return result;
+  };
+  // `finished`: one message before the sign-in, which must fail as not signed
+  // in, or this is not the case the recording is for.
+  let failedBefore = true;
+  if (runningInit && e.messageBefore) {
+    failedBefore = (await sendMessage("before the sign-in"))?.is_error === true;
+    if (!failedBefore) console.error(`${ending}: WARNING: the message sent before the sign-in did not fail as not signed in`);
+  }
 
   // 2. The sign-in.
   const tried = [];
   const signIn = { tried, steps: [] };
   const step = (what) => signIn.steps.push({ t: at(), step: what });
-  if (route !== "process") {
-    const proc = startCli(stream(), env, cwd, started);
-    const initialized = !!(await proc.control({ subtype: "initialize", hooks: {} }, answerWithin).answer);
-    const auth = initialized ? await proc.control({ subtype: "claude_authenticate", loginWithClaudeAi: true }, answerWithin).answer : null;
-    const address = auth?.response?.subtype === "success" ? auth.response.response?.automaticUrl : undefined;
-    const refusal = !initialized ? "no answer to initialize" : !auth ? `no answer to claude_authenticate in ${answerWithin / 1000} s, or the CLI exited` : auth.response?.subtype !== "success" ? "claude_authenticate answered an error" : typeof address !== "string" ? "claude_authenticate answered no automaticUrl" : null;
-    tried.push({ route: "control", refused: refusal });
-    if (refusal) {
-      step(`control route refused: ${refusal}`);
-      const exit = await proc.end(5_000);
-      signIn.refused = { proc, exit };
+  if (endingRoute !== "process") {
+    const control = await startByControl(signInEnv, cwd, started, stream, e.claudeAi ?? true);
+    tried.push({ route: "control", refused: control.refused });
+    if (control.refused) {
+      step(`control route refused: ${control.refused}`);
+      signIn.refused = { proc: control.proc, exit: await control.proc.end(5_000) };
     } else {
-      Object.assign(signIn, { route: "control", proc, address });
+      Object.assign(signIn, control, { route: "control" });
       step("claude_authenticate answered an address; claude_oauth_wait_for_completion sent");
-      const wait = proc.control({ subtype: "claude_oauth_wait_for_completion" }, 24 * 3600_000);
-      signIn.waitId = wait.id;
-      signIn.done = wait.answer.then((m) => (m ? { how: m.response?.subtype === "success" ? "finished" : "failed", answer: m.response?.subtype } : { how: "exited" }));
     }
   }
-  if (!signIn.route && route !== "control") {
-    const proc = startCli(["auth", "login", "--claudeai"], env, cwd, started);
+  if (!signIn.route && endingRoute !== "control") {
+    const proc = startCli(["auth", "login", "--claudeai"], signInEnv, cwd, started);
     // The address, from whichever stream prints it first.
     const fromOutput = () => [...proc.stdout, ...proc.stderr].map((l) => /https:\/\/\S+/.exec(l.line)?.[0]).find(Boolean);
     // Its own clock: the control route may have used up its time already.
@@ -329,14 +443,15 @@ async function record(ending, number) {
     while (!address && (await within(proc.exited, 100)) === null && Date.now() - since < answerWithin) address = fromOutput();
     tried.push({ route: "process", refused: address ? null : `printed no address in ${answerWithin / 1000} s, or exited first` });
     Object.assign(signIn, { route: "process", proc, address });
-    signIn.done = proc.exited.then((e) => ({ how: e.code === 0 ? "finished" : "failed", answer: `exit ${e.code ?? e.signal}` }));
+    signIn.done = proc.exited.then((x) => ({ how: x.code === 0 ? "finished" : "failed", answer: `exit ${x.code ?? x.signal}` }));
     step(address ? "auth login printed an address" : "auth login printed no address");
   }
 
   // 3. The page, and 4. the ending.
   let outcome = { how: "no route gave an address" };
+  let second = null;
   if (signIn.address) {
-    if (ending !== "stopped") {
+    if (e.ask) {
       const reply = await ask("Has a sign-in page opened in your browser? Type y or n, then press Enter.");
       signIn.person_said_page_opened = reply === null ? null : /^y/i.test(reply.trim());
       signIn.recorder_opened_address = signIn.person_said_page_opened === false;
@@ -346,14 +461,35 @@ async function record(ending, number) {
       }
       console.log(ending === "finished" ? "Sign in on that page with your account. The recorder waits for you." : `Close that page without signing in. The recorder stops the sign-in in ${abandonAfter / 1000} seconds.`);
     }
-    const limit = ending === "stopped" ? 0 : ending === "abandoned" ? abandonAfter : waitFor;
+    // A second sign-in while this one is under way, on its process or another.
+    if (e.second === "same") {
+      const again = await signIn.proc.control({ subtype: "claude_authenticate", loginWithClaudeAi: true }, answerWithin).answer;
+      step(again ? `the second claude_authenticate answered: ${again.response?.subtype}${again.response?.response?.automaticUrl ? ", with an address" : ""}` : `the second claude_authenticate was not answered in ${answerWithin / 1000} s, or the CLI exited`);
+    } else if (e.second === "other") {
+      second = await startByControl(signInEnv, cwd, started, stream, true);
+      step(second.refused ? `the second process's sign-in was refused: ${second.refused}` : "the second process's claude_authenticate answered an address; its claude_oauth_wait_for_completion sent");
+    }
+    if (e.second) {
+      const first = await within(signIn.done, settle);
+      step(first ? `the first wait answered after the second sign-in: ${first.how}` : `the first wait did not answer within ${settle / 1000} s of the second sign-in`);
+      if (second?.done) {
+        const answered = await within(second.done, 0);
+        step(answered ? `the second process's wait answered: ${answered.how}` : "the second process's wait had not answered");
+      }
+    }
+    const limit = e.limit?.() ?? 0;
     const ended = await within(signIn.done, limit);
     if (ended) {
       outcome = ended;
       step(`the sign-in ended by itself: ${ended.how}`);
     } else {
       outcome = { how: `stopped by the host after ${limit / 1000} s` };
-      await stopSignIn(signIn, step);
+      await stopSignIn(signIn, e.stop, step);
+    }
+    if (second?.done) {
+      const ended2 = await within(second.done, 0);
+      second.outcome = ended2 ? ended2.how : "stopped by the host";
+      if (!ended2) await stopSignIn(second, e.stop, (what) => step(`second process: ${what}`));
     }
   }
   // Whatever its ending, the sign-in's process is closed (and killed if it must be).
@@ -361,13 +497,14 @@ async function record(ending, number) {
     signIn.exit = await signIn.proc.end(10_000);
     step(`the sign-in's process ${signIn.exit.killed ? "was killed" : "exited"}: ${signIn.exit.code ?? signIn.exit.signal}`);
   }
-
-  // 5. The session that was running all along, asked once.
-  let runningAnswer = null;
-  if (runningInit) {
-    running.send({ type: "user", message: { role: "user", content: [{ type: "text", text: MESSAGE }] } });
-    runningAnswer = await running.next((m) => m.type === "result", 120_000);
+  if (second) {
+    second.exit = await second.proc.end(10_000);
+    step(`the second process ${second.exit.killed ? "was killed" : "exited"}: ${second.exit.code ?? second.exit.signal}`);
   }
+
+  // 5. The session that was running all along, asked once more.
+  let runningAnswer = null;
+  if (runningInit) runningAnswer = await sendMessage("after the sign-in ended");
   const runningExit = await running.end();
 
   // 6. A fresh probe.
@@ -378,13 +515,15 @@ async function record(ending, number) {
 
   // 7. Withdraw the credential before the folder goes.
   let signOut = null;
-  if (outcome.how === "finished") {
+  if (outcome.how === "finished" || second?.outcome === "finished") {
     signOut = startCli(["auth", "logout"], env, cwd, started);
     signOut.child.stdin.end();
     signOut.exit = (await within(signOut.exited, 60_000)) ?? (killTree(signOut.child), { ...(await signOut.exited), killed: true });
   }
 
   for (const child of children) killTree(child);
+  // What the folder holds of each process, now that none is running.
+  const records = sessionRecords(join(config, "projects"));
   removeScratch(scratch);
 
   // The recordings, then the check, then the write.
@@ -393,22 +532,28 @@ async function record(ending, number) {
     claude_code_version: version,
     recorder: "scripts/record-claude-sign-in.mjs",
     ending,
-    executable: CLAUDE,
+    executable: installed?.described ?? CLAUDE,
     env_set: { ...ENV_SET, CLAUDE_CONFIG_DIR: "<a new scratch folder, deleted afterward>" },
     env_removed: ENV_REMOVED,
   };
-  const meta = (proc, exit, extra) => ({
-    ...base,
-    ...extra,
-    args: proc.args,
-    exit_code: exit?.code ?? null,
-    signal: exit?.signal ?? null,
-    killed: exit?.killed ?? false,
-    stdout_lines: proc.stdout.length,
-    stdout_timing_ms: proc.stdout.map((l) => l.t),
-    stderr: proc.stderr,
-    sent: proc.sent,
-  });
+  const meta = (proc, exit, extra) => {
+    const id = proc.args[proc.args.indexOf("--session-id") + 1];
+    return {
+      ...base,
+      ...(proc.env === signInEnv && e.keyInEnvironment ? { env_set_for_this_process: { ANTHROPIC_API_KEY: "<a placeholder shaped like no key>" } } : {}),
+      ...extra,
+      args: proc.args,
+      exit_code: exit?.code ?? null,
+      signal: exit?.signal ?? null,
+      killed: exit?.killed ?? false,
+      // A stream-json process names its session; `auth` commands have none.
+      left_session_record: proc.args.includes("--session-id") ? records.has(`${id}.jsonl`) : null,
+      stdout_lines: proc.stdout.length,
+      stdout_timing_ms: proc.stdout.map((l) => l.t),
+      stderr: proc.stderr,
+      sent: proc.sent,
+    };
+  };
   const recordings = [];
   const add = (suffix, proc, exit, extra) => recordings.push({ suffix, proc, meta: meta(proc, exit, extra) });
   if (signIn.refused) add(`sign-in-${ending}-refused`, signIn.refused.proc, signIn.refused.exit, { role: "a sign-in by the control route, refused", refused: tried[0].refused });
@@ -425,7 +570,14 @@ async function record(ending, number) {
       steps: signIn.steps,
     });
   }
-  add(`sign-in-${ending}-running`, running, runningExit, { role: "a session started signed out before the sign-in, then sent one message", message: MESSAGE, started_signed_out: startedSignedOut, got_result: !!runningAnswer });
+  if (second) add(`sign-in-${ending}-second`, second.proc, second.exit, { role: "a second process's sign-in, started while the first was under way", refused: second.refused, outcome: second.outcome ?? null });
+  add(`sign-in-${ending}-running`, running, runningExit, {
+    role: e.messageBefore ? "a session started signed out before the sign-in, sent one message before it and one after" : "a session started signed out before the sign-in, then sent one message",
+    message: MESSAGE,
+    started_signed_out: startedSignedOut,
+    messages,
+    got_result: !!runningAnswer,
+  });
   add(`sign-in-${ending}-probe`, probe, probeExit, { role: "a probe started after the sign-in ended" });
   if (signOut) add(`sign-in-${ending}-sign-out`, signOut, signOut.exit, { role: "claude auth logout against the scratch folder" });
 
@@ -454,22 +606,58 @@ async function record(ending, number) {
   console.log(`${ending}: wrote ${files.map((f) => f.name).join(", ")}`);
   // A run with no address recorded no sign-in: written, as evidence of the refusals, and failed.
   if (!signIn.address) console.error(`${ending}: no route gave a sign-in address, so nobody could sign in`);
-  return { written: files.map((f) => f.name), failed: !startedSignedOut || !signIn.address, next: n };
+  return { written: files.map((f) => f.name), failed: !startedSignedOut || !failedBefore || !signIn.address, next: n };
 }
 
-// The host stops the sign-in: the control route withdraws the pending request,
-// then closes stdin; the process route has no channel, so it is killed. Each
-// step is timed; the process is closed (and killed if it must be) after.
-async function stopSignIn(signIn, step) {
-  if (signIn.route !== "control") {
+// A sign-in by the control route: a CLI started with Ersa's command line,
+// `initialize`, `claude_authenticate`, then `claude_oauth_wait_for_completion`
+// once there is an address. Returns the process and, when the CLI refused (an
+// error answer, no answer, an exit, or no `automaticUrl` to open), why.
+async function startByControl(env, cwd, started, stream, loginWithClaudeAi) {
+  const proc = startCli(stream(), env, cwd, started);
+  proc.env = env;
+  const initialized = !!(await proc.control({ subtype: "initialize", hooks: {} }, answerWithin).answer);
+  const auth = initialized ? await proc.control({ subtype: "claude_authenticate", loginWithClaudeAi }, answerWithin).answer : null;
+  const address = auth?.response?.subtype === "success" ? auth.response.response?.automaticUrl : undefined;
+  const refused = !initialized ? "no answer to initialize" : !auth ? `no answer to claude_authenticate in ${answerWithin / 1000} s, or the CLI exited` : auth.response?.subtype !== "success" ? "claude_authenticate answered an error" : typeof address !== "string" ? "claude_authenticate answered no automaticUrl" : null;
+  if (refused) return { proc, refused };
+  const wait = proc.control({ subtype: "claude_oauth_wait_for_completion" }, 24 * 3600_000);
+  const done = wait.answer.then((m) => (m ? { how: m.response?.subtype === "success" ? "finished" : "failed", answer: m.response?.subtype } : { how: "exited" }));
+  return { proc, refused: null, address, waitId: wait.id, done };
+}
+
+// The host stops the sign-in. By the control route, as `how` says: `cancel`
+// withdraws the pending wait and gives the CLI --settle seconds to say anything;
+// `cancel-then-close` withdraws it and closes stdin at once; `close` closes
+// stdin with the wait still pending. The process route has no channel, so it
+// is killed. Each step is timed; the process is closed (and killed if it must
+// be) after.
+async function stopSignIn(signIn, how, step) {
+  if (signIn.route === "process") {
     step("killed the sign-in process");
     killTree(signIn.proc.child);
     return;
   }
-  signIn.proc.send({ type: "control_cancel_request", request_id: signIn.waitId });
-  step("sent control_cancel_request for claude_oauth_wait_for_completion");
-  const answered = await within(signIn.done, 5_000);
-  step(answered ? `the wait answered after the cancel: ${answered.how}` : "the wait did not answer within 5 s of the cancel");
+  if (how !== "close") {
+    signIn.proc.send({ type: "control_cancel_request", request_id: signIn.waitId });
+    step("sent control_cancel_request for claude_oauth_wait_for_completion");
+  }
+  if (how === "cancel") {
+    const answered = await within(signIn.done, settle);
+    step(answered ? `the wait answered after the cancel: ${answered.how}` : `the wait did not answer within ${settle / 1000} s of the cancel`);
+    return;
+  }
+  signIn.proc.child.stdin.end();
+  step(how === "close" ? "closed stdin with the wait pending, withdrawing nothing" : "closed stdin straight after the cancel");
+  const answered = await within(signIn.done, 0);
+  if (answered) step(`the wait answered: ${answered.how}`);
+}
+
+// The names of the session record files anywhere under `projects/`, which a
+// process's `<session id>.jsonl` would be one of whatever its folder is named.
+function sessionRecords(projects) {
+  if (!existsSync(projects)) return new Set();
+  return new Set(readdirSync(projects, { recursive: true }).map((p) => String(p).split(/[\\/]/).at(-1)).filter((n) => n.endsWith(".jsonl")));
 }
 
 const isJson = (line) => {
@@ -537,8 +725,10 @@ console.log(`Recording Claude Code ${version}'s sign-in: ${ENDINGS.join(", then 
 const GUIDE = {
   stopped: "The recorder starts a sign-in and stops it at once. If a sign-in page opens in your browser, close it. Don't sign in.",
   abandoned: `A sign-in page will open in your browser. Close it without signing in. The recorder then waits ${abandonAfter / 1000} seconds and stops the sign-in.`,
-  finished: "A sign-in page will open in your browser. Sign in there with your account. The recorder waits for you to finish.",
+  finished: "A session sends one message first, which fails as not signed in. Then a sign-in page will open in your browser. Sign in there with your account. The recorder waits for you to finish, then the session sends one more message.",
 };
+// The endings that need no person: nothing opens and nothing is asked but Enter.
+for (const name of NO_ACCOUNT) GUIDE[name] = `The recorder starts a sign-in (${name}) and stops it. No page opens. Don't sign in.`;
 let failed = false;
 mkdirSync(OUT, { recursive: true });
 let number = nextFixtureNumber(OUT);
