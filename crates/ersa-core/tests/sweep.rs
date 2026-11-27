@@ -948,7 +948,15 @@ async fn a_removal_whose_try_is_stuck_holds_the_workspace() {
     let before = clock.ended();
 
     clock.hour_passed();
-    reached(&gate).await;
+    // The try comes once the pass has judged the workspace and git's own
+    // removal has failed, some thirty git commands, which is most of a
+    // pass: waited for as long as a pass is, and a pass that ends without
+    // it fails at once.
+    tokio::select! {
+        () = gate.reached() => {}
+        () = clock.until_ended(before + 1) => panic!("the pass ended without trying the folder"),
+        () = tokio::time::sleep(PASS) => panic!("the pass reached no try at the folder in {PASS:?}"),
+    }
     let field = format!("workspace={}", id(&workspace));
     let deadline = tokio::time::Instant::now() + PASS;
     while !log.logged("INFO", KEPT, &field) {
