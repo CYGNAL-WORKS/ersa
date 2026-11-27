@@ -9,3 +9,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
+- [ ] 2026-11-27 FLOW-CLEAN-UP: a `branch` item reported `merged` that still holds `unshared` commits (a squash-merged branch) is refused by `cleanup.remove` without `discard`, since its commits go, though R16 ticks it as one whose changes the base branch already holds. #545 ticks it, sends `discard` for it, counts none of its commits as lost in the question, and keeps the confirming button's plain wording for it; whether R17 should count those commits, or the button read as discarding, is open.
