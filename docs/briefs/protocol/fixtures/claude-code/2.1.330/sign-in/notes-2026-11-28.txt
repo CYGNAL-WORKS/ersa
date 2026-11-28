@@ -1,0 +1,23 @@
+Claude Code 2.1.330 (Windows), a finished sign-in where the session running all along had already failed, recorded 2026-11-28 (UTC) by the owner with `scripts/record-claude-sign-in.mjs --ending finished` (#671, ADR 0040). The run used a new scratch configuration folder, signed out with `claude auth logout` and deleted afterward. The machine's own CLI read signed out afterward (`claude auth status`), with no credential file. Times are milliseconds from the start of the run, as each `.meta.json` gives them. How the files are laid out is in `notes-2026-11-26.txt`.
+
+Files: 29-sign-in-finished (the sign-in), 30-sign-in-finished-running (the session that ran all along), 31-sign-in-finished-resumed (that session, stopped and resumed), 32-sign-in-finished-probe (a CLI started afterward), 33-sign-in-finished-sign-out.
+
+The session running all along (30), in order
+- Started signed out: `initialize` answered `account` `{tokenSource: "none", apiProvider: "firstParty"}`.
+- Its first message, sent at 816 before the sign-in started, failed as not signed in: `system/init` without `scratchpad_path`, then an `assistant` message from model `<synthetic>` with `error: "authentication_failed"` and "Not logged in · Please run /login", then `result` with `is_error: true` and `terminal_reason: "api_error"`, at 1072.
+- The process was not restarted. After the sign-in ended (below), its second message, sent at 25265, was answered by the model: a new `system/init` at 25327, now with `scratchpad_path` (as a signed-in session's has) and still `apiKeySource: "none"`, then the model's reply, and `result` with `is_error: false`, `terminal_reason: "completed"`, a cost above 0 and `credential_expires_at`, at 27390, about 2.1 s after it was sent. The model is the same in both `system/init` lines.
+- So the running CLI picks up a sign-in made by another process in the same configuration folder by itself, at its next message, even after a message of its own failed as not signed in. Nothing was sent to it in between. Closing stdin then ended it, exit 0.
+
+The same session resumed (31)
+- Started as the adapter resumes a session: Ersa's command line with `--resume` and the session's id, in its folder, after the running process had exited. `initialize` was answered, so the resume was not refused.
+- Its one message was answered by the model: `system/init` names the same session (`resumed_session_id_matches: true`) and has `scratchpad_path`; `result` `is_error: false`, `completed`, at 30346, about 1.6 s after it was sent. It also wrote `system` `commands_changed` twice (75 commands), before and after its `system/init`. Exit 0 when stdin closed.
+
+The sign-in (29)
+- As on 2026-11-26: `claude_authenticate` answered two addresses at 1364, the wait was sent at once, the person said no page had opened, and the recorder opened `automaticUrl` at 9860. `system` `commands_changed` was written before the wait answered `success` at 24946, about 15 s after the page opened, with `account` naming an email, an organization, a plan and `apiProvider` (each a placeholder here) and no `tokenSource`. Exit 0 when stdin closed.
+- The probe (32) read signed in at once: `account` with the same four fields and no `tokenSource`, 84 commands and 14 models. Sign-out (33) wrote "Successfully logged out from your Anthropic account." and exited 0.
+
+Session records: the running session's record held everything the resume needed. The sign-in's process and the probe left none.
+
+The owner's account answered two messages in this run (30's second and 31's); the first failed without reaching the model.
+
+Privacy: every line passed the redactor's check (`secretsIn`, `accountDetails`), and a search of these files for the account's email, its local part, its organization's name and the machine's user name found none of them.
