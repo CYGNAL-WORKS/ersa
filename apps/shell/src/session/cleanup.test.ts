@@ -86,6 +86,8 @@ describe("the question", () => {
     expect(questionTitle(questionOf([branch()]))).toBe("Clean up 1 branch?");
     // Nothing lost: the button reads as it always does.
     expect(questionOf([workspace(), branch({ unshared: 5, merged: true })])).toMatchObject({ files: 0, commits: 0, discards: false });
+    // A folder Ersa can't identify loses nothing the question counts, and the button still reads as discarding it.
+    expect(questionOf([workspace(), folder()])).toMatchObject({ files: 0, commits: 0, discards: true });
   });
 
   // verifies: FLOW-CLEAN-UP-R28
