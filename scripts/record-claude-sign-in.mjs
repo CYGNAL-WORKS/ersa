@@ -25,7 +25,9 @@
 //                         --abandon-after seconds, 120 by default
 //   finished              the person signs in; the recorder waits up to --wait seconds, 600 by
 //                         default. The session running all along sends one message before the
-//                         sign-in, which fails as not signed in, and one after it.
+//                         sign-in, which fails as not signed in, and one after it; then it is
+//                         stopped and resumed, as the adapter resumes a session, and sent one
+//                         more. At most two messages reach the model: the first fails at once.
 // The rest need no account and no person: each opens no page and asks nothing,
 // and each starts the sign-in by the control route alone, since `auth login`
 // may open a browser by itself. Each is stopped as `stopped` is unless it says:
@@ -65,7 +67,8 @@
 //      ending, or stops the sign-in as the host would: the control route withdraws the
 //      pending request (`control_cancel_request`) and closes stdin, as the ending says,
 //      then kills the process if it must; the process route kills it;
-//   5. sends `running` one message and records its answer;
+//   5. sends `running` one message and records its answer; for `finished`, then stops it,
+//      resumes it (`-resumed`: Ersa's command line with `--resume <its id>`) and sends one more;
 //   6. probes a new CLI (`initialize`, `get_settings`);
 //   7. after a finished sign-in, runs `claude auth logout` against the scratch folder,
 //      so the credential is withdrawn before the folder is deleted;
@@ -83,7 +86,7 @@
 // (a folder of its own: the adapter's tests read every recording beside it),
 // a `.jsonl` (stdout, one line per line; a text line is written as a JSON
 // string) and a `.meta.json` per process: `<NN>-sign-in-<ending>`, the sign-in;
-// `-running`, `-probe`, after a finished sign-in `-sign-out`, and a refused
+// `-running`, for `finished` `-resumed`, `-probe`, after a finished sign-in `-sign-out`, and a refused
 // control route's process `-refused`.
 //
 // The scratch folder is deleted when the run ends, however it ends: the CLIs are
@@ -124,7 +127,7 @@ const PLACEHOLDER_KEY = "placeholder-not-a-key";
 const ENDING = {
   stopped: { stop: "cancel" },
   abandoned: { ask: true, limit: () => abandonAfter, stop: "cancel" },
-  finished: { ask: true, limit: () => waitFor, stop: "cancel", messageBefore: true },
+  finished: { ask: true, limit: () => waitFor, stop: "cancel", messageBefore: true, resume: true },
   "closed-after-cancel": { controlOnly: true, stop: "cancel-then-close" },
   "closed-while-waiting": { controlOnly: true, stop: "close" },
   "second-same-process": { controlOnly: true, stop: "cancel", second: "same" },
@@ -402,21 +405,22 @@ async function record(ending, number) {
   const account = runningAnswerToInit?.response?.response?.account;
   const startedSignedOut = account?.tokenSource === "none" && account?.apiProvider === "firstParty" && account?.apiKeySource === undefined;
   if (!startedSignedOut) console.error(`${ending}: WARNING: the CLI did not start signed out in the scratch folder, so this is not a recording of a sign-in`);
-  // Its messages, each with whether it was answered and whether as an error.
-  const messages = [];
-  const sendMessage = async (when) => {
-    // A CLI that exits instead of answering ends the wait at once.
-    const answer = Promise.race([running.next((m) => m.type === "result", 120_000), running.exited.then(() => null)]);
-    running.send({ type: "user", message: { role: "user", content: [{ type: "text", text: MESSAGE }] } });
+  // One message to a session, kept in its `messages` with whether it was
+  // answered and whether as an error. A CLI that exits instead of answering
+  // ends the wait at once.
+  const sendMessage = async (proc, when) => {
+    const answer = Promise.race([proc.next((m) => m.type === "result", 120_000), proc.exited.then(() => null)]);
+    proc.send({ type: "user", message: { role: "user", content: [{ type: "text", text: MESSAGE }] } });
     const result = await answer;
-    messages.push({ when, got_result: !!result, is_error: result?.is_error ?? null });
+    proc.messages.push({ when, got_result: !!result, is_error: result?.is_error ?? null });
     return result;
   };
+  running.messages = [];
   // `finished`: one message before the sign-in, which must fail as not signed
   // in, or this is not the case the recording is for.
   let failedBefore = true;
   if (runningInit && e.messageBefore) {
-    failedBefore = (await sendMessage("before the sign-in"))?.is_error === true;
+    failedBefore = (await sendMessage(running, "before the sign-in"))?.is_error === true;
     if (!failedBefore) console.error(`${ending}: WARNING: the message sent before the sign-in did not fail as not signed in`);
   }
 
@@ -506,8 +510,25 @@ async function record(ending, number) {
 
   // 5. The session that was running all along, asked once more.
   let runningAnswer = null;
-  if (runningInit) runningAnswer = await sendMessage("after the sign-in ended");
-  const runningExit = await running.end();
+  if (runningInit) runningAnswer = await sendMessage(running, "after the sign-in ended");
+  // `finished`: stopped as the adapter stops a session (stdin closed, then
+  // killed after 3 s), so the next step resumes it from its record.
+  const runningExit = await running.end(e.resume ? 3_000 : undefined);
+
+  // 5a. `finished`: that session resumed as the adapter resumes one (Ersa's
+  // command line with --resume and its id, in its folder), whether or not its
+  // message above was answered, and sent one more message. A resume the CLI
+  // refuses (no answer to `initialize`) is recorded as it happens.
+  let resumed = null;
+  if (e.resume && runningInit) {
+    const id = running.args[running.args.indexOf("--session-id") + 1];
+    resumed = startCli([...ERSA_ARGS, "--resume", id], env, cwd, started);
+    resumed.messages = [];
+    resumed.resumedId = id;
+    resumed.answeredInit = !!(await resumed.control({ subtype: "initialize", hooks: {} }, answerWithin).answer);
+    if (resumed.answeredInit) await sendMessage(resumed, "after the session was resumed");
+    resumed.exit = await resumed.end(3_000);
+  }
 
   // 6. A fresh probe.
   const probe = startCli(probeArgs(), env, cwd, started);
@@ -538,8 +559,12 @@ async function record(ending, number) {
     env_set: { ...ENV_SET, CLAUDE_CONFIG_DIR: "<a new scratch folder, deleted afterward>" },
     env_removed: ENV_REMOVED,
   };
+  // The session a process reported in its `system` `init` lines, the last one.
+  const reportedSession = (proc) =>
+    proc.stdout.map((l) => (isJson(l.line) ? JSON.parse(l.line) : null)).filter((m) => m?.type === "system" && m.subtype === "init").at(-1)?.session_id ?? null;
   const meta = (proc, exit, extra) => {
-    const id = proc.args[proc.args.indexOf("--session-id") + 1];
+    // A resumed process's session is the one it reports, which may be new.
+    const id = proc.resumedId ? reportedSession(proc) : proc.args[proc.args.indexOf("--session-id") + 1];
     return {
       ...base,
       ...(proc.env === signInEnv && e.keyInEnvironment ? { env_set_for_this_process: { ANTHROPIC_API_KEY: "<a placeholder shaped like no key>" } } : {}),
@@ -549,7 +574,7 @@ async function record(ending, number) {
       signal: exit?.signal ?? null,
       killed: exit?.killed ?? false,
       // A stream-json process names its session; `auth` commands have none.
-      left_session_record: proc.args.includes("--session-id") ? records.has(`${id}.jsonl`) : null,
+      left_session_record: proc.args.includes("--session-id") || (proc.resumedId && id) ? records.has(`${id}.jsonl`) : null,
       stdout_lines: proc.stdout.length,
       stdout_timing_ms: proc.stdout.map((l) => l.t),
       stderr: proc.stderr,
@@ -577,9 +602,21 @@ async function record(ending, number) {
     role: e.messageBefore ? "a session started signed out before the sign-in, sent one message before it and one after" : "a session started signed out before the sign-in, then sent one message",
     message: MESSAGE,
     started_signed_out: startedSignedOut,
-    messages,
+    messages: running.messages,
     got_result: !!runningAnswer,
   });
+  if (resumed) {
+    const reported = reportedSession(resumed);
+    add(`sign-in-${ending}-resumed`, resumed, resumed.exit, {
+      role: "the session that ran all along, stopped after the sign-in and resumed, then sent one message",
+      message: MESSAGE,
+      answered_initialize: resumed.answeredInit,
+      // Whether the resumed process carried on the session it was given, by the
+      // id its `system` `init` reported; null when it reported none.
+      resumed_session_id_matches: reported === null ? null : reported === resumed.resumedId,
+      messages: resumed.messages,
+    });
+  }
   add(`sign-in-${ending}-probe`, probe, probeExit, { role: "a probe started after the sign-in ended" });
   if (signOut) add(`sign-in-${ending}-sign-out`, signOut, signOut.exit, { role: "claude auth logout against the scratch folder" });
 
@@ -727,7 +764,7 @@ console.log(`Recording Claude Code ${version}'s sign-in: ${ENDINGS.join(", then 
 const GUIDE = {
   stopped: "The recorder starts a sign-in and stops it at once. If a sign-in page opens in your browser, close it. Don't sign in.",
   abandoned: `A sign-in page will open in your browser. Close it without signing in. The recorder then waits ${abandonAfter / 1000} seconds and stops the sign-in.`,
-  finished: "A session sends one message first, which fails as not signed in. Then a sign-in page will open in your browser. Sign in there with your account. The recorder waits for you to finish, then the session sends one more message.",
+  finished: "A session sends one message first, which fails as not signed in. Then a sign-in page will open in your browser. Sign in there with your account. The recorder waits for you to finish. Then the session sends one more message, is stopped and resumed, and sends one more.",
 };
 // The endings that need no person: nothing opens and nothing is asked but Enter.
 for (const name of NO_ACCOUNT) GUIDE[name] = `The recorder starts a sign-in (${name}) and stops it. No page opens. Don't sign in.`;

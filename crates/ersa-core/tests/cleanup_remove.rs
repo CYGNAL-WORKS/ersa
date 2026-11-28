@@ -598,30 +598,93 @@ async fn a_folder_item_whose_token_is_stale_is_refused() {
     assert!(stray.join("a.bin").exists());
 }
 
-/// A folder Ersa could not measure in time has a token that is new on
-/// every inspect, so its removal is refused whatever token is sent,
-/// `discard` or not, and nothing of it is removed (issue #543, planning
-/// pass of 2026-11-26).
+/// Measuring stops, as when its 30 seconds run out, once the folder's own
+/// entries are all read and before anything deeper.
+fn stop_after_own_entries(config: &mut ersa_core::CoreConfig) {
+    config.measure_depth_limit = Some(1);
+}
+
+/// A stray folder with a file directly in it and one a level down; its
+/// item's id.
+fn stray_folder(s: &Setup) -> (std::path::PathBuf, String) {
+    let project = s.project["id"].as_str().unwrap().to_string();
+    let stray = worktrees(s).join("stray");
+    std::fs::create_dir_all(stray.join("deep")).unwrap();
+    std::fs::write(stray.join("a.bin"), vec![1u8; 300]).unwrap();
+    std::fs::write(stray.join("deep").join("b.bin"), vec![2u8; 200]).unwrap();
+    (stray, format!("f:{project}:stray"))
+}
+
+/// A folder Ersa could not read to the end goes with `discard` and the
+/// token it was shown while its own entries are as they were, whatever
+/// changed deeper inside; without `discard` it stays.
+// verifies: FLOW-CLEAN-UP-R13
+// verifies: FLOW-CLEAN-UP-R31
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_not_read_to_the_end_goes_with_discard_while_its_own_entries_stay() {
+    let _turn = turn().await;
+    let (mut s, _clock) = listing_with(stop_after_own_entries).await;
+    let (stray, id) = stray_folder(&s);
+
+    for discard in [None, Some(false)] {
+        refused_for_unsaved_work(&inspect_and_remove(&mut s, &id, discard).await);
+        assert!(stray.join("deep").join("b.bin").exists(), "nothing removed");
+    }
+
+    let seen = inspect(&mut s, &id).await;
+    assert!(seen.get("size_bytes").is_none(), "{seen}");
+    // Deeper inside, which Ersa did not read and the list says so.
+    std::fs::write(stray.join("deep").join("b.bin"), vec![2u8; 250]).unwrap();
+    let response = remove(&mut s, &id, &seen["token"], Some(true)).await;
+    assert_eq!(result(&response)["id"], id.as_str());
+    assert!(!stray.exists(), "the folder is gone");
+    assert!(worktrees(&s).exists(), "the project's folder stays");
+}
+
+/// A folder Ersa could not read to the end, one of whose own entries
+/// changed since it was inspected, is refused with it as it is now, and
+/// nothing of it is removed.
 // verifies: FLOW-CLEAN-UP-R13
 #[tokio::test(flavor = "multi_thread")]
-async fn a_folder_not_measured_in_time_is_never_removed() {
+async fn a_folder_not_read_to_the_end_whose_own_entries_changed_is_refused() {
+    let _turn = turn().await;
+    let (mut s, _clock) = listing_with(stop_after_own_entries).await;
+    let (stray, id) = stray_folder(&s);
+    let seen = inspect(&mut s, &id).await;
+    std::fs::write(stray.join("c.bin"), vec![3u8; 10]).unwrap();
+
+    let response = remove(&mut s, &id, &seen["token"], Some(true)).await;
+
+    let error = error(&response);
+    assert_eq!(kind(error), "invalid_state", "{error}");
+    assert!(reason(error).is_none(), "{error}");
+    let now = detail(error);
+    assert_eq!(now["id"], id.as_str(), "{error}");
+    assert_eq!(now["kind"], "folder", "{error}");
+    assert_eq!(now["path"], stray.display().to_string(), "{error}");
+    assert!(now.get("size_bytes").is_none(), "{error}");
+    assert_ne!(now["token"], seen["token"], "{error}");
+    assert_eq!(now["token"], inspect(&mut s, &id).await["token"], "{error}");
+    for file in ["a.bin", "c.bin", "deep/b.bin"] {
+        assert!(stray.join(file).exists(), "{file} stays");
+    }
+}
+
+/// A folder whose own entries Ersa could not all read in time can't be
+/// inspected, so it can't be removed here: `vcs_error`, `discard` or not,
+/// and nothing of it is removed.
+// verifies: FLOW-CLEAN-UP-R31
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_whose_own_entries_were_not_all_read_is_not_removed() {
     let _turn = turn().await;
     let (mut s, _clock) = listing_with(|config| config.measure_limit = Duration::ZERO).await;
-    let project = s.project["id"].as_str().unwrap().to_string();
-    let stray = worktrees(&s).join("stray");
-    std::fs::create_dir_all(&stray).unwrap();
-    std::fs::write(stray.join("a.bin"), vec![1u8; 300]).unwrap();
-    let id = format!("f:{project}:stray");
+    let (stray, id) = stray_folder(&s);
 
-    for discard in [Some(true), None] {
-        let seen = inspect(&mut s, &id).await;
-        assert!(seen.get("size_bytes").is_none(), "{seen}");
-        let response = remove(&mut s, &id, &seen["token"], discard).await;
-        let error = error(&response);
-        assert_eq!(kind(error), "invalid_state", "{error}");
-        assert!(detail(error).get("size_bytes").is_none(), "{error}");
-        assert!(stray.join("a.bin").exists(), "nothing removed");
-    }
+    let response = remove(&mut s, &id, &json!("any"), Some(true)).await;
+
+    assert_eq!(kind(error(&response)), "vcs_error", "{response}");
+    assert!(stray.join("a.bin").exists(), "nothing removed");
+    assert!(stray.join("deep").join("b.bin").exists(), "nothing removed");
 }
 
 /// Nothing deletes a folder outside the worktrees root, nor a workspace's

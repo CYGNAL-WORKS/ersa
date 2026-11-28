@@ -99,7 +99,7 @@ pub(super) async fn list(
     Ok(CleanupListResult { items, unread })
 }
 
-/// `cleanup.inspect` (FLOW-CLEAN-UP-R12, R26): the item as it is now, with
+/// `cleanup.inspect` (FLOW-CLEAN-UP-R30, R26): the item as it is now, with
 /// what removing it would lose. Holds one of the places R116 counts from
 /// its start to its end, and with none free answers `vcs_error` at once.
 pub(super) async fn inspect(core: &Core, params: IdParams) -> Result<CleanupInspection, ApiError> {
@@ -170,16 +170,26 @@ pub(super) async fn inspect_held(core: &Core, id: &str) -> Result<CleanupInspect
         if !unidentified(&path, &named, &surveys).await? {
             return Err(gone());
         }
-        let measure = measure(core, &path).await?;
+        // Gone since it was found: no item now.
+        let measure = measure(core, &path).await?.ok_or_else(gone)?;
+        // Not even the folder's own entries all read: nothing the person
+        // could be shown would say what a removal takes, so it can't be
+        // inspected, nor removed here (FLOW-CLEAN-UP-R31).
+        if !measure.own_entries_read {
+            return Err(ApiError::new(
+                ErrorKind::VcsError,
+                format!(
+                    "Ersa could not list what is directly in {path} within {} seconds",
+                    core.config.measure_limit.as_secs()
+                ),
+            ));
+        }
+        // Every entry read when the measuring finished; when it did not,
+        // the folder's own entries alone, in name order, so the token stays
+        // while they do, whatever changes deeper (FLOW-CLEAN-UP-R31).
         let mut digest = workspace::Digest::default();
         for line in &measure.evidence {
             digest.add(line);
-        }
-        // Not walked to the end, what is in it can't all go into the token:
-        // one made new each time never matches, so no removal goes ahead on
-        // what the user saw of it.
-        if measure.size_bytes.is_none() {
-            digest.add(&uuid::Uuid::new_v4().to_string());
         }
         let item = folder_item(project_id, name, path);
         return Ok(CleanupInspection {
@@ -245,7 +255,11 @@ async fn inspect_workspace(
     let size_bytes = if put_away || !measured {
         None
     } else {
-        measure(core, &workspace.path).await?.size_bytes
+        // No size for a folder deleted by hand, nor for one not measured
+        // to the end, wherever the measuring stopped: what removing it
+        // loses is counted above, so it never fails the inspect (R30).
+        let measured = measure(core, &workspace.path).await?;
+        measured.and_then(|m| m.size_bytes)
     };
     // `workspace.changes`'s token covers everything it counts; what else
     // removing the item loses is added to it.
@@ -290,11 +304,17 @@ async fn holds_repository(
     Ok(holds)
 }
 
-/// Measures the folder at `path` within Core's limit for it.
-async fn measure(core: &Core, path: &str) -> Result<workspace::Measure, ApiError> {
+/// Measures the folder at `path` within Core's limit for it; `None` when
+/// there is no folder there.
+async fn measure(core: &Core, path: &str) -> Result<Option<workspace::Measure>, ApiError> {
     let config = &core.config;
-    let measure =
-        workspace::measure_folder(path, config.measure_limit, config.measure_gate.clone()).await?;
+    let measure = workspace::measure_folder(
+        path,
+        config.measure_limit,
+        config.measure_depth_limit,
+        config.measure_gate.clone(),
+    )
+    .await?;
     Ok(measure)
 }
 

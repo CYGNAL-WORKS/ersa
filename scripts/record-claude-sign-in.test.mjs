@@ -99,8 +99,9 @@ test("a finished sign-in by the control route is recorded with every process, re
     assert.deepEqual(written(t), [
       "00-sign-in-finished.jsonl", "00-sign-in-finished.meta.json",
       "01-sign-in-finished-running.jsonl", "01-sign-in-finished-running.meta.json",
-      "02-sign-in-finished-probe.jsonl", "02-sign-in-finished-probe.meta.json",
-      "03-sign-in-finished-sign-out.jsonl", "03-sign-in-finished-sign-out.meta.json",
+      "02-sign-in-finished-resumed.jsonl", "02-sign-in-finished-resumed.meta.json",
+      "03-sign-in-finished-probe.jsonl", "03-sign-in-finished-probe.meta.json",
+      "04-sign-in-finished-sign-out.jsonl", "04-sign-in-finished-sign-out.meta.json",
     ]);
     const signIn = metaOf(t, "00-sign-in-finished.meta.json");
     assert.equal(signIn.route, "control");
@@ -130,12 +131,24 @@ test("a finished sign-in by the control route is recorded with every process, re
     const results = read(t, "01-sign-in-finished-running.jsonl").trim().split("\n").map((l) => JSON.parse(l)).filter((m) => m.type === "result");
     assert.deepEqual(results.map((m) => m.is_error), [true, false]);
     assert.equal(signIn.left_session_record, false);
+    // Then that session was stopped, resumed as the adapter resumes one, and sent
+    // one more message, answered on the session it was given.
+    const resumed = metaOf(t, "02-sign-in-finished-resumed.meta.json");
+    const id = running.args[running.args.indexOf("--session-id") + 1];
+    assert.deepEqual(resumed.args.slice(-2), ["--resume", id]);
+    assert.ok(!resumed.args.includes("--session-id"));
+    assert.deepEqual(resumed.args.slice(0, -2), running.args.slice(0, -2), "Ersa's command line, as the running session's");
+    assert.ok(resumed.sent[0].t > running.sent.at(-1).t);
+    assert.equal(resumed.answered_initialize, true);
+    assert.equal(resumed.resumed_session_id_matches, true);
+    assert.deepEqual(resumed.messages, [{ when: "after the session was resumed", got_result: true, is_error: false }]);
+    assert.deepEqual(resumed.sent.map((s) => JSON.parse(s.line).type), ["control_request", "user"]);
     // The probe loads the user's settings alone, as the adapter's does.
-    const probeArgs = metaOf(t, "02-sign-in-finished-probe.meta.json").args;
+    const probeArgs = metaOf(t, "03-sign-in-finished-probe.meta.json").args;
     assert.equal(probeArgs[probeArgs.indexOf("--setting-sources") + 1], "user");
     assert.match(read(t, "01-sign-in-finished-running.jsonl"), /"result":"ok"/);
-    assert.match(read(t, "02-sign-in-finished-probe.jsonl"), /"email":"user@example.com"/);
-    assert.equal(metaOf(t, "03-sign-in-finished-sign-out.meta.json").exit_code, 0);
+    assert.match(read(t, "03-sign-in-finished-probe.jsonl"), /"email":"user@example.com"/);
+    assert.equal(metaOf(t, "04-sign-in-finished-sign-out.meta.json").exit_code, 0);
     assertClean(t);
     assert.deepEqual(scratchLeft(t), []);
     assert.ok(!stdout.includes("https://"), "the recorder never prints the address");
@@ -311,6 +324,8 @@ test("a session that keeps failing after the sign-in is recorded as it is, and t
     // A second failure is evidence, not a failed recording.
     assert.equal(code, 0);
     assert.deepEqual(metaOf(t, "01-sign-in-finished-running.meta.json").messages.map((m) => m.is_error), [true, true]);
+    // The resumed session, a new process, is answered: the case where Core would start the backend again.
+    assert.deepEqual(metaOf(t, "02-sign-in-finished-resumed.meta.json").messages.map((m) => m.is_error), [false]);
     assert.equal(metaOf(t, "00-sign-in-finished.meta.json").outcome, "finished");
     assertClean(t);
     assert.deepEqual(scratchLeft(t), []);
@@ -479,6 +494,48 @@ test("--offline has npm install from its cache alone, and is refused without --c
     assert.match(alone.stderr, /^usage:/m);
     assert.ok(!existsSync(log));
     assert.deepEqual(scratchLeft(t), []);
+  } finally {
+    t.done();
+  }
+});
+
+test("a resume the CLI refuses, or one that starts a new session, is recorded as it happens and the run still ends", async () => {
+  for (const [play, check] of [
+    ["resume-refused", (resumed, lines) => {
+      assert.equal(resumed.answered_initialize, false);
+      assert.deepEqual(resumed.messages, []);
+      assert.equal(resumed.exit_code, 1);
+      assert.equal(resumed.resumed_session_id_matches, null);
+      assert.equal(resumed.left_session_record, null);
+      assert.match(lines, /No conversation found with session ID/);
+    }],
+    ["resume-new-session", (resumed) => {
+      assert.equal(resumed.answered_initialize, true);
+      assert.equal(resumed.resumed_session_id_matches, false);
+      assert.deepEqual(resumed.messages.map((m) => m.is_error), [false]);
+    }],
+  ]) {
+    const t = setup();
+    try {
+      const { code } = await run(t, ["--ending", "finished"], { input: "\nn\n", play }).exited;
+      assert.equal(code, 0, play);
+      check(metaOf(t, "02-sign-in-finished-resumed.meta.json"), read(t, "02-sign-in-finished-resumed.jsonl"));
+      // The rest of the ending is written as ever.
+      assert.equal(metaOf(t, "04-sign-in-finished-sign-out.meta.json").exit_code, 0, play);
+      assertClean(t);
+      assert.deepEqual(scratchLeft(t), []);
+    } finally {
+      t.done();
+    }
+  }
+});
+
+test("only the finished ending resumes its session", async () => {
+  const t = setup();
+  try {
+    const { code } = await run(t, ["--ending", "stopped"], { input: "\n" }).exited;
+    assert.equal(code, 0);
+    assert.ok(!written(t).some((n) => n.includes("resumed")));
   } finally {
     t.done();
   }
