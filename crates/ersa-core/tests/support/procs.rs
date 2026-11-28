@@ -88,6 +88,9 @@ fn plays_a_part_in_a_process_tree() {
     if part != PARENT_THAT_WAITS && part != PARENT_THAT_EXITS {
         return;
     }
+    // Never waited on: it is the grandchild left running for the test to
+    // see killed, and Windows keeps no zombie of an unwaited process.
+    #[allow(clippy::zombie_processes)]
     let grandchild = std::process::Command::new("ping")
         .args(["-n", "600", "127.0.0.1"])
         .stdin(std::process::Stdio::null())
