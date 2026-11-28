@@ -15,8 +15,8 @@ test("a signed-out backend shows the sign-in note, and a start Core refuses says
   await screen.getByRole("button", { name: "Sign in" }).click();
   // Core refuses: the note says it couldn't be started, with Core's reason, and offers Sign in again (R03).
   // announced as an alert, the same words shown in the note.
-  await expect(screen.getByRole("alert")).toHaveText("Claude Code's sign-in couldn't be started. Ersa can't start a sign-in to Claude Code");
-  await expect(page.locator(".sign-in-words")).toHaveText("Claude Code's sign-in couldn't be started. Ersa can't start a sign-in to Claude Code");
+  await expect(screen.getByRole("alert")).toHaveText("Claude Code's sign-in couldn't be started. Ersa has no sign-in for Claude Code.");
+  await expect(page.locator(".sign-in-words")).toHaveText("Claude Code's sign-in couldn't be started. Ersa has no sign-in for Claude Code.");
   await expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
   await ersa.shot("refused");
 });
