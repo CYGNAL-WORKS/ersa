@@ -957,9 +957,21 @@ impl Adapter for FakeAdapter {
             | SignInMode::CouldNotStart(_)
             | SignInMode::NeverStarts => super::procs::parent_of_a_grandchild(true),
         };
-        let mut process = transport.spawn(spec).await?;
+        // A command not on the host is the one failure the fake expects of
+        // its own process; any other is the test machine's, not a backend's.
+        let mut process = match transport.spawn(spec).await {
+            Ok(process) => process,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(SignInStartError::NotFound);
+            }
+            Err(e) => panic!("the fake's sign-in process: {e}"),
+        };
         let mut stdout = process.take_stdout().expect("stdout");
-        let pid = stdout.next_line().await?.expect("the process's id");
+        let pid = stdout
+            .next_line()
+            .await
+            .expect("the process's output")
+            .expect("the process's id");
         let pid: u32 = pid.trim().parse().expect("a process id");
         sign_ins.processes.lock().unwrap().push(pid);
         drop(sign_ins.start_gate.lock().await);

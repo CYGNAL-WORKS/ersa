@@ -199,9 +199,9 @@ describe("the sign-in note on the new-session screen", () => {
   it("says the sign-in couldn't be started, with Core's reason, and offers Sign in when Core refuses", async () => {
     const core = fakeCore([claudeCode("signed_out")]);
     await start(core);
-    core.signIn = () => Promise.reject({ kind: "rpc", error: { code: -32000, message: "Ersa can't start a sign-in to Claude Code.", data: { kind: "invalid_state" } } });
+    core.signIn = () => Promise.reject({ kind: "rpc", error: { code: -32000, message: "Ersa has no sign-in for Claude Code.", data: { kind: "invalid_state" } } });
     await signIn();
-    expect(noteWords()).toBe("Claude Code's sign-in couldn't be started. Ersa can't start a sign-in to Claude Code.");
+    expect(noteWords()).toBe("Claude Code's sign-in couldn't be started. Ersa has no sign-in for Claude Code.");
     expect(shownLabel()).toBe("Sign in");
     expect(noteButton().getAttribute("aria-disabled")).toBeNull();
     expect(openLink).not.toHaveBeenCalled();

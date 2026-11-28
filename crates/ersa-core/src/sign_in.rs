@@ -143,9 +143,7 @@ pub async fn begin(core: &Arc<Core>, of: SignInOf, adapter: Arc<dyn Adapter>) ->
             Ok(first) => first.started().await,
             Err(_) => Err(ApiError::internal("a sign-in under way is not one")),
         },
-        Err((Refusal::Closing, _)) => Err(ApiError::invalid_state(
-            "Core is shutting down; no sign-in can start",
-        )),
+        Err((Refusal::Closing, _)) => Err(shutting_down()),
         // The one before it took the whole limit to end.
         Err((Refusal::GaveUp, _)) => Err(too_slow(core, adapter.as_ref())),
         Err((refusal, _)) => Err(ApiError::internal(format!(
@@ -207,11 +205,13 @@ enum Interrupted {
 impl Interrupted {
     /// What the requests waiting on the start are told when it never
     /// started.
-    fn before_start(&self, adapter: &dyn Adapter) -> ApiError {
-        ApiError::invalid_state(match self {
-            Interrupted::Canceled => format!("The sign-in to {} was canceled.", adapter.label()),
-            Interrupted::ShutDown => "Core is shutting down; no sign-in can start".to_string(),
-        })
+    fn before_start(&self, label: &str) -> ApiError {
+        match self {
+            Interrupted::Canceled => {
+                ApiError::invalid_state(format!("The sign-in to {label} was canceled."))
+            }
+            Interrupted::ShutDown => shutting_down(),
+        }
     }
 }
 
@@ -242,14 +242,14 @@ impl Task {
         let start = tokio::select! {
             start = start => start,
             interrupted = interrupted(&core, &mut canceled) => {
-                started.send_replace(Some(Err(interrupted.before_start(adapter.as_ref()))));
+                started.send_replace(Some(Err(interrupted.before_start(adapter.label()))));
                 return;
             }
         };
         let StartedSignIn { url, mut sign_in } = match start {
             Ok(Ok(started)) => started,
             Ok(Err(e)) => {
-                started.send_replace(Some(Err(not_started(adapter.as_ref(), e))));
+                started.send_replace(Some(Err(not_started(adapter.label(), e))));
                 return;
             }
             Err(_) => {
@@ -262,7 +262,7 @@ impl Task {
         if !core.admission.sign_in_started(&of) {
             let _ = tokio::time::timeout(SIGN_IN_STOP_LIMIT, sign_in.stop()).await;
             drop(sign_in);
-            let canceled = Interrupted::Canceled.before_start(adapter.as_ref());
+            let canceled = Interrupted::Canceled.before_start(adapter.label());
             started.send_replace(Some(Err(canceled)));
             return;
         }
@@ -337,30 +337,88 @@ async fn finish(
         .notify_all(notification::BACKEND_SIGN_IN_ENDED, &params);
 }
 
+// The words of every refusal below say why the sign-in didn't start and
+// never that it didn't: the note a person reads says that already, in its
+// own sentence, before the reason (PROTO-CORE-API-R170, FLOW-SIGN-IN-R03).
+
+/// The answer for a sign-in asked for, or still starting, while Core shuts
+/// down.
+fn shutting_down() -> ApiError {
+    ApiError::invalid_state("Ersa is shutting down.")
+}
+
 /// The answer for a sign-in that has not started within its limit (R157).
 fn too_slow(core: &Core, adapter: &dyn Adapter) -> ApiError {
+    took_too_long(adapter.label(), core.config.sign_in_start_limit)
+}
+
+fn took_too_long(label: &str, limit: Duration) -> ApiError {
     ApiError::invalid_state(format!(
-        "The sign-in to {} didn't start within {} seconds.",
-        adapter.label(),
-        core.config.sign_in_start_limit.as_secs()
+        "{label} took more than {} seconds to respond.",
+        limit.as_secs()
     ))
 }
 
 /// The answer for a sign-in whose adapter did not start it, each kind as
 /// `invalid_state`: the backend's own reason, unchanged, when it refused
-/// (R157), and, when the adapter tried and could not, words saying the
-/// sign-in couldn't start followed by the adapter's (R166).
-fn not_started(adapter: &dyn Adapter, error: SignInStartError) -> ApiError {
-    let label = adapter.label();
+/// (R157), and the adapter's own sentence, unchanged, when it tried and
+/// could not (R169).
+fn not_started(label: &str, error: SignInStartError) -> ApiError {
     let message = match error {
         SignInStartError::NotFound => {
             format!("{label} isn't installed on this host: its command wasn't found.")
         }
-        SignInStartError::NoSignIn => format!("Ersa can't start a sign-in to {label}"),
+        SignInStartError::NoSignIn => format!("Ersa has no sign-in for {label}."),
         SignInStartError::Refused(reason) => reason,
-        SignInStartError::CouldNotStart(what) => {
-            format!("The sign-in to {label} couldn't start: {what}.")
-        }
+        SignInStartError::CouldNotStart(sentence) => sentence,
     };
     ApiError::invalid_state(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// None of the refusals Core words itself says that the sign-in
+    /// couldn't, can't or didn't start; each says why, as a sentence.
+    // verifies: PROTO-CORE-API-R170
+    #[test]
+    fn no_refusal_core_words_says_the_sign_in_did_not_start() {
+        let label = "Claude Code";
+        let words: Vec<String> = [
+            not_started(label, SignInStartError::NotFound),
+            not_started(label, SignInStartError::NoSignIn),
+            took_too_long(label, Duration::from_secs(20)),
+            Interrupted::Canceled.before_start(label),
+            Interrupted::ShutDown.before_start(label),
+            shutting_down(),
+        ]
+        .into_iter()
+        .map(|error| error.0.message)
+        .collect();
+        assert_eq!(
+            words,
+            [
+                "Claude Code isn't installed on this host: its command wasn't found.",
+                "Ersa has no sign-in for Claude Code.",
+                "Claude Code took more than 20 seconds to respond.",
+                "The sign-in to Claude Code was canceled.",
+                "Ersa is shutting down.",
+                "Ersa is shutting down.",
+            ]
+        );
+        for message in &words {
+            let lower = message.to_lowercase();
+            for said in [
+                "couldn't",
+                "can't",
+                "didn't",
+                "could not",
+                "cannot",
+                "did not",
+            ] {
+                assert!(!lower.contains(&format!("{said} start")), "{message}");
+            }
+        }
+    }
 }

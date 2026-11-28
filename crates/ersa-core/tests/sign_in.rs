@@ -311,7 +311,7 @@ async fn a_sign_in_held_behind_one_that_is_ending_answers_within_its_limit() {
     assert_eq!(kind(&error), "invalid_state");
     assert_eq!(
         error["message"],
-        json!("The sign-in to fake didn't start within 2 seconds.")
+        json!("fake took more than 2 seconds to respond.")
     );
     drop(stopping);
     assert_eq!(other.response(canceling).await["result"], json!({}));
@@ -364,7 +364,7 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
     assert_eq!(kind(&error), "invalid_state");
     assert_eq!(
         error["message"],
-        json!("Ersa can't start a sign-in to without-sign-in")
+        json!("Ersa has no sign-in for without-sign-in.")
     );
 
     let reason = "The vendor's sign-in is closed for maintenance.";
@@ -381,7 +381,7 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
         error["message"]
             .as_str()
             .unwrap()
-            .contains("didn't start within 5 seconds"),
+            .contains("took more than 5 seconds to respond"),
         "{error}"
     );
     eventually_gone(fake.sign_ins.latest_process().await).await;
@@ -392,29 +392,21 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
 }
 
 /// A sign-in its adapter tried to start and could not, after starting a
-/// process for it, is answered `invalid_state`, saying that the sign-in
-/// couldn't start and then the adapter's words; the process is gone, and
-/// the sign-in was never under way: the listing never carries it and no
+/// process for it, is answered `invalid_state` with the adapter's own
+/// sentence for what went wrong, unchanged; the process is gone, and the
+/// sign-in was never under way: the listing never carries it and no
 /// ending is sent (R157's last sentence). Core's own 20 seconds to start,
 /// so the test measures no process's start-up (#664).
-// Cites nothing: PROTO-CORE-API-R166 is retired for R169, under which the
-// message is the adapter's sentence alone, so this test cites R169 once
-// it asserts that (#668).
+// verifies: PROTO-CORE-API-R169
 #[tokio::test(flavor = "multi_thread")]
 async fn a_sign_in_its_adapter_could_not_start_is_refused_and_leaves_nothing_running() {
-    let words = "the backend's process ended before it handed over a page";
+    let words = "The fake ended before it handed over a sign-in page.";
     let mode = SignInMode::CouldNotStart(words.into());
     let (_core, fake, mut client) = core_with(mode, |_| {}).await;
 
     let error = client.error("backend.sign_in", the_fake()).await;
     assert_eq!(kind(&error), "invalid_state");
-    assert_eq!(
-        error["message"],
-        json!(format!(
-            "The sign-in to {} couldn't start: {words}.",
-            fake::BACKEND
-        ))
-    );
+    assert_eq!(error["message"], json!(words), "the adapter's own sentence");
     assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 1);
     eventually_gone(fake.sign_ins.latest_process().await).await;
 
