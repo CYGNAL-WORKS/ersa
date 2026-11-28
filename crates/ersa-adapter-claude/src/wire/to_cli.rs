@@ -110,7 +110,8 @@ pub struct HostControlRequest {
 
 /// The control requests the adapter sends (ADR 0014). `initialize`,
 /// `rename_session`, `set_model`, `set_permission_mode`,
-/// `apply_flag_settings`, `get_context_usage` and `get_settings` are recorded; the others
+/// `apply_flag_settings`, `get_context_usage`, `get_settings`,
+/// `claude_authenticate` and `claude_oauth_wait_for_completion` are recorded; the others
 /// follow the SDK types until fixtures exist.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
@@ -175,6 +176,20 @@ pub enum HostRequest {
     /// is the effort a session given none runs with, which the model probe
     /// marks as the default effort (PROTO-CLAUDE-CODE-STREAM-R82).
     GetSettings,
+    /// Starts the CLI's own sign-in (PROTO-CLAUDE-CODE-STREAM, Signing in).
+    /// `loginWithClaudeAi: true` asks for the sign-in with a Claude
+    /// subscription, the CLI's default; the CLI answers two addresses of the
+    /// vendor's page, `automaticUrl` and `manualUrl` (fixture
+    /// 2.1.330/sign-in/06-sign-in-finished). There is deliberately no
+    /// request for `claude_oauth_callback`: Ersa relays no code (ADR 0040).
+    ClaudeAuthenticate {
+        #[serde(rename = "loginWithClaudeAi")]
+        login_with_claude_ai: bool,
+    },
+    /// Waits for the sign-in `claude_authenticate` started to end: the CLI
+    /// answers `success` once the person has signed in, and nothing while
+    /// nobody has (fixtures 03-sign-in-abandoned and 06-sign-in-finished).
+    ClaudeOauthWaitForCompletion,
     /// A JSON-RPC message for an in-process MCP server declared in
     /// `initialize`'s `sdkMcpServers`.
     McpMessage {

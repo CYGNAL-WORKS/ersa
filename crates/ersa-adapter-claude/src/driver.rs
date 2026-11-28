@@ -27,12 +27,15 @@ use ersa_adapter::{
     Direction, ImageLimits, LineReader, LineWriter, ListedRecord, ModelReport, OpenElsewhere,
     OutgoingMessage, PermissionDecision, Process, ProcessExit, ProcessSpec, Projector,
     QuestionReply, RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings, Removal,
-    Requested, SessionConfig, SessionControl, TitleRules, Transport, async_trait,
+    Requested, SessionConfig, SessionControl, SignInStartError, StartedSignIn, TitleRules,
+    Transport, async_trait,
 };
 use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::PermissionBehavior;
 use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
+
+mod sign_in;
 
 use crate::projector::ClaudeProjector;
 use crate::questions::{self, QUESTION_TOOL};
@@ -591,14 +594,14 @@ impl Adapter for ClaudeAdapter {
     /// still stand.
     async fn models(&self, transport: Arc<dyn Transport>) -> Result<ModelReport, AdapterError> {
         let started = tokio::time::Instant::now();
-        let config = SessionConfig {
-            permission_mode: "default".into(),
-            backend_session_id: self.new_session_id(),
-            ..SessionConfig::default()
-        };
         // The probe is no session: it asks nothing about context.
         let (session, answer) = self
-            .launch(transport, config, Arc::new(ProbeSink), AskContext::No)
+            .launch(
+                transport,
+                self.probe_config(),
+                Arc::new(ProbeSink),
+                AskContext::No,
+            )
             .await?;
         let models = read_models(&answer["response"]);
         let default_effort = match models {
@@ -626,6 +629,16 @@ impl Adapter for ClaudeAdapter {
             // one still lists its models (PROTO-CLAUDE-CODE-STREAM-R83).
             signed_out: read_signed_out(&answer["response"]),
         })
+    }
+
+    /// Starts the CLI's own sign-in on a process of its own and returns once
+    /// the address of the vendor's page is in hand (PROTO-CLAUDE-CODE-STREAM,
+    /// Signing in; see the `sign_in` module).
+    async fn start_sign_in(
+        &self,
+        transport: Arc<dyn Transport>,
+    ) -> Result<StartedSignIn, SignInStartError> {
+        sign_in::start(self, transport).await
     }
 
     fn projector(&self) -> Box<dyn Projector> {
@@ -845,7 +858,73 @@ fn open_elsewhere(check: LiveCheck) -> OpenElsewhere {
     }
 }
 
+/// Why a launch did not get the CLI through its `initialize` handshake.
+/// A session or the model probe reports it as an [`AdapterError`]
+/// ([`LaunchFailure::into_error`]); a sign-in tells the person what went
+/// wrong in words of its own, and so needs the kind, not the text.
+enum LaunchFailure {
+    /// Nothing ran: a bad id, or the transport could not start the CLI.
+    NotStarted(AdapterError),
+    /// The CLI started and the handshake failed; the CLI has been ended.
+    /// `stderr` is what it last wrote there, which a session's error quotes
+    /// and a sign-in's never does (PROTO-CORE-API-R163).
+    Handshake {
+        failure: Handshake,
+        stderr: Vec<String>,
+    },
+}
+
+/// How the `initialize` handshake failed.
+enum Handshake {
+    /// The request could not be written.
+    Unsent(AdapterError),
+    /// The CLI answered with an error, for this reason.
+    Refused(String),
+    /// The CLI exited before answering.
+    Exited,
+    /// The time ran out; `answered` when the CLI had answered and then
+    /// stopped reading its input.
+    Silent { answered: bool },
+}
+
+impl LaunchFailure {
+    /// The error a session or the model probe reports: the handshake's
+    /// failure with the CLI's last stderr lines, which usually say why.
+    fn into_error(self, timeout: Duration) -> AdapterError {
+        match self {
+            LaunchFailure::NotStarted(error) => error,
+            LaunchFailure::Handshake { failure, stderr } => {
+                let error = AdapterError::Protocol(match failure {
+                    Handshake::Unsent(e) => format!("could not send initialize: {e}"),
+                    Handshake::Refused(reason) => format!("the CLI refused initialize: {reason}"),
+                    Handshake::Exited => "the CLI exited before answering initialize".into(),
+                    Handshake::Silent { answered: true } => format!(
+                        "the CLI answered initialize but stopped reading its input within {timeout:?}"
+                    ),
+                    Handshake::Silent { answered: false } => {
+                        format!("the CLI did not answer initialize within {timeout:?}")
+                    }
+                });
+                with_stderr(error, &stderr)
+            }
+        }
+    }
+}
+
 impl ClaudeAdapter {
+    /// How the model probe's CLI starts, and a sign-in's, which starts the
+    /// same way (PROTO-CLAUDE-CODE-STREAM-R84): a new session under an id of
+    /// its own, in Core's own folder, of no project, so with the user's
+    /// settings alone. Such a CLI, sent no message, writes no session record
+    /// (`initialize-only-2026-11-09.txt`).
+    fn probe_config(&self) -> SessionConfig {
+        SessionConfig {
+            permission_mode: "default".into(),
+            backend_session_id: self.new_session_id(),
+            ..SessionConfig::default()
+        }
+    }
+
     /// Starts the CLI on `transport` and performs the `initialize` handshake
     /// (PROTO-CLAUDE-CODE-STREAM-R02), returning the running session and the
     /// CLI's answer (the `control_response`'s `response` object).
@@ -856,10 +935,23 @@ impl ClaudeAdapter {
         sink: Arc<dyn AdapterSink>,
         ask_context: AskContext,
     ) -> Result<(ClaudeSession, Value), AdapterError> {
+        self.launch_or_say_why(transport, config, sink, ask_context)
+            .await
+            .map_err(|failure| failure.into_error(self.handshake_timeout))
+    }
+
+    /// [`Self::launch`], saying which way it failed.
+    async fn launch_or_say_why(
+        &self,
+        transport: Arc<dyn Transport>,
+        config: SessionConfig,
+        sink: Arc<dyn AdapterSink>,
+        ask_context: AskContext,
+    ) -> Result<(ClaudeSession, Value), LaunchFailure> {
         // A bad resume or session id fails here, before anything starts.
-        let resume = resume_args(&config)?;
-        let fork = fork_args(&config)?;
-        let session_id = session_id_args(&config)?;
+        let resume = resume_args(&config).map_err(LaunchFailure::NotStarted)?;
+        let fork = fork_args(&config).map_err(LaunchFailure::NotStarted)?;
+        let session_id = session_id_args(&config).map_err(LaunchFailure::NotStarted)?;
 
         let mut spec = ProcessSpec {
             program: program(&config),
@@ -875,16 +967,17 @@ impl ClaudeAdapter {
         let mut process = transport.spawn(spec).await.map_err(|e| {
             // Name what was tried: "program not found" alone does not say
             // which program, or where to set another.
-            AdapterError::Io(io::Error::new(
+            LaunchFailure::NotStarted(AdapterError::Io(io::Error::new(
                 e.kind(),
                 format!(
                     "could not start Claude Code as `{program}` ({e}); \
                      set ERSA_CLAUDE or the session's claude_path to the CLI"
                 ),
-            ))
+            )))
         })?;
-        let stdin = process.take_stdin().ok_or(AdapterError::NotRunning)?;
-        let stdout = process.take_stdout().ok_or(AdapterError::NotRunning)?;
+        let not_running = || LaunchFailure::NotStarted(AdapterError::NotRunning);
+        let stdin = process.take_stdin().ok_or_else(not_running)?;
+        let stdout = process.take_stdout().ok_or_else(not_running)?;
 
         let (exited_tx, exited_rx) = watch::channel(false);
         let shared = Arc::new(Shared {
@@ -940,7 +1033,7 @@ impl ClaudeAdapter {
             shared
                 .write(&HostMessage::control_request(&init_id, request))
                 .await
-                .map_err(|e| AdapterError::Protocol(format!("could not send initialize: {e}")))?;
+                .map_err(Handshake::Unsent)?;
             match answer_rx.await {
                 Ok(answer) if answer["subtype"] == "success" => {
                     // A trust the CLI did not record leaves the workspace's
@@ -964,14 +1057,14 @@ impl ClaudeAdapter {
                     }
                     Ok(answer)
                 }
-                Ok(answer) => Err(AdapterError::Protocol(format!(
-                    "the CLI refused initialize: {}",
-                    answer["error"].as_str().unwrap_or("no reason given")
-                ))),
-                // The read loop dropped the sender: the CLI exited first.
-                Err(_) => Err(AdapterError::Protocol(
-                    "the CLI exited before answering initialize".into(),
+                Ok(answer) => Err(Handshake::Refused(
+                    answer["error"]
+                        .as_str()
+                        .unwrap_or("no reason given")
+                        .to_string(),
                 )),
+                // The read loop dropped the sender: the CLI exited first.
+                Err(_) => Err(Handshake::Exited),
             }
         };
         // The timeout covers the write too: a CLI that never reads its stdin
@@ -980,29 +1073,24 @@ impl ClaudeAdapter {
             tokio::time::timeout(self.handshake_timeout, handshake)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(AdapterError::Protocol(if answered.load(Ordering::SeqCst) {
-                        format!(
-                            "the CLI answered initialize but stopped reading its input within {:?}",
-                            self.handshake_timeout
-                        )
-                    } else {
-                        format!(
-                            "the CLI did not answer initialize within {:?}",
-                            self.handshake_timeout
-                        )
-                    }))
+                    Err(Handshake::Silent {
+                        answered: answered.load(Ordering::SeqCst),
+                    })
                 })
         };
         match handshake.await {
             Ok(answer) => Ok((session, answer)),
-            Err(error) => {
+            Err(failure) => {
                 // A half-started CLI is of no use; end it before reporting.
                 session.kill_and_wait().await;
                 // What the CLI said on its way out is usually the real reason.
                 if let Some(stderr) = stderr {
                     let _ = tokio::time::timeout(DRAIN_IDLE, stderr).await;
                 }
-                Err(with_stderr(error, &shared.stderr_tail()))
+                Err(LaunchFailure::Handshake {
+                    failure,
+                    stderr: shared.stderr_tail(),
+                })
             }
         }
     }
@@ -1403,12 +1491,39 @@ impl ClaudeSession {
         request: HostRequest,
         limit: Duration,
     ) -> Result<Value, AdapterError> {
+        match self.answer_within(what, request, limit).await {
+            Ok(answer) if answer["subtype"] == "success" => Ok(answer["response"].clone()),
+            Ok(answer) => Err(AdapterError::Protocol(format!(
+                "the CLI refused the {what}: {}",
+                answer["error"].as_str().unwrap_or("no reason given")
+            ))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A fresh request id naming it `what`, and the wait for the CLI's
+    /// first answer to it, registered before the request is written so the
+    /// read loop finds the waiter however soon the answer comes. An exit
+    /// clears every waiter, which ends the wait too.
+    fn await_answer(&self, what: &str) -> (String, oneshot::Receiver<Value>) {
         let request_id = self.shared.request_id(what);
-        // Registered before the write, so the read loop finds the waiter
-        // however soon the answer comes. An exit clears every waiter, which
-        // ends this wait too.
         let (answer_tx, answer_rx) = oneshot::channel();
         lock(&self.shared.awaiting).insert(request_id.clone(), answer_tx);
+        (request_id, answer_rx)
+    }
+
+    /// Sends the control request `request`, its id naming it `what`, and
+    /// waits up to `limit` for the CLI's first answer to it, which it
+    /// returns whole (`subtype`, then `response` or `error`). Only the
+    /// first answer reaches the wait: the read loop hands an answer to
+    /// whoever waits on its `request_id` and then forgets the id.
+    async fn answer_within(
+        &self,
+        what: &str,
+        request: HostRequest,
+        limit: Duration,
+    ) -> Result<Value, AdapterError> {
+        let (request_id, answer_rx) = self.await_answer(what);
         let asked = async {
             self.shared
                 .write(&HostMessage::control_request(&request_id, request))
@@ -1419,11 +1534,7 @@ impl ClaudeSession {
         // A CLI that never answers (one too old to know the request, or
         // wedged) must not keep the waiter for the rest of the session.
         match tokio::time::timeout(limit, asked).await {
-            Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(answer["response"].clone()),
-            Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
-                "the CLI refused the {what}: {}",
-                answer["error"].as_str().unwrap_or("no reason given")
-            ))),
+            Ok(Ok(answer)) => Ok(answer),
             Ok(Err(e)) => {
                 lock(&self.shared.awaiting).remove(&request_id);
                 Err(e)

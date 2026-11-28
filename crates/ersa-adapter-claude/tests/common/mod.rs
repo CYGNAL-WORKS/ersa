@@ -17,6 +17,8 @@ use ersa_adapter_claude::ClaudeProjector;
 use serde_json::Value;
 use tokio::sync::watch;
 
+pub mod stand_in;
+
 /// One recorded fixture: the CLI's stdout lines and what was written to its stdin.
 pub struct Fixture {
     /// `<version>/<file stem>`, such as `2.1.302/01-hello`.
@@ -66,6 +68,17 @@ pub fn fixtures() -> Vec<Fixture> {
     found.sort_by(|a, b| a.name.cmp(&b.name));
     assert!(!found.is_empty(), "no fixtures found");
     found
+}
+
+/// A sign-in recording: `<version>/sign-in/<name>`, which [`fixtures`]
+/// does not read, a sign-in being no session (PROTO-CLAUDE-CODE-STREAM,
+/// Conformance).
+pub fn sign_in_recording(version: &str, name: &str) -> Recording {
+    let file = fixtures_root()
+        .join(version)
+        .join("sign-in")
+        .join(format!("{name}.jsonl"));
+    Recording::load(&file).unwrap_or_else(|e| panic!("{version}/sign-in/{name}: {e}"))
 }
 
 pub fn fixture(name: &str) -> Fixture {
