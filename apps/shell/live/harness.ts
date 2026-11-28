@@ -84,6 +84,12 @@ export interface Ersa {
  */
 const START_LIMIT_MS = 60_000;
 
+/**
+ * How long a quit waits for what it ended to let go of its files. Under full load, the window's WebView2 browser
+ * process took between 10 and 30 s; on an idle machine, well under one.
+ */
+const LET_GO_MS = 30_000;
+
 let counter = 0;
 
 // PowerShell, given the Shell's process as `$p`: True when that process owns a visible top-level window titled Ersa.
@@ -153,6 +159,8 @@ export const test = base.extend<{ backend: Backend; installedLater: boolean; sig
       const dir = mkdtempSync(path.join(tmpdir(), "ersa-live-"));
       folders.add(dir);
       const running: ChildProcess[] = [];
+      // Processes of the Shell's and Core's trees that still held files or pipes once a quit had waited for them.
+      const strays: Listed[] = [];
       let browser: Browser | undefined;
       const unanswered: string[] = [];
       let launches = 0;
@@ -217,7 +225,21 @@ export const test = base.extend<{ backend: Backend; installedLater: boolean; sig
         // Disconnects only; ending the processes below closes the window.
         await browser?.close().catch(() => {});
         browser = undefined;
+        // Listed before anything ends, since a process whose parent has gone can no longer be found from it: the Shell
+        // and Core, the window's WebView2 processes below the Shell, and the backend CLIs below Core. A listing that
+        // fails still lets the trees be ended, and then fails the quit.
+        let trees: Listed[] = [];
+        let unlisted: unknown;
+        try {
+          trees = await processTrees(running.filter((child) => !ended(child)).map((child) => child.pid as number));
+        } catch (e) {
+          unlisted = e;
+        }
         for (const child of [...running].reverse()) await endTree(child);
+        // taskkill returns before what it ended has let go of its files and pipes. A restart's second window starts on
+        // the same WebView2 user data folder, and its Core on the same pipe name, so both wait for that (#689).
+        strays.push(...(await endListed(trees, LET_GO_MS)));
+        if (unlisted !== undefined) throw unlisted;
         // Those ended are let go, so a restart's wait does not take one for its own start failing; any still
         // running stay for the check below.
         const left = running.filter((child) => !ended(child));
@@ -253,6 +275,10 @@ export const test = base.extend<{ backend: Backend; installedLater: boolean; sig
           running: () => running.length > 0 && running.every((child) => !ended(child)),
           async restart() {
             await quit();
+            if (strays.length > 0) {
+              const which = strays.map(named).join(", ");
+              throw new Error(`restart: ${which} still held files ${LET_GO_MS / 1000} s after Ersa quit, so the second window would not start`);
+            }
             window = await launch();
             ersa.page = window.page;
           },
@@ -261,15 +287,21 @@ export const test = base.extend<{ backend: Backend; installedLater: boolean; sig
       } finally {
         await quit();
         rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
-        const left = [...running.filter((child) => !ended(child)).map((child) => `process ${child.pid}`), ...(existsSync(dir) ? [dir] : [])];
+        const unended = running.filter((child) => !ended(child)).map((child) => child.pid);
+        const left = [
+          ...unended.map((pid) => `process ${pid}`),
+          ...strays.filter((stray) => !unended.includes(stray.pid)).map(named),
+          ...(existsSync(dir) ? [dir] : []),
+        ];
         if (left.length > 0) throw new Error(`the live check left behind ${left.join(", ")}`);
         folders.delete(dir);
       }
       if (unanswered.length > 0) throw new Error(`the Interface opened a dialog the test did not answer: ${unanswered.join("; ")}`);
     },
-    // A budget of its own, apart from the test's, shared by the start and the cleanup: the start's limit, then a
-    // minute for the cleanup (two process trees of up to 10 s each, and the folder's retries).
-    { timeout: START_LIMIT_MS + 60_000 },
+    // A budget of its own, apart from the test's, shared by the start and the cleanup: the start's limit, then the
+    // cleanup at its longest: the listing (15 s), two process trees of up to 10 s each, LET_GO_MS and its PowerShell's
+    // margin (45 s), and the folder's retries, which back off by 250 ms more each time (about 50 s).
+    { timeout: START_LIMIT_MS + 135_000 },
   ],
 });
 
@@ -377,6 +409,103 @@ async function endTree(child: ChildProcess) {
   // taskkill returns before the process is gone; Node marks it ended once it is.
   const until = Date.now() + 10_000;
   while (!ended(child) && Date.now() < until) await sleep(100);
+}
+
+/**
+ * A process from Windows' own process list. Its id and its start time together name it: Windows gives an ended
+ * process's id to the next process, but never with the same start time.
+ */
+interface Listed {
+  pid: number;
+  name: string;
+  /** When it started, as Win32_Process's CreationDate, in a form PowerShell reads back the same. */
+  started: string;
+}
+
+function named(process: Listed): string {
+  return `${process.name} (process ${process.pid})`;
+}
+
+/** Runs a PowerShell script that takes about `takes` ms at most, and parses the JSON array it prints. */
+async function listed(script: string, takes = 0): Promise<Listed[]> {
+  const { stdout } = await promisify(execFile)("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024,
+    // Room for PowerShell's own start on a busy machine, so one that hangs fails the quit rather than taking the
+    // fixture's whole budget.
+    timeout: takes + 15_000,
+  });
+  const text = stdout.trim();
+  return text === "" ? [] : (JSON.parse(text) as Listed[]);
+}
+
+/**
+ * The processes `roots` and everything below them, as Windows lists them now. A process counts as a child only if it
+ * started no earlier than its parent, so one whose parent's id now belongs to a newer process is not taken.
+ */
+async function processTrees(roots: number[]): Promise<Listed[]> {
+  if (roots.length === 0) return [];
+  return listed(`
+    $roots = @(${roots.join(",")})
+    $all = @(Get-CimInstance Win32_Process)
+    $tree = @{}
+    foreach ($p in $all) { if ($roots -contains [int]$p.ProcessId) { $tree[[int]$p.ProcessId] = $p } }
+    do {
+      $grew = $false
+      foreach ($p in $all) {
+        $id = [int]$p.ProcessId; $parent = [int]$p.ParentProcessId
+        if (-not $tree.ContainsKey($id) -and $tree.ContainsKey($parent) -and $p.CreationDate -ge $tree[$parent].CreationDate) {
+          $tree[$id] = $p; $grew = $true
+        }
+      }
+    } while ($grew)
+    $listed = @($tree.Values | ForEach-Object {
+      [pscustomobject]@{ pid = [int]$_.ProcessId; name = $_.Name; started = $_.CreationDate.ToString('o') }
+    })
+    ConvertTo-Json -Compress -InputObject $listed`);
+}
+
+/**
+ * Ends each of `processes` still running, and waits up to `ms` for each to let go of what it held, in one PowerShell;
+ * returns those that have not. `taskkill /T` reaches only what is still below a root when it runs, so a process whose
+ * parent ended between the listing and the kill (a helper a git command leaves on purpose) is ended here.
+ *
+ * Ended is not enough: an ended process stays listed while Windows closes its handles, and on a busy machine the
+ * window's WebView2 browser process took over 10 s to close its 1,161, the open files in the WebView2 user data
+ * folder among them. A second window started then fails with "The requested resource is in use" (#689). A process
+ * listed with no handles left holds nothing, so it counts as gone.
+ */
+async function endListed(processes: Listed[], ms: number): Promise<Listed[]> {
+  if (processes.length === 0) return [];
+  const wanted = JSON.stringify(processes).replace(/'/g, "''");
+  return listed(
+    `
+    # Windows PowerShell's ConvertFrom-Json gives an array as one object; piping it on spreads it into its items.
+    $wanted = '${wanted}' | ConvertFrom-Json
+    $wanted = @($wanted | ForEach-Object { $_ })
+    $until = (Get-Date).AddMilliseconds(${ms})
+    do {
+      $left = @()
+      foreach ($w in $wanted) {
+        $p = Get-Process -Id $w.pid -ErrorAction SilentlyContinue
+        if (-not $p) { continue }
+        # Opening the process keeps its id from going to a newer process while it is compared and ended. It is the
+        # same process only when its start time matches the listing's too, so a newer one is neither waited on nor
+        # ended.
+        try { $null = $p.Handle; $same = [Math]::Abs(($p.StartTime - [datetime]$w.started).TotalMilliseconds) -lt 1 } catch { $same = $false }
+        if (-not $same) { continue }
+        $p.Refresh()
+        if ($p.HandleCount -eq 0) { continue }
+        $left += $w
+        # Ending one already ended does nothing.
+        try { $p.Kill() } catch {}
+      }
+      if ($left.Count -eq 0) { break }
+      Start-Sleep -Milliseconds 100
+    } while ((Get-Date) -lt $until)
+    ConvertTo-Json -Compress -InputObject $left`,
+    ms,
+  );
 }
 
 /**
