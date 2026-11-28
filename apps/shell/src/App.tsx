@@ -5,6 +5,7 @@ import { Button } from "./components/Button";
 import type { AttachWhat } from "./components/AttachMenu";
 import { ArchivedNote } from "./components/ArchivedNote";
 import { Composer } from "./components/Composer";
+import { CleanUpQuestion } from "./components/CleanUpQuestion";
 import { DeleteQuestion } from "./components/DeleteQuestion";
 import { DeveloperPane } from "./components/DeveloperPane";
 import { RailFoot } from "./components/RailFoot";
@@ -42,6 +43,7 @@ import { StartStop, lastUsedFrom, readBackends, rememberPatch, startSession } fr
 import { mergeWorkspaces } from "./session/workspaces";
 import { useWorkbench } from "./session/workbench";
 import { useArchiveSetting } from "./session/archiveInactive";
+import { useCleanUp } from "./session/cleanupList";
 import { type RawLogReader, type RawLogView, readRawLog } from "./session/rawLog";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
@@ -161,6 +163,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Storage's Archive inactive sessions (FLOW-CLEAN-UP-R15), read with the rest of the settings and sent as a change.
   const archiveSetting = useArchiveSetting(saveSettings, describeError);
   const { read: readArchive, unread: archiveUnread } = archiveSetting;
+  // Storage's Clean up list (FLOW-CLEAN-UP, steps 5 to 7), read each time the settings page opens while Core is reached.
+  const cleanUp = useCleanUp(client, describeError);
   // Today, moved on at local midnight, so the date groups move with the passing of days alone (R07).
   const today = useLocalDay();
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
@@ -850,7 +854,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   );
   // While the question is open the rest of the window is inert, so neither a click nor Tab takes focus out of it
   // (docs/design/RAIL.md, The delete question); it is not dimmed.
-  const behind = deleteAsk !== undefined && deleteAsk.phase.kind !== "deleted";
+  // The list names items by their sessions' titles and their projects, as the window holds them.
+  const cleanUpNames = useMemo(() => ({ sessions: sessions.state === "ready" ? sessions.sessions : [], projects: projectList ?? [] }), [sessions, projectList]);
+  // Opening the settings page reads the list, and so does Core coming back while it shows (FLOW-CLEAN-UP, Trigger).
+  const readCleanUp = useRef(cleanUp.read);
+  readCleanUp.current = cleanUp.read;
+  const reached = view.phase === "connected";
+  useEffect(() => {
+    if (page === "settings" && reached) readCleanUp.current();
+  }, [page, reached]);
+  // The clean-up question stands over the window in the same way (docs/design/SETTINGS.md, The clean-up question).
+  const behind = (deleteAsk !== undefined && deleteAsk.phase.kind !== "deleted") || cleanUp.view.run !== undefined;
   // Cancel leaves everything as it was, and focus goes back to the tile.
   const cancelDelete = () => {
     const id = deleteAsk?.id;
@@ -1183,6 +1197,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               changing={archiveSetting.changing}
               offline={view.phase !== "connected"}
               onArchive={archiveSetting.choose}
+              cleanUp={cleanUp.view}
+              onCleanUp={cleanUp.actions}
+              names={cleanUpNames}
             />
           </ErrorBoundary>
         </main>
@@ -1377,6 +1394,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         />
       </Workbench>
       </div>
+      {cleanUp.view.run && (
+        <CleanUpQuestion run={cleanUp.view.run} onConfirm={cleanUp.actions.confirm} onCancel={cleanUp.actions.cancel} onStop={cleanUp.actions.stop} />
+      )}
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
         <DeleteQuestion
           title={deleteAsk.title}

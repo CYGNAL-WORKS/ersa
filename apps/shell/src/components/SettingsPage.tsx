@@ -3,6 +3,8 @@ import { t } from "../catalog";
 import { ARCHIVE_DAYS, type ArchiveDays, type ArchiveView } from "../session/archiveInactive";
 import type { Sending } from "../session/follow";
 import { Chip } from "./Chip";
+import { CleanUp, type CleanUpNames } from "./CleanUp";
+import type { CleanUpActions, CleanUpView } from "../session/cleanupList";
 import { Problem } from "./RailTree";
 import "./Page.css";
 import "./SettingsPage.css";
@@ -12,7 +14,7 @@ const NEVER = "never";
 
 const ARCHIVE_OPTIONS = [
   { id: NEVER, label: t("settings.storage.archiveNeverLabel") },
-  ...ARCHIVE_DAYS.map((days) => ({ id: String(days), label: t("settings.storage.archiveDaysLabel", { count: days }) })),
+  ...ARCHIVE_DAYS.map((days) => ({ id: String(days), label: t("settings.storage.daysLabel", { count: days }) })),
 ];
 
 const daysOf = (id: string): ArchiveDays | undefined => ARCHIVE_DAYS.find((d) => String(d) === id);
@@ -20,14 +22,19 @@ const daysOf = (id: string): ArchiveDays | undefined => ARCHIVE_DAYS.find((d) =>
 /**
  * The settings page (LAY-SHELL, The settings page; docs/design/SETTINGS.md): the heading, the names of its sections,
  * and the chosen section's settings. Storage is the only section so far, with Archive inactive sessions
- * (FLOW-CLEAN-UP, step 4; R15). A setting takes effect when it is changed: the page has no Save.
+ * (FLOW-CLEAN-UP, step 4; R15) and the Clean up list (steps 5 to 7). A setting takes effect when it is changed: the page has no Save.
  */
 export function SettingsPage({
   archive,
   changing,
   offline,
   onArchive,
+  cleanUp,
+  onCleanUp,
+  names,
+  now,
   forceChip,
+  forceItem,
   forceSection,
   initialOpen,
 }: {
@@ -39,6 +46,13 @@ export function SettingsPage({
   offline?: boolean;
   /** Sends a choice to Core: a number of days, or undefined for Never. */
   onArchive: (days: ArchiveDays | undefined) => void;
+  /** The Clean up list (FLOW-CLEAN-UP, steps 5 to 7), its actions, and the names it shows items by. */
+  cleanUp: CleanUpView;
+  onCleanUp: CleanUpActions;
+  names: CleanUpNames;
+  /** For the gallery: the time the list counts "last active" from, and its first item's pointer or keyboard state. */
+  now?: Date;
+  forceItem?: "hover" | "focus" | "pressed";
   /** For the gallery: the chip's pointer or keyboard state, the section name's keyboard focus, and the chip's list open. */
   forceChip?: "hover" | "focus" | "pressed";
   forceSection?: "focus";
@@ -122,6 +136,7 @@ export function SettingsPage({
                 </div>
               )}
             </div>
+            <CleanUp view={cleanUp} actions={onCleanUp} names={names} offline={offline} now={now} forceItem={forceItem} />
           </section>
         </div>
       </div>

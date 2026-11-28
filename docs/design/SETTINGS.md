@@ -27,6 +27,33 @@ The page follows Claude Desktop's settings: the heading, the names of the sectio
 
 ## Storage
 
-Storage holds Archive inactive sessions, and the Clean up list will follow it (`FLOW-CLEAN-UP`).
+Storage holds Archive inactive sessions, then Clean up (`FLOW-CLEAN-UP`).
 
 - **Archive inactive sessions**: "Archive a session, as Archive does, once it has had no activity for this long. Running, pinned, and unread sessions are never archived." The chip names the setting for assistive technology and offers Never, 1 day, 2 days, 7 days, 14 days and 30 days, Desktop's values. The words say what the setting does without promising that every idle session goes, since the sweep leaves a running session and some others alone (FLOW-CLEAN-UP, step 4), and leave the folder to Archive, which puts it away only when nothing else needs it (step 1).
+
+## Clean up
+
+Claude Desktop shows one list of the worktrees it can remove and the space freed, and removes nothing until the user approves (`claude-desktop/cleanup-2026-11-20.txt`); what it draws is not recorded, so the list is drawn from Ersa's own parts below.
+
+- **Clean up inactive sessions** is a setting as above: "List the folders and branches Ersa no longer needs, with those of sessions inactive this long. Nothing is removed until you choose Clean up." Its chip offers 30 days, 60 days and 90 days, Desktop's values, and opens on 30. It is not kept: a choice reads the list again.
+- **The list** is beneath that row, `space-md` from it and its parts `space-md` apart, read each time the page opens. Its items are in groups, in the brief's order: "Inactive and kept sessions", "Leftover workspaces", "Unused branches", "Folders Ersa can't identify". A group's heading is in `ui-small` at the `heading` weight in `ink-muted`, `space-xs` above its items; a group with nothing in it is not drawn. Its height eases over `motion-settle` with `motion-ease-out` as what it holds arrives, and what arrives fades in over `motion-quick`; at once with reduced motion.
+- **An item** is a checkbox whose label is the whole row: a control without an edge, padded `space-sm` with `radius-md` corners, pulled out by its padding so its words line up with the setting's above. Under the pointer it takes `material-hover`, pressed `material-pressed`, and with keyboard focus its edge turns `ink`. The box is Lucide's square at `size-icon-sm`, `ink-faint` unticked and `accent` ticked, as the Worktree checkbox's; unavailable, `ink-faint` and unchanged under the pointer. Beside it, `space-sm` apart:
+  - its name in `ui` in `ink`: a session's folder by its sessions' titles, a branch by its name and a folder by its own name, those two in `mono`;
+  - beneath, `space-xs` apart, in `ui-small` in `ink-muted` and `space-md` apart: its project, when it was last active in the sessions page's words, its branch in `mono` and its size once measured, in File Explorer's units; a folder named by its own name gives its path on the line beneath, in `mono`;
+  - beneath, what removing it loses: "Nothing is lost." or, for a merged branch, "Its changes are already in the base branch." in `ink-muted`; else each loss led by the caution glyph in `ink`, as the delete question's: the changed files and commits that exist nowhere else, commits that can't be counted, a repository of its own, or, for a folder, that Ersa can't count what it holds or couldn't finish looking through it.
+- **Checking.** While the list is read it says "Checking…" after the context ring's turning arc at `size-ring-sm`, and so does each item until it is checked; such an item's box is unavailable and unticked. The ring holds still with reduced motion.
+- **Can't be read.** The list, or a project whose branches and folders Core couldn't look through, says so and why as a setting's problem does. An item that couldn't be checked says "Ersa can't count what's in it." and why, the same way, and can't be ticked: removing it needs what checking gives.
+- **Empty.** "Nothing to clean up. Folders and branches Ersa no longer needs appear here." in `ui-small` in `ink-muted`.
+- **The foot**, `space-md` beneath a `hairline` `line` rule: how many are chosen in `ui-small` in `ink-muted` at the leading side, and **Clean up…** at the trailing side, a plain button, unavailable while nothing is chosen.
+- **When it ends**, above the list: "Removed 2 of 4 items." in `ui` in `ink` after a glyph, `positive` when everything went and neutral otherwise, then "Stopped before the rest." when it was stopped, and each item not removed as a problem naming it, with why. It stays until the next clean-up or a change of days. Focus goes back to Clean up…, or, while the list is read again and Clean up… is gone, to the chip just above it.
+- **While Ersa can't reach Core**, and while the question is open, the chip, the boxes and Clean up… are unavailable and the list keeps what was read.
+
+## The clean-up question
+
+The delete question's dialog (`RAIL.md`, The delete question): centered over the window, which is inert and not dimmed, `size-dialog` wide on `material-tile` with a `line` edge and `radius-lg` corners, fading in over `motion-settle`. Focus starts on Cancel and stays within it.
+
+- **The title** names what goes: "Clean up 3 folders and 2 branches?".
+- **Beneath**, in `ink-muted`: "This frees 1.2 GB." when a folder goes, leaving out what wasn't measured, and "Sessions whose folders go keep their conversations and branches." when a session's folder goes, Desktop's promise.
+- **What is lost**, each led by the caution glyph in `ink`: "You lose 3 changed files and 2 commits that exist nowhere else for good.", commits that can't be counted, how many of the folders hold a repository of their own, how many folders Ersa can't count, and how many it couldn't finish looking through, which the space freed leaves out.
+- **The buttons**: Cancel and Clean up, which reads "Discard and clean up" when anything chosen loses work or is a folder Ersa can't identify; a merged branch's commits, which the question does not count, leave it as it is (FLOW-CLEAN-UP-R33). Its label is in `danger`, as Delete's is.
+- **Removing.** The question stays, saying "Removed 1 of 3…", the count of those done. Cancel is unavailable and the confirming button becomes Stop, with focus on it; pressed, it reads "Stopping…" after the ring until the item under way ends, and keeps focus. Then the question goes at once.

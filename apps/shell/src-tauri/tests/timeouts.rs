@@ -28,3 +28,19 @@ fn a_fork_is_waited_on_for_10_minutes() {
 fn a_resume_is_waited_on_for_10_minutes() {
     assert_eq!(timeout_for("session.resume"), Duration::from_secs(10 * 60));
 }
+
+/// An inspect measures a folder for up to 30 seconds and counts its changes
+/// for up to 60, so the Shell waits 2 minutes for its answer.
+// verifies: PROTO-CORE-API-R125
+#[test]
+fn a_clean_up_inspect_is_waited_on_for_2_minutes() {
+    assert_eq!(timeout_for("cleanup.inspect"), Duration::from_secs(2 * 60));
+}
+
+/// A removal waits its turn at the project's worktrees and then removes a
+/// folder, so the Shell waits 10 minutes for its answer.
+// verifies: PROTO-CORE-API-R125
+#[test]
+fn a_clean_up_removal_is_waited_on_for_10_minutes() {
+    assert_eq!(timeout_for("cleanup.remove"), Duration::from_secs(10 * 60));
+}

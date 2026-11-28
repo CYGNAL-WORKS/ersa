@@ -26,6 +26,10 @@ pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// wait: those can legitimately take minutes on a large repository.
 pub const LONG_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
+/// How long a `cleanup.inspect` may wait (PROTO-CORE-API-R125): Core measures
+/// a folder for up to 30 seconds and counts its changes for up to 60.
+pub const INSPECT_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+
 /// How long a `session.send` waits with neither its answer nor a
 /// `session.send_progress` for its session (PROTO-CORE-API-R89). Core
 /// reports at least every 5 seconds, so this is six reports missed; while
@@ -46,7 +50,10 @@ pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
         | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown"
-        | "attachment.inspect" | "session.delete" | "session.fork" => LONG_REQUEST_TIMEOUT,
+        | "attachment.inspect" | "session.delete" | "session.fork"
+        // A removal waits its turn at the project's worktrees, then removes a folder (PROTO-CORE-API-R125).
+        | "cleanup.remove" => LONG_REQUEST_TIMEOUT,
+        "cleanup.inspect" => INSPECT_TIMEOUT,
         // A silence, not a limit: see [`SEND_SILENCE`].
         "session.send" => SEND_SILENCE,
         _ => REQUEST_TIMEOUT,

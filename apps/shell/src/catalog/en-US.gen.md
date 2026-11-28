@@ -1348,7 +1348,7 @@ Archive a session, as Archive does, once it has had no activity for this long. R
 
 Never
 
-### `settings.storage.archiveDaysLabel`
+### `settings.storage.daysLabel`
 
 #### `one`
 
@@ -1357,6 +1357,238 @@ Never
 #### `other`
 
 {count} days
+
+### `settings.storage.cleanUp.inactiveLabel`
+
+Clean up inactive sessions
+
+### `settings.storage.cleanUp.inactiveDescription`
+
+List the folders and branches Ersa no longer needs, with those of sessions inactive this long. Nothing is removed until you choose Clean up.
+
+### `settings.storage.cleanUp.listLabel`
+
+Clean up list
+
+### `settings.storage.cleanUp.checkingProgress`
+
+Checking…
+
+### `settings.storage.cleanUp.nothingEmpty`
+
+Nothing to clean up. Folders and branches Ersa no longer needs appear here.
+
+### `settings.storage.cleanUp.listError`
+
+The clean-up list can't be read.
+
+### `settings.storage.cleanUp.unreadError`
+
+Ersa couldn't look for branches and folders in {project}.
+
+### `settings.storage.cleanUp.workspaceHeading`
+
+Inactive and kept sessions
+
+### `settings.storage.cleanUp.leftoverHeading`
+
+Leftover workspaces
+
+### `settings.storage.cleanUp.branchHeading`
+
+Unused branches
+
+### `settings.storage.cleanUp.folderHeading`
+
+Folders Ersa can't identify
+
+### `settings.storage.cleanUp.nothingLostDetail`
+
+Nothing is lost.
+
+### `settings.storage.cleanUp.mergedDetail`
+
+Its changes are already in the base branch.
+
+### `settings.storage.cleanUp.lossDetail`
+
+Removing it loses {parts} for good.
+
+### `settings.storage.cleanUp.changedFilesPart`
+
+#### `one`
+
+{count} changed file
+
+#### `other`
+
+{count} changed files
+
+### `settings.storage.cleanUp.commitsPart`
+
+#### `one`
+
+{count} commit that exists nowhere else
+
+#### `other`
+
+{count} commits that exist nowhere else
+
+### `settings.storage.cleanUp.unrecordedDetail`
+
+Commits made here can't be counted, and go with it.
+
+### `settings.storage.cleanUp.repositoryDetail`
+
+Its folder holds a repository of its own, which goes with the folder and doesn't come back with it.
+
+### `settings.storage.cleanUp.unfinishedDetail`
+
+Ersa couldn't finish looking through this folder, so it can't say how big it is or whether anything inside it changed.
+
+### `settings.storage.cleanUp.folderDetail`
+
+Ersa can't count what removing it loses.
+
+### `settings.storage.cleanUp.inspectError`
+
+Ersa can't count what's in it.
+
+### `settings.storage.cleanUp.chosenLabel`
+
+#### `one`
+
+{count} item chosen
+
+#### `other`
+
+{count} items chosen
+
+### `settings.storage.cleanUp.cleanUpButton`
+
+Clean up…
+
+### `settings.storage.cleanUp.questionTitle`
+
+Clean up {parts}?
+
+### `settings.storage.cleanUp.foldersPart`
+
+#### `one`
+
+{count} folder
+
+#### `other`
+
+{count} folders
+
+### `settings.storage.cleanUp.branchesPart`
+
+#### `one`
+
+{count} branch
+
+#### `other`
+
+{count} branches
+
+### `settings.storage.cleanUp.freesDetail`
+
+This frees {size}.
+
+### `settings.storage.cleanUp.keepsDetail`
+
+Sessions whose folders go keep their conversations and branches.
+
+### `settings.storage.cleanUp.lostDetail`
+
+You lose {parts} for good.
+
+### `settings.storage.cleanUp.unrecordedQuestion`
+
+#### `one`
+
+Commits in 1 of the folders can't be counted, and are lost too.
+
+#### `other`
+
+Commits in {count} of the folders can't be counted, and are lost too.
+
+### `settings.storage.cleanUp.repositoriesDetail`
+
+#### `one`
+
+1 of the folders holds a repository of its own, which goes with it.
+
+#### `other`
+
+{count} of the folders hold a repository of their own, which go with them.
+
+### `settings.storage.cleanUp.unfinishedQuestion`
+
+#### `one`
+
+Ersa couldn't finish looking through 1 of the folders, so the space freed leaves it out.
+
+#### `other`
+
+Ersa couldn't finish looking through {count} of the folders, so the space freed leaves them out.
+
+### `settings.storage.cleanUp.folderQuestion`
+
+#### `one`
+
+Ersa can't count what 1 of the folders holds.
+
+#### `other`
+
+Ersa can't count what {count} of the folders hold.
+
+### `settings.storage.cleanUp.cancelButton`
+
+Cancel
+
+### `settings.storage.cleanUp.confirmButton`
+
+Clean up
+
+### `settings.storage.cleanUp.discardButton`
+
+Discard and clean up
+
+### `settings.storage.cleanUp.removedProgress`
+
+Removed {done} of {count}…
+
+### `settings.storage.cleanUp.stopButton`
+
+Stop
+
+### `settings.storage.cleanUp.stoppingProgress`
+
+Stopping…
+
+### `settings.storage.cleanUp.resultDetail`
+
+#### `one`
+
+Removed {removed} of 1 item.
+
+#### `other`
+
+Removed {removed} of {count} items.
+
+### `settings.storage.cleanUp.stoppedDetail`
+
+Stopped before the rest.
+
+### `settings.storage.cleanUp.notRemovedError`
+
+Couldn't remove {name}.
+
+### `settings.storage.cleanUp.changedReason`
+
+It changed since it was checked, so nothing of it was removed.
 
 ## `workbench`
 

@@ -321,7 +321,7 @@ describe("Delete on a tile whose workspace is put away", () => {
     expect(dialog.textContent).toContain("The session's folder was already removed, and its branch ersa/fix is deleted too.");
     expect(dialog.textContent).not.toContain("folder and branch");
     expect(dialog.textContent).not.toContain("will be lost");
-    const confirm = within(dialog).getAllByRole("button").find((b) => b.classList.contains("delete-question-confirm"));
+    const confirm = within(dialog).getAllByRole("button").find((b) => b.classList.contains("dialog-confirm"));
     expect(confirm?.querySelector("[data-shown]")?.textContent).toBe("Delete");
     fireEvent.click(confirm as HTMLElement);
     await settle();

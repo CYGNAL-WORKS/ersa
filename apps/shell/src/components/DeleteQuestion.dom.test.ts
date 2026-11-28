@@ -213,7 +213,7 @@ describe("the delete question's buttons", () => {
     });
 
     it("holds the buttons at its foot whether it grows or shrinks: its body both grows and gives way", () => {
-      const body = /\.delete-question-body \{([^}]*)\}/.exec(readFileSync(join(import.meta.dirname, "DeleteQuestion.css"), "utf8"))?.[1] ?? "";
+      const body = /\.dialog-body \{([^}]*)\}/.exec(readFileSync(join(import.meta.dirname, "Dialog.css"), "utf8"))?.[1] ?? "";
       expect(body).toContain("flex: 1 1 auto;");
       expect(body).toContain("min-height: 0;");
     });
