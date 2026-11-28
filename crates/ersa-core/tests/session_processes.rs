@@ -13,7 +13,7 @@ use ersa_adapter::{
 };
 use ersa_protocol::events::{BackendPassthrough, Event};
 use serde_json::{Value, json};
-use support::procs::{eventually_gone, parent_of_a_grandchild, running};
+use support::procs::{eventually_gone, grandchild_pid, parent_of_a_grandchild, running};
 use support::{Client, TestCore, shut_down, start_with_adapters, tempdir, workspace};
 use tokio::sync::watch;
 
@@ -44,8 +44,10 @@ impl Adapter for TreeAdapter {
         let mut process = transport.spawn(parent_of_a_grandchild(true)).await?;
         let mut stdout = process.take_stdout().ok_or(AdapterError::NotRunning)?;
         // Ready once the grandchild's id is in the log.
-        let first = stdout.next_line().await?.ok_or(AdapterError::NotRunning)?;
-        sink.record(Direction::Backend, first);
+        let pid = grandchild_pid(&mut *stdout)
+            .await?
+            .ok_or(AdapterError::NotRunning)?;
+        sink.record(Direction::Backend, pid.to_string());
         let kill = watch::Sender::new(false);
         let mut killed = kill.subscribe();
         tokio::spawn(async move {
