@@ -525,10 +525,7 @@ impl ProcessTree {
         if unsafe { AssignProcessToJobObject(tree.job, process as HANDLE) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        let pid = child
-            .id()
-            .ok_or_else(|| io::Error::other("the process exited before it could be resumed"))?;
-        resume_process(pid)?;
+        resume_process(process as HANDLE)?;
         Ok(tree)
     }
 
@@ -567,59 +564,37 @@ impl Drop for ProcessTree {
     }
 }
 
-/// Resumes every thread of process `pid`, which was created suspended and so
-/// has exactly one. Windows has no documented call to resume a process, and
-/// the spawned child's thread handle is not kept, so the thread is found by
-/// listing the system's threads.
-fn resume_process(pid: u32) -> io::Result<()> {
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
-    };
-    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+/// Resumes every thread of `process`, which was created suspended and so
+/// has exactly one.
+///
+/// The spawned child's thread handle is not kept, and Windows documents no
+/// call that resumes a process by its handle; ntdll's `NtResumeProcess` does,
+/// and has since Windows XP. The documented way, finding the thread in a
+/// snapshot of every thread on the machine (`CreateToolhelp32Snapshot`),
+/// cost each start of a process tens of milliseconds on an idle machine and
+/// seconds when many started at once, as Core's git commands and backends do
+/// (#664).
+fn resume_process(process: HANDLE) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::{NTSTATUS, RtlNtStatusToDosError};
 
-    // SAFETY: no pointers; the process id is ignored for a thread snapshot.
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
-    if snapshot == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
+    // Linked by name from ntdll.dll, which every Windows process has loaded,
+    // as windows-sys links the calls it does declare.
+    #[link(name = "ntdll.dll", kind = "raw-dylib", modifiers = "+verbatim")]
+    unsafe extern "system" {
+        fn NtResumeProcess(process: HANDLE) -> NTSTATUS;
     }
-    let mut entry = THREADENTRY32 {
-        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-        ..THREADENTRY32::default()
-    };
-    let mut resumed = 0;
-    let mut failure = None;
-    // SAFETY: `snapshot` is a valid snapshot handle and `entry` has its
-    // `dwSize` set, as both calls require.
-    let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
-    while more {
-        if entry.th32OwnerProcessID == pid {
-            // SAFETY: plain values in; the handle is checked and closed.
-            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
-            if thread.is_null() {
-                failure = Some(io::Error::last_os_error());
-            } else {
-                // SAFETY: `thread` was opened with the right to resume it.
-                if unsafe { ResumeThread(thread) } == u32::MAX {
-                    failure = Some(io::Error::last_os_error());
-                } else {
-                    resumed += 1;
-                }
-                unsafe { CloseHandle(thread) };
-            }
-        }
-        // SAFETY: as for Thread32First.
-        more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+
+    // SAFETY: `process` is the child's handle, opened with every right
+    // when it was created, and valid while the caller holds the child.
+    let status = unsafe { NtResumeProcess(process) };
+    // A negative status is an error, and Windows maps it to the error code
+    // its other calls report.
+    if status < 0 {
+        // SAFETY: a plain value in, a plain value out.
+        let code = unsafe { RtlNtStatusToDosError(status) };
+        return Err(io::Error::from_raw_os_error(code as i32));
     }
-    // SAFETY: closed once, here.
-    unsafe { CloseHandle(snapshot) };
-    match (resumed, failure) {
-        (0, Some(e)) => Err(e),
-        (0, None) => Err(io::Error::other(format!(
-            "process {pid} has no thread to resume"
-        ))),
-        _ => Ok(()),
-    }
+    Ok(())
 }
 
 // -- The stored search path ---------------------------------------------------
