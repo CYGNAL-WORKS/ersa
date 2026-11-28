@@ -21,10 +21,19 @@
 //   leak-token       a line carrying a token is written when the sign-in finishes
 //   leak-name        the email's local part and the machine's user name are written
 //                    to stderr when the sign-in finishes
+//   stale-session    a session whose message failed as signed out keeps failing,
+//                    whatever the credential says afterward
+//   writes-record    a stream-json session writes its session record on initialize
+//   resume-refused   a session started with --resume writes an error line and exits 1
+//   resume-new-session  a session started with --resume reports another session id
+// A session reports its id in a `system` `init` line at the start of each turn,
+// as the real CLI does: its --session-id, else its --resume id.
+// FAKE_CLAUDE_VERSION, when set, is the version --version prints.
 // A key in the environment (ANTHROPIC_API_KEY) shows in `account` as the real
 // CLI shows one (2.1.330/01-probe-key-in-environment).
 
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -66,7 +75,7 @@ function personSignsIn() {
 
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
-  console.log("0.0.0-fake (Claude Code)");
+  console.log(`${process.env.FAKE_CLAUDE_VERSION ?? "0.0.0-fake"} (Claude Code)`);
 } else if (args[0] === "auth" && args[1] === "login") {
   console.log("Opening browser to sign in…");
   if (PLAY.has("no-address")) process.exit(1);
@@ -79,6 +88,16 @@ if (args[0] === "--version") {
   rmSync(CREDENTIAL, { force: true });
   console.log("Successfully logged out from your Anthropic account.");
 } else {
+  const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+  const resumed = flag("--resume");
+  if (resumed && PLAY.has("resume-refused")) {
+    console.log(`No conversation found with session ID: ${resumed}`);
+    process.exit(1);
+  }
+  const sessionId = resumed && PLAY.has("resume-new-session") ? randomUUID() : (flag("--session-id") ?? resumed);
+  // Under stale-session, once a message has failed as signed out, the session
+  // holds on to that.
+  let failedSignedOut = false;
   const lines = createInterface({ input: process.stdin });
   lines.on("line", (line) => {
     const msg = JSON.parse(line);
@@ -86,6 +105,10 @@ if (args[0] === "--version") {
     const fail = (error) => say({ type: "control_response", response: { subtype: "error", request_id: msg.request_id, error } });
     const request = msg.request ?? {};
     if (msg.type === "control_request" && request.subtype === "initialize") {
+      if (PLAY.has("writes-record")) {
+        mkdirSync(join(CONFIG, "projects", "C--fake-cwd"), { recursive: true });
+        writeFileSync(join(CONFIG, "projects", "C--fake-cwd", `${sessionId}.jsonl`), "");
+      }
       answer({ commands: [], models: [{ value: "default", displayName: "Default" }], account: signedIn() ? ACCOUNT : SIGNED_OUT });
     } else if (msg.type === "control_request" && request.subtype === "get_settings") {
       answer({ applied: { effort: "medium" } });
@@ -96,12 +119,14 @@ if (args[0] === "--version") {
     } else if (msg.type === "control_request" && request.subtype === "claude_oauth_wait_for_completion") {
       personSignsIn().then(() => answer({ account: ACCOUNT }));
     } else if (msg.type === "user") {
-      if (signedIn()) {
+      say({ type: "system", subtype: "init", session_id: sessionId });
+      if (signedIn() && !failedSignedOut) {
         say({ type: "assistant", message: { model: "claude-fake", content: [{ type: "text", text: "ok" }] } });
         say({ type: "result", subtype: "success", is_error: false, result: "ok" });
       } else {
         say({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: "Not logged in · Please run /login" }] }, error: "authentication_failed" });
         say({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" });
+        failedSignedOut = PLAY.has("stale-session");
       }
     }
     // control_cancel_request: withdrawn, nothing to answer.

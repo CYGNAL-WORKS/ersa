@@ -236,8 +236,9 @@ async fn branch_item(
 async fn folder_item(core: &Core, id: &str, token: &str, discard: bool) -> Result<(), ApiError> {
     let turns = sharing_turns(core, id).await?;
     let now = workspace::in_one_place(cleanup::inspect_held(core, id)).await??;
-    // A folder whose measuring did not finish has a token that matches
-    // none (FLOW-CLEAN-UP-R12), so it is refused here, `discard` or not.
+    // A folder whose measuring did not finish has a token that follows its
+    // own entries alone (FLOW-CLEAN-UP-R31): it goes with `discard` while
+    // those are as they were, and is refused here when they changed.
     if now.token != token {
         drop(turns);
         return Err(changed_to(&now));

@@ -80,6 +80,12 @@ pub struct CoreConfig {
     /// thread before it reads the folder, until a test lets it go. `None`,
     /// except in tests.
     pub measure_gate: Option<Arc<Gate>>,
+    /// In tests, measuring a folder for `cleanup.inspect` stops as when its
+    /// time runs out on reaching a folder this many levels down: 1 stops
+    /// once the folder's own entries are all read, before anything deeper,
+    /// which no limit on time can do without racing the clock. `None`,
+    /// except in tests.
+    pub measure_depth_limit: Option<usize>,
     /// How long a request waits for its turn at a project's worktrees
     /// while another change to them is under way (PROTO-CORE-API-R119).
     /// [`crate::workspace::WORKTREE_TURN_WAIT`], except in tests that let
@@ -322,6 +328,7 @@ impl CoreConfig {
             folder_try_window: crate::workspace::FOLDER_TRY_WINDOW,
             measure_limit: crate::workspace::MEASURE_LIMIT,
             measure_gate: None,
+            measure_depth_limit: None,
             worktree_turn_wait: crate::workspace::WORKTREE_TURN_WAIT,
             command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
