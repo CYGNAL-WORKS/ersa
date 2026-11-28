@@ -36,9 +36,9 @@ const WAIT: &str = "claude_oauth_wait_for_completion";
 const INITIALIZE: &str = "initialize";
 
 /// What the adapter says, in its own words, for each start it could not
-/// make (PROTO-CLAUDE-CODE-STREAM-R86).
+/// make (PROTO-CLAUDE-CODE-STREAM-R91).
 const INITIALIZE_REFUSED: &str = "Claude Code refused to connect to Ersa.";
-const QUIT_EARLY: &str = "Claude Code quit before it gave Ersa its sign-in page.";
+const QUIT_EARLY: &str = "Claude Code quit before its sign-in page could open.";
 const NO_ADDRESS: &str = "Claude Code didn't give Ersa the address of its sign-in page.";
 const WOULD_NOT_RUN: &str = "Ersa couldn't run Claude Code on this host.";
 

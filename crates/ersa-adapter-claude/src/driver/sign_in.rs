@@ -38,8 +38,8 @@ use crate::wire::{HostMessage, HostRequest};
 /// The CLI answered `initialize` with an error.
 pub(crate) const INITIALIZE_REFUSED: &str = "Claude Code refused to connect to Ersa.";
 /// The process ended before the adapter had the page's address and had
-/// asked to learn the sign-in's end.
-pub(crate) const QUIT_EARLY: &str = "Claude Code quit before it gave Ersa its sign-in page.";
+/// asked to learn the sign-in's end, so the page never opened.
+pub(crate) const QUIT_EARLY: &str = "Claude Code quit before its sign-in page could open.";
 /// The CLI's answer to `claude_authenticate` holds no `automaticUrl` with
 /// something in it.
 pub(crate) const NO_ADDRESS: &str = "Claude Code didn't give Ersa the address of its sign-in page.";
@@ -62,7 +62,7 @@ impl AdapterSink for SignInSink {
     fn process_exited(&self, _exit: io::Result<ProcessExit>) {}
 }
 
-/// Starts a sign-in on `transport` (PROTO-CLAUDE-CODE-STREAM-R84 to R86).
+/// Starts a sign-in on `transport` (PROTO-CLAUDE-CODE-STREAM-R84, R85, R91).
 /// A start that fails leaves no process of the adapter's running: each
 /// failure after the process started ends it, and waits until it has
 /// exited, before saying why.
@@ -121,7 +121,7 @@ async fn ask_for_the_page(
             AdapterError::Protocol(_) | AdapterError::UnknownRequest(_) => could_not(NO_ANSWER),
         })?;
     if answer["subtype"] != "success" {
-        // The backend refused, in its own words, unchanged (R86). Words that
+        // The backend refused, in its own words, unchanged (R91). Words that
         // are empty or missing are passed on as empty: the note then shows
         // its own sentence alone (FLOW-SIGN-IN-R03).
         let reason = answer["error"].as_str().unwrap_or_default();
