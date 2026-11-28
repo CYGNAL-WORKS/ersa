@@ -62,6 +62,7 @@ describe("the items ticked to begin with", () => {
 });
 
 describe("what a removal is sent", () => {
+  // verifies: FLOW-CLEAN-UP-R32
   it("is discard exactly where Core would refuse it without, so no branch Core would keep is deleted", () => {
     expect(sendsDiscard(workspace())).toBe(false);
     expect(sendsDiscard(leftover({ unshared: 3, ignored: 4 }))).toBe(false);
@@ -77,6 +78,7 @@ describe("what a removal is sent", () => {
 
 describe("the question", () => {
   // verifies: FLOW-CLEAN-UP-R17
+  // verifies: FLOW-CLEAN-UP-R33
   it("names how many folders and branches go, the space freed, and what is lost for good", () => {
     const q = questionOf([workspace({ uncommitted: 3, stranded: 1, size_bytes: 1000 }), leftover({ size_bytes: 24 }), branch({ unshared: 2 }), branch({ unshared: 5, merged: true })]);
     expect(questionTitle(q)).toBe("Clean up 2 folders and 2 branches?");

@@ -224,6 +224,7 @@ describe("the list", () => {
 
 describe("the question", () => {
   // verifies: FLOW-CLEAN-UP-R17
+  // verifies: FLOW-CLEAN-UP-R33
   it("is asked once before anything is removed, naming how many folders and branches go, the space freed and what is lost for good", async () => {
     const core = fakeCore([clean, kept, merged, spike]);
     await openStorage(core);
