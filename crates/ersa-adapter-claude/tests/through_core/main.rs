@@ -24,3 +24,4 @@ mod naming;
 mod replay;
 mod resume;
 mod session;
+mod sign_in;

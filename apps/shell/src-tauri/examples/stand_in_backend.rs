@@ -22,7 +22,9 @@
 //!   resetting in three days.
 //!   With `ERSA_STAND_IN_SIGNED_OUT` set too, its `initialize` answer
 //!   carries the account a signed-out CLI reports, so Core lists it as
-//!   signed out (PROTO-CLAUDE-CODE-STREAM-R83).
+//!   signed out (PROTO-CLAUDE-CODE-STREAM-R83). Asked to sign in
+//!   (`claude_authenticate`), it refuses in words of its own, so a sign-in
+//!   is refused with the backend's reason and no page is ever opened.
 //! - Otherwise it starts that grandchild, writes `<own pid> <grandchild pid>`
 //!   to the file named by `ERSA_STAND_IN_PIDS`, and reads its input until
 //!   the input closes, which is how Core tells the CLI to stop. Its
@@ -32,6 +34,9 @@
 //! `target/<profile>/examples/`.
 
 use std::io::{BufRead, Read, Write};
+
+/// What the stand-in says when asked to sign in, which it never does.
+const SIGN_IN_REFUSED: &str = "This stand-in doesn't sign in.";
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -182,6 +187,19 @@ fn answer_initialize() {
             Some("get_settings") => serde_json::json!({ "applied": { "effort": "low" } }),
             _ => serde_json::Value::Null,
         };
+        // A sign-in is refused, in words of the backend's own, as a CLI
+        // refuses one its settings rule out (PROTO-CLAUDE-CODE-STREAM,
+        // Signing in): no sign-in is ever played here, and no page opened.
+        if message["request"]["subtype"] == "claude_authenticate" {
+            let refusal = serde_json::json!({
+                "type": "control_response",
+                "response": { "subtype": "error", "request_id": message["request_id"], "error": SIGN_IN_REFUSED },
+            });
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{refusal}");
+            let _ = out.flush();
+            continue;
+        }
         if !response.is_null() {
             let answer = serde_json::json!({
                 "type": "control_response",
