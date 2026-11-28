@@ -1,0 +1,119 @@
+{
+  "recorded_at": "2026-11-27T22:57:00.204Z",
+  "claude_code_version": "2.1.330",
+  "recorder": "scripts/record-claude-sign-in.mjs",
+  "ending": "second-same-process",
+  "executable": "claude",
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa",
+    "CLAUDE_CONFIG_DIR": "<a new scratch folder, deleted afterward>"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "role": "the sign-in",
+  "route": "control",
+  "tried": [
+    {
+      "route": "control",
+      "refused": null
+    }
+  ],
+  "outcome": "stopped by the host after 0 s",
+  "final_answer": null,
+  "address_field": "automaticUrl",
+  "person_said_page_opened": null,
+  "recorder_opened_address": false,
+  "steps": [
+    {
+      "t": 1138,
+      "step": "claude_authenticate answered an address; claude_oauth_wait_for_completion sent"
+    },
+    {
+      "t": 1141,
+      "step": "the second claude_authenticate answered: success, with an address"
+    },
+    {
+      "t": 6155,
+      "step": "the first wait did not answer within 5 s of the second sign-in"
+    },
+    {
+      "t": 6170,
+      "step": "sent control_cancel_request for claude_oauth_wait_for_completion"
+    },
+    {
+      "t": 11176,
+      "step": "the wait did not answer within 5 s of the cancel"
+    },
+    {
+      "t": 11339,
+      "step": "the sign-in's process exited: 0"
+    }
+  ],
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "31f57bbf-aca0-412f-b1c2-27dd30177e61"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "killed": false,
+  "left_session_record": false,
+  "stdout_lines": 3,
+  "stdout_timing_ms": [
+    1127,
+    1138,
+    1141
+  ],
+  "stderr": [],
+  "sent": [
+    {
+      "t": 644,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-initialize-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1128,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_authenticate-2\",\"request\":{\"subtype\":\"claude_authenticate\",\"loginWithClaudeAi\":true}}"
+    },
+    {
+      "t": 1138,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_oauth_wait_for_completion-3\",\"request\":{\"subtype\":\"claude_oauth_wait_for_completion\"}}"
+    },
+    {
+      "t": 1138,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-claude_authenticate-4\",\"request\":{\"subtype\":\"claude_authenticate\",\"loginWithClaudeAi\":true}}"
+    },
+    {
+      "t": 6170,
+      "line": "{\"type\":\"control_cancel_request\",\"request_id\":\"ersa-claude_oauth_wait_for_completion-3\"}"
+    }
+  ]
+}

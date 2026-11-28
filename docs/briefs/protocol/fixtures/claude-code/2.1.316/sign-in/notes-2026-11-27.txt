@@ -1,0 +1,11 @@
+Claude Code 2.1.316 (Windows), the tested version, a sign-in started and stopped, recorded 2026-11-27 by an agent with `scripts/record-claude-sign-in.mjs --cli-version 2.1.316 --offline --ending stopped --route control` (#671, ADR 0040). The CLI was the npm package `@anthropic-ai/claude-code-win32-x64@2.1.316`, installed by npm from its own cache with no network (`--offline`) and its scripts off, into a scratch folder deleted afterward. It is the package fetched, with the owner's approval, for fixture `2.1.316/55-probe-get-settings`. The run used a new scratch configuration folder, deleted afterward, and an opener that opens nothing: no sign-in page was shown, and nobody signed in. The machine's own CLI stayed 2.1.330 and read signed out before and after. Times are milliseconds from the start of the run, as each `.meta.json` gives them.
+
+Files: 00-sign-in-stopped (the sign-in), 01-sign-in-stopped-running (a session started signed out before it and sent one message after), 02-sign-in-stopped-probe (a CLI started afterward). The layout is the one `2.1.330/sign-in/notes-2026-11-26.txt` describes.
+
+What it looked like
+- 2.1.316 takes `claude_authenticate`. With `loginWithClaudeAi: true` it answered `success` about 225 ms after the request (2.1.330: about 20 ms) with `manualUrl` and `automaticUrl` and nothing else, the same sign-in page and return addresses as 2.1.330. Its scopes are 2.1.330's less `user:privacy_consents:write`.
+- `claude_oauth_wait_for_completion` was sent, then `control_cancel_request` for it 14 ms later. As on 2.1.330, the CLI wrote nothing more for 5 s: no answer to the wait and no acknowledgment of the cancel. It exited 0 when stdin closed.
+- `initialize` answered `account` `{tokenSource: "none", apiProvider: "firstParty"}`, signed out, as 2.1.330 does.
+- The running session's message failed as not signed in ("Not logged in · Please run /login", `is_error: true`, `terminal_reason: "api_error"`), exit 1 when stdin closed. The probe read signed out.
+- The sign-in's process left no session record in the scratch folder; the running session did.
+- No line carries a token, a key or a code (the redactor's check). No process wrote to stderr.
