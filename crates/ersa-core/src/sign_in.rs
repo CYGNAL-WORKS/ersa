@@ -349,13 +349,10 @@ fn shutting_down() -> ApiError {
 
 /// The answer for a sign-in that has not started within its limit (R157).
 fn too_slow(core: &Core, adapter: &dyn Adapter) -> ApiError {
-    took_too_long(adapter.label(), core.config.sign_in_start_limit)
-}
-
-fn took_too_long(label: &str, limit: Duration) -> ApiError {
     ApiError::invalid_state(format!(
-        "{label} took more than {} seconds to respond.",
-        limit.as_secs()
+        "{} took more than {} seconds to respond.",
+        adapter.label(),
+        core.config.sign_in_start_limit.as_secs()
     ))
 }
 
@@ -379,46 +376,16 @@ fn not_started(label: &str, error: SignInStartError) -> ApiError {
 mod tests {
     use super::*;
 
-    /// None of the refusals Core words itself says that the sign-in
-    /// couldn't, can't or didn't start; each says why, as a sentence.
-    // verifies: PROTO-CORE-API-R170
+    /// The answer Core gives a sign-in while it shuts down says why, and
+    /// not that the sign-in didn't start. Its connections are closing by
+    /// then, so no test over a connection can read it; the other refusals
+    /// Core words are read over one (tests/sign_in.rs, R170).
     #[test]
-    fn no_refusal_core_words_says_the_sign_in_did_not_start() {
-        let label = "Claude Code";
-        let words: Vec<String> = [
-            not_started(label, SignInStartError::NotFound),
-            not_started(label, SignInStartError::NoSignIn),
-            took_too_long(label, Duration::from_secs(20)),
-            Interrupted::Canceled.before_start(label),
-            Interrupted::ShutDown.before_start(label),
-            shutting_down(),
-        ]
-        .into_iter()
-        .map(|error| error.0.message)
-        .collect();
+    fn the_answer_while_shutting_down_says_why() {
+        assert_eq!(shutting_down().0.message, "Ersa is shutting down.");
         assert_eq!(
-            words,
-            [
-                "Claude Code isn't installed on this host: its command wasn't found.",
-                "Ersa has no sign-in for Claude Code.",
-                "Claude Code took more than 20 seconds to respond.",
-                "The sign-in to Claude Code was canceled.",
-                "Ersa is shutting down.",
-                "Ersa is shutting down.",
-            ]
+            Interrupted::ShutDown.before_start("Claude Code").0.message,
+            "Ersa is shutting down."
         );
-        for message in &words {
-            let lower = message.to_lowercase();
-            for said in [
-                "couldn't",
-                "can't",
-                "didn't",
-                "could not",
-                "cannot",
-                "did not",
-            ] {
-                assert!(!lower.contains(&format!("{said} start")), "{message}");
-            }
-        }
     }
 }

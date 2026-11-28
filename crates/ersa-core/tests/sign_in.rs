@@ -414,6 +414,71 @@ async fn a_sign_in_its_adapter_could_not_start_is_refused_and_leaves_nothing_run
     assert!(!any_ended_yet(&mut client).await);
 }
 
+/// Whether `message` says that a sign-in couldn't, can't or didn't start.
+fn says_it_did_not_start(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "couldn't",
+        "can't",
+        "didn't",
+        "could not",
+        "cannot",
+        "did not",
+    ]
+    .iter()
+    .any(|said| lower.contains(&format!("{said} start")))
+}
+
+/// Every refusal Core words itself, read over a connection, says why the
+/// sign-in didn't start and not that it didn't, since the note says that
+/// already: a command not found, an adapter with no sign-in, a start
+/// canceled before it started, and one past its limit. Shutdown's answer
+/// is checked where Core words it, since its connections are closing.
+// verifies: PROTO-CORE-API-R170
+#[tokio::test(flavor = "multi_thread")]
+async fn no_refusal_in_ersas_words_says_the_sign_in_did_not_start() {
+    let (core, fake, mut client) = core_with(SignInMode::NotFound, |_| {}).await;
+    let mut other = core.client().await;
+    let mut messages = Vec::new();
+
+    let error = client.error("backend.sign_in", the_fake()).await;
+    messages.push(error["message"].clone());
+    let without = json!({ "host_id": "local", "name": "without-sign-in" });
+    let error = client.error("backend.sign_in", without).await;
+    messages.push(error["message"].clone());
+
+    *fake.sign_ins.mode.lock().unwrap() = SignInMode::Starts(None);
+    let held = fake.sign_ins.start_gate.lock().await;
+    let asked = client.request("backend.sign_in", the_fake()).await;
+    fake.sign_ins.latest_process().await;
+    other.result("backend.cancel_sign_in", the_fake()).await;
+    drop(held);
+    messages.push(client.response(asked).await["error"]["message"].clone());
+
+    // Nothing here needs a process to start in time: this one never says it
+    // started, so its limit runs out however slow the machine is (#664).
+    let limit = |config: &mut CoreConfig| config.sign_in_start_limit = Duration::from_secs(2);
+    let (_slow_core, _slow, mut slow_client) = core_with(SignInMode::NeverStarts, limit).await;
+    let error = slow_client.error("backend.sign_in", the_fake()).await;
+    messages.push(error["message"].clone());
+
+    assert_eq!(
+        messages,
+        [
+            json!("fake isn't installed on this host: its command wasn't found."),
+            json!("Ersa has no sign-in for without-sign-in."),
+            json!("The sign-in to fake was canceled."),
+            json!("fake took more than 2 seconds to respond."),
+        ]
+    );
+    for message in &messages {
+        assert!(
+            !says_it_did_not_start(message.as_str().unwrap()),
+            "{message}"
+        );
+    }
+}
+
 /// A sign-in that fails with no reason of the backend's ends `failed`
 /// with no `message`, and leaves nothing it started running.
 // verifies: PROTO-CORE-API-R159
