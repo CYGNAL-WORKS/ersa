@@ -189,6 +189,29 @@ describe("the list", () => {
     expect(cleanUpButton().disabled).toBe(false);
   });
 
+  // verifies: FLOW-CLEAN-UP-R29
+  it("removes a folder Ersa couldn't finish looking through once it is ticked and the question confirmed, with discard", async () => {
+    const core = fakeCore([huge]);
+    await openStorage(core);
+    fireEvent.click(box("huge"));
+    fireEvent.click(cleanUpButton());
+    await settle();
+    fireEvent.click(within(question()!).getByRole("button", { name: "Discard and clean up" }));
+    for (let i = 0; i < 3; i++) await settle();
+    expect(core.callsOf("cleanup.remove")).toEqual([{ id: "fo-huge", token: "t-huge", discard: true }]);
+    expect(within(list()).getByRole("status").textContent).toContain("Removed 1 of 1 item.");
+  });
+
+  // verifies: FLOW-CLEAN-UP-R19
+  it("says a folder Core can't inspect can't be counted, and leaves it unticked", async () => {
+    const core = fakeCore([huge], { answers: { "cleanup.inspect": () => { throw { kind: "rpc", error: { code: -32000, message: "cleanup.inspect: listing the folder's entries took longer than 30 seconds", data: { kind: "vcs_error" } } }; } } });
+    await openStorage(core);
+    expect(said("huge")).toContain("Ersa can't count what's in it.");
+    expect(said("huge")).toContain("listing the folder's entries took longer than 30 seconds");
+    expect(box("huge").checked).toBe(false);
+    expect(box("huge").disabled).toBe(true);
+  });
+
   it("is read again for the days chosen", async () => {
     const core = fakeCore([clean]);
     await openStorage(core);
