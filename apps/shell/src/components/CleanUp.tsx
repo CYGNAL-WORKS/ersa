@@ -68,17 +68,21 @@ export function CleanUp({
   });
 
   // When the question closes, focus comes back to Clean up…, or, while the list is read again after a clean-up and the
-  // button is unavailable, to the list, which then says what was done.
+  // button is gone, to the chip that chooses the days, the control just above, which is available again by then.
   const button = useRef<HTMLButtonElement>(null);
+  const row = useRef<HTMLDivElement>(null);
   const wasRunning = useRef(running);
   useEffect(() => {
-    if (wasRunning.current && !running) (button.current && !button.current.disabled ? button.current : body.current)?.focus({ preventScroll: true });
+    if (wasRunning.current && !running) {
+      const to = button.current && !button.current.disabled ? button.current : row.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+      to?.focus({ preventScroll: true });
+    }
     wasRunning.current = running;
   }, [running]);
 
   return (
     <div className="setting clean-up">
-      <div className="setting-row">
+      <div ref={row} className="setting-row">
         <div className="setting-words">
           <span className="setting-label">{t("settings.storage.cleanUp.inactiveLabel")}</span>
           <span className="setting-description">{t("settings.storage.cleanUp.inactiveDescription")}</span>
@@ -94,7 +98,7 @@ export function CleanUp({
           disabled={unavailable}
         />
       </div>
-      <div ref={body} tabIndex={-1} className="clean-up-body" aria-label={t("settings.storage.cleanUp.listLabel")} role="region" aria-busy={view.list.state === "loading" || undefined}>
+      <div ref={body} className="clean-up-body" aria-label={t("settings.storage.cleanUp.listLabel")} role="region" aria-busy={view.list.state === "loading" || undefined}>
         {view.result && <ResultNote result={view.result} names={names} />}
         {view.list.state === "loading" && <Checking />}
         {view.list.state === "error" && (

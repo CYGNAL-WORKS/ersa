@@ -72,7 +72,7 @@ export function useCleanUp(client: CoreClient, describe: (error: unknown) => str
   // Each read has a number; an answer to an older read, or an inspect it began, changes nothing.
   const reading = useRef(0);
   const stopping = useRef(false);
-  // The items waiting for an inspect, the read they belong to, and how many inspects are at Core now. One pool for
+  // The newest read's items waiting for an inspect, and how many inspects are at Core now. One pool for
   // every read: an inspect already sent can't be called off, so a read made meanwhile waits for its place rather than
   // adding more, and never more than INSPECT_AT_ONCE are at Core whatever the reads.
   const waiting = useRef<CleanupItem[]>([]);

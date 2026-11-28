@@ -222,6 +222,7 @@ describe("the question", () => {
     await settle();
     expect(question()).toBeNull();
     expect(core.callsOf("cleanup.remove")).toEqual([]);
+    expect(document.activeElement).toBe(cleanUpButton());
 
     // Unticked again, nothing is lost and the button reads as always.
     fireEvent.click(box("Tidy the docs"));
@@ -293,6 +294,8 @@ describe("cleaning up", () => {
     expect(within(list()).getByRole("status").textContent).toContain("Removed 3 of 3 items.");
     expect(core.callsOf("cleanup.list")).toHaveLength(2);
     expect(within(list()).getByText("Nothing to clean up. Folders and branches Ersa no longer needs appear here.")).toBeTruthy();
+    // Clean up… went with the items, so focus is on the chip just above it, not dropped to the window.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Clean up inactive sessions:/ }));
   });
 
   // verifies: FLOW-CLEAN-UP-R18
@@ -312,6 +315,8 @@ describe("cleaning up", () => {
     expect(core.callsOf("cleanup.remove")).toHaveLength(1);
     expect(question()).toBeNull();
     expect(within(list()).getByRole("status").textContent).toContain("Removed 1 of 3 items. Stopped before the rest.");
+    // The list is being read again, so focus is on the chip just above it.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Clean up inactive sessions:/ }));
   });
 
   // verifies: FLOW-CLEAN-UP-R18

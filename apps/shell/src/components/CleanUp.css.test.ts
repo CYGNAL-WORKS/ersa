@@ -16,11 +16,6 @@ function rule(selector: string): string {
 }
 
 describe("the list", () => {
-  it("shows keyboard focus after a clean-up with a token edge, not the browser's ring", () => {
-    expect(rule(".clean-up-body:focus")).toContain("outline: none;");
-    expect(rule(".clean-up-body:focus-visible")).toContain("box-shadow: inset 0 0 0 var(--line-hairline) var(--color-ink);");
-  });
-
   it("clips what it holds only while it grows, so a row's edge reaches past its sides at rest", () => {
     expect(rule(".clean-up-body")).not.toContain("overflow");
     expect(rule(".clean-up-body[data-easing]")).toContain("overflow: clip;");
