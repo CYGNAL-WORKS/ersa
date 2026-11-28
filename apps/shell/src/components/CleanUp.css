@@ -1,0 +1,244 @@
+/* Clean up under Storage (docs/design/SETTINGS.md, Clean up). The setting's row is SettingsPage.css's; here the list
+   beneath it. */
+
+/* What the list holds, beneath the setting's row. Its height eases as what it holds arrives (CleanUp.tsx), and what
+   it holds is clipped to it while it grows; at rest nothing is, so a row's fill and edge reach past its sides. */
+.clean-up-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+  animation: page-in var(--motion-quick) var(--motion-ease-out);
+}
+
+.clean-up-body[data-easing] {
+  overflow: clip;
+}
+
+.clean-up-body > * {
+  animation: page-in var(--motion-quick) var(--motion-ease-out);
+}
+
+/* A problem starts where the setting's words do, as a setting's problem does. */
+.clean-up-problem > .rail-note,
+.clean-up-result > .rail-note {
+  padding-inline: 0;
+}
+
+.clean-up-checking {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.clean-up-empty {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* A group's heading in the section heading's look, a step smaller in weight of place: ui-small at the heading weight
+   in ink-muted. */
+.clean-up-heading {
+  margin: 0 0 var(--space-xs);
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  font-weight: var(--type-heading-weight);
+  line-height: var(--type-ui-small-leading);
+}
+
+.clean-up-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* An item is a control without an edge: the whole row is its checkbox's label. It takes material-hover under the
+   pointer and material-pressed pressed; with keyboard focus its edge turns ink (DESIGN.md, Pointer and press). The
+   row is pulled out by its padding, so its words line up with the setting's above. */
+.clean-up-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-sm);
+  align-items: start;
+  margin-inline: calc(-1 * (var(--space-sm) + var(--line-hairline)));
+  padding: var(--space-sm);
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--motion-quick) var(--motion-ease-out);
+}
+
+.clean-up-row:not([data-disabled]):hover,
+.clean-up-row[data-force="hover"] {
+  background: var(--material-hover);
+}
+
+.clean-up-row:not([data-disabled]):active,
+.clean-up-row[data-force="pressed"] {
+  background: var(--material-pressed);
+}
+
+.clean-up-row:has(.clean-up-input:focus-visible),
+.clean-up-row[data-force="focus"] {
+  border-color: var(--color-ink);
+}
+
+.clean-up-row[data-disabled] {
+  cursor: default;
+}
+
+/* The native box lies over the whole row, unseen, so a press anywhere on it toggles and the keyboard reaches it. */
+.clean-up-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+/* The drawn box sits on the name's first line: unticked ink-faint, ticked the accent, the color of the active choice
+   (the Worktree checkbox's), unavailable ink-faint again. */
+.clean-up-box {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--type-ui-size) * var(--type-ui-leading));
+  color: var(--color-ink-faint);
+  transition: color var(--motion-quick) var(--motion-ease-out);
+}
+
+.clean-up-box[data-checked] {
+  color: var(--color-accent);
+}
+
+.clean-up-row[data-disabled] .clean-up-box {
+  color: var(--color-ink-faint);
+}
+
+.clean-up-words {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.clean-up-name {
+  color: var(--color-ink);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  overflow-wrap: anywhere;
+}
+
+/* A branch or a folder is named as it is written. */
+.clean-up-name[data-named="code"],
+.clean-up-code {
+  font-family: var(--type-mono-family);
+  overflow-wrap: anywhere;
+}
+
+.clean-up-name[data-named="code"] {
+  font-size: var(--type-mono-size);
+}
+
+/* Its project, when it was last active, its branch, folder and size, a gap between each. */
+.clean-up-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--space-md);
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* Where a folder is, on the line beneath the rest, as small as they are. */
+.clean-up-path {
+  margin-top: calc(-1 * var(--space-xs));
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.clean-up-size {
+  font-variant-numeric: tabular-nums;
+}
+
+.clean-up-loss {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.clean-up-loss > .rail-note {
+  padding-inline: 0;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.clean-up-nothing {
+  color: var(--color-ink-muted);
+}
+
+/* What removing it loses: led by a caution glyph, in ink, as the delete question's loss. */
+.clean-up-caution {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  color: var(--color-ink);
+}
+
+/* How many are ticked, and Clean up…, at the list's foot. */
+.clean-up-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xl);
+  padding-top: var(--space-md);
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+.clean-up-chosen {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-variant-numeric: tabular-nums;
+}
+
+.clean-up-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* What the last clean-up did: a positive glyph when everything went, else a neutral one, the failures beneath. */
+.clean-up-result-line {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  margin: 0;
+  color: var(--color-ink);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clean-up-body,
+  .clean-up-body > *,
+  .clean-up-row,
+  .clean-up-box {
+    animation: none;
+    transition: none;
+  }
+}

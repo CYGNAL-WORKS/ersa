@@ -565,7 +565,74 @@ export const enUS = {
       archiveInactiveLabel: "Archive inactive sessions",
       archiveInactiveDescription: "Archive a session, as Archive does, once it has had no activity for this long. Running, pinned, and unread sessions are never archived.",
       archiveNeverLabel: "Never",
-      archiveDaysLabel: { one: "{count} day", other: "{count} days" },
+      // A choice of days in a Storage setting's chip.
+      daysLabel: { one: "{count} day", other: "{count} days" },
+      // Clean up (FLOW-CLEAN-UP, steps 5 to 7; R16 to R19, R28, R29; docs/design/SETTINGS.md, Clean up).
+      cleanUp: {
+        // The setting whose days choose which sessions count as inactive; 30, 60 or 90, as Claude Desktop's.
+        inactiveLabel: "Clean up inactive sessions",
+        inactiveDescription: "List the folders and branches Ersa no longer needs, with those of sessions inactive this long. Nothing is removed until you choose Clean up.",
+        // The list, for assistive technology.
+        listLabel: "Clean up list",
+        // While the list is read, and beside an item until it is checked (R19).
+        checkingProgress: "Checking…",
+        nothingEmpty: "Nothing to clean up. Folders and branches Ersa no longer needs appear here.",
+        // The list can't be read, before the reason (R19).
+        listError: "The clean-up list can't be read.",
+        // A project whose branches and folders Core couldn't look through, before the reason.
+        unreadError: "Ersa couldn't look for branches and folders in {project}.",
+        // The groups, in the order the brief lists them (FLOW-CLEAN-UP, step 5).
+        workspaceHeading: "Inactive and kept sessions",
+        leftoverHeading: "Leftover workspaces",
+        branchHeading: "Unused branches",
+        folderHeading: "Folders Ersa can't identify",
+        // What removing an item loses (R16, R28, R29).
+        nothingLostDetail: "Nothing is lost.",
+        mergedDetail: "Its changes are already in the base branch.",
+        lossDetail: "Removing it loses {parts} for good.",
+        changedFilesPart: { one: "{count} changed file", other: "{count} changed files" },
+        commitsPart: { one: "{count} commit that exists nowhere else", other: "{count} commits that exist nowhere else" },
+        unrecordedDetail: "Commits made here can't be counted, and go with it.",
+        repositoryDetail: "Its folder holds a repository of its own, which goes with the folder and doesn't come back with it.",
+        unfinishedDetail: "Ersa couldn't finish looking through this folder, so it can't say how big it is or whether anything inside it changed.",
+        folderDetail: "Ersa can't count what removing it loses.",
+        // An item Core couldn't check, before the reason (R19).
+        inspectError: "Ersa can't count what's in it.",
+        // Beneath the list: how many are ticked, and the button that asks first.
+        chosenLabel: { one: "{count} item chosen", other: "{count} items chosen" },
+        cleanUpButton: "Clean up…",
+        // The question (R17, R28, R29). The title names what goes: "Clean up 3 folders and 2 branches?".
+        questionTitle: "Clean up {parts}?",
+        foldersPart: { one: "{count} folder", other: "{count} folders" },
+        branchesPart: { one: "{count} branch", other: "{count} branches" },
+        freesDetail: "This frees {size}.",
+        keepsDetail: "Sessions whose folders go keep their conversations and branches.",
+        lostDetail: "You lose {parts} for good.",
+        unrecordedQuestion: { one: "Commits in 1 of the folders can't be counted, and are lost too.", other: "Commits in {count} of the folders can't be counted, and are lost too." },
+        repositoriesDetail: {
+          one: "1 of the folders holds a repository of its own, which goes with it.",
+          other: "{count} of the folders hold a repository of their own, which go with them.",
+        },
+        unfinishedQuestion: {
+          one: "Ersa couldn't finish looking through 1 of the folders, so the space freed leaves it out.",
+          other: "Ersa couldn't finish looking through {count} of the folders, so the space freed leaves them out.",
+        },
+        folderQuestion: { one: "Ersa can't count what 1 of the folders holds.", other: "Ersa can't count what {count} of the folders hold." },
+        cancelButton: "Cancel",
+        confirmButton: "Clean up",
+        // When anything chosen holds unsaved work, or is a folder Ersa can't identify (FLOW-CLEAN-UP, step 6).
+        discardButton: "Discard and clean up",
+        // While the items are removed one at a time (R18): the count of those done, and Stop after the current one.
+        removedProgress: "Removed {done} of {count}…",
+        stopButton: "Stop",
+        stoppingProgress: "Stopping…",
+        // When it ends, above the list (R18).
+        resultDetail: { one: "Removed {removed} of 1 item.", other: "Removed {removed} of {count} items." },
+        stoppedDetail: "Stopped before the rest.",
+        notRemovedError: "Couldn't remove {name}.",
+        // An item that changed after it was checked: Core removed nothing of it, and the list shows it as it is now.
+        changedReason: "It changed since it was checked, so nothing of it was removed.",
+      },
     },
   },
   // The workbench at the window's right (LAY-SHELL, The workbench; docs/design/WORKBENCH.md).

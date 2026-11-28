@@ -1,0 +1,21 @@
+The Claude Code extension for VS Code as a host of the CLI's sign-in, read 2026-11-27 from the installed extension, version 2.1.332 (Windows).
+Read from the extension's own program files, not from a sign-in made in it. Nobody signed in, and no sign-in page was opened. The extension drives the CLI over the same control channel Ersa uses, so this says what one of the vendor's own hosts does with the requests PROTO-CLAUDE-CODE-STREAM (Signing in) describes. It was read twice: by the session that reported it on issue #672, and again, for the section "After the sign-in's answer", by the session that wrote this file.
+
+After the sign-in's answer (the answer to `claude_oauth_wait_for_completion`)
+  An ordinary sign-in: the extension does nothing to any conversation. It does not restart, resume or send again for any of them. It reads the CLI's sign-in status again for its own display.
+  Its interface holds the words "Signed in. Send your message again.", shown as advice and not as an error. The person sends the message again, and it goes to the process that was already running.
+  The answer may carry `hybridSignIn`: an object holding a `message`, which the extension shows as a notice, and sometimes `newProcess` set to true. The extension's own name for this is an organization's sign-in. It reads nothing else of the answer to decide what to do with conversations.
+  With `hybridSignIn` and its `message`, the extension restarts the other conversations' processes in three cases: `newProcess` is true; its own reading says the sign-in is with a provider other than Anthropic's own; or its check of the sign-in status afterward does not read signed in. It also restarts them after a sign-in of the kind it calls a console profile, which Ersa never asks for.
+  A restart is: a conversation at rest has its process closed at once; one that is working has it closed after its next `result`. The conversation that ran the sign-in's own requests is left alone until the sign-in is over. The extension tells its window that the conversation's process has closed.
+
+Reported by the first read, not checked again
+  The extension has no other route when the CLI refuses `claude_authenticate`: it shows the CLI's error as it is, and does not run the CLI's sign-in command.
+  It sends `claude_authenticate` to a conversation's own process when one is open, else to a temporary one.
+  It also shows `manualUrl`, with a field to paste a code that it passes on with `claude_oauth_callback`.
+  Its wait has no time limit, and its cancel only stops the host waiting.
+  It treats a message that failed with `authentication_failed` as "signed out", except when the failure names the provider's credentials or a blocked network.
+
+Where Ersa differs, on purpose
+  Ersa always uses a process of its own for a sign-in, opens only `automaticUrl`, relays no code, withdraws the wait and closes the process on a cancel, and ends a sign-in after 10 minutes (ADR 0040; PROTO-CORE-API, Signing in).
+
+Not observed: any of this run; an answer that carries `hybridSignIn`, from any CLI version, so its `message`'s words and when the CLI sends it are unknown (the one recorded answer, fixture 06-sign-in-finished, holds an account and nothing else); what the person sees while conversations restart, and what starts a closed conversation's process again; whether a message sent again after an ordinary sign-in is answered by a conversation whose earlier message had failed, which is the recording the owner makes (#671); and any other version of the extension.

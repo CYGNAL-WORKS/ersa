@@ -1,9 +1,8 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
+import { type ReactNode, useRef } from "react";
 import { t } from "../catalog";
 import { type DeletePhase, type WhatGoes, losesWork } from "../session/deletion";
-import { HeightEase } from "../theme/motion";
 import { Button, ButtonLabels } from "./Button";
-import "./DeleteQuestion.css";
+import { Dialog, DialogFailure, DialogLoss } from "./Dialog";
 
 interface DeleteQuestionProps {
   /** The session's title as its tile shows it. */
@@ -25,65 +24,15 @@ interface DeleteQuestionProps {
  * Cancel and stays within it; while the deletion runs, both buttons and Escape wait for it to end.
  */
 export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, inline = false }: DeleteQuestionProps) {
-  const id = useId();
-  const root = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
   const deleting = phase.kind === "deleting";
   const failed = phase.kind === "failed";
 
-  // Each phase places focus as it begins, so it never falls out of the dialog with a button that became unavailable.
-  // Asking, and reading what to ask, it starts on Cancel, so an Enter pressed out of habit deletes nothing, however
+  // Asking, and reading what to ask, focus starts on Cancel, so an Enter pressed out of habit deletes nothing, however
   // many times Ersa asks; while the deletion runs both buttons are unavailable, so the dialog itself keeps it; a
   // failure gives it to Try again.
-  useEffect(() => {
-    if (inline) return;
-    const to = phase.kind === "deleting" ? root : phase.kind === "failed" ? confirm : cancel;
-    to.current?.focus({ preventScroll: true });
-  }, [inline, phase]);
-
-  // Focus stays within the dialog: a press anywhere else in the window, all of it inert while the question is open,
-  // takes no focus, so Escape and Tab still reach the dialog.
-  useEffect(() => {
-    if (inline) return;
-    const away = (event: MouseEvent) => {
-      if (event.target instanceof Node && root.current?.contains(event.target)) return;
-      event.preventDefault();
-    };
-    document.addEventListener("mousedown", away, true);
-    return () => document.removeEventListener("mousedown", away, true);
-  }, [inline]);
-
-  // What arrives late, the counts or a failure's reason, changes the question's height. It eases to the new height
-  // over motion-settle and stays centered, so nothing pops in (DESIGN.md); its body takes up the difference, so the title
-  // stays at its top and the buttons at its foot, growing or shrinking.
-  const ease = useRef(new HeightEase()).current;
-  useLayoutEffect(() => {
-    if (!inline && root.current) ease.change(root.current);
-  }, [ease, inline, phase]);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      if (!deleting) onCancel();
-    } else if (event.key === "Tab") {
-      // Focus stays within the dialog: Tab from the last button wraps to the first, and Shift+Tab the other way.
-      const buttons = [...(root.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-      const first = buttons[0];
-      const last = buttons[buttons.length - 1];
-      if (!first || !last) {
-        event.preventDefault();
-        return;
-      }
-      if (event.shiftKey && (document.activeElement === first || !root.current?.contains(document.activeElement))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || !root.current?.contains(document.activeElement))) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-  };
+  const focusTo = deleting ? undefined : failed ? confirm : cancel;
 
   const goes = phase.kind === "asking" || phase.kind === "deleting" ? phase.goes : undefined;
   // Every label the confirming button can take, and the one it shows now. All of them hold its width, so it keeps one
@@ -97,62 +46,49 @@ export function DeleteQuestion({ title, phase, onConfirm, onTryAgain, onCancel, 
   const shown: keyof typeof labels = failed ? "tryAgain" : deleting ? "deleting" : goes && losesWork(goes) ? "lose" : "delete";
 
   return (
-    <div
-      ref={root}
-      className="delete-question"
-      data-inline={inline || undefined}
-      role="dialog"
-      aria-modal={!inline || undefined}
-      aria-labelledby={`${id}-title`}
-      aria-describedby={`${id}-detail`}
-      aria-busy={deleting || phase.kind === "reading" || undefined}
-      tabIndex={-1}
-      onKeyDown={onKeyDown}
-    >
-      <h2 className="delete-question-title" id={`${id}-title`}>
-        {t("rail.delete.title", { title })}
-      </h2>
-      <div className="delete-question-body">
-        <div className="delete-question-detail" id={`${id}-detail`}>
+    <Dialog
+      title={t("rail.delete.title", { title })}
+      busy={deleting || phase.kind === "reading"}
+      onCancel={() => {
+        if (!deleting) onCancel();
+      }}
+      focusTo={focusTo}
+      focusKey={phase}
+      inline={inline}
+      detail={
+        <>
           {phase.kind === "asking" && phase.changed && <p>{t("rail.delete.changedDetail")}</p>}
           <p>{t("rail.delete.conversationDetail")}</p>
           {goes && <Goes goes={goes} />}
           {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
-        </div>
-        {goes && <Loss goes={goes} />}
-        {goes && goes.kind !== "filesStay" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
-        {failed && (
-          <div className="delete-question-failed" role="alert">
-            <p className="problem">{t("rail.delete.failedError")}</p>
-            <p className="delete-question-reason">{phase.reason}</p>
-          </div>
-        )}
-      </div>
-      <div className="delete-question-actions">
-        <Button ref={cancel} onClick={onCancel} disabled={deleting}>
-          {t("rail.delete.cancelButton")}
-        </Button>
-        <Button
-          ref={confirm}
-          className="delete-question-confirm"
-          onClick={failed ? onTryAgain : onConfirm}
-          disabled={deleting || phase.kind === "reading"}
-        >
-          <ButtonLabels labels={labels} shown={shown} busy="deleting" />
-        </Button>
-      </div>
-    </div>
+        </>
+      }
+      actions={
+        <>
+          <Button ref={cancel} onClick={onCancel} disabled={deleting}>
+            {t("rail.delete.cancelButton")}
+          </Button>
+          <Button ref={confirm} className="dialog-confirm" onClick={failed ? onTryAgain : onConfirm} disabled={deleting || phase.kind === "reading"}>
+            <ButtonLabels labels={labels} shown={shown} busy="deleting" />
+          </Button>
+        </>
+      }
+    >
+      {goes && <Loss goes={goes} />}
+      {goes && goes.kind !== "filesStay" && goes.branchKept && <p className="dialog-note">{t("rail.delete.branchKeptDetail")}</p>}
+      {failed && <DialogFailure lead={t("rail.delete.failedError")} reason={phase.reason} />}
+    </Dialog>
   );
 }
 
 /** What goes with the conversation: the folder and its branch by name, or where the files stay. */
 function Goes({ goes }: { goes: WhatGoes }) {
-  if (goes.kind === "filesStay") return <p>{t("rail.delete.filesStayDetail", { path: <span className="delete-question-name">{goes.path}</span> })}</p>;
+  if (goes.kind === "filesStay") return <p>{t("rail.delete.filesStayDetail", { path: <span className="dialog-name">{goes.path}</span> })}</p>;
   // A workspace that is put away has no folder left to delete: the question says so, and what happens to the branch
   // (FLOW-ARCHIVE-DELETE-SESSION-R13). One choice for both kinds, only the words differ.
   const away = goes.kind === "putAway";
   if (goes.branch === "") return <p>{away ? t("rail.delete.putAwayDetail") : t("rail.delete.folderDetail")}</p>;
-  const branch = <span className="delete-question-name">{goes.branch}</span>;
+  const branch = <span className="dialog-name">{goes.branch}</span>;
   const said = away
     ? goes.shared
       ? t("rail.delete.putAwaySharedDetail", { branch })
@@ -180,16 +116,13 @@ function Loss({ goes }: { goes: WhatGoes }) {
   // Commits git can no longer count are named in place of a count of them (FLOW-ARCHIVE-DELETE-SESSION-R10).
   if (goes.unrecorded) said.push(t("rail.delete.unrecordedDetail"));
   return (
-    <p className="delete-question-loss">
-      <span className="glyph" data-tone="caution" aria-hidden="true" />
-      <span>
-        {said.map((s, i) => (
-          <span key={i}>
-            {i > 0 && " "}
-            {s}
-          </span>
-        ))}
-      </span>
-    </p>
+    <DialogLoss>
+      {said.map((s, i) => (
+        <span key={i}>
+          {i > 0 && " "}
+          {s}
+        </span>
+      ))}
+    </DialogLoss>
   );
 }

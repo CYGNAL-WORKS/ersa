@@ -1,6 +1,7 @@
-/* The delete question (docs/design/RAIL.md, The delete question): centered over the window, which is not dimmed,
-   above every other layer, on the tile's material with a line edge. */
-.delete-question {
+/* A question over the window (Dialog.tsx; docs/design/RAIL.md, The delete question; docs/design/SETTINGS.md, The
+   clean-up question): centered over the window, which is not dimmed, above every other layer, on the tile's material with
+   a line edge. */
+.dialog {
   position: fixed;
   inset: 0;
   z-index: var(--stack-dialog);
@@ -19,32 +20,32 @@
   color: var(--color-ink);
   font-size: var(--type-ui-size);
   line-height: var(--type-ui-leading);
-  animation: delete-question-in var(--motion-settle) var(--motion-ease-out);
+  animation: dialog-in var(--motion-settle) var(--motion-ease-out);
 }
 
 /* The gallery draws it in place, where its states sit side by side. */
-.delete-question[data-inline] {
+.dialog[data-inline] {
   position: static;
   margin: 0;
 }
 
 /* Focused only while the deletion runs, to keep the keyboard here. With keyboard focus its edge reads ink, as the
    shelf's does. */
-.delete-question:focus {
+.dialog:focus {
   outline: none;
 }
 
-.delete-question:focus-visible {
+.dialog:focus-visible {
   border-color: var(--color-ink);
 }
 
-@keyframes delete-question-in {
+@keyframes dialog-in {
   from {
     opacity: 0;
   }
 }
 
-.delete-question-title {
+.dialog-title {
   flex: none;
   margin: 0;
   font-family: var(--type-heading-family);
@@ -56,7 +57,7 @@
 
 /* All that can change its height. While the question eases to a new height this takes up the difference, clipping
    its words as they arrive, so the buttons stay at the foot whether it grows or shrinks. */
-.delete-question-body {
+.dialog-body {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
@@ -65,33 +66,33 @@
   overflow: clip;
 }
 
-.delete-question-body > * {
+.dialog-body > * {
   flex: none;
 }
 
-/* What goes with it: ui in ink-muted. */
-.delete-question-detail {
+/* What happens: ui in ink-muted. */
+.dialog-detail {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
   color: var(--color-ink-muted);
 }
 
-.delete-question-detail p,
-.delete-question-kept,
-.delete-question-reason {
+.dialog-detail p,
+.dialog-note,
+.dialog-reason {
   margin: 0;
 }
 
-/* The branch's name, and a path where the files stay, in mono. */
-.delete-question-name {
+/* A name the question quotes, a branch or a path, in mono. */
+.dialog-name {
   font-family: var(--type-mono-family);
   font-size: var(--type-mono-size);
   overflow-wrap: anywhere;
 }
 
 /* What would be lost: led by a caution glyph, in ink. The glyph sits on the first line's middle. */
-.delete-question-loss {
+.dialog-loss {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: var(--space-sm);
@@ -100,19 +101,20 @@
   color: var(--color-ink);
 }
 
-.delete-question-kept {
+/* A note beneath what is lost, such as a branch that is kept: ui in ink-muted. */
+.dialog-note {
   color: var(--color-ink-muted);
 }
 
 /* A failure's reason beneath its words, past the danger glyph, keeping its own lines. */
-.delete-question-reason {
+.dialog-reason {
   padding-inline-start: calc(var(--size-glyph) + var(--space-sm));
   color: var(--color-ink-muted);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.delete-question-actions {
+.dialog-actions {
   flex: none;
   display: flex;
   justify-content: flex-end;
@@ -122,13 +124,13 @@
 
 /* The confirming button is the plain button with its label in danger, never a danger fill. Focused, it reads as
    every focused button does. */
-.delete-question-confirm:not(:disabled, :focus-visible, [data-force="focus"]) {
+.dialog-confirm:not(:disabled, :focus-visible, [data-force="focus"]) {
   color: var(--color-danger);
 }
 
 /* With reduced motion on, the question appears at once; its ring holds still as every button's does. */
 @media (prefers-reduced-motion: reduce) {
-  .delete-question {
+  .dialog {
     animation: none;
   }
 }
