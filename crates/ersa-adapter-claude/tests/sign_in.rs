@@ -404,7 +404,7 @@ fn failed_starts() -> Vec<(&'static str, Script, SignInStartError)> {
 /// it refused `claude_authenticate`, the adapter's own otherwise. Each
 /// stand-in that does not exit by itself is held open, so only the adapter
 /// can end it.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R86
+// verifies: PROTO-CLAUDE-CODE-STREAM-R91
 #[tokio::test]
 async fn a_start_that_fails_says_why_and_leaves_nothing_running() {
     for (case, script, expected) in failed_starts() {

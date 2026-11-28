@@ -49,7 +49,7 @@ Each rule names the check that enforces it, and says so when the check covers on
 ## Interface patterns
 
 - **Buttons and commands.** Lead with a verb, use sentence case, and end without punctuation, except the ellipsis of a command that asks for more before it acts. Name the action: "Quit", "Allow", "Add project". Never use "OK" or "Yes" for a choice with consequences.
-- **Errors.** Say what failed, then what to do, as sentences ending with a period: "Ersa can't reach your sessions. It's trying again." Say it in the person's terms: interface copy never names Ersa's own parts, such as Core. (Not checked) Don't blame the person, and don't prefix "Error:".
+- **Errors.** Say what failed, then what to do, as sentences ending with a period: "Ersa can't reach your sessions. It's trying again." Where the error stands beside a button that is the next step, the button is the what to do. Say it in the person's terms: interface copy never names Ersa's own parts, such as Core. (Not checked) Don't blame the person, and don't prefix "Error:".
 - **Empty states.** Say what will appear here and how to make it appear: "No projects yet. Add a folder to start a session in it."
 - **Progress.** Use a present participle with an ellipsis: "Saving…", "Reconnecting…".
 - **Confirmations.** The question names the consequence, and the primary button repeats its verb: "Quit Ersa? 2 sessions are running and will stop." with Quit and Cancel.
