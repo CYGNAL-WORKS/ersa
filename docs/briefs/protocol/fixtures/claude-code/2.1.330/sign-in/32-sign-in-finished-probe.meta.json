@@ -1,0 +1,68 @@
+{
+  "recorded_at": "2026-11-28T00:44:34.766Z",
+  "claude_code_version": "2.1.330",
+  "recorder": "scripts/record-claude-sign-in.mjs",
+  "ending": "finished",
+  "executable": "claude",
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa",
+    "CLAUDE_CONFIG_DIR": "<a new scratch folder, deleted afterward>"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "role": "a probe started after the sign-in ended",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "40eb8413-6413-4bb6-8faa-26e8f578170e"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "killed": false,
+  "left_session_record": false,
+  "stdout_lines": 2,
+  "stdout_timing_ms": [
+    31209,
+    31214
+  ],
+  "stderr": [],
+  "sent": [
+    {
+      "t": 30795,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-initialize-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 31209,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_settings-2\",\"request\":{\"subtype\":\"get_settings\"}}"
+    }
+  ]
+}

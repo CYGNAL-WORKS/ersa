@@ -1,0 +1,103 @@
+{
+  "recorded_at": "2026-11-28T00:44:34.766Z",
+  "claude_code_version": "2.1.330",
+  "recorder": "scripts/record-claude-sign-in.mjs",
+  "ending": "finished",
+  "executable": "claude",
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa",
+    "CLAUDE_CONFIG_DIR": "<a new scratch folder, deleted afterward>"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN"
+  ],
+  "role": "a session started signed out before the sign-in, sent one message before it and one after",
+  "message": "Reply with the single word: ok",
+  "started_signed_out": true,
+  "messages": [
+    {
+      "when": "before the sign-in",
+      "got_result": true,
+      "is_error": true
+    },
+    {
+      "when": "after the sign-in ended",
+      "got_result": true,
+      "is_error": false
+    }
+  ],
+  "got_result": true,
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "b7097712-5b41-4858-8f45-38fce3fe31f5"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "killed": false,
+  "left_session_record": true,
+  "stdout_lines": 18,
+  "stdout_timing_ms": [
+    816,
+    967,
+    975,
+    1015,
+    1016,
+    1072,
+    25327,
+    25330,
+    27368,
+    27368,
+    27368,
+    27368,
+    27369,
+    27369,
+    27370,
+    27371,
+    27372,
+    27390
+  ],
+  "stderr": [],
+  "sent": [
+    {
+      "t": 9,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-initialize-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 816,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: ok\"}]}}"
+    },
+    {
+      "t": 25265,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: ok\"}]}}"
+    }
+  ]
+}
