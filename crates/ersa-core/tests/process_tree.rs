@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use ersa_adapter::{Process, ProcessSpec, Transport};
 use ersa_core::transport::LocalTreeTransport;
-use support::procs::{eventually_gone, parent_of_a_grandchild, running, shell};
+use support::procs::{eventually_gone, grandchild_pid, parent_of_a_grandchild, running, shell};
 
-/// Spawns `spec` and reads the grandchild's pid from its first line.
+/// Spawns `spec` and reads the grandchild's pid from what it prints.
 async fn spawn_with_grandchild(spec: ProcessSpec) -> (Box<dyn Process>, u32) {
     spawn_with_grandchild_on(LocalTreeTransport::new(), spec).await
 }
@@ -21,15 +21,11 @@ async fn spawn_with_grandchild_on(
 ) -> (Box<dyn Process>, u32) {
     let mut process = transport.spawn(spec).await.expect("spawn");
     let mut stdout = process.take_stdout().expect("stdout");
-    let line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line())
+    let pid = tokio::time::timeout(Duration::from_secs(30), grandchild_pid(&mut *stdout))
         .await
         .expect("the parent printed in time")
         .expect("read")
-        .expect("a line");
-    let pid: u32 = line
-        .trim()
-        .parse()
-        .unwrap_or_else(|_| panic!("a pid, not {line:?}"));
+        .expect("a pid");
     assert!(running(pid), "the grandchild started");
     (process, pid)
 }
