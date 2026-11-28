@@ -79,14 +79,13 @@ export function itemName(item: CleanupItem, sessions: readonly Pick<Session, "id
 /**
  * What removing the item loses, counted: changed files and commits that exist nowhere else. A session's folder is put
  * away, keeping its branch, so only its stranded commits go. A leftover goes with its branch, which Core keeps when it
- * holds commits of its own, unless the removal is sent `discard`: then those commits go too (PROTO-CORE-API, Removing
- * a folder).
+ * holds commits of its own, unless the removal is sent `discard`: then every commit only the leftover holds goes, which
+ * is `unshared`, its stranded ones among them (PROTO-CORE-API, Removing a folder; workspace.changes).
  */
 export function lostCounts(inspected: CleanupInspectResult): { files: number; commits: number } {
   if (inspected.kind === "workspace") return { files: inspected.uncommitted ?? 0, commits: inspected.stranded ?? 0 };
   if (inspected.kind === "leftover") {
-    const branch = sendsDiscard(inspected) ? (inspected.unshared ?? 0) : 0;
-    return { files: inspected.uncommitted ?? 0, commits: (inspected.stranded ?? 0) + branch };
+    return { files: inspected.uncommitted ?? 0, commits: sendsDiscard(inspected) ? (inspected.unshared ?? 0) : 0 };
   }
   if (inspected.kind === "branch" && inspected.merged !== true) return { files: 0, commits: inspected.unshared ?? 0 };
   return { files: 0, commits: 0 };

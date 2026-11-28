@@ -11,10 +11,16 @@
   animation: page-in var(--motion-quick) var(--motion-ease-out);
 }
 
-/* Focused only after a clean-up, so a screen reader starts from the list and hears what was done. The list is no
-   control, so it draws no edge of its own: the browser's ring is no token. */
+/* Focused only after a clean-up, so the next Tab starts from the list and a screen reader hears what was done. The
+   browser's ring is no token: with keyboard focus the list shows an inset ink hairline, as the workbench's focused list
+   does (WORKBENCH.md). */
 .clean-up-body:focus {
   outline: none;
+}
+
+.clean-up-body:focus-visible {
+  box-shadow: inset 0 0 0 var(--line-hairline) var(--color-ink);
+  border-radius: var(--radius-md);
 }
 
 .clean-up-body[data-easing] {

@@ -112,7 +112,8 @@ describe("what removing an item loses", () => {
   // verifies: FLOW-CLEAN-UP-R17
   it("counts a leftover's branch commits when it goes with discard, since Core then deletes the branch with them", () => {
     expect(lostCounts(leftover({ uncommitted: 2, unshared: 5 }))).toEqual({ files: 2, commits: 5 });
-    expect(questionOf([leftover({ uncommitted: 2, unshared: 5, stranded: 1 })])).toMatchObject({ files: 2, commits: 6 });
+    // Stranded commits are among the unshared ones (workspace.changes), so they are counted once.
+    expect(questionOf([leftover({ uncommitted: 0, unshared: 5, stranded: 1 })])).toMatchObject({ files: 0, commits: 5 });
     // Without discard the branch is kept with its commits; a session's folder is put away, keeping its branch.
     expect(lostCounts(leftover({ unshared: 5 }))).toEqual({ files: 0, commits: 0 });
     expect(lostCounts(workspace({ uncommitted: 2, unshared: 5 }))).toEqual({ files: 2, commits: 0 });

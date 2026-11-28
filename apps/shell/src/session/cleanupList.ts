@@ -75,7 +75,7 @@ export function useCleanUp(client: CoreClient, describe: (error: unknown) => str
   // The items waiting for an inspect, the read they belong to, and how many inspects are at Core now. One pool for
   // every read: an inspect already sent can't be called off, so a read made meanwhile waits for its place rather than
   // adding more, and never more than INSPECT_AT_ONCE are at Core whatever the reads.
-  const waiting = useRef<{ read: number; items: CleanupItem[] }>({ read: 0, items: [] });
+  const waiting = useRef<CleanupItem[]>([]);
   const atCore = useRef(0);
 
   /** Replaces one item's view, by id, in the list now shown. */
@@ -85,9 +85,10 @@ export function useCleanUp(client: CoreClient, describe: (error: unknown) => str
 
   /** Sends the next inspects while there is room, each answer counted only for the read it belongs to (R19). */
   const pump = useCallback(() => {
-    while (atCore.current < INSPECT_AT_ONCE && waiting.current.items.length > 0) {
-      const item = waiting.current.items.shift()!;
-      const mine = waiting.current.read;
+    while (atCore.current < INSPECT_AT_ONCE && waiting.current.length > 0) {
+      const item = waiting.current.shift()!;
+      // Only the newest read has items waiting, so the item is that read's.
+      const mine = reading.current;
       atCore.current += 1;
       void client
         .call("cleanup.inspect", { id: item.id })
@@ -108,13 +109,13 @@ export function useCleanUp(client: CoreClient, describe: (error: unknown) => str
       const mine = ++reading.current;
       setList({ state: "loading" });
       setChoices({});
-      waiting.current = { read: mine, items: [] };
+      waiting.current = [];
       client.call("cleanup.list", { inactive_days: inactive }).then(
         (answer) => {
           if (mine !== reading.current) return;
           setList({ state: "ready", items: answer.items.map((item) => ({ state: "checking", item })), unread: answer.unread });
           // The items are inspected a few at a time, in list order; an older read's waiting items are dropped.
-          waiting.current = { read: mine, items: [...answer.items] };
+          waiting.current = [...answer.items];
           pump();
         },
         (error) => {
