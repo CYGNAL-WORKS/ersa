@@ -117,7 +117,7 @@ async fn a_sign_in_answers_once_started_with_the_address_its_backend_handed_over
     assert_eq!(started, json!({ "url": PAGE }));
     assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 1);
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     ended(&mut client).await;
 
     *fake.sign_ins.mode.lock().unwrap() = SignInMode::Starts(None);
@@ -128,7 +128,7 @@ async fn a_sign_in_answers_once_started_with_the_address_its_backend_handed_over
         "no address: opening the page is the backend's"
     );
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     ended(&mut client).await;
 }
 
@@ -175,7 +175,7 @@ async fn a_second_sign_in_while_one_is_under_way_starts_none_and_answers_as_the_
     assert_eq!(again, json!({ "url": PAGE }));
     assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 1, "one start");
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     ended(&mut first).await;
 }
 
@@ -212,7 +212,7 @@ async fn a_sign_in_asked_for_while_one_is_ending_starts_afresh_once_it_has_ended
     // And one that ended by itself, while Core still lets go of it.
     let stopping = fake.sign_ins.stop_gate.lock().await;
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     while fake.sign_ins.stops.load(Ordering::SeqCst) < 2 {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -228,7 +228,7 @@ async fn a_sign_in_asked_for_while_one_is_ending_starts_afresh_once_it_has_ended
     assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 3);
     assert_eq!(ended(&mut other).await["outcome"], json!("failed"));
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     ended(&mut other).await;
 }
 
@@ -311,7 +311,7 @@ async fn a_sign_in_held_behind_one_that_is_ending_answers_within_its_limit() {
     assert_eq!(kind(&error), "invalid_state");
     assert_eq!(
         error["message"],
-        json!("The sign-in to fake didn't start within 2 seconds.")
+        json!("fake took more than 2 seconds to respond.")
     );
     drop(stopping);
     assert_eq!(other.response(canceling).await["result"], json!({}));
@@ -364,7 +364,7 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
     assert_eq!(kind(&error), "invalid_state");
     assert_eq!(
         error["message"],
-        json!("Ersa can't start a sign-in to without-sign-in")
+        json!("Ersa has no sign-in for without-sign-in.")
     );
 
     let reason = "The vendor's sign-in is closed for maintenance.";
@@ -381,7 +381,7 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
         error["message"]
             .as_str()
             .unwrap()
-            .contains("didn't start within 5 seconds"),
+            .contains("took more than 5 seconds to respond"),
         "{error}"
     );
     eventually_gone(fake.sign_ins.latest_process().await).await;
@@ -389,6 +389,110 @@ async fn a_sign_in_that_cannot_start_is_refused_and_leaves_nothing_running() {
     // None of them was under way for anyone, and none is said to have ended.
     assert_eq!(listed(&mut client).await.get("signing_in"), None);
     assert!(!any_ended_yet(&mut client).await);
+}
+
+/// A sign-in its adapter tried to start and could not, after starting a
+/// process for it, is answered `invalid_state` with the adapter's own
+/// sentence for what went wrong, unchanged; the process is gone, and the
+/// sign-in was never under way: the listing never carries it and no
+/// ending is sent (R157's last sentence). Core's own 20 seconds to start,
+/// so the test measures no process's start-up (#664).
+// verifies: PROTO-CORE-API-R169
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_its_adapter_could_not_start_is_refused_and_leaves_nothing_running() {
+    let words = "The fake ended before it handed over a sign-in page.";
+    let mode = SignInMode::CouldNotStart(words.into());
+    let (_core, fake, mut client) = core_with(mode, |_| {}).await;
+
+    let error = client.error("backend.sign_in", the_fake()).await;
+    assert_eq!(kind(&error), "invalid_state");
+    assert_eq!(error["message"], json!(words), "the adapter's own sentence");
+    assert_eq!(fake.sign_ins.starts.load(Ordering::SeqCst), 1);
+    eventually_gone(fake.sign_ins.latest_process().await).await;
+
+    assert_eq!(listed(&mut client).await.get("signing_in"), None);
+    assert!(!any_ended_yet(&mut client).await);
+}
+
+/// Whether `message` says that a sign-in couldn't, can't or didn't start.
+fn says_it_did_not_start(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "couldn't",
+        "can't",
+        "didn't",
+        "could not",
+        "cannot",
+        "did not",
+    ]
+    .iter()
+    .any(|said| lower.contains(&format!("{said} start")))
+}
+
+/// Every refusal Core words itself, read over a connection, says why the
+/// sign-in didn't start and not that it didn't, since the note says that
+/// already: a command not found, an adapter with no sign-in, a start
+/// canceled before it started, and one past its limit. Shutdown's answer
+/// is checked where Core words it, since its connections are closing.
+// verifies: PROTO-CORE-API-R170
+#[tokio::test(flavor = "multi_thread")]
+async fn no_refusal_in_ersas_words_says_the_sign_in_did_not_start() {
+    let (core, fake, mut client) = core_with(SignInMode::NotFound, |_| {}).await;
+    let mut other = core.client().await;
+    let mut messages = Vec::new();
+
+    let error = client.error("backend.sign_in", the_fake()).await;
+    messages.push(error["message"].clone());
+    let without = json!({ "host_id": "local", "name": "without-sign-in" });
+    let error = client.error("backend.sign_in", without).await;
+    messages.push(error["message"].clone());
+
+    *fake.sign_ins.mode.lock().unwrap() = SignInMode::Starts(None);
+    let held = fake.sign_ins.start_gate.lock().await;
+    let asked = client.request("backend.sign_in", the_fake()).await;
+    fake.sign_ins.latest_process().await;
+    other.result("backend.cancel_sign_in", the_fake()).await;
+    drop(held);
+    messages.push(client.response(asked).await["error"]["message"].clone());
+
+    // Nothing here needs a process to start in time: this one never says it
+    // started, so its limit runs out however slow the machine is (#664).
+    let limit = |config: &mut CoreConfig| config.sign_in_start_limit = Duration::from_secs(2);
+    let (_slow_core, _slow, mut slow_client) = core_with(SignInMode::NeverStarts, limit).await;
+    let error = slow_client.error("backend.sign_in", the_fake()).await;
+    messages.push(error["message"].clone());
+
+    assert_eq!(
+        messages,
+        [
+            json!("fake isn't installed on this host: its command wasn't found."),
+            json!("Ersa has no sign-in for without-sign-in."),
+            json!("The sign-in to fake was canceled."),
+            json!("fake took more than 2 seconds to respond."),
+        ]
+    );
+    for message in &messages {
+        assert!(
+            !says_it_did_not_start(message.as_str().unwrap()),
+            "{message}"
+        );
+    }
+}
+
+/// A sign-in that fails with no reason of the backend's ends `failed`
+/// with no `message`, and leaves nothing it started running.
+// verifies: PROTO-CORE-API-R159
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sign_in_that_fails_with_no_reason_ends_failed_with_no_message() {
+    let (_core, fake, mut client) = core_with(SignInMode::Starts(None), |_| {}).await;
+
+    client.result("backend.sign_in", the_fake()).await;
+    fake.sign_ins.end(SignInEnd::Failed(None));
+    assert_eq!(
+        ended(&mut client).await,
+        json!({ "host_id": "local", "name": fake::BACKEND, "outcome": "failed" })
+    );
+    eventually_gone(fake.sign_ins.latest_process().await).await;
 }
 
 /// `backend.list` carries `signing_in` while a sign-in Ersa started is
@@ -414,7 +518,7 @@ async fn the_backends_entry_carries_the_sign_in_while_it_is_under_way() {
     );
 
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     ended(&mut client).await;
     assert_eq!(listed(&mut client).await.get("signing_in"), None);
 
@@ -422,7 +526,7 @@ async fn the_backends_entry_carries_the_sign_in_while_it_is_under_way() {
     asker.result("backend.sign_in", the_fake()).await;
     assert_eq!(listed(&mut client).await["signing_in"], json!({}));
     fake.sign_ins
-        .end(SignInEnd::Failed("stopped by the test".into()));
+        .end(SignInEnd::Failed(Some("stopped by the test".into())));
     ended(&mut client).await;
 }
 
@@ -438,7 +542,7 @@ async fn each_ending_is_sent_once_to_every_connection() {
 
     asker.result("backend.sign_in", the_fake()).await;
     fake.sign_ins
-        .end(SignInEnd::Failed("The code expired.".into()));
+        .end(SignInEnd::Failed(Some("The code expired.".into())));
     let expected = json!({
         "host_id": "local", "name": fake::BACKEND, "outcome": "failed", "message": "The code expired."
     });
@@ -616,7 +720,7 @@ async fn shutdown_ends_a_sign_in_still_starting_and_leaves_nothing_running() {
 #[tokio::test(flavor = "multi_thread")]
 async fn nothing_a_sign_in_started_is_left_after_it_ends() {
     let (_core, fake, mut client) = core_with(SignInMode::Starts(None), |_| {}).await;
-    for end in [SignInEnd::Failed("No.".into()), SignInEnd::SignedIn] {
+    for end in [SignInEnd::Failed(Some("No.".into())), SignInEnd::SignedIn] {
         client.result("backend.sign_in", the_fake()).await;
         let process = fake.sign_ins.latest_process().await;
         fake.sign_ins.end(end);
@@ -635,7 +739,7 @@ async fn core_writes_and_stores_nothing_of_a_sign_in() {
     let limit = |config: &mut CoreConfig| config.sign_in_limit = Duration::from_millis(300);
     let (core, fake, mut client) = core_with(SignInMode::Starts(Some(PAGE.into())), limit).await;
 
-    let failed = SignInEnd::Failed(format!("The page {PAGE} expired."));
+    let failed = SignInEnd::Failed(Some(format!("The page {PAGE} expired.")));
     for end in [Some(failed), Some(SignInEnd::SignedIn), None] {
         assert_eq!(
             client.result("backend.sign_in", the_fake()).await,

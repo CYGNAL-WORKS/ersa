@@ -297,20 +297,42 @@ pub trait Adapter: Send + Sync {
     /// to open; Core opens none itself (PROTO-CORE-API-R155).
     ///
     /// Everything the sign-in runs is started through `transport`, which
-    /// ends it all when Core lets go of it, so a start Core gives up on
-    /// leaves nothing running. An `Io` error of kind `NotFound` means the
-    /// backend's command is not on the host; a `Protocol` error carries the
-    /// backend's own reason for refusing to start one. The default: the
-    /// adapter has no sign-in to start.
+    /// ends it all when Core lets go of it, so a start Core gives up on, or
+    /// one that fails, leaves nothing running. A start that fails says
+    /// which kind of failure it was ([`SignInStartError`]), since Core
+    /// answers each kind in its own way. The default: the adapter has no
+    /// sign-in to start.
     async fn start_sign_in(
         &self,
         _transport: Arc<dyn Transport>,
-    ) -> Result<StartedSignIn, AdapterError> {
-        Err(AdapterError::Protocol(format!(
-            "Ersa can't start a sign-in to {}",
-            self.label()
-        )))
+    ) -> Result<StartedSignIn, SignInStartError> {
+        Err(SignInStartError::NoSignIn)
     }
+}
+
+/// Why a sign-in didn't start ([`Adapter::start_sign_in`]). Core answers
+/// every kind `invalid_state` (PROTO-CORE-API-R157, R169); the kinds differ
+/// in whose words the answer carries. A person reads the answer after the
+/// note's own sentence saying that the sign-in couldn't be started
+/// (FLOW-SIGN-IN-R03), so no words of Ersa's say that again
+/// (PROTO-CORE-API-R170).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignInStartError {
+    /// The backend's command is not on the host. Core says so in its own
+    /// words.
+    NotFound,
+    /// The adapter has no sign-in to start. Core says so in its own words.
+    NoSignIn,
+    /// The backend refused to start one, for this reason, in the backend's
+    /// own words, which Core passes on unchanged.
+    Refused(String),
+    /// The adapter tried to start one and could not, as when the backend's
+    /// process ends before it hands over an address. The words are the
+    /// adapter's own: one sentence, ending with a period, saying what went
+    /// wrong in the person's terms and not that the sign-in couldn't start.
+    /// Core passes it on unchanged, so it is never a transport's or a
+    /// backend's text.
+    CouldNotStart(String),
 }
 
 /// A sign-in the backend has started ([`Adapter::start_sign_in`]).
@@ -341,8 +363,10 @@ pub trait SignIn: Send {
 pub enum SignInEnd {
     /// It is done.
     SignedIn,
-    /// It failed, for this reason, in the backend's own words.
-    Failed(String),
+    /// It failed: with the reason in the backend's own words when the
+    /// backend gave one, and `None` when it gave none, as when its process
+    /// ends before saying how the sign-in went.
+    Failed(Option<String>),
 }
 
 /// How a session's conversation ends, read from its record.
@@ -996,17 +1020,14 @@ mod tests {
     }
 
     /// An adapter has no sign-in unless it says how to start one, and then
-    /// says so by its backend's label, starting nothing.
+    /// says so, starting nothing.
     // verifies: PROTO-CORE-API-R157
     #[tokio::test]
     async fn an_adapter_has_no_sign_in_by_default() {
         let transport = crate::fake::FakeTransport::new(Vec::<String>::new());
         let started = Bare.start_sign_in(Arc::new(transport.clone())).await;
         match started {
-            Err(AdapterError::Protocol(message)) => {
-                assert_eq!(message, "Ersa can't start a sign-in to Bare Backend");
-            }
-            Err(other) => panic!("{other}"),
+            Err(error) => assert_eq!(error, SignInStartError::NoSignIn),
             Ok(_) => panic!("a sign-in started"),
         }
         assert!(transport.spawned().is_empty(), "nothing started");

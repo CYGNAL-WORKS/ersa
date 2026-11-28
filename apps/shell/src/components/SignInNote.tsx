@@ -10,7 +10,8 @@ import "./SignInNote.css";
 function failureWords(label: string, said: SignInWords): string {
   switch (said.kind) {
     case "refused":
-      return `${t("composer.signIn.startError", { label })} ${said.reason}`;
+      // An empty reason, as a backend's own error text may be, leaves the sentence alone (FLOW-SIGN-IN-R03).
+      return said.reason ? `${t("composer.signIn.startError", { label })} ${said.reason}` : t("composer.signIn.startError", { label });
     case "unopened":
       return t("composer.signIn.unopenedError", { label });
     case "failed":

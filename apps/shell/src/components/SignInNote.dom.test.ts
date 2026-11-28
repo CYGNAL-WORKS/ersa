@@ -57,7 +57,7 @@ describe("the sign-in note", () => {
   });
 
   it.each<[string, NoteState, string]>([
-    ["a refused start, with Core's reason", { kind: "signedOut", said: { kind: "refused", reason: "Core is shutting down." } }, "Claude Code's sign-in couldn't be started. Core is shutting down."],
+    ["a refused start, with Core's reason", { kind: "signedOut", said: { kind: "refused", reason: "Ersa is shutting down." } }, "Claude Code's sign-in couldn't be started. Ersa is shutting down."],
     ["a page Ersa couldn't open", { kind: "signedOut", said: { kind: "unopened" } }, "Ersa couldn't open Claude Code's sign-in page."],
     ["a sign-in that failed, with the backend's reason", { kind: "signedOut", said: { kind: "failed", reason: "The browser was closed." } }, "Claude Code's sign-in didn't finish. The browser was closed."],
     ["a sign-in that failed with no reason", { kind: "signedOut", said: { kind: "failed" } }, "Claude Code's sign-in didn't finish."],
@@ -69,6 +69,13 @@ describe("the sign-in note", () => {
     expect(tone()).toBe("danger");
     expect(screen.getByRole("alert").textContent).toBe(said);
     expect(screen.getByRole("button", { name: "Sign in" }).getAttribute("data-variant")).toBe("primary");
+  });
+
+  // verifies: FLOW-SIGN-IN-R03
+  it("says its own sentence alone for a refused start whose reason is empty, with nothing after it", () => {
+    draw({ kind: "signedOut", said: { kind: "refused", reason: "" } });
+    expect(words()).toBe("Claude Code's sign-in couldn't be started.");
+    expect(screen.getByRole("alert").textContent).toBe("Claude Code's sign-in couldn't be started.");
   });
 
   it("holds all three labels in one cell, so the button keeps its width, with the ring leading Starting… alone", () => {
